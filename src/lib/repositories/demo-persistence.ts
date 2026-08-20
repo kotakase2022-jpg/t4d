@@ -2,6 +2,7 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 import type { FixtureDb } from '@/lib/fixtures/store';
+import { decodeDemoEdits, encodeDemoEdits, type DemoEdit } from './demo-edit-codec';
 import type { TableName } from './types';
 
 /**
@@ -27,16 +28,6 @@ const COOKIE_NAME = 't4d.demo-edits';
 /** Cookie の実サイズ上限。ヘッダー全体を圧迫しない範囲に抑える */
 const MAX_BYTES = 3800;
 
-/** 1 件の変更（upsert）。row は「変更のあった列」だけを持つ */
-interface DemoEdit {
-  /** テーブル名 */
-  t: string;
-  /** 主キー */
-  id: string;
-  /** 変更後の列（部分） */
-  v: Record<string, unknown>;
-}
-
 /** Cookie に記録する対象テーブル（画面から人が編集するもの） */
 const PERSISTED_TABLES = new Set<TableName>([
   // 取込系。1 ファイル数行程度のデモ操作なら Cookie に収まる。
@@ -59,19 +50,6 @@ export function isPersistedTable(table: TableName): boolean {
   return PERSISTED_TABLES.has(table);
 }
 
-function encode(edits: DemoEdit[]): string {
-  return Buffer.from(JSON.stringify(edits), 'utf8').toString('base64url');
-}
-
-function decode(raw: string): DemoEdit[] {
-  try {
-    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    return Array.isArray(parsed) ? (parsed as DemoEdit[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 /** 現在の Cookie に入っている変更を読む */
 export async function readDemoEdits(): Promise<DemoEdit[]> {
   // テストやスクリプトなど、リクエストスコープの外から呼ばれることがある。
@@ -79,7 +57,7 @@ export async function readDemoEdits(): Promise<DemoEdit[]> {
   try {
     const store = await cookies();
     const raw = store.get(COOKIE_NAME)?.value;
-    return raw ? decode(raw) : [];
+    return raw ? decodeDemoEdits(raw) : [];
   } catch {
     return [];
   }
@@ -112,12 +90,12 @@ export async function appendDemoEdit(
 
   // 上限を超えたら古い方から落とす
   let candidate = merged;
-  while (candidate.length > 0 && encode(candidate).length > MAX_BYTES) {
+  while (candidate.length > 0 && encodeDemoEdits(candidate).length > MAX_BYTES) {
     candidate = candidate.slice(1);
   }
 
   try {
-    store.set(COOKIE_NAME, encode(candidate), {
+    store.set(COOKIE_NAME, encodeDemoEdits(candidate), {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',

@@ -72,3 +72,19 @@ Route (app)                                                Size  First Load JS
 ```
 8 passed（連続 3 回とも 8/8）
 ```
+
+## 追加修正後の再回帰（BUG-057: Cookie 容量）
+
+| コマンド               | 結果                               |
+| ---------------------- | ---------------------------------- |
+| pnpm lint              | PASS                               |
+| pnpm format:check      | PASS                               |
+| pnpm typecheck         | PASS                               |
+| pnpm check:rls         | PASS（76 テーブル / 171 ポリシー） |
+| pnpm test              | 317 passed (29 files)              |
+| pnpm test:rls          | 67 passed                          |
+| pnpm test:e2e          | 166 passed                         |
+| pnpm test:e2e:supabase | 13 passed                          |
+| pnpm verify:supabase   | 33 / 33（db reset 直後）           |
+| pnpm build             | Compiled successfully              |
+| pnpm test:e2e:prod     | 9 passed（連続 3 回とも 9/9）      |

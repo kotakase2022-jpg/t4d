@@ -190,3 +190,4 @@ PROD-005,自己検証指示 2026-08-20 本番確認,取込フロー（投入→A
 PROD-006,自己検証指示 2026-08-20 本番確認,マテリアリティ登録の永続化,/enterprise/disclosures/ssbj,企業管理者,本番ログイン済み,重要度を登録しリロード,リロード後も登録内容が残る,src/lib/repositories/demo-persistence.ts,PROD-SMOKE-6,本番実ブラウザ,同上,PASS,BUG-054,追加要求⑥の本番確認
 PROD-007,自己検証指示 2026-08-20 本番確認,権限制御（未ログイン・他テナント）,/enterprise/*,未ログイン/他テナント管理者,-,未ログインで直リンク・他テナントのEvidence IDを直叩き,ログインへ誘導され他テナントは404,src/lib/authorization,PROD-SMOKE-7,本番実ブラウザ,同上,PASS,-,IDOR不成立を本番で確認
 PROD-008,自己検証指示 2026-08-20 本番確認,監査法人ワークスペースのRead-only,/audit/*,監査法人メンバー,本番ログイン済み,Data Room と案件配下を閲覧,閲覧のみ可能で更新導線が無い,src/app/audit,PROD-SMOKE-8,本番実ブラウザ,同上,PASS,-,テナント分離を本番で確認
+PROD-009,自己検証指示 2026-08-20 本番確認,多言語・多形式ファイルの一括取込,/enterprise/imports,企業管理者,本番ログイン済み,Shift_JIS 日本語 CSV とドイツ語 CSV を同時投入,事前加工なしで解析され AI が指標を推定する,src/lib/imports,PROD-SMOKE-9,本番実ブラウザ,tests/e2e-production/production-smoke.spec.ts,PASS,BUG-057,3ファイル以上はCookie上限のため本番のみ制限（known-limitations D-3）

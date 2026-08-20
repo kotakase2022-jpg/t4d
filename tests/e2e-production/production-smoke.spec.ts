@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { buildHeterogeneousDataset } from '../../scripts/hetero-dataset';
 
 /**
  * 本番スモークテスト（自己検証ミッション用）。
@@ -198,4 +199,34 @@ test('本番: 監査法人ワークスペースが Read-only で動く', async (
     expect(res?.status(), `${p} が開けない`).toBeLessThan(400);
     await expect(page.locator('#t4d-main')).toBeVisible();
   }
+});
+
+test('本番: 多言語・多形式のファイルを一括取込して AI が仕分けする', async ({ page }) => {
+  // 本番（Demo Mode）は取込結果を Cookie に控えて持ち回す。複数ファイルでも
+  // 直後のプレビューが読めることを、実際のファイルで確認する。
+  const dataset = await buildHeterogeneousDataset();
+  const pick = (prefix: string) => {
+    const f = dataset.find((d) => d.name.startsWith(prefix))!;
+    return { name: f.name, mimeType: f.mimeType, buffer: Buffer.from(f.bytes) };
+  };
+
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/imports`);
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  await page.locator('input[name="files"]').setInputFiles([pick('06_'), pick('17_')]);
+  await page.getByRole('button', { name: '取込を開始' }).click();
+  await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/);
+
+  // ドイツ語の 1.234,5 が 1234.5 として解釈され、指標が自動選択されている
+  const germanRow = page
+    .locator('tr', { hasText: 'Stromverbrauch' })
+    .filter({ has: page.locator('input[name^="value:"]') })
+    .first();
+  await expect(germanRow).toBeVisible({ timeout: 60_000 });
+  await expect(germanRow.locator('input[name^="value:"]')).toHaveValue('1234.5');
+  await expect(germanRow.locator('select').first()).not.toHaveValue('');
+
+  // Shift_JIS のファイルが文字化けせずに読めている
+  await expect(page.locator('#t4d-main')).toContainText('使用量');
 });

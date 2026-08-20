@@ -66,8 +66,13 @@ export default async function ImportJobPage({
               結果を参照できないことがあります。
             </p>
             <p className="mt-2 text-[12px] text-ink-muted">
-              お手数ですが、もう一度「データ収集」からファイルを取り込んでください。
-              件数の少ないファイルであれば結果が保持されます。
+              直近の操作はブラウザの Cookie に控えていますが、Cookie の上限（約 4KB）があるため、
+              おおよそ 25 行を超える取込は保持できません。
+              お手数ですが、ファイルを分けて取り込んでください（2 ファイル程度なら保持されます）。
+            </p>
+            <p className="mt-2 text-[12px] text-ink-muted">
+              実 Supabase
+              へ接続した環境ではこの制限はありません（ファイル数・行数の制限なく取り込めます）。
             </p>
             <div className="mt-3">
               <Button size="sm" variant="outline" asChild>

@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { localSupabaseEnv } from './scripts/local-supabase-env';
 
 /**
  * Supabase Mode の E2E。
@@ -10,17 +11,19 @@ import { defineConfig, devices } from '@playwright/test';
  * こちらは **実 Supabase（Auth + Postgres + RLS + Storage）** に接続した状態で
  * アプリが動くことを確認する。
  *
- * 接続先は `supabase status` が出力するローカル既定値。
- * これは Supabase CLI が全環境で共有する公開のローカル開発用キーであり、秘密情報ではない。
+ * 接続先とキーは `supabase status` から実行時に読む。
+ * ローカル開発用の値だが、キーの形をした文字列はリポジトリへ置かない（CLAUDE.md §0.5）。
  */
 
 const PORT = Number(process.env.E2E_SUPABASE_PORT ?? 3200);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'http://127.0.0.1:54421';
-const SUPABASE_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-  'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
+// 接続情報は `supabase status` から読む（キーをリポジトリへ置かない）
+const {
+  url: SUPABASE_URL,
+  publishableKey: SUPABASE_KEY,
+  serviceRoleKey: SUPABASE_SECRET,
+} = localSupabaseEnv();
 
 export default defineConfig({
   testDir: './tests/e2e-supabase',
@@ -56,8 +59,7 @@ export default defineConfig({
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: SUPABASE_KEY,
       // 監査ログの追記は Service Role の許可用途（指示書 11-14）。
       // これは Supabase CLI のローカル既定値であり、秘密情報ではない。
-      SUPABASE_SERVICE_ROLE_KEY:
-        process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'sb_secret_N7UND0UgjKTVK-Uodkm0Hg_xSvEMPvz',
+      SUPABASE_SERVICE_ROLE_KEY: SUPABASE_SECRET,
       NEXT_TELEMETRY_DISABLED: '1',
       // E2E は決定論的な MockAIProvider で回す。
       // .env.local に OPENAI_API_KEY があると next start が読み込んでしまい、

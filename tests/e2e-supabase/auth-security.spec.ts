@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { localSupabaseEnv } from '../../scripts/local-supabase-env';
 import { LOCAL_DEMO_PASSWORD } from '@/lib/fixtures/to-sql';
 
 /**
@@ -26,11 +27,8 @@ async function login(page: Page, email: string): Promise<void> {
 // 実 Supabase Auth（GoTrue）に対する通し検証。
 // ---------------------------------------------------------------------------
 
-// ローカルスタックの既定値（Supabase CLI が `supabase start` で必ず生成する固定値）。
-// 本番のキーではない。本番キーをここへ書かないこと。
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'http://127.0.0.1:54421';
-const SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'sb_secret_N7UND0UgjKTVK-Uodkm0Hg_xSvEMPvz';
+// 接続情報は `supabase status` から読む。キーの形をした文字列はリポジトリへ置かない。
+const { url: SUPABASE_URL, serviceRoleKey: SERVICE_ROLE_KEY } = localSupabaseEnv();
 
 /** テスト後始末用: Admin API でパスワードを既定値へ戻す（実メール送信は行わない） */
 async function adminResetPassword(email: string, password: string): Promise<void> {

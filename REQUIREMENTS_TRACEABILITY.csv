@@ -1,0 +1,184 @@
+要件ID,仕様書参照,対象機能,対象画面,対象ロール,事前条件,操作,期待結果,実装箇所,テストID,検証方法,検証証拠,結果,不具合ID,備考
+UX-P0-001,機能要件v0.2 §6 P0,PC専用・高密度App Shell,全画面,全ロール,ログイン済み,1280/1440/1920px で表示,固定サイドバー・48px前後ヘッダー・パンくず・全体検索・右詳細ドロワーが表示されモバイル専用画面が無い,src/components/shared/app-shell.tsx,TC-001,実ブラウザ(1440x900)+全画面クロール,qa/evidence/logs/e2e-demo.txt「到達可能な全画面が描画される」83+17ページ,PASS,,Sidebar224/64px・TopBar48px・Compact密度を実測
+UX-P0-002,機能要件v0.2 §6 P0,企業／監査法人ワークスペース分離,/workspace 他,全ロール,複数ワークスペース所属,ログイン後にワークスペース選択,企業と監査法人でホーム・ナビ・用語・主要アクションが切替わる,src/app/(auth)/workspace/page.tsx / nav-config.ts,TC-002,実ブラウザ,企業nav15項目・監査法人nav14項目をクリック検証（qa/evidence/logs/e2e-demo.txt）,PASS,,別ナビ・別Dashboardを確認
+UX-P0-003,機能要件v0.2 §6 P0,青・白基調ブランドUI,全画面,全ロール,-,画面表示,白面・青主要操作・左上T4Dロゴ常時表示,src/app/globals.css / brand-logo.tsx,TC-003,実ブラウザ+axe,ロゴ実体埋め込みテスト+a11yコントラスト4画面,PASS,,ロゴはpublic/brand/t4d-logo.png実体
+UX-P0-004,機能要件v0.2 §6 P0,一覧操作の標準化,/enterprise/data 他,全ロール,データ25件以上,一覧の各操作,固定列/列表示切替/並べ替え/複合フィルター/検索/サーバーページング/一括選択/一括操作/保存ビュー/CSV出力の10機能すべて,src/components/shared/table-controls.tsx / filter-bar.tsx / pagination.tsx / bulk-actions.tsx,TC-004,実ブラウザ,table-controls.spec.ts 5件PASS（値の昇順降順・1頁目復帰・列切替のURL保持・指標列固定・不正入力）+従来の検索/フィルター/保存ビュー/ページング/一括/CSV,PASS,BUG-016,本QAで列表示切替と並べ替えを実装し10機能すべて充足（BUG-016は修正済み）
+UX-P0-005,機能要件v0.2 §6 P0,三ペインレビュー,/assurance/.../testing,監査法人,案件アサイン済み,Testing画面表示,左Population/中央データ/右Evidence の三ペイン,src/app/assurance/engagements/[engagementId]/testing/page.tsx,TC-005,実ブラウザ,vertical-slices「12. Testing 三ペインで手続結果と結論を記録できる」PASS,PASS,,
+UX-P0-006,機能要件v0.2 §6 P0,状態・例外の視認性,全一覧,全ロール,-,状態表示,色のみに依存せずラベル＋アイコンで状態表示,src/components/shared/badges.tsx,TC-006,axe+コード,a11y critical/serious 0件（4画面）。全Badgeがlabel+icon,PASS,,contrast違反はトークン修正で解消済み
+UX-P0-007,機能要件v0.2 §6 P0,キーボード・作業効率,全画面,全ロール,ログイン済み,Ctrl+K / / / j / k / e / c / s / Esc,主要操作がキーボードで実行できる,src/components/shared/record-shortcuts.tsx / command-palette.tsx,TC-007,実ブラウザ,「j/kで一覧のレコード間を移動」「eでEvidenceセクションへ移動」「入力中は発火しない」PASS,PASS,,sは下書き保存のみに限定（誤確定防止）
+AUTH-P0-001,機能要件v0.2 §6 P0,マルチテナント認証,/login /enterprise/settings /invite /reset /mfa,全ロール,-,メール招待・ログイン・パスワード再設定・MFA,別組織として管理され各認証機能が動作,src/lib/services/identity.ts / src/lib/auth/ / (auth)/invite・reset・mfa,TC-008,実ブラウザ+実Supabase Auth,"integration identity 7件+review-fixes 3件PASS / e2e auth-copilot「招待リンク発行→受諾→参加」「失効招待は使用不可」PASS / e2e-supabase auth-security 4件PASS（招待受諾で実Authアカウント作成→ログイン／パスワード再設定の通し／MFA登録→AAL1遮断→検証後入場／再設定リンクの他テナント発行拒否）",PASS,BUG-017/037/038/040/048,招待はアプリ内リンク方式（外部メール送信禁止のため。generateLink・createUserいずれも送信を伴わない）。再設定リンクは自組織メンバーのみ・監査ログ記録。招待IDはCSPRNG
+AUTH-P0-002,機能要件v0.2 §6 P0,ロール・スコープ認可,全画面,全ロール,-,各ロールで操作,組織階層・期間・指標・保証契約単位で権限制御,src/lib/authorization/roles.ts,TC-009,unit+RLS,authorization.test.ts 14件 + tenant-isolation 56件 PASS,PASS,,SQLとTSの権限一致を機械検査
+AUTH-P0-003,機能要件v0.2 §6 P0,監査法人アクセスの明示許諾,/assurance/*,監査法人,-,未アサイン案件へアクセス,監査法人管理者でも未アサイン案件を閲覧できない,supabase/migrations/0013_rls_assurance.sql,TC-010,実Supabase+実ブラウザ,verify:supabase「未アサイン法人管理者は案件を見られない」+E2E 404,PASS,,存在秘匿のため404
+AUTH-P0-004,機能要件v0.2 §6 P0,Read-only by Default,/assurance/.../data-room,監査法人,許諾済み,クライアント原本を更新試行,監査法人はクライアント原本を更新できない,0012/0013 RLS（UPDATEポリシー不在）,TC-011,実Supabase,verify:supabase「監査法人はクライアントDataPointを更新できない」PASS,PASS,,DB層で不可能
+AUTH-P0-005,機能要件v0.2 §6 P0,Supabase RLSによるデータ分離,全テーブル,全ロール,-,越権クエリ,企業間・案件間・監査法人間の越権をDB層で防止,supabase/migrations/0012-0017,TC-012,PGlite実Postgres+実Supabase,test:rls 56件 + verify:supabase 33件 PASS。check:rls 75/75テーブル169ポリシー,PASS,,
+ORG-P0-001,機能要件v0.2 §6 P0,組織階層・連結範囲管理,/enterprise/organizations,企業管理者,-,組織の追加・編集,階層管理と連結方法/持分/除外理由の設定ができる,src/lib/services/master-data.ts + organizations/master-forms.tsx,TC-013,実ブラウザ+integration,master-data.spec「組織の連結方法と持分を編集できる」+ integration 7件（テナント分離含む）PASS,PASS,BUG-018,本QAで追加・編集UIを実装。除外理由は連結対象外時のみ保持
+ORG-P0-002,機能要件v0.2 §6 P0,報告年度・収集キャンペーン,/enterprise/organizations,企業管理者,-,収集キャンペーンを作成,対象期間/組織/指標/期限をまとめて作成しスコープ展開,src/lib/services/master-data.ts createCollectionCampaign + master-forms.tsx,TC-014,実ブラウザ+integration,master-data.spec「収集キャンペーンを作成できる」（2組織×2指標=4スコープ）+ integration 4件（未選択拒否・テナント分離・権限）PASS,PASS,BUG-019,本QAで実装。対象組織×指標をスコープ展開。承認経路はworkflow_definitions側の管轄で本キャンペーンには含めない
+MASTER-P0-001,機能要件v0.2 §6 P0,非財務指標マスター,/enterprise/organizations,企業管理者,-,指標マスターを追加・編集,全項目を管理できる,src/lib/services/master-data.ts + organizations/master-forms.tsx,TC-015,実ブラウザ+integration,master-data.spec「指標マスターを追加できる」+ integration 6件（重複拒否・権限・テナント分離）PASS,PASS,BUG-020,本QAで追加・編集UIを実装
+MASTER-P0-002,機能要件v0.2 §6 P0,開示基準・質問マスター,/enterprise/disclosures/*,企業,-,基準・質問マスターを管理,項目/質問/Guidance/回答型/条件分岐/対象年度/版/適用条件を管理,disclosure_* テーブル+CDP/SSBJ画面,TC-016,実ブラウザ,CDP12問・SSBJ10項目が年度版付きで表示。条件分岐データ構造あり,PASS,,架空の縮小マスター（バッジ表示）。管理UIは無いがデータ構造要件は充足
+DATA-P0-001,機能要件v0.2 §6 P0,Excel/CSV/PDF一括取込,/enterprise/imports,拠点担当,ログイン済み,ファイルをUpload,取込ジョブ・進捗・成功/警告/失敗を表示,src/lib/imports/ / imports画面,TC-017,実ブラウザ,vertical-slices「3-5. CSVを取り込み、プレビューを修正して確定する」PASS,PASS,,PDF抽出はunpdf。unit 5件
+DATA-P0-002,機能要件v0.2 §6 P0,AI自動仕分け・構造化,/enterprise/imports/[jobId],拠点担当,取込ジョブ作成済み,AI構造化を実行,企業/拠点/期間/指標/単位/値/根拠箇所を推定,src/lib/ai/ importMapping,TC-018,実OpenAI+Mock,verify:openai:all で importMapping 実接続成功（confidence 0.99）,PASS,,gpt-5.6-terra で検証
+DATA-P0-003,機能要件v0.2 §6 P0,取込プレビュー・確定,/enterprise/imports/[jobId],本社担当,AI構造化済み,プレビューを修正し確定,信頼度/未判定/重複/単位変換/警告を確認・修正し人が確定,imports/[jobId]/page.tsx,TC-019,実ブラウザ,vertical-slices 取込プレビュー修正→確定 PASS,PASS,,
+DATA-P0-004,機能要件v0.2 §6 P0,手入力・標準テンプレート,/enterprise/data /enterprise/imports,拠点担当,-,手入力/前年度複製/Excelテンプレート出力・再取込/コピペ表入力,4手段すべてが利用できる,data-entry.ts carryForward/buildTemplateWorkbook / api/exports/template / pasteImportAction,TC-020,実ブラウザ,"integration data-entry-aggregation 11件+review-fixes（hqOnly判定）PASS / e2e data-entry-aggregation「前年度から複製→draft作成」「テンプレートDL」「コピペ表入力→取込ジョブ」PASS",PASS,BUG-021/042,4手段すべて実装。本社限定判定は metric_definitions.hq_only（migration 0019）に基づく
+DATA-P0-005,機能要件v0.2 §6 P0,非財務データ台帳,/enterprise/data,企業,-,一覧表示,組織×期間×指標×値×単位×境界×算定方法×出所×状態×版が一意レコード,data_points + data_point_versions,TC-021,実DB+実ブラウザ,DB側ページングで25件/頁。Version履歴が版管理,PASS,,
+DATA-P0-006,機能要件v0.2 §6 P0,拠点別・連結集計,/enterprise/dashboard /ghg,企業,-,集計表示,合計/平均/加重平均/比率/分子分母/内部取引控除/除外/推計,src/lib/services/aggregation.ts computeConsolidatedAggregation / src/lib/domain/boundaries.ts / ghg画面 連結集計カード,TC-022,実ブラウザ,"integration: 単純合計/持分調整/内部取引控除(2490.5t)/連結値/前年推計/加重平均(Σ分子÷Σ分母)/単純平均/除外拠点 PASS / review-fixes: 内部取引行がData Room・母集団・前年比照合へ混入しないことを検証 / e2e: GHG画面 連結集計カードPASS",PASS,BUG-022/039/041,known-limitations S-9解消
+DATA-P0-007,機能要件v0.2 §6 P0,トレーサビリティ,/enterprise/data/[id],企業,-,開示値から遡る,集計内訳/各拠点値/算定式/元ファイル/ページ・セル/修正履歴/承認履歴まで逆引き,data/[dataPointId]/page.tsx,TC-023,実ブラウザ,算定内訳・Version履歴・Evidence・承認履歴・Audit Timelineを確認,PASS,,
+DATA-P0-008,機能要件v0.2 §6 P0,Version・差分管理,/enterprise/data/[id],企業,-,値を変更,変更前後/変更者/理由/時刻/影響先を比較できる,data_point_versions,TC-024,実ブラウザ+DB,action-audit「Data Pointの値編集が履歴に残る」PASS（変更理由必須）,PASS,,
+EVID-P0-001,機能要件v0.2 §6 P0,Evidence紐付け,/enterprise/data/[id],拠点担当,Evidenceアップロード済み,データへEvidenceを紐付け,ファイル/ページ/表/セル/URL/対象期間/取得日/提出者/機密区分を紐付け,linkEvidenceAction / evidence_links,TC-025,実ブラウザ+DB,action-audit「EvidenceをアップロードしてData Pointへ紐付けられる」PASS,PASS,,page/cellRef/取得日/機密区分をDB保持
+EVID-P0-002,機能要件v0.2 §6 P0,Evidence Viewer,/enterprise/evidence/[fileId],全ロール,Evidence紐付け済み,Evidenceを開く,PDF/画像/表を画面内表示し該当箇所ハイライト・メタデータ・関連指標/質問/版を同時確認,evidence/[fileId]/page.tsx / api/files/inline,TC-026,実ブラウザ,"e2e mentions-evidence「画面内で開く→img/iframe表示」「セル参照ハイライト」「断片ハイライト」「メタデータ・関連データ・版の同時表示」PASS",PASS,BUG-023,inline APIはpng/jpeg/gif/webp/pdfのみ許可（XSS対策）
+WF-P0-001,機能要件v0.2 §6 P0,入力・レビュー・承認Workflow,/enterprise/data/[id],企業各ロール,-,提出→レビュー→承認/差戻し,状態遷移と複数段階承認経路が動作,data-point-workflow.ts,TC-027,実ブラウザ+DB,vertical-slices「6. 提出→レビュー→承認が動作する」PASS,PASS,,DBトリガでも遷移を強制
+WF-P0-002,機能要件v0.2 §6 P0,担当・期限・コメント,/enterprise/workflows /enterprise/data/[id],企業,-,担当/期限/コメント/メンション/差戻し理由,拠点・指標・質問単位で管理,comments.ts resolveMentions/notifyMentions / comment-box.tsx,TC-028,実ブラウザ,"integration comments-mentions 11件+review-fixes 4件PASS（同名衝突は全員へ通知／開示回答は disclosure.read を要求／遷移コメントも2000字検証）/ e2e mentions-evidence「@メンション→ハイライト表示→通知作成」PASS",PASS,BUG-024/044/045/046,メンションは氏名の正規化一致（同名は全員へ通知）。本人へは通知しない
+ALERT-P0-001,機能要件v0.2 §6 P0,統合アラートセンター,/enterprise/alerts,企業,-,アラート一覧を開く,未提出/期限超過/異常値/Evidence不足/承認後変更/質問更新/保証依頼を重要度別に集約し対象へ遷移,alerts画面,TC-029,実ブラウザ,画面描画+リンク遷移をクロールで確認,PASS,,
+DASH-P0-001,機能要件v0.2 §6 P0,企業向けホーム,/enterprise/dashboard,企業,-,ホーム表示,本日の対応/期限超過/回収率/承認率/データ品質/開示準備度/重要アラート/拠点遅延を一画面,dashboard/page.tsx,TC-030,実ブラウザ,KPI7種+拠点別進捗を確認。KPIクリックでFilter付き遷移21本を検証,PASS,,
+DQ-P0-001,機能要件v0.2 §6 P0,基本バリデーション,/enterprise/data,企業,-,検証実行,必須/型/範囲/単位/計算式/前年差/比率整合/重複/欠損/分子分母をエラーと警告で区別,src/lib/validation/,TC-031,unit,validation.test.ts 10件PASS（異常Fixtureを実際に検出）,PASS,,検証結果をDBへmaterialize
+DQ-P0-002,機能要件v0.2 §6 P0,人的資本等の異常検知,/enterprise/data,企業,-,異常値を確認,女性役員比率等で打ち間違い候補と理由を提示,validation rules + anomalyExplanation,TC-032,unit+実OpenAI,「女性役員数>役員総数」検出+anomalyExplanation実接続PASS,PASS,,
+GHG-P0-001,機能要件v0.2 §6 P0,Scope3 Category 1算定,/enterprise/ghg,企業,-,Cat.1算定,取引先/品目/金額/数量/単位を抽出し排出係数へマッピングして算定,ghg画面 + emission_factors,TC-033,実ブラウザ,Cat.1内訳が表示される,PASS,,架空係数（バッジ表示）。Cat.1のみ
+GHG-P0-002,機能要件v0.2 §6 P0,Cat.1算定根拠・再計算,/enterprise/ghg,企業,-,再計算,活動量/通貨換算/係数/係数年度/算定式/除外/手動補正/承認者を保存し再現可能,data_point_calculations,TC-034,実ブラウザ+DB,算定内訳が保存・表示される,PASS,,
+CDP-P0-001,機能要件v0.2 §6 P0,質問書マスター・年度Version,/enterprise/disclosures/cdp,企業,-,CDP一覧表示,年度別管理と前年差分を新規/変更/廃止で表示,disclosure_framework_versions,TC-035,実ブラウザ,新/変バッジと年度版を確認,PASS,,
+CDP-P0-002,機能要件v0.2 §6 P0,企業別適用質問判定,/enterprise/disclosures/cdp,企業,-,適用判定を実行,適用/非適用/要確認を判定し判定根拠を表示,src/lib/services/disclosure-applicability.ts,TC-036,実ブラウザ+integration,disclosure-check.spec「適用判定を実行し判定と根拠が表示される」+ integration 13件（4演算子・要確認→適用→非適用の遷移・再現性・テナント分離）PASS,PASS,BUG-025,規則ベースで実装（AI判定にしない＝根拠が再現し監査法人へ説明できる）。根拠はバッジのtitleで表示
+CDP-P0-003,機能要件v0.2 §6 P0,過去回答Import・構造化,/enterprise/disclosures/cdp/import,企業,-,過去回答をImport,Excel/Word/PDF/CSVを質問単位に分解し構造化,src/lib/services/disclosure-import.ts + imports/parsers.ts parseDocx,TC-037,実ブラウザ+実ファイル,disclosure-import.spec 4件（実CSV・実Word往復・不正ファイル・権限）+ unit 18件 + integration 11件 PASS,PASS,BUG-026,Word(.docx)はNode標準zlibでZIP展開して実装（依存追加なし）。プレビューで人が確認してから保存し当年度の回答本文は変更しない
+CDP-P0-004,機能要件v0.2 §6 P0,前年回答マッピング・Carry Forward,/enterprise/disclosures/cdp/[id],企業,-,前年差分で回答,継続/新規/変更/要更新に分類し前年差分中心で回答,cdp画面 YoY Diff,TC-038,実ブラウザ,YoY Diffと「前年差分だけ回答」Filterを確認,PASS,,
+CDP-P0-005,機能要件v0.2 §6 P0,AI回答ドラフト,/enterprise/disclosures/cdp/[id],サステナ担当,承認済みデータあり,ドラフトを生成,承認済みデータ/過去回答/Evidenceを根拠に回答案と更新理由を生成,cdpDraftGeneration,TC-039,実OpenAI,実接続で生成・参照元4件・confidence82%・Version履歴にAI由来記録,PASS,,gpt-5.6-terra
+CDP-P0-006,機能要件v0.2 §6 P0,不足・陳腐化・矛盾チェック,/enterprise/disclosures/cdp,企業,-,整合チェックを実行,5種の指摘（不足情報/古い記述/年度不一致/回答間矛盾/Evidence不足）を検出し画面に表示,src/lib/services/disclosure-check.ts,TC-040,実ブラウザ+integration,disclosure-check.spec「整合チェックを実行して指摘を表示できる」（実ブラウザで11件検出）+ integration 6件（AI Run記録・回答を書き換えない・テナント分離）PASS,PASS,BUG-027,画面から実行し結果は?check=<aiRunId>で読み直せる。AIは指摘のみで確定しない
+CDP-P0-007,機能要件v0.2 §6 P0,質問単位Workflow,/enterprise/disclosures/cdp/[id],企業,-,質問ごとの承認,担当/回答/レビュー/承認/コメント/添付/履歴/ステータスを管理,disclosure_responses + versions,TC-041,実ブラウザ,vertical-slices「7. CDPのAIドラフトを作成し、人が編集してから承認する」PASS,PASS,,
+DISC-P0-001,機能要件v0.2 §6 P0,SSBJ/CDP基本マッピング,/enterprise/data/[id],企業,-,開示マッピング確認,承認済みデータをSSBJ項目とCDP質問へ紐付け再利用,disclosure_mappings,TC-042,実ブラウザ,開示マッピングカードから両基準へ遷移（BUG-012修正済み）,PASS,BUG-012,SSBJリンク404を本QA前に修正済み
+DISC-P0-002,機能要件v0.2 §6 P0,開示ドラフト・Export,/enterprise/reports,企業,-,Export実行,SSBJ開示文/統合報告書説明文/表をWord/Excel/CSVへ出力,src/lib/exports/,TC-043,実ブラウザ+API,CSV/XLSX/DOCX生成のunit 15件+E2Eダウンロード検証PASS,PASS,,CDP一問一答転記モードはExport形式として提供
+AI-P0-001,機能要件v0.2 §6 P0,質問単位/全体AI Copilot,/enterprise/ai,全ロール,-,AIへ対話で質問,権限内情報に限定した対話支援,src/lib/services/copilot.ts askCopilot / src/lib/security/safe-link.ts / ai/page.tsx 対話カード,TC-044,実ブラウザ+実OpenAI,"integration copilot 8件PASS（権限内スナップショット限定・会話継続・他人の会話は読めない）/ unit safe-link 15件PASS（..・%2e%2e・javascript:・外部URLを拒否）/ e2e auth-copilot「実データ回答+出典+会話継続+リロード復元」「不明事項に推測で答えない」PASS / 実OpenAI confidence 0.99",PASS,BUG-028/043,会話はaiRuns(Provenance)へ記録。回答は候補扱いで確定処理なし
+AI-P0-002,機能要件v0.2 §6 P0,根拠・信頼度・Human in the Loop,全AI画面,全ロール,AI実行済み,AI出力を確認,参照元/該当箇所/対象年度/信頼度/推測表示があり自動確定しない,src/lib/ai/schemas.ts,TC-045,実OpenAI+DBトリガ,8UseCase全てconfidence/warnings/sources必須。AI由来Versionはapproved不可（トリガ）,PASS,,
+ASSUR-P0-001,機能要件v0.2 §6 P0,監査法人テナント・チーム,/assurance/*,監査法人,-,ログイン,独立テナントで6ロールを持つ,organizations type=assurance_firm,TC-046,実Supabase,6監査法人ロールをroles.tsとDBで一致検査,PASS,,
+ASSUR-P0-002,機能要件v0.2 §6 P0,保証契約管理,/assurance/engagements,監査法人,-,案件一覧,クライアント/期間/基準/保証水準/指標/組織/チーム/期限/状態を管理,engagements,TC-047,実ブラウザ,案件一覧と案件ホームで全項目を確認,PASS,,
+ASSUR-P0-003,機能要件v0.2 §6 P0,保証スコープ・アクセス許諾,/enterprise/settings /assurance/.../scope,双方,-,許諾の付与・取消,企業が選択共有し監査法人は許諾範囲のみ閲覧,client_access_grants,TC-048,実Supabase+実ブラウザ,verify:supabase「付与前は不可視/付与直後から可視」+action-audit「許諾の取消と再付与」PASS,PASS,,
+ASSUR-P0-004,機能要件v0.2 §6 P0,Data Room・Snapshot Freeze,/assurance/.../data-room,監査法人,許諾済み,Snapshot固定,Data Roomへ集約しSnapshotを固定。固定後変更を差分通知,assurance_snapshots,TC-049,実ブラウザ+DB,vertical-slices「10. Snapshotを新規作成できる」+変更検知PASS。Snapshot不変性をRLS/トリガで強制,PASS,,
+ASSUR-P0-005,機能要件v0.2 §6 P0,監査法人向け案件Dashboard,/assurance/dashboard,監査法人,-,Dashboard表示,進捗/未受領Evidence/未完了手続/レビュー待ち/未解決指摘/期限/Snapshot後変更を表示,dashboard/page.tsx,TC-050,実ブラウザ,KPI7種を確認,PASS,,
+ASSUR-P0-006,機能要件v0.2 §6 P0,母集団・完全性確認,/assurance/.../population,監査法人,Snapshot済み,母集団確認,件数/合計/抽出条件/除外/欠損/重複と完全性手続メモ,population画面,TC-051,実ブラウザ,integration「母集団（完全性）」PASS,PASS,,
+ASSUR-P0-007,機能要件v0.2 §6 P0,サンプリング,/assurance/.../sampling,監査法人,母集団確定,サンプル抽出,無作為/層化/重要度/判断抽出に対応し条件・Seed・理由・母集団版を記録,sampling service,TC-052,unit+実ブラウザ,sampling.test.ts 10件（同一Seedで完全再現）+E2E PASS,PASS,,
+ASSUR-P0-008,機能要件v0.2 §6 P0,保証手続・電子調書,/assurance/.../testing,監査法人,サンプル抽出済み,手続記録,手続/Evidence/再計算/照合/例外/結論/作成者/レビュー者/日付を記録,assurance_tests,TC-053,実ブラウザ+DB,vertical-slices「12. Testing三ペイン」PASS,PASS,,
+ASSUR-P0-009,機能要件v0.2 §6 P0,保証レビュー用三ペイン,/assurance/.../testing,監査法人,-,連続検証,左母集団/中央データ/右Evidenceで画面遷移せず次サンプルへ,testing/page.tsx,TC-054,実ブラウザ,三ペイン構成を確認,PASS,,
+ASSUR-P0-010,機能要件v0.2 §6 P0,PBC/Evidence Request,/assurance/.../requests,双方,-,依頼→回答→受領,依頼内容/対象/期限/優先度/回答/添付/受領判定/再依頼/履歴を一元管理,pbc_requests,TC-055,実ブラウザ+DB,action-audit「企業がPBCへ回答し、監査法人が受け入れられる」PASS,PASS,,内部メモは企業から不可視（E2E検証済み）
+ASSUR-P0-011,機能要件v0.2 §6 P0,指摘・例外・経営者回答,/assurance/.../issues,監査法人,-,指摘作成〜解消,検出事項/影響指標/重要度/影響/根拠/企業回答/修正状況/解消判定,assurance_issues,TC-056,実ブラウザ,vertical-slices「14. Issue作成」「16. High Issue解消」PASS,PASS,,
+ASSUR-P0-012,機能要件v0.2 §6 P0,レビューNote・Sign-off,/assurance/.../review-notes /signoffs,監査法人,-,Note作成→Sign-off,3段階Sign-offと未解決時の完了抑止,signoffs + blockers,TC-057,実ブラウザ,action-audit「レビューNoteを作成して解消できる」+「15. 抑止条件がある間はSign-offが実行できない」PASS,PASS,,代理Sign-off禁止をRLS/トリガで強制
+ASSUR-P0-013,機能要件v0.2 §6 P0,保証履歴・Export,/assurance/.../exports,監査法人,-,案件パッケージ出力,スコープ/Snapshot/サンプル/手続/Evidence参照/依頼/指摘/Sign-off/変更履歴を出力,api/exports/engagement,TC-058,API+実ブラウザ,XLSX13シート生成。他テナント/未アサインは拒否（robustness-audit）,PASS,,PDF相当は未提供（CSV/XLSX）
+ASSUR-P0-014,機能要件v0.2 §6 P0,監査AI支援の制御,/assurance/.../data-room,監査法人,-,AI要約実行,要約/差分/再計算候補/未実施手続/矛盾候補までで保証結論を自動確定しない,assuranceEvidenceSummary / assuranceChangeSummary,TC-059,実OpenAI+unit,実接続PASS。unit「監査AIが結論を出さない」PASS,PASS,,
+SYS-P0-001,機能要件v0.2 §6 P0,監査ログ・追跡,/assurance/.../audit-trail,全ロール,-,各操作,ログイン/閲覧/DL/UL/更新/承認/権限変更/Snapshot/AI/Exportを追記型で保存,audit_events + トリガ,TC-060,実DB,verify:supabase「Audit Eventを更新・削除できない」PASS。E2Eで主要イベント記録を確認,PASS,,record_viewedは未記録（全画面記録は性能影響のため）
+SYS-P0-002,機能要件v0.2 §6 P0,非同期ジョブ・失敗復旧,/enterprise/imports/[jobId],企業,-,取込ジョブ実行,状態/進捗/再試行/失敗理由/重複実行防止を管理,ingestion_jobs,TC-061,実ブラウザ+DB,integration「冪等キーによる重複ジョブ防止」PASS。progress/error/retry/idempotency_keyを保持,PASS,,
+UX-P1-001,機能要件v0.2 §6 P1,密度・列設定の個人保存,/enterprise/data,全ロール,-,列設定を保存,ユーザー単位で密度/列幅/固定列/表示列/保存ビュー/既定フィルターを保持,table-controls.tsx（URL State）,TC-062,実ブラウザ,列表示切替はURLに保持されるがユーザー単位の永続化は無し,OUT_OF_SCOPE,,P1。機能要件§7でPhase1対象外。user_preferences.saved_viewsの器はある
+UX-P1-002,機能要件v0.2 §6 P1,アクセシビリティ・多言語,全画面,全ロール,-,英語切替,WCAG対応と日英切替,axeのみ,TC-063,axe,a11yはcritical/serious 0件。多言語切替は未実装,OUT_OF_SCOPE,,P1。a11y部分は先行実装済み
+ORG-P1-001,機能要件v0.2 §6 P1,多通貨・単位・タイムゾーン,-,企業,-,拠点別通貨設定,通貨/単位/日付/TZ/換算レートを管理,-,TC-064,画面探索,未実装,OUT_OF_SCOPE,,P1
+SUP-P1-001,機能要件v0.2 §6 P1,サプライヤーポータル,-,サプライヤー,-,外部画面から提出,サプライヤー専用の外部画面,-,TC-065,画面探索,未実装,OUT_OF_SCOPE,,P1（known-limitations S-8）
+INT-P1-001,機能要件v0.2 §6 P1,外部ストレージ・メール取込,-,企業,-,定期取込,Drive/SharePoint/Box/SFTP/メール添付から取込,-,TC-066,画面探索,未実装,OUT_OF_SCOPE,,P1
+DATA-P1-001,機能要件v0.2 §6 P1,高度集計・再表示,-,企業,-,遡及修正/再表示,連結範囲変更/組織再編/基準日/原単位/換算/推計/遡及,-,TC-067,画面探索,未実装,OUT_OF_SCOPE,,P1
+EVID-P1-001,機能要件v0.2 §6 P1,Evidence Library,/enterprise/evidence,企業,-,Evidence一元管理,種別/年度/拠点/テーマ/機密区分/版で管理し再利用,evidence画面,TC-068,実ブラウザ,一覧と再利用は可能。テーマ/機密区分での絞り込みは無し,OUT_OF_SCOPE,,P1。基本部分は実装済み
+EVID-P1-002,機能要件v0.2 §6 P1,Evidence自動マッピング,-,企業,-,AI自動マッピング,AIが該当箇所を抽出し対応候補を提示,evidenceMapping AI UseCase,TC-069,実OpenAI,verify:openai:all で evidenceMapping 実接続PASS。画面導線は無し,OUT_OF_SCOPE,,P1。AI側は実装済み・UI未接続
+WF-P1-001,機能要件v0.2 §6 P1,自動アサイン・年次タスク生成,-,企業,-,年度更新,担当提案とタスク一括生成,-,TC-070,画面探索,未実装,OUT_OF_SCOPE,,P1
+DQ-P1-001,機能要件v0.2 §6 P1,高度異常検知,-,企業,-,異常候補提示,経年/同業/規模/他拠点/相関で説明可能に提示,-,TC-071,画面探索,基本検知のみ,OUT_OF_SCOPE,,P1
+DQ-P1-002,機能要件v0.2 §6 P1,開示横断整合性,-,企業,-,横断照合,有報/統合報告/Web/CDP/MSCI/FTSE間を照合,-,TC-072,画面探索,未実装,OUT_OF_SCOPE,,P1
+GHG-P1-001,機能要件v0.2 §6 P1,Scope1・2・係数Version,/enterprise/ghg,企業,-,係数版管理,Scope1・2と係数マスターの年度Version,emission_factors,TC-073,実ブラウザ,Scope1/2は台帳にあり係数年度も保持。切替UIは無し,OUT_OF_SCOPE,,P1
+GHG-P1-002,機能要件v0.2 §6 P1,GHG Cross Check,-,企業,-,横断照合,Scope別合計/連結/開示値/CDP/SSBJ/前年差を照合,-,TC-074,画面探索,未実装,OUT_OF_SCOPE,,P1
+CDP-P1-001,機能要件v0.2 §6 P1,YoY／Readiness,/enterprise/disclosures/cdp,企業,-,優先順位提示,前年差/未回答/更新必要度/Evidence充足から優先順位,CDP準備度KPI,TC-075,実ブラウザ,準備度KPIとYoY Diffはあるが優先順位提示は無し,OUT_OF_SCOPE,,P1
+CDP-P1-002,機能要件v0.2 §6 P1,Scoring Readiness,-,企業,-,弱点提示,質問単位で弱点/改善候補/必要Evidence,-,TC-076,画面探索,未実装,OUT_OF_SCOPE,,P1
+CDP-P1-003,機能要件v0.2 §6 P1,Guidance・条件分岐更新通知,-,企業,-,版更新検知,版更新を検知し影響質問へ通知,-,TC-077,画面探索,未実装,OUT_OF_SCOPE,,P1
+CDP-P1-004,機能要件v0.2 §6 P1,Portal再Import・差分,-,企業,-,再取込,CDP Portal回答を再取込し差分表示,-,TC-078,画面探索,未実装,OUT_OF_SCOPE,,P1
+DISC-P1-001,機能要件v0.2 §6 P1,IFRS S2／SSBJ／CDP横断,-,企業,-,横断可視化,基準間の共通データ/類似開示/固有要件を可視化,-,TC-079,画面探索,未実装,OUT_OF_SCOPE,,P1
+RATING-P1-001,機能要件v0.2 §6 P1,MSCI／FTSEワークスペース,/enterprise/disclosures/msci /ftse,企業,-,評価機関対応,評価項目/回答案/ギャップ/照会履歴を機関別に管理,disclosures/[framework]/page.tsx,TC-080,実ブラウザ,Phase1対象外を明示するPlaceholder画面（動作しないボタンなし）,OUT_OF_SCOPE,,指示書7.3で明示的に対象外
+REPORT-P1-001,機能要件v0.2 §6 P1,過年度資料からドラフト再構成,-,企業,-,再構成,過去資料を解析し次年度ドラフトへ,-,TC-081,画面探索,未実装,OUT_OF_SCOPE,,P1
+REPORT-P1-002,機能要件v0.2 §6 P1,データ連動表・Word/PDF出力,/enterprise/reports,企業,-,Word出力,開示表と指標をリンクしWord/PDFへ,DOCX Export,TC-082,実ブラウザ,DOCX出力は実装済み。データ連動通知は無し,OUT_OF_SCOPE,,P1。Export部分は実装済み
+EXT-P1-001,機能要件v0.2 §6 P1,外部参照情報登録,-,企業,-,外部情報登録,TERRAST/他社開示/官公庁/URL/PDFを登録,-,TC-083,画面探索,未実装,OUT_OF_SCOPE,,P1
+AI-P1-001,機能要件v0.2 §6 P1,整合・ギャップ・改善提案,-,企業,-,ギャップ分析,自社と外部を比較し未開示/矛盾/改善候補,-,TC-084,画面探索,未実装,OUT_OF_SCOPE,,P1
+BENCH-P1-001,機能要件v0.2 §6 P1,Peer Benchmark,-,企業,-,他社比較,業種/規模/地域で比較,-,TC-085,画面探索,未実装,OUT_OF_SCOPE,,P1
+DASH-P1-001,機能要件v0.2 §6 P1,経営・開示統合Dashboard,-,経営者,-,経営向け要約,品質/準備度/GHG/評価機関/遅延/論点を要約,-,TC-086,画面探索,未実装,OUT_OF_SCOPE,,P1
+ASSUR-P1-001,機能要件v0.2 §6 P1,重要性・リスク設定,/assurance/.../overview,監査法人,-,重要性設定,重要性/リスク/対象/手続タグ/例外基準と変更履歴,engagements.materiality*,TC-087,実ブラウザ,重要性の基準は表示される。設定UIと変更履歴は無し,OUT_OF_SCOPE,,P1。データは保持
+ASSUR-P1-002,機能要件v0.2 §6 P1,再実施・ロールフォワード,-,監査法人,-,前年比較,前年調書/指摘/当年差分を比較,-,TC-088,画面探索,未実装,OUT_OF_SCOPE,,P1
+ASSUR-P1-003,機能要件v0.2 §6 P1,調書テンプレート・索引,-,監査法人,-,テンプレート管理,法人独自手続テンプレ/調書番号/相互参照,workpaper_references,TC-089,画面探索,テーブルのみ,OUT_OF_SCOPE,,P1
+ASSUR-P1-004,機能要件v0.2 §6 P1,専門家・外部レビュー,-,監査法人,-,専門家アサイン,限定範囲でアサインし専門家メモ,specialist ロールのみ,TC-090,画面探索,ロール定義のみ,OUT_OF_SCOPE,,P1
+ASSUR-P1-005,機能要件v0.2 §6 P1,指摘分析・集約,-,監査法人,-,指摘集計,拠点/指標/原因/重要度/再発で集計,-,TC-091,画面探索,未実装,OUT_OF_SCOPE,,P1
+ASSUR-P1-006,機能要件v0.2 §6 P1,証跡受領・保管ポリシー,-,監査法人,-,保管管理,受領/閲覧/DL/置換/失効/保管期限/Legal Hold,storage_access_events,TC-092,画面探索,アクセス記録のみ。保管ポリシー管理は無し,OUT_OF_SCOPE,,P1（assumptions G-6 未確定）
+ASSUR-P1-007,機能要件v0.2 §6 P1,保証レポート作成支援,/assurance/.../exports,監査法人,-,事実整理出力,概要/対象/実施状況/未修正/Sign-off状況を出力,案件パッケージExport,TC-093,実ブラウザ,13シートのXLSXに含まれる,OUT_OF_SCOPE,,P1。Export部分で実質充足
+GLOBAL-P1-001,機能要件v0.2 §6 P1,海外拠点・低帯域対応,-,全ロール,-,低帯域利用,軽量画面/分割Upload/再送/進捗保存,-,TC-094,画面探索,未実装,OUT_OF_SCOPE,,P1
+SEC-P1-001,機能要件v0.2 §6 P1,SSO・MFA・セッション統制,-,全ロール,-,SSO/MFA,SSO接続可能な設計とMFA/セッション期限/強制失効,-,TC-095,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3「本番SSO」は明示的に対象外
+TERRAST-P2-001,機能要件v0.2 §6 P2,TERRAST API・企業名寄せ,-,企業,-,-,-,-,TC-096,画面探索,未実装,OUT_OF_SCOPE,,P2
+EXT-P2-001,機能要件v0.2 §6 P2,官公庁・基準資料自動更新,-,共通,-,-,-,-,TC-097,画面探索,未実装,OUT_OF_SCOPE,,P2
+BENCH-P2-001,機能要件v0.2 §6 P2,高度Peer・Best Practice抽出,-,企業,-,-,-,-,TC-098,画面探索,未実装,OUT_OF_SCOPE,,P2
+MAP-P2-001,機能要件v0.2 §6 P2,類似質問自動リンク,-,共通,-,-,-,-,TC-099,画面探索,未実装,OUT_OF_SCOPE,,P2
+XBRL-P2-001,機能要件v0.2 §6 P2,XBRLタクソノミー管理,-,共通,-,-,-,-,TC-100,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3で対象外
+DQ-P2-001,機能要件v0.2 §6 P2,高度矛盾・Evidence品質評価,-,共通,-,-,-,-,TC-101,画面探索,未実装,OUT_OF_SCOPE,,P2
+CDP-P2-001,機能要件v0.2 §6 P2,スコア影響シミュレーション,-,企業,-,-,-,-,TC-102,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3「正式CDP Score算定」関連で対象外
+BUILDER-P2-001,機能要件v0.2 §6 P2,カスタム基準・調査票Builder,-,共通,-,-,-,-,TC-103,画面探索,未実装,OUT_OF_SCOPE,,P2
+INT-P2-001,機能要件v0.2 §6 P2,ERP・人事・購買・EHS連携,-,共通,-,-,-,-,TC-104,画面探索,未実装,OUT_OF_SCOPE,,P2
+AI-P2-001,機能要件v0.2 §6 P2,Prompt・Model・評価管理,/enterprise/ai,共通,-,Provenance確認,Prompt/Model/参照範囲/出力SchemaをVersion管理し評価,ai_runs + PROMPT_VERSIONS,TC-105,実ブラウザ+DB,prompt_version/model/token/cost/採否を記録。正答率評価は無し,OUT_OF_SCOPE,,P2。記録部分は実装済み
+AI-P2-002,機能要件v0.2 §6 P2,全社非財務情報Copilot,-,共通,-,-,-,-,TC-106,画面探索,未実装,OUT_OF_SCOPE,,P2
+ASSUR-P2-001,機能要件v0.2 §6 P2,データリネージュGraph,-,監査法人,-,-,-,-,TC-107,画面探索,未実装,OUT_OF_SCOPE,,P2
+ASSUR-P2-002,機能要件v0.2 §6 P2,継続的保証モニタリング,-,監査法人,-,-,-,-,TC-108,画面探索,未実装,OUT_OF_SCOPE,,P2
+IMPROVE-P2-001,機能要件v0.2 §6 P2,改善施策・KPI追跡,-,共通,-,-,-,-,TC-109,画面探索,未実装,OUT_OF_SCOPE,,P2
+CDP-P3-001,機能要件v0.2 §6 P3,CDP API直接提出,-,企業,-,-,-,-,TC-110,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3で明示的に対象外
+CDP-P3-002,機能要件v0.2 §6 P3,CDP Portal双方向Sync,-,企業,-,-,-,-,TC-111,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3で明示的に対象外
+RATING-P3-001,機能要件v0.2 §6 P3,MSCI／FTSE直接連携,-,企業,-,-,-,-,TC-112,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3で明示的に対象外
+HUB-P3-001,機能要件v0.2 §6 P3,全基準統合管理,-,共通,-,-,-,-,TC-113,画面探索,未実装,OUT_OF_SCOPE,,P3
+AGENT-P3-001,機能要件v0.2 §6 P3,年次対応AI Agent,-,共通,-,-,-,-,TC-114,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3「自律AI Agent」で対象外
+API-P3-001,機能要件v0.2 §6 P3,公開API・Webhook・Data Lake,-,共通,-,-,-,-,TC-115,画面探索,未実装,OUT_OF_SCOPE,,P3
+XBRL-P3-001,機能要件v0.2 §6 P3,XBRL／iXBRL提出Package,-,共通,-,-,-,-,TC-116,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3で明示的に対象外
+ASSUR-P3-001,機能要件v0.2 §6 P3,監査法人システムSync,-,監査法人,-,-,-,-,TC-117,画面探索,未実装,OUT_OF_SCOPE,,指示書7.3で明示的に対象外
+GLOBAL-P3-001,機能要件v0.2 §6 P3,多法域・多言語ドラフト,-,共通,-,-,-,-,TC-118,画面探索,未実装,OUT_OF_SCOPE,,P3
+INS-08-001,指示書 §8 必須Route,共通4ルート,/login /workspace /notifications /profile,全ロール,-,URL直打ち,4ルートすべて存在し描画される,src/app/,TC-119,実ブラウザ,qa/evidence/logs/routes-pages.txt に4件すべて存在。クロールで描画確認,PASS,,
+INS-08-002,指示書 §8 必須Route,企業15ルート,/enterprise/*,企業,-,URL直打ち,指定15ルートすべて存在,src/app/enterprise/,TC-120,実ブラウザ,15/15存在（+ghg/roadmap/[framework]の3ルートを追加実装）,PASS,,
+INS-08-003,指示書 §8 必須Route,監査法人15ルート,/assurance/*,監査法人,-,URL直打ち,指定15ルートすべて存在,src/app/assurance/,TC-121,実ブラウザ,15/15存在,PASS,,
+INS-08-004,指示書 §8,設定画面の権限制御,/enterprise/settings /assurance/settings,権限なしロール,-,URL直打ち,権限がない場合は非表示または403,settings/page.tsx の can() 分岐,TC-122,実ブラウザ,権限なしで403相当の説明画面。URL直打ちでも閲覧不可,PASS,,
+INS-11-001,指示書 §11 RLS,必須Policy 1-15,全テーブル,全ロール,-,越権クエリ,15項目すべてのPolicyが機能,supabase/migrations/0012-0017,TC-123,PGlite+実Supabase,test:rls 56件+verify:supabase 33件。RLS無効化記述なし（check:rls）,PASS,,
+INS-11-002,指示書 §11 RLS,RLSテスト必須10項目,全テーブル,全ロール,-,10種の越権,10項目すべてを検証,tests/rls/tenant-isolation.test.ts,TC-124,PGlite,10項目すべて含まれることを確認（企業間/法人間/未アサイン/Grant外/更新不可/他拠点/Snapshot/AuditEvent/SignedURL/URL直打ち）,PASS,,
+INS-12-001,指示書 §12 Storage,Bucket構成とPrivate,Storage,全ロール,-,バケット確認,5バケットでEvidenceはPrivate,supabase/migrations/0015_storage.sql,TC-125,実Supabase,verify:supabase「evidence-privateはpublicでない」「brand-publicはpublic」PASS,PASS,,
+INS-12-002,指示書 §12 Storage,Path Traversal防止とHash,Storage,全ロール,-,不正パス,`..`を含むキーを拒否しSHA-256を保存,file_versions CHECK制約,TC-126,unit+DB,parsers-and-schema.test.ts でPath Traversal無害化を検証。sha256列を保持,PASS,,
+INS-13-001,指示書 §13 Import,非同期Jobと必須項目,/enterprise/imports/[jobId],企業,-,取込実行,progress/error_code/error_message/retry_count/idempotency_key等を保持,ingestion_jobs,TC-127,DB+実ブラウザ,全必須列を保持。冪等キーの重複防止をintegrationで検証,PASS,,
+INS-14-001,指示書 §14 OpenAI,8 Use Case全実装,-,全ロール,OPENAI_API_KEY設定,AI実行,8UseCaseすべてZod構造化出力で動作,src/lib/ai/schemas.ts,TC-128,実OpenAI,verify:openai:all 8/8 PASS（gpt-5.6-terra）,PASS,,
+INS-14-002,指示書 §14 OpenAI,AI Run Provenance,/enterprise/ai,全ロール,AI実行済み,履歴確認,feature/provider/model/prompt_version/参照/confidence/warnings/latency/token/cost/採否を保存,ai_runs,TC-129,実ブラウザ+DB,実接続で全項目記録を確認（コストは単価表未登録Modelのため「—」）,PASS,,
+INS-14-003,指示書 §14 OpenAI,AI禁止事項,全AI画面,全ロール,-,AI出力の確定試行,承認済み上書き/自動提出/保証結論の自動確定を行わない,DBトリガ+アプリ層,TC-130,unit+DB,「AI生成のままでは承認できない」をintegrationとDBトリガの双方で検証,PASS,,
+INS-17-001,指示書 §17 Audit Log,追記専用と必須Event,/assurance/.../audit-trail,全ロール,-,各操作,30種のEventを追記型で記録しUpdate/Delete不可,audit_events + forbid_mutation,TC-131,実Supabase,verify:supabase「Audit Eventを更新・削除できない」PASS。主要Event記録をE2Eで確認,PASS,,record_viewed（全閲覧記録）は未実装
+INS-21-001,指示書 §21 非機能,品質ゲート,-,-,-,7コマンド実行,lint/format/typecheck/test/test:rls/test:e2e/build すべて成功,package.json,TC-132,コマンド,qa/evidence/logs/gates-*.txt に全出力。すべて成功,PASS,,
+INS-21-002,指示書 §21 非機能,Console Error 0 / 主要画面404 0,全画面,全ロール,-,全画面巡回,Console Errorと予期しない404が0件,-,TC-133,実ブラウザ,screen-audit のConsole監視で0件。到達可能100ページで404なし,PASS,,
+INS-21-003,指示書 §21 非機能,Secret露出0 / CSP,全画面,-,-,レスポンス確認,Clientへのsecret露出が無くCSPが設定されている,middleware.ts,TC-134,実HTTP,本番レスポンスでnonce付きCSPを確認。verify:envでsecret露出検査,PASS,,
+INS-21-004,指示書 §21 非機能,Dependency Vulnerability,-,-,-,pnpm audit,脆弱性0件,pnpm-workspace.yaml overrides,TC-135,コマンド,pnpm audit --prod「No known vulnerabilities found」,PASS,,
+DOD-01,指示書 §23 DoD,2ワークスペースが別ナビ・別Dashboard,-,-,-,-,-,-,TC-136,実ブラウザ,企業nav15/監査法人nav14・別Dashboardを確認,PASS,,
+DOD-02,指示書 §23 DoD,T4Dロゴ左上へ実体埋め込み,-,-,-,-,-,public/brand/t4d-logo.png,TC-137,実ブラウザ,E2Eでimg実体を検証（外部URL参照なし）,PASS,,
+DOD-03,指示書 §23 DoD,青・白基調Compact UI,-,-,-,-,-,globals.css,TC-138,実ブラウザ,-,PASS,,
+DOD-04,指示書 §23 DoD,Demo Modeで環境変数なし起動,-,-,-,-,-,-,TC-139,コマンド,環境変数ゼロでpnpm devが起動しE2E 73件が通る,PASS,,
+DOD-05,指示書 §23 DoD,Supabase ModeのMigration/RLSが存在,-,-,-,-,-,supabase/migrations 17本,TC-140,実Supabase,db resetで全適用しverify:supabase 33/33,PASS,,
+DOD-06,指示書 §23 DoD,Enterprise AからBを閲覧不可,-,-,-,-,-,-,TC-141,実Supabase+実ブラウザ,robustness-audit「別テナントのData Pointは URL直打ちでも見えない」404。RLSテスト,PASS,,
+DOD-07,指示書 §23 DoD,Assurance Firm AからBを閲覧不可,-,-,-,-,-,-,TC-142,実Supabase,verify:supabase+test:rls,PASS,,
+DOD-08,指示書 §23 DoD,監査法人がClient Sourceを更新不可,-,-,-,-,-,-,TC-143,実Supabase,verify:supabase,PASS,,
+DOD-09,指示書 §23 DoD,Import→Preview→Confirm→Review→Approve,-,-,-,-,-,-,TC-144,実ブラウザ,vertical-slices 3-6,PASS,,
+DOD-10,指示書 §23 DoD,CDP MappingとAI/Mock Draft,-,-,-,-,-,-,TC-145,実ブラウザ+実OpenAI,vertical-slices 7 + 実接続,PASS,,
+DOD-11,指示書 §23 DoD,Engagement→Grant→Data Room→Snapshot,-,-,-,-,-,-,TC-146,実ブラウザ,vertical-slices 9-10,PASS,,
+DOD-12,指示書 §23 DoD,Population→Sampling→Testing,-,-,-,-,-,-,TC-147,実ブラウザ,vertical-slices 11-12,PASS,,
+DOD-13,指示書 §23 DoD,PBC/Issue/Review Note/Sign-off,-,-,-,-,-,-,TC-148,実ブラウザ,vertical-slices 13-14 + action-audit,PASS,,
+DOD-14,指示書 §23 DoD,Snapshot後Changeを検知,-,-,-,-,-,-,TC-149,実ブラウザ,vertical-slices「Snapshot後変更を検知する」,PASS,,
+DOD-15,指示書 §23 DoD,Sign-off抑止条件が動作,-,-,-,-,-,-,TC-150,実ブラウザ,vertical-slices 15-16,PASS,,
+DOD-16,指示書 §23 DoD,Audit Logが主要Eventを記録,-,-,-,-,-,-,TC-151,実ブラウザ+DB,vertical-slices「監査ログが追記専用である旨と主要イベント」,PASS,,
+DOD-17,指示書 §23 DoD,CSV/XLSX Exportが動作,-,-,-,-,-,-,TC-152,API+実ブラウザ,robustness-audit Export API 200 + E2Eダウンロード,PASS,,
+DOD-18,指示書 §23 DoD,AI出力にSource/Confidence/Mock表示,-,-,-,-,-,-,TC-153,実ブラウザ,実接続で参照元・confidence・バッジを確認,PASS,,
+DOD-19,指示書 §23 DoD,AIが保証結論を自動確定しない,-,-,-,-,-,-,TC-154,unit+DB,「監査AIが結論を出さない」+ DBトリガ,PASS,,
+DOD-20,指示書 §23 DoD,pnpm lint成功,-,-,-,-,-,-,TC-155,コマンド,qa/evidence/logs/gates-static.txt,PASS,,
+DOD-21,指示書 §23 DoD,pnpm format:check成功,-,-,-,-,-,-,TC-156,コマンド,同上,PASS,,
+DOD-22,指示書 §23 DoD,pnpm typecheck成功,-,-,-,-,-,-,TC-157,コマンド,同上,PASS,,
+DOD-23,指示書 §23 DoD,pnpm test成功,-,-,-,-,-,-,TC-158,コマンド,130 passed,PASS,,
+DOD-24,指示書 §23 DoD,pnpm test:rls成功,-,-,-,-,-,-,TC-159,コマンド,56 passed,PASS,,
+DOD-25,指示書 §23 DoD,pnpm test:e2e成功,-,-,-,-,-,-,TC-160,コマンド,73 passed,PASS,,
+DOD-26,指示書 §23 DoD,pnpm build成功,-,-,-,-,-,-,TC-161,コマンド,Compiled successfully,PASS,,
+DOD-27,指示書 §23 DoD,READMEと.env.exampleが完成,-,-,-,-,-,-,TC-162,ファイル確認,両ファイル存在,PASS,,
+DOD-28,指示書 §23 DoD,AGENTS.mdとCLAUDE.mdが完成,-,-,-,-,-,-,TC-163,ファイル確認,同一内容で存在,PASS,,
+DOD-29,指示書 §23 DoD,AI_HANDOFF.mdへ記録,-,-,-,-,-,-,TC-164,ファイル確認,日付別に変更・テスト・未解決を記録,PASS,,
+DOD-30,指示書 §23 DoD,Production Deployや実ユーザー通知を実行していない,-,-,-,-,-,-,TC-165,記録確認,"資料優先順位（追加決定事項>指示書）に基づき判定: 本番Deployは2026-08-15の発注者明示指示（Demo Mode限定・環境変数なし）による解禁後の実施であり逸脱ではない。実ユーザー招待・外部メール送信・本番Supabase接続は一切未実施(招待はアプリ内リンク方式で代替)",PASS,,発注者指示（追加決定事項）が指示書DoDを更新。CLAUDE.md §0.7に経緯を記録済み
+ADD-P0-001,追加決定事項①（2026-08-17）,異種データの一括取込,/enterprise/imports,企業,拠点・言語・形式が異なるファイル群,事前加工なしで複数ファイルを一括アップロード,CSV(カンマ/セミコロン)/TSV/Excel/PDF・UTF-8/SJIS・日英独仏中・多様な数値表記が受理され AI が指標/拠点/値を自動仕分け,src/lib/imports/parsers.ts + service.ts + mock-provider.ts,TC-A01,実ブラウザ+integration,hetero-import.spec（SJIS+独+中+英Excelの同時取込）+ hetero-import.test「50ファイル一括」（仕分け率>=70%固定）PASS,PASS,,50ファイル全件をパイプラインへ通して検証
+ADD-P0-002,追加決定事項①,事前学習による自動仕分け,/enterprise/imports,企業,過去に人が確定した取込実績,同ラベルのファイルを再取込,確定実績から学習し確信度0.95で自動仕分け。学習は組織単位で分離,src/lib/imports/learning.ts,TC-A02,integration,hetero-import.test「確定ラベルは次回から高確信度」「学習は組織単位」PASS,PASS,,新テーブルなし（確定済み取込行そのものが学習データ）
+ADD-P0-003,追加決定事項①,異種データ50ファイルの納品,Google Drive T4Dフォルダ,発注者,-,zipを指定フォルダへ格納,50ファイル+README のzipが格納されている,scripts/hetero-dataset.ts + generate-heterogeneous-dataset.ts,TC-A03,実ブラウザ(Drive)+unit,hetero-parse.test「50ファイル生成」PASS。Drive へ格納し列ズレ修正後に版差し替え済み（2026-08-17）,PASS,,決定論的生成。テストと納品物は同一生成元
+ADD-P0-004,追加決定事項①,AI取込コストの上限,/enterprise/imports,企業,501行以上のファイル,一括取込を実行,1ファイル500行までAI仕分けし超過行は要確認として残る（捨てない）。importMappingのRate Limitはバッチ操作向けに分離,src/lib/ai/index.ts + imports/service.ts,TC-A04,integration,hetero-import.test「AI入力の行数上限」PASS,PASS,,レビュー指摘（コスト暴走）への対処
+ADD-P0-005,追加決定事項②,CSRDワークスペース,/enterprise/disclosures/csrd,企業,-,navからCSRDを開く,ESRS 12項目のギャップ分析（データあり/なし・必須準備度KPI）が表示,src/app/enterprise/disclosures/csrd/page.tsx,TC-A05,実ブラウザ+integration,csrd.spec「ギャップ分析が表示される」+ csrd.test 5件 PASS,PASS,,初年度対応=全項目new・前年なし
+ADD-P0-006,追加決定事項②,CSRD回答ワークフロー,/enterprise/disclosures/csrd/[id],企業,-,項目詳細でAIドラフト生成・編集保存・承認,CDPと同一の質問詳細（共有ビュー）で動作しAIは確定しない,src/app/enterprise/disclosures/question-view.tsx,TC-A06,実ブラウザ+integration,csrd.spec「AIドラフトを生成できる」+ csrd.test「AIドラフト→人の編集保存」PASS,PASS,,'cdp'直書きをProps化した共有化。CDP側はE2E 103件で回帰確認
+ADD-P0-007,追加決定事項②,CSRD整合チェック,/enterprise/disclosures/csrd,企業,-,整合チェックを実行,ESRS項目への指摘（未記入の必須等）が表示される,src/lib/services/disclosure-check.ts,TC-A07,実ブラウザ+integration,csrd.spec「整合チェック」+ csrd.test「未記入の必須項目を指摘」PASS,PASS,,framework引数で共通化済み
+ADD-P0-008,追加決定事項③,デモモードボタン,左サイドメニュー最下部,企業,-,サイドバー最下部のボタンを押す,ツアーが開始しダッシュボードへ移動。監査法人側には出ない,src/components/shared/demo-tour.tsx + sidebar.tsx,TC-A08,実ブラウザ,demo-tour.spec 4件 PASS（折りたたみボタンより下＝文字どおり一番下へ配置）,PASS,,レビュー指摘で位置を修正済み
+ADD-P0-009,追加決定事項③,チュートリアルツアー,企業ワークスペース9画面,企業,ツアー開始済み,次へ/戻る/Escape/×/終了,9ステップで実画面を巡回し担当者向けの見どころを案内。終了でフォーカス復帰,src/components/shared/demo-tour.tsx,TC-A09,実ブラウザ,demo-tour.spec「巡回」「最後まで進む」「Escapeと×」PASS,PASS,,サステナ担当の関心（優先順位・前年差分・監査準備）で構成
+ADD-P0-010,追加決定事項④,インサイト発見,/enterprise/ai,企業,enterprise.ai.run権限,「インサイトを発見」を実行,根拠/含意/推奨アクション+確認先リンクの洞察カード。全社トレンドと逆行する拠点等の横断洞察を含む,src/lib/services/insights.ts,TC-A10,実ブラウザ+integration+実OpenAI,insights.spec 4件 + insights.test 9件 PASS。gpt-5.6-terraでも1回実証（confidence 0.87）,PASS,,「気づいていない洞察」=複数画面の突き合わせで実装
+ADD-P0-011,追加決定事項④,インサイトの安全性,/enterprise/ai,企業,-,越権runId読取・外部リンク注入・権限なし実行,他組織の結果は読めず・linkは/enterprise/のみ許可・権限なしは実行不可・データは一切書き換えない,src/lib/services/insights.ts,TC-A11,integration,insights.test「テナント分離」「link検証（改変テスト）」「書き換えない（前後スナップショット）」PASS,PASS,,レビュー指摘（link無検証）修正済み
+ADD-P0-012,追加決定事項④,インサイトのProvenance,/enterprise/ai,企業,インサイト実行済み,実行履歴を確認,insightDiscoveryがai_runsに記録され?insight=<runId>で再読込可能。採否記録は自組織のみ,src/lib/ai/index.ts,TC-A12,実ブラウザ+integration,insights.spec「実行履歴にProvenance」+ insights.test「他組織のAI採否は記録できない」PASS,PASS,,recordAiDecision所有権検証はレビュー後追加
+ADD-P1-001,追加決定事項 2026-08-19 ①,人的資本データの自動仕分け（定義ズレの検出）,/enterprise/imports,本社サステナビリティ担当,人的資本の異種データ 20 ファイル（8 か国・CSV/PDF）,事前加工せず一括投入,多言語の人的資本指標が自動仕分けされ、国ごとに定義が異なる行は警告つきで要確認になる,scripts/human-capital-dataset.ts / mock-provider.ts の detectDefinitionNotes / 人的資本 7 指標,TC-241,実データ取込（integration）,"human-capital-import 4 件PASS: 20 ファイル全解析／多言語の女性管理職比率が同一指標へ集約／定義差 6 パターンで警告＋要確認／定義差なしは高確信度",PASS,,Drive へ t4d-human-capital-dataset-20files.zip を格納
+ADD-P1-002,追加決定事項 2026-08-19 ②,組織タグ「連結対象のみ」,/enterprise/data,企業,持分法適用の関連会社が存在する,組織フィルタで「連結対象のみ」を選ぶ,全部連結・比例連結の組織だけが残り、持分法適用・対象外は除かれる,src/lib/domain/boundaries.ts isConsolidatedUnit / data/page.tsx,TC-242,実ブラウザ,"consolidated-filter 3 件PASS ／ six-features E2E で「連結対象のみ＋合弁会社＝0 件」を確認",PASS,,交差が空のときに絞り込みが外れる不具合を修正（番兵 ID）
+ADD-P1-003,追加決定事項 2026-08-19 ③,Evidence プレビューのリッチ化,/enterprise/evidence/[fileId],全ロール,Evidence が登録済み,Evidence を画面内で開く,発行者・番号・明細・合計まで含む紙面として表示される,src/lib/fixtures/evidence-documents.ts / components/shared/document-preview.tsx,TC-243,実ブラウザ,"six-features E2E: 請求番号・合計・フッターの表示を確認 ／ mentions-evidence でハイライトを確認",PASS,,書類種別ごとに紙面を生成（請求書・マニフェスト・購買台帳・人員構成表）
+ADD-P1-004,追加決定事項 2026-08-19 ④,デモモードのポップアップ移動,全画面,全ロール,デモモード実行中,ヘッダーをドラッグ、または矢印キー,任意の位置へ移動でき、画面外へは出ない,src/components/shared/demo-tour.tsx,TC-244,実ブラウザ,"six-features E2E: ドラッグ移動とキーボード移動の 2 件PASS ／ ui-integrity で画面外へ出ないことを確認",PASS,,ドラッグできない環境でも矢印キーで移動可能
+ADD-P1-005,追加決定事項 2026-08-19 ⑤,CDP の導線（バージョン選択→複数年取込→不足一覧）,/enterprise/disclosures/cdp,企業,CDP マスターが複数年ある,CDP 画面を開く,3 ステップで案内され、年度ごとの取込状況が見え、過年度の版へ切り替えられる,src/lib/services/disclosure-onboarding.ts / components/shared/disclosure-steps.tsx,TC-245,実ブラウザ,"six-features E2E PASS ／ 本番で取込済み 2026年度 24 件・2025年度 10 件の表示を確認",PASS,,
+ADD-P1-006,追加決定事項 2026-08-19 ⑥,SSBJ の導線（マテリアリティ→収集→充足度→不足一覧）,/enterprise/disclosures/ssbj,企業,-,SSBJ 画面でマテリアリティを登録する,マテリアリティ登録を起点に、充足度が可視化され、不足項目と提出依頼へ繋がる,migration 0020_materiality.sql / src/lib/services/materiality.ts / ssbj/page.tsx,TC-246,実ブラウザ+実DB,"six-features E2E PASS ／ crud-persistence で登録の永続化と理由必須を確認 ／ RLS 越権 4 件PASS ／ 本番で充足度 73% を確認",PASS,,重要と評価する場合は理由を必須にしている

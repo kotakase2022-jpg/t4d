@@ -1,0 +1,135 @@
+@import 'tailwindcss';
+
+/* ======================================================================
+   T4D ブランドトークン（指示書 5.2）
+   青と白を基調。オレンジはロゴ・注意・期限超過等の限定アクセントのみ。
+   ====================================================================== */
+@theme {
+  --color-brand-50: #f5f9ff;
+  --color-brand-100: #eaf3ff;
+  --color-brand-200: #cfe2fb;
+  --color-brand-300: #a8caf5;
+  --color-brand-400: #5b95dc;
+  --color-brand-500: #2a7ad0;
+  --color-brand-600: #1468c4;
+  --color-brand-700: #0b57a4;
+  --color-brand-800: #0a4a92;
+  --color-brand-900: #083b78;
+  --color-brand-950: #062f63;
+
+  --color-surface: #ffffff;
+  --color-surface-muted: #f5f7fa;
+  --color-line: #dde4ec;
+  --color-ink: #172033;
+  --color-ink-muted: #617083;
+
+  /*
+   * 指示書 5.2 の色は「例」として提示されたもの。
+   * success #16815B / danger #C83B3B は soft 背景の上で WCAG 2 AA（4.5:1）を満たさず、
+   * axe（tests/e2e）で serious 違反として検出されたため、色相を保ったまま暗度のみ調整した。
+   *   danger  #C83B3B → #A61B1B（on #FDECEB で 6.6:1）
+   *   success #16815B → #12704E（on #E7F5EF で 5.4:1）
+   */
+  --color-warning: #f5a800;
+  --color-warning-soft: #fff6e0;
+  --color-success: #12704e;
+  --color-success-soft: #e7f5ef;
+  --color-danger: #a61b1b;
+  --color-danger-soft: #fdeceb;
+  --color-info: #0b57a4;
+  --color-info-soft: #eaf3ff;
+
+  --radius-t4d: 6px;
+  --radius-t4d-lg: 8px;
+
+  /* Compact Density（指示書 5.3） */
+  --spacing-topbar: 48px;
+  --spacing-sidebar: 224px;
+  --spacing-sidebar-collapsed: 64px;
+  --spacing-row: 36px;
+
+  --font-sans:
+    'Inter', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui,
+    sans-serif;
+  --font-mono: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-surface-muted);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Keyboard Focus Ring を消さない（指示書 5.4） */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #c6cfdb;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #a9b5c5;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  /* 数値列は等幅で桁を揃える */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* PC 専用。最小想定幅 1280px。 */
+  .t4d-min-canvas {
+    min-width: 1280px;
+  }
+
+  .t4d-sticky-head thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--color-surface-muted);
+  }
+
+  .t4d-scroll-x {
+    overflow-x: auto;
+  }
+}
+
+/* 印刷時はナビゲーションを落とす（Export 前の目視確認用） */
+@media print {
+  .t4d-no-print {
+    display: none !important;
+  }
+}

@@ -1,0 +1,6 @@
+/api/exports/cdp
+/api/exports/data-points
+/api/exports/engagement
+/api/files/download
+/api/files/signed-url
+/api/jobs/[jobId]

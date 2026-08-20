@@ -1,0 +1,178 @@
+$ playwright test
+[WebServer]    ▲ Next.js 15.5.23
+[WebServer]    - Environments: .env.local
+[WebServer] 
+[WebServer]    Creating an optimized production build ...
+[WebServer] <w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (107kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+[WebServer] <w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (258kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+[WebServer]  ✓ Compiled successfully in 5.0s
+[WebServer]    Linting and checking validity of types ...
+[WebServer] 
+[WebServer]  ⚠ The Next.js plugin was not detected in your ESLint configuration. See https://nextjs.org/docs/app/api-reference/config/eslint#migrating-existing-config
+[WebServer]    Collecting page data ...
+[WebServer]    Generating static pages (0/28) ...
+[WebServer]    Generating static pages (7/28) 
+[WebServer]    Generating static pages (14/28) 
+[WebServer]    Generating static pages (21/28) 
+[WebServer]  ✓ Generating static pages (28/28)
+[WebServer]    Finalizing page optimization ...
+[WebServer]    Collecting build traces ...
+[WebServer] 
+[WebServer] Route (app)                                                Size  First Load JS    
+[WebServer] ┌ ○ /                                                     150 B         103 kB
+[WebServer] ├ ○ /_not-found                                           150 B         103 kB
+[WebServer] ├ ƒ /api/exports/cdp                                      150 B         103 kB
+[WebServer] ├ ƒ /api/exports/data-points                              150 B         103 kB
+[WebServer] ├ ƒ /api/exports/engagement                               150 B         103 kB
+[WebServer] ├ ƒ /api/files/download                                   150 B         103 kB
+[WebServer] ├ ƒ /api/files/signed-url                                 150 B         103 kB
+[WebServer] ├ ƒ /api/jobs/[jobId]                                     150 B         103 kB
+[WebServer] ├ ƒ /assurance/dashboard                                2.72 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements                              2.72 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/audit-trail   2.69 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/data-room     2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/exports       1.18 kB         115 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/issues        2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/overview      2.72 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/population    2.69 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/requests      2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/review-notes  2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/sampling      2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/scope         2.69 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/signoffs      2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/testing       2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/settings                                 2.69 kB         116 kB
+[WebServer] ├ ƒ /enterprise/ai                                      2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/alerts                                  2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/dashboard                               2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/data                                    2.68 kB         149 kB
+[WebServer] ├ ƒ /enterprise/data/[dataPointId]                      2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/disclosures/[framework]                   164 B         106 kB
+[WebServer] ├ ƒ /enterprise/disclosures/cdp                         1.16 kB         118 kB
+[WebServer] ├ ƒ /enterprise/disclosures/cdp/[questionId]            2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/disclosures/ssbj                        2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/evidence                                2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/ghg                                     2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/imports                                 2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/imports/[jobId]                         3.69 kB         117 kB
+[WebServer] ├ ƒ /enterprise/organizations                             171 B         106 kB
+[WebServer] ├ ƒ /enterprise/reports                                 1.18 kB         115 kB
+[WebServer] ├ ƒ /enterprise/roadmap                                   171 B         106 kB
+[WebServer] ├ ƒ /enterprise/settings                                2.69 kB         116 kB
+[WebServer] ├ ƒ /enterprise/workflows                               2.71 kB         116 kB
+[WebServer] ├ ƒ /login                                                865 B         120 kB
+[WebServer] ├ ƒ /notifications                                      2.72 kB         116 kB
+[WebServer] ├ ƒ /profile                                              171 B         106 kB
+[WebServer] └ ƒ /workspace                                          2.37 kB         122 kB
+[WebServer] + First Load JS shared by all                            102 kB
+[WebServer]   ├ chunks/583e5aa7-e2b9542f32ccb858.js                 54.2 kB
+[WebServer]   ├ chunks/6569-e188dc69629788b5.js                     46.1 kB
+[WebServer]   └ other shared chunks (total)                            2 kB
+[WebServer] 
+[WebServer] 
+[WebServer] ƒ Middleware                                            92.7 kB
+[WebServer] 
+[WebServer] ○  (Static)   prerendered as static content
+[WebServer] ƒ  (Dynamic)  server-rendered on demand
+[WebServer] 
+[WebServer]    ▲ Next.js 15.5.23
+[WebServer]    - Local:        http://127.0.0.1:3100
+[WebServer]    - Network:      http://127.0.0.1:3100
+[WebServer] 
+[WebServer]  ✓ Starting...
+[WebServer]  ✓ Ready in 371ms
+
+Running 78 tests using 1 worker
+
+  ok  1 [chromium-desktop] › tests\e2e\action-audit.spec.ts:33:5 › 一括操作: 選択した Data Point をまとめて提出できる (1.3s)
+  ok  2 [chromium-desktop] › tests\e2e\action-audit.spec.ts:57:5 › Data Point の値編集が履歴に残る (1.1s)
+  ok  3 [chromium-desktop] › tests\e2e\action-audit.spec.ts:80:5 › Evidence をアップロードして Data Point へ紐付けられる (1.9s)
+  ok  4 [chromium-desktop] › tests\e2e\action-audit.spec.ts:114:5 › AI 下書きを Reject できる (1.3s)
+  ok  5 [chromium-desktop] › tests\e2e\action-audit.spec.ts:136:5 › 許諾の取消と再付与が反映される (1.1s)
+  ok  6 [chromium-desktop] › tests\e2e\action-audit.spec.ts:153:5 › 企業が PBC へ回答し、監査法人が受け入れられる (1.9s)
+  ok  7 [chromium-desktop] › tests\e2e\action-audit.spec.ts:176:5 › レビュー Note を作成して解消できる (1.1s)
+  ok  8 [chromium-desktop] › tests\e2e\action-audit.spec.ts:193:5 › Snapshot 後変更の要約と影響評価が動作する (2.0s)
+  ok  9 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:26:5 › 期間セレクタで対象期間を切り替えられる (1.2s)
+  ok 10 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:58:5 › 案件セレクタで同じサブページのまま別案件へ移動する (750ms)
+  ok 11 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:85:5 › 検索（Debounce）が URL と結果に反映される (1.2s)
+  ok 12 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:102:5 › フィルターのトグルと解除が URL に反映される (632ms)
+  ok 13 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:119:5 › 保存ビューを適用できる (549ms)
+  ok 14 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:131:5 › ページングの前へ・次へが機能する (640ms)
+  ok 15 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:153:5 › コマンドパレットから選んで画面移動できる (575ms)
+  ok 16 [chromium-desktop] › tests\e2e\interaction-audit.spec.ts:170:5 › ユーザーメニューからログアウトできる (1.0s)
+  ok 17 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:56:5 › 存在しない ID の企業ルートは 404 になる（500 にしない） (640ms)
+  ok 18 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:74:5 › 存在しない案件は 404 になる（存在を漏らさない） (496ms)
+  ok 19 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:86:5 › 未ログインでは API も保護される (191ms)
+  ok 20 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:108:5 › Export API が企業ユーザーに対して正しく応答する (449ms)
+  ok 21 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:124:5 › 他テナント・未アサインの案件 Export は拒否される (706ms)
+  ok 22 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:141:5 › Signed URL API と Job API が不正入力で 500 にならない (470ms)
+  ok 23 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:157:5 › 別テナントの Data Point は URL 直打ちでも見えない (733ms)
+  ok 24 [chromium-desktop] › tests\e2e\robustness-audit.spec.ts:171:5 › 壊れたクエリ文字列でも一覧が落ちない (952ms)
+[AUDIT] 企業: 95 ページを検査
+  ok 25 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:25:5 › 企業ワークスペース: 到達可能な全画面が描画される (8.3s)
+[AUDIT] 監査法人: 17 ページを検査
+  ok 26 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:42:5 › 監査法人ワークスペース: 到達可能な全画面が描画される (1.7s)
+[AUDIT] 東 一郎: 93 ページを検査
+  ok 27 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:98:7 › 東 一郎 でも到達可能な全画面が描画される (8.0s)
+[AUDIT] 海野 みどり: 93 ページを検査
+  ok 28 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:98:7 › 海野 みどり でも到達可能な全画面が描画される (9.7s)
+[AUDIT] 検見川 涼: 93 ページを検査
+  ok 29 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:98:7 › 検見川 涼 でも到達可能な全画面が描画される (9.4s)
+[AUDIT] 承 花子: 93 ページを検査
+  ok 30 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:98:7 › 承 花子 でも到達可能な全画面が描画される (7.9s)
+[AUDIT] 保 統括: 16 ページを検査
+  ok 31 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:98:7 › 保 統括 でも到達可能な全画面が描画される (1.6s)
+[AUDIT] 若葉 新: 16 ページを検査
+  ok 32 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:98:7 › 若葉 新 でも到達可能な全画面が描画される (1.6s)
+[AUDIT] 企業サイドバー: 15 本をクリック検証
+  ok 33 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:162:5 › 企業ワークスペース: サイドバー全項目が Client 遷移で開く (2.7s)
+[AUDIT] 監査法人サイドバー: 14 本をクリック検証
+  ok 34 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:171:5 › 監査法人ワークスペース: サイドバー全項目が Client 遷移で開く (2.4s)
+[AUDIT] 企業ダッシュボード本文: 21 本をクリック検証
+  ok 35 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:180:5 › 企業ダッシュボード: KPI カードが Client 遷移で開く (3.2s)
+[AUDIT] 案件ホーム本文: 8 本をクリック検証
+  ok 36 [chromium-desktop] › tests\e2e\screen-audit.spec.ts:194:5 › 案件ホーム: 本文のリンクが Client 遷移で開く (1.7s)
+  ok 37 [chromium-desktop] › tests\e2e\table-controls.spec.ts:19:5 › 値の昇順・降順で並べ替えられる（DB 側） (648ms)
+  ok 38 [chromium-desktop] › tests\e2e\table-controls.spec.ts:42:5 › 並べ替えると 1 ページ目へ戻る (551ms)
+  ok 39 [chromium-desktop] › tests\e2e\table-controls.spec.ts:52:5 › 列表示を切り替えられ、URL に保持される (711ms)
+  ok 40 [chromium-desktop] › tests\e2e\table-controls.spec.ts:69:5 › 指標列は常に表示され、外せない (558ms)
+  ok 41 [chromium-desktop] › tests\e2e\table-controls.spec.ts:76:5 › 不正な sort / cols を渡しても壊れない (738ms)
+  ok 42 [chromium-desktop] › tests\e2e\tenant-isolation-audit.spec.ts:52:5 › A: 別テナントの企業は他社の Evidence を取得できない (1.2s)
+  ok 43 [chromium-desktop] › tests\e2e\tenant-isolation-audit.spec.ts:71:5 › A2: 無関係な監査法人は他社の Evidence を取得できない (762ms)
+  ok 44 [chromium-desktop] › tests\e2e\tenant-isolation-audit.spec.ts:113:5 › B: 他法人の Issue を Server Action で解消できない (1.0s)
+  ok 45 [chromium-desktop] › tests\e2e\tenant-isolation-audit.spec.ts:147:5 › C: 他社の許諾を Server Action で取り消せない (1.0s)
+  ok 46 [chromium-desktop] › tests\e2e\tenant-isolation-audit.spec.ts:174:5 › D: 別テナントの組織 ID を含む storageKey を直接叩けない (440ms)
+  ok 47 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:21:7 › 企業 Vertical Slice › 1-2. 企業管理者でログインし、ダッシュボードの KPI が表示される (394ms)
+  ok 48 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:49:7 › 企業 Vertical Slice › KPI クリックで Filter 付き一覧へ遷移する (441ms)
+  ok 49 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:59:7 › 企業 Vertical Slice › 3-5. CSV を取り込み、プレビューを修正して確定する (1.1s)
+  ok 50 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:107:7 › 企業 Vertical Slice › 6. 提出 → レビュー → 承認が動作する (1.5s)
+  ok 51 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:145:7 › 企業 Vertical Slice › 拠点担当は承認ボタンを持たない（権限による UI 分岐） (567ms)
+  ok 52 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:153:7 › 企業 Vertical Slice › 7. CDP の AI ドラフトを作成し、人が編集してから承認する (982ms)
+  ok 53 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:190:7 › 企業 Vertical Slice › Export（CSV）がダウンロードできる (523ms)
+  ok 54 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:202:7 › 監査法人 Vertical Slice › 8-9. 監査法人マネージャーでログインし、案件が表示される (584ms)
+  ok 55 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:213:7 › 監査法人 Vertical Slice › 未アサインの法人管理者はクライアントデータを閲覧できない (400ms)
+  ok 56 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:223:7 › 監査法人 Vertical Slice › Data Room はクライアント原本を Read-only で表示し、Snapshot 後変更を検知する (468ms)
+  ok 57 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:236:7 › 監査法人 Vertical Slice › 10. Snapshot を新規作成できる (559ms)
+  ok 58 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:245:7 › 監査法人 Vertical Slice › 11. サンプルを抽出できる（Seed を記録し再現可能） (558ms)
+  ok 59 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:259:7 › 監査法人 Vertical Slice › 12. Testing 三ペインで手続結果と結論を記録できる (627ms)
+  ok 60 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:279:7 › 監査法人 Vertical Slice › 自己レビューは禁止されている (469ms)
+  ok 61 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:290:7 › 監査法人 Vertical Slice › 13. PBC（資料依頼）を作成できる (589ms)
+  ok 62 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:308:7 › 監査法人 Vertical Slice › 企業側からは PBC の内部メモが見えない (450ms)
+  ok 63 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:315:7 › 監査法人 Vertical Slice › 14. Issue（指摘）を作成できる (577ms)
+  ok 64 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:334:7 › 監査法人 Vertical Slice › 15. 抑止条件がある間は Sign-off が実行できない (447ms)
+  ok 65 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:353:7 › 監査法人 Vertical Slice › 16. High Issue を解消すると該当の抑止条件が外れる (763ms)
+  ok 66 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:378:7 › 監査法人 Vertical Slice › 案件パッケージ Export（XLSX）がダウンロードできる (460ms)
+  ok 67 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:388:7 › 監査法人 Vertical Slice › 監査ログが追記専用である旨と主要イベントが記録されている (440ms)
+  ok 68 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:406:9 › アクセシビリティ › 企業ダッシュボード に重大な a11y 違反がない (861ms)
+  ok 69 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:406:9 › アクセシビリティ › 非財務データ一覧 に重大な a11y 違反がない (1.2s)
+  ok 70 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:406:9 › アクセシビリティ › CDP ワークスペース に重大な a11y 違反がない (912ms)
+  ok 71 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:406:9 › アクセシビリティ › 監査法人ダッシュボード に重大な a11y 違反がない (719ms)
+  ok 72 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:423:7 › アクセシビリティ › j / k で一覧のレコード間を移動できる (553ms)
+  ok 73 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:445:7 › アクセシビリティ › 入力中はショートカットが発火しない (547ms)
+  ok 74 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:457:7 › アクセシビリティ › e で Evidence セクションへ移動する (488ms)
+  ok 75 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:466:7 › アクセシビリティ › キーボードショートカット（Ctrl+K）でコマンドパレットが開く (397ms)
+  ok 76 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:475:7 › アクセシビリティ › 未ログインで保護ルートへ直接アクセスするとログインへ戻される (471ms)
+  ok 77 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:492:7 › Client 側遷移 › 未訪問ルートへの Link クリックで URL と本文が切り替わる（監査法人） (576ms)
+  ok 78 [chromium-desktop] › tests\e2e\vertical-slices.spec.ts:506:7 › Client 側遷移 › 未訪問ルートへの Link クリックで URL と本文が切り替わる（企業） (609ms)
+
+  78 passed (2.2m)

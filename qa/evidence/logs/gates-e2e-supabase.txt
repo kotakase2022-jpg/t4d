@@ -1,0 +1,106 @@
+$ playwright test --config playwright.supabase.config.ts
+[WebServer]    ▲ Next.js 15.5.23
+[WebServer]    - Environments: .env.local
+[WebServer] 
+[WebServer]    Creating an optimized production build ...
+[WebServer] <w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (107kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+[WebServer] <w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (258kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+[WebServer]  ✓ Compiled successfully in 7.0s
+[WebServer]    Linting and checking validity of types ...
+[WebServer] 
+[WebServer]  ⚠ The Next.js plugin was not detected in your ESLint configuration. See https://nextjs.org/docs/app/api-reference/config/eslint#migrating-existing-config
+[WebServer]    Collecting page data ...
+[WebServer]    Generating static pages (0/28) ...
+[WebServer]    Generating static pages (7/28) 
+[WebServer]    Generating static pages (14/28) 
+[WebServer]    Generating static pages (21/28) 
+[WebServer]  ✓ Generating static pages (28/28)
+[WebServer]    Finalizing page optimization ...
+[WebServer]    Collecting build traces ...
+[WebServer] 
+[WebServer] Route (app)                                                Size  First Load JS    
+[WebServer] ┌ ○ /                                                     150 B         103 kB
+[WebServer] ├ ○ /_not-found                                           150 B         103 kB
+[WebServer] ├ ƒ /api/exports/cdp                                      150 B         103 kB
+[WebServer] ├ ƒ /api/exports/data-points                              150 B         103 kB
+[WebServer] ├ ƒ /api/exports/engagement                               150 B         103 kB
+[WebServer] ├ ƒ /api/files/download                                   150 B         103 kB
+[WebServer] ├ ƒ /api/files/signed-url                                 150 B         103 kB
+[WebServer] ├ ƒ /api/jobs/[jobId]                                     150 B         103 kB
+[WebServer] ├ ƒ /assurance/dashboard                                2.72 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements                              2.72 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/audit-trail   2.69 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/data-room     2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/exports       1.18 kB         115 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/issues        2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/overview      2.72 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/population    2.69 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/requests      2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/review-notes  2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/sampling      2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/scope         2.69 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/signoffs      2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/engagements/[engagementId]/testing       2.71 kB         116 kB
+[WebServer] ├ ƒ /assurance/settings                                 2.69 kB         116 kB
+[WebServer] ├ ƒ /enterprise/ai                                      2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/alerts                                  2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/dashboard                               2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/data                                    2.69 kB         149 kB
+[WebServer] ├ ƒ /enterprise/data/[dataPointId]                      2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/disclosures/[framework]                   164 B         106 kB
+[WebServer] ├ ƒ /enterprise/disclosures/cdp                         1.16 kB         118 kB
+[WebServer] ├ ƒ /enterprise/disclosures/cdp/[questionId]            2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/disclosures/ssbj                        2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/evidence                                2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/ghg                                     2.72 kB         116 kB
+[WebServer] ├ ƒ /enterprise/imports                                 2.71 kB         116 kB
+[WebServer] ├ ƒ /enterprise/imports/[jobId]                         3.69 kB         117 kB
+[WebServer] ├ ƒ /enterprise/organizations                             171 B         106 kB
+[WebServer] ├ ƒ /enterprise/reports                                 1.18 kB         115 kB
+[WebServer] ├ ƒ /enterprise/roadmap                                   171 B         106 kB
+[WebServer] ├ ƒ /enterprise/settings                                2.69 kB         116 kB
+[WebServer] ├ ƒ /enterprise/workflows                               2.71 kB         116 kB
+[WebServer] ├ ƒ /login                                                865 B         120 kB
+[WebServer] ├ ƒ /notifications                                      2.72 kB         116 kB
+[WebServer] ├ ƒ /profile                                              171 B         106 kB
+[WebServer] └ ƒ /workspace                                          2.37 kB         122 kB
+[WebServer] + First Load JS shared by all                            102 kB
+[WebServer]   ├ chunks/583e5aa7-e2b9542f32ccb858.js                 54.2 kB
+[WebServer]   ├ chunks/6569-e188dc69629788b5.js                     46.1 kB
+[WebServer]   └ other shared chunks (total)                            2 kB
+[WebServer] 
+[WebServer] 
+[WebServer] ƒ Middleware                                            92.8 kB
+[WebServer] 
+[WebServer] ○  (Static)   prerendered as static content
+[WebServer] ƒ  (Dynamic)  server-rendered on demand
+[WebServer] 
+[WebServer]    ▲ Next.js 15.5.23
+[WebServer]    - Local:        http://127.0.0.1:3200
+[WebServer]    - Network:      http://127.0.0.1:3200
+[WebServer] 
+[WebServer]  ✓ Starting...
+[WebServer]  ✓ Ready in 371ms
+
+Running 9 tests using 1 worker
+
+  ok 1 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:28:5 › デモバッジが出ず、Supabase Auth のログインフォームが表示される (218ms)
+  ok 2 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:36:5 › 誤ったパスワードではログインできない (229ms)
+[WebServer]  ⨯ Error: メールアドレスまたはパスワードが正しくありません。
+[WebServer]     at n (C:\Dev\repos\t4d\.next\server\app\(auth)\login\page.js:2:17074)
+[WebServer]     at async m (C:\Dev\repos\t4d\.next\server\app\(auth)\login\page.js:1:6978)
+[WebServer]     at async p (C:\Dev\repos\t4d\.next\server\app\(auth)\login\page.js:2:1861)
+[WebServer]     at async M (C:\Dev\repos\t4d\.next\server\app\(auth)\login\page.js:2:6948) {
+[WebServer]   digest: '3440422901'
+[WebServer] }
+  ok 3 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:45:5 › 企業ユーザーがログインし、実 DB のデータでダッシュボードが表示される (1.0s)
+  ok 4 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:58:5 › 一覧が DB 側ページングで表示され、フィルターが効く (1.8s)
+  ok 5 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:77:5 › 監査法人ユーザーは許諾範囲のみ閲覧でき、Read-only 表示になる (2.1s)
+  ok 6 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:95:5 › 未アサインの法人管理者は URL 直打ちでも 404 になる (2.6s)
+  ok 7 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:109:5 › CSP が nonce ベースで、script-src に unsafe-inline を含まない (146ms)
+[AUDIT/supabase] 企業: 97 ページ
+  ok 8 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:127:5 › 企業ユーザー: 実 RLS 下で到達可能な全画面が描画される (29.5s)
+[AUDIT/supabase] 監査法人: 17 ページ
+  ok 9 [chromium-supabase] › tests\e2e-supabase\supabase-mode.spec.ts:144:5 › 監査法人ユーザー: 実 RLS 下で到達可能な全画面が描画される (7.7s)
+
+  9 passed (1.1m)

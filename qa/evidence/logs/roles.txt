@@ -1,0 +1,15 @@
+enterprise_admin
+sustainability_manager
+site_contributor
+supplier_contributor
+reviewer
+approver
+external_advisor
+viewer
+assurance_admin
+engagement_partner
+assurance_manager
+assurance_staff
+specialist
+assurance_viewer
+platform_admin

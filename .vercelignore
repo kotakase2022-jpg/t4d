@@ -1,0 +1,32 @@
+# Vercel へアップロードしないもの。
+#
+# 最重要: **Secret を絶対に上げない**。
+# `.env.local` には OPENAI_API_KEY などが入る。Vercel の環境変数は
+# ダッシュボード（または `vercel env add`）で設定するものであり、
+# リポジトリのファイルとして持ち込まない。
+
+.env
+.env.*
+!.env.example
+
+# ローカル成果物
+node_modules
+.next
+out
+build
+coverage
+test-results
+playwright-report
+blob-report
+playwright/.cache
+*.tsbuildinfo
+
+# 本番ビルドに不要
+# （注意: gitignore 規則では tests/ を除外すると内側の ! 再包含は効かない。
+#  scripts から参照するものは tests/ ではなく scripts/ に置くこと）
+tests
+supabase/.branches
+supabase/.temp
+supabase/.env
+local-evidence
+tmp

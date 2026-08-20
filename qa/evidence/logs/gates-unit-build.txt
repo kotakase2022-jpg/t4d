@@ -1,0 +1,10 @@
+### pnpm test
+[2m Test Files [22m [1m[32m9 passed[39m[22m[90m (9)[39m
+[2m      Tests [22m [1m[32m130 passed[39m[22m[90m (130)[39m
+### pnpm test:rls
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m56 passed[39m[22m[90m (56)[39m
+### pnpm build
+ ✓ Compiled successfully in 6.0s
+### pnpm audit --prod
+No known vulnerabilities found

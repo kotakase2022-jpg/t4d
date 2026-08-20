@@ -1,0 +1,60 @@
+$ tsx scripts/verify-supabase.ts
+検証対象: http://127.0.0.1:54421
+
+1. Supabase Auth でのログイン
+  ✓ 7 アカウントすべてでログインできる
+
+2. テナント分離（企業 A ⇔ 企業 B）
+  ✓ 企業 A は自社の Data Point を取得できる
+  ✓ 企業 A から企業 B の Data Point は 0 件
+  ✓ 企業 B から企業 A の指標定義は 0 件
+
+3. 監査法人のアクセス（Engagement Member + Grant）
+  ✓ アサイン済みマネージャーは案件を取得できる
+  ✓ 未アサインの法人管理者は案件を取得できない
+  ✓ 別法人は案件を取得できない
+  ✓ 許諾済みの Data Point は取得できる
+  ✓ 組織が許諾外の Data Point は取得できない
+  ✓ 指標が許諾外の Data Point は取得できない
+  ✓ 未承認の Data Point は許諾内でも取得できない
+  ✓ 未アサインの法人管理者はクライアントデータを 1 件も取得できない
+
+4. Read-only by Default（監査法人は企業原本を更新できない）
+  ✓ 監査法人からの UPDATE は 1 行も更新しない
+  ✓ 値が書き換わっていない
+
+5. Unit スコープ（拠点担当は担当外を更新できない）
+  ✓ 担当拠点は更新できる
+  ✓ 担当外拠点は更新できない
+
+6. 承認権限と状態遷移トリガ
+  ✓ 拠点担当は承認できない
+  ✓ 承認者は承認できる
+
+7. Immutability（Snapshot / Audit Event / Sign-off）
+  ✓ Snapshot は更新されない
+  ✓ Audit Event は更新されない
+  ✓ Audit Event は削除できない（権限なし）
+
+8. 代理 Sign-off の禁止
+  ✓ 他人名義の Sign-off は拒否される
+  ✓ 本人名義の Sign-off は登録できる
+
+9. 内部情報の非対称性
+  ✓ 企業側は共有フラグの立った Review Note のみ閲覧できる
+  ✓ 企業側から draft の PBC は見えない
+  ✓ 企業側から送付済みの PBC は見える
+
+10. 許諾の付与主体と即時反映
+  ✓ 監査法人は自分に許諾を追加できない
+  ✓ 付与前は不可視
+  ✓ 企業管理者は許諾を追加できる
+  ✓ 付与直後から可視になる
+
+11. Storage（Evidence Bucket が Private）
+  ✓ evidence-private バケットが存在する
+  ✓ evidence-private は public ではない
+  ✓ brand-public は public
+
+33 / 33 の検証に成功しました。
+✓ 実 Supabase に対する通し検証に合格しました。

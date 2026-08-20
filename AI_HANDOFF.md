@@ -1,0 +1,1190 @@
+# AI_HANDOFF
+
+各 Milestone の変更・テスト・未解決・次作業の記録です。新しい作業をしたら**追記**してください。
+
+---
+
+## 2026-08-14 — M0〜M7 初回構築（空リポジトリ → Phase 1 完成）
+
+### 前提
+
+- リポジトリはコミット 0 件の空リポジトリだった。既存実装の破壊はなし。
+- 実 Supabase / OpenAI API Key は未提供。既定は Demo / Fixture Mode。
+- 本番 Deploy・実ユーザー招待・外部メール送信は実行していない。`main` への Push もしていない。
+
+---
+
+### M0 調査・計画
+
+- `docs/implementation-plan.md`（現状・アーキテクチャ方針・Milestone・リスク 8 件・実装順）
+- `docs/assumptions.md`（A 外部資格情報 / B 業務マスター / C 権限解釈 / D 技術選択 / E データ・時刻 / F 対象外 / G 未入手）
+- Drive の `T4D logo.png`（2172×724 PNG）を `public/brand/t4d-logo.png` へ実体配置。
+
+### M1 基盤
+
+- Next.js 15.5 / React 19 / Tailwind 4 / TypeScript strict + `noUncheckedIndexedAccess`
+- ブランドトークン（`src/app/globals.css`）、UI プリミティブ 13 種（Radix + cva + cn）
+- AppShell（Top Bar 48px / Sidebar 224–64px / Compact Density）、BrandLogo、Command Palette、Help
+- Demo Auth（`t4d_demo_user` Cookie、本番 Auth と別経路）、Workspace 選択、middleware Route Guard
+- Loading / Empty / Error / Permission Denied の共通状態部品
+
+### M2 DB・RLS
+
+- Migration 15 本 / **75 テーブル** / **167 RLS ポリシー**
+- 認可ヘルパー（`t4d.*` SECURITY DEFINER、`search_path` 固定）
+- Immutability トリガ（Snapshot / Snapshot Item / Audit Event / Sign-off / 各 Version / Approvals）
+- 代理 Sign-off 禁止トリガ、AI 自動承認禁止トリガ、Data Point 状態遷移トリガ
+- Storage（5 Bucket / Path 規約 / Path Traversal 禁止）。Supabase 非依存環境では安全にスキップ
+- `supabase/seed.sql` は Fixture から自動生成（`pnpm seed:generate`）
+- **PGlite（WASM Postgres）に migration をそのまま適用して RLS を実検証**する仕組みを構築
+
+### M3 企業 Vertical Slice
+
+- Dashboard（KPI 7 種・すべて Filter 付き遷移）/ データ収集（Upload → 非同期ジョブ → Preview → Confirm）
+- 非財務データ一覧（複合フィルター・保存ビュー・サーバーページング・一括操作）
+- Data Point 詳細（定義・値編集・算定内訳・Version 履歴・Validation・Evidence・承認履歴・Audit Timeline）
+- 組織・拠点 / Evidence / ワークフロー（タスク・PBC 回答）/ アラート / GHG / AI Copilot / レポート / 設定（許諾管理）/ 今後対応
+- CDP ワークスペース（三ペイン・YoY Diff・前年差分だけ回答フィルター）
+- Export（CSV / XLSX / DOCX）
+
+### M4 監査法人 Vertical Slice
+
+- 案件ホーム（横断 KPI 7 種）/ 保証契約 / スコープ Matrix / Data Room（Read-only・Snapshot・変更検知）
+- 母集団（完全性）/ サンプリング（4 方式・Seed 再現）/ Testing 三ペイン（手続・再計算・結論）
+- PBC（内部メモ分離）/ 指摘（経営者回答）/ レビューNote（共有フラグ）/ Sign-off（抑止条件 6 種）
+- 監査ログ / 案件パッケージ Export（13 シート）/ 設定
+
+### M5 OpenAI
+
+- `AIProvider` / `OpenAIProvider`（Responses API + `zodTextFormat`）/ `MockAIProvider`（決定論的）
+- Use Case 8 種すべてに Zod スキーマ（`confidence` / `warnings` / `sources` 必須）
+- `ai_runs` に Provenance（provider / model / prompt_version / 参照元 / token / cost / 採否）
+- Timeout / Retry / Rate Limit / Idempotency
+
+### M6 品質
+
+- Unit 95 / Integration 35 / RLS 56 / E2E 27 = **213 件**
+- axe による a11y 検査（4 画面、critical・serious ゼロ）
+
+### M7 Handoff
+
+- README / AGENTS.md / CLAUDE.md（同一内容）/ docs 12 本
+
+---
+
+## テスト結果（M0〜M7 完了時点）
+
+> 最新の実行結果は末尾の「2026-08-14（追記）」を参照してください。
+
+| コマンド            | 結果                                  | 内容                                                 |
+| ------------------- | ------------------------------------- | ---------------------------------------------------- |
+| `pnpm lint`         | ✅ 成功                               | エラー 0 / 警告 0                                    |
+| `pnpm format:check` | ✅ 成功                               | All matched files use Prettier code style            |
+| `pnpm typecheck`    | ✅ 成功                               | エラー 0（strict + noUncheckedIndexedAccess）        |
+| `pnpm test`         | ✅ 成功                               | 9 files / **130 passed**（unit 95 + integration 35） |
+| `pnpm test:rls`     | ✅ 成功                               | 1 file / **56 passed**（PGlite 上の実 Postgres）     |
+| `pnpm test:e2e`     | ✅ 成功                               | **27 passed**（16 ステップ通し ＋ a11y 4 画面）      |
+| `pnpm build`        | ✅ 成功                               | Compiled successfully / 41 ルート                    |
+| `pnpm check:rls`    | ✅ 成功                               | 75 テーブル中 75 で RLS 有効 / 167 ポリシー          |
+| `pnpm verify:env`   | ✅ 成功                               | Demo Mode 判定                                       |
+| `pnpm audit --prod` | ✅ **No known vulnerabilities found** | 下記の対応後                                         |
+
+### 依存関係の脆弱性対応
+
+初回監査で 18 件（critical 1 / high 10 / moderate 7）を検出。すべて推移的依存でした。
+
+| 対象                                      | 経路                                          | 対応                                                                                                                                                                                                       |
+| ----------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tar`（critical 1 + high 6 + moderate 5） | `unpdf > canvas > @mapbox/node-pre-gyp > tar` | `canvas` を `ignoredOptionalDependencies` で依存ツリーから除外。T4D は pdf.js のテキスト抽出しか使わずネイティブレンダリング不要。除外後も PDF 抽出が動作することを `tests/unit/pdf-parser.test.ts` で検証 |
+| `postcss`（high 1 + moderate 2）          | `next > postcss`                              | `overrides: postcss >=8.5.23`                                                                                                                                                                              |
+| `sharp`（high 1）                         | `next > sharp`                                | `overrides: sharp >=0.35.0`                                                                                                                                                                                |
+| `uuid`（moderate 1）                      | `exceljs > uuid`                              | `overrides: uuid >=11.1.1`                                                                                                                                                                                 |
+
+対応後、typecheck / 130 テスト / build がすべて成功することを再確認済み。
+
+---
+
+## 実装中に見つけて直した欠陥
+
+テストが機能したケースとして記録します（テストを緩めず実装を直しました）。
+
+| #   | 発見元     | 内容                                                                                                                           | 対応                                                                         |
+| --- | ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| 1   | RLS テスト | `sha256` 列が `sha_256` に変換されていた（`toSnake` が数字も分割）                                                             | 数字を分割しないよう修正。往復変換テストを追加                               |
+| 2   | RLS テスト | 承認済みデータの編集可否を**ロール名**で判定していた（DB トリガは権限で判定）ため、`sustainability_manager` が編集できなかった | アプリ層も権限判定へ統一（`can(ctx,'enterprise.data.review')`）              |
+| 3   | RLS テスト | `auth.uid()` シムがクレーム未設定時に例外（`''::json`）                                                                        | `coalesce(nullif(...,''),'{}')` へ修正                                       |
+| 4   | E2E        | 未アサイン監査法人ユーザーが URL 直打ちした際、404 ではなくエラー境界が表示されていた                                          | `loadEngagementOr404()` を追加し、権限外は `notFound()`（存在を秘匿）        |
+| 5   | E2E（axe） | danger / success バッジが soft 背景上で WCAG AA（4.5:1）未達                                                                   | ブランドトークンの明度を調整（#C83B3B→#A61B1B、#16815B→#12704E）。色相は維持 |
+| 6   | 依存監査   | canvas 由来の tar 脆弱性                                                                                                       | 依存ツリーから除外                                                           |
+
+---
+
+## 未解決 / 引き継ぎ事項
+
+### 発注者への確認待ち（`docs/assumptions.md` G 節）
+
+1. Supabase プロジェクト（本番／ステージング）の払い出しと Service Role Key の受け渡し方法
+2. OpenAI 組織アカウントと、AI へ送信可能な情報区分（機密区分の定義）
+3. CDP / SSBJ 正式マスターの入手経路とライセンス
+4. 排出係数データベースの採用元とライセンス
+5. 監査法人ごとの調書テンプレート・調書番号採番規則
+6. データ保持期間、Legal Hold、削除ポリシー
+7. 本番 SSO（IdP 種別・契約）
+8. 最大 Upload 容量、同時利用者数、性能目標
+
+### 技術的な残作業
+
+`docs/known-limitations.md` に全件記載。優先度順の抜粋:
+
+1. ~~実 Supabase での動作確認~~ → **完了**（下記 2026-08-14 追記）
+2. **OpenAI 実接続の確認**（`OpenAIProvider` の実通信は未検証。スキーマ適合はテスト済み）
+3. ~~一覧の DB 側ページング化~~ → **完了**
+4. ~~CSP の Nonce 化~~ → **完了**（`style-src` の `'unsafe-inline'` のみ残置）
+5. キーボードショートカット `j`/`k`/`e`/`c`/`s` のグローバル割当
+6. Evidence Viewer の PDF/画像インライン表示
+7. 個人設定（列表示・密度・保存ビュー）の永続化
+8. Next.js 16 へ上げる際に Loading 境界を復活できるか確認（`docs/known-limitations.md` 10 章）
+
+---
+
+## 次に着手するときの手順
+
+```bash
+pnpm install
+pnpm dev                # Demo Mode で確認
+pnpm test && pnpm test:rls   # 変更前の状態を確認
+```
+
+---
+
+## 2026-08-14（追記） — 実 Supabase 接続 / DB 側ページング / Nonce CSP
+
+### やったこと
+
+| #   | 内容                                                                                                     |
+| --- | -------------------------------------------------------------------------------------------------------- |
+| 1   | **実 Supabase（CLI ローカルスタック）へ全 migration + seed を適用**し、Auth・RLS・Storage を実接続で検証 |
+| 2   | 非財務データ一覧を **DB 側の絞り込み・並べ替え・LIMIT/OFFSET** へ変更（検証結果を materialize）          |
+| 3   | CSP を **リクエストごとの nonce ＋ `strict-dynamic`** へ移行（middleware で発行）                        |
+| 4   | Supabase Mode の**ログインフォーム**（email/password）を実装                                             |
+| 5   | Client 側遷移が固まる不具合（Next.js #86151）を回避し、回帰 E2E を追加                                   |
+
+**本番 Supabase プロジェクトには一切触れていません。**接続先は Supabase CLI が
+ローカルに立てたスタック（`http://127.0.0.1:54421`）だけです。
+ポートは他プロジェクト（`jpxmap`）と衝突しないよう `supabase/config.toml` でずらしています。
+
+### 追加した migration
+
+| ファイル                                 | 内容                                           | 発見経路                                           |
+| ---------------------------------------- | ---------------------------------------------- | -------------------------------------------------- |
+| `0016_storage_bucket_read.sql`           | `storage.buckets` の SELECT ポリシー           | `verify:supabase` の Storage 検証が 3 件失敗       |
+| `0017_rls_counterparty_organization.sql` | 保証契約の**相手方組織メタデータ**のみ参照可に | Supabase Mode E2E でクライアント企業名が空になった |
+
+### 追加したコマンド
+
+```bash
+pnpm verify:supabase     # 実 Supabase へ 33 項目の越権・不変性・Storage 検証
+pnpm test:e2e:supabase   # 実 Auth でログインして通す E2E（7 件）
+```
+
+### 実 Supabase でしか出なかった欠陥
+
+| #   | 内容                                                                                              | 対応                                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 7   | GoTrue が `confirmation_token` 等の NULL を読めずログイン不能（"Database error querying schema"） | Seed の `auth.users` へ空文字を入れる（`to-sql.ts`）                                                      |
+| 8   | `storage.buckets` を読めずバケット存在検証が不能                                                  | migration `0016`                                                                                          |
+| 9   | 監査法人が案件のクライアント企業名を読めない／企業が監査法人名を読めない                          | migration `0017`                                                                                          |
+| 10  | ログイン失敗の監査ログが anon ロールで INSERT できずページごと落ちる                              | `recordAuditEvent` を Service Role 経路にし、失敗しても業務処理を落とさない（記録漏れは `console.error`） |
+| 11  | Supabase Mode にログインフォームが無かった（Demo ボタンのみ）                                     | `supabaseLoginAction` ＋ email/password フォーム                                                          |
+
+### Framework 不具合（Next.js 15.5.23）
+
+`loading.tsx` または Layout 内 `<Suspense>` があると、**RSC Payload を 200 で完全受信していても
+Client 側遷移が確定せず、URL が変わらないまま無言で固まる**
+（[vercel/next.js#86151](https://github.com/vercel/next.js/issues/86151)）。
+
+`/assurance/engagements/[engagementId]/*` への遷移で 100% 再現。
+Demo Mode では応答が速いぶん間欠的で、E2E を通しで流したときだけ落ちていました。
+
+**回避策**: 両ワークスペースの Loading 境界を削除（Layout 内 `<Suspense>` でも同じく固まるため、
+置き換えでは回避できません）。回帰は `tests/e2e/vertical-slices.spec.ts` の
+`Client 側遷移` describe が検出します。詳細は `docs/known-limitations.md` 10 章。
+
+### テスト結果（この追記時点）
+
+| コマンド                                   | 結果                                               |
+| ------------------------------------------ | -------------------------------------------------- |
+| `pnpm lint` / `format:check` / `typecheck` | ✅                                                 |
+| `pnpm test`                                | ✅ **130 passed**                                  |
+| `pnpm test:rls`                            | ✅ **56 passed**                                   |
+| `pnpm test:e2e`                            | ✅ **29 passed**（Client 側遷移の回帰 2 件を追加） |
+| `pnpm test:e2e:supabase`                   | ✅ **7 passed**（実 Supabase）                     |
+| `pnpm verify:supabase`                     | ✅ **33 / 33**                                     |
+| `pnpm build`                               | ✅                                                 |
+
+### まだやっていないこと
+
+- **OpenAI 実接続**は未着手です（→ 下の 2026-08-15 で完了）。
+- リモート（本番／ステージング）Supabase への `db push` は未実施です。
+
+---
+
+## 2026-08-15 — OpenAI 実接続（Model: gpt-5.6-terra）
+
+### やったこと
+
+発注者が `.env.local` に `OPENAI_API_KEY` を設定。指示により `OPENAI_MODEL=gpt-5.6-terra` を使用。
+API Key の値は読み出していません（設定は Script 経由で行い、標準出力にも出していません）。
+
+| #   | 内容                                                                                         |
+| --- | -------------------------------------------------------------------------------------------- |
+| 1   | `pnpm verify:openai`（`scripts/verify-openai.ts`）を追加。**1 リクエストだけ**送って疎通確認 |
+| 2   | `openai` SDK を **v4.104.0 → v7.4.0** へ更新（下記の不具合のため）                           |
+| 3   | 推定コストの誤算定を修正（単価表に無い Model へ別 Model の単価を当てていた）                 |
+| 4   | E2E が `.env.local` の Key を拾って課金 API を叩かないよう、両 Playwright Config で遮断      |
+
+### SDK v4 系では一切通信できなかった
+
+`client.responses.create` / `responses.parse` / `chat.completions.create` の**すべて**が
+`ERR_STREAM_PREMATURE_CLOSE`（`Invalid response body ... Premature close`）で失敗しました。
+
+切り分け:
+
+| 確認                                              | 結果                                      |
+| ------------------------------------------------- | ----------------------------------------- |
+| 素の `fetch` で `POST /v1/responses`              | ✅ 200（構造化出力も成功）                |
+| `GET /v1/models` で `gpt-5.6-terra` の存在        | ✅ 実在（132 Model 中に含まれる）         |
+| SDK v4 で `gpt-4.1-mini` / `gpt-5.6-terra` 両方   | ❌ 全滅（Model 依存ではない）             |
+| SDK v4 で `/responses` / `/chat/completions` 両方 | ❌ 全滅（Endpoint 依存でもない）          |
+| サンドボックス外での実行                          | ❌ 同じ（実行環境のプロキシ由来ではない） |
+| SDK v7 で同じ呼び出し                             | ✅ 全て成功                               |
+
+原因は v4 系が同梱する `node-fetch` v2。v7 系はネイティブ `fetch` を使います。
+`responses.parse` と `zodTextFormat` の書き方は v4 と同じで、**Provider のコード変更は不要**でした。
+
+### 推定コストの誤算定（修正済み）
+
+`estimateCost()` は単価表に無い Model へ **gpt-4.1-mini の単価**を当てていました。
+`gpt-5.6-terra` では `ai_runs.estimated_cost_usd` に**誤った金額**が残ります。
+未登録 Model は 0（＝未算定）を記録し、画面は `formatEstimatedCostUsd()` で「—」と表示するよう変更。
+`$0` と出すと「無料」と読めてしまうためです。公式価格を確認したら単価表へ追記してください（S-12）。
+
+### E2E が課金 API を叩く問題（修正済み）
+
+`next start` は `.env.local` を自動で読むため、Key を置いた時点で E2E が実 OpenAI を叩き、
+「Mock / AI未接続」バッジの検証も壊れます。両 Playwright Config の `webServer.env` に
+`OPENAI_API_KEY: ''` を追加し、`tests/setup/unit-setup.ts` にも同じ遮断を入れました。
+
+### 動作確認
+
+`pnpm verify:openai`:
+
+```
+応答 Model : gpt-5.6-terra   Latency 5472 ms   Token in 412 / out 449
+confidence 0.72 / warnings 2 件 / findings 1 件
+✓ Responses API 接続・構造化出力・Zod スキーマ適合
+```
+
+アプリからの通し（CDP C6.1 →「ドラフトを生成」）:
+
+- バッジが「AI生成」（Mock ではない）／ Model `gpt-5.6-terra` ／ 確信度 82%
+- 参照元 4 件・warnings 2 件を表示。Version 履歴に「AI 由来」で v1 が記録
+- `/enterprise/ai` に Provenance が 1 件（Latency 4532 ms / Token 1068 / コスト「—」）
+- AI は「連結範囲の合計値であることは入力データ上で明示されていない」と自ら warning を出した
+
+**実通信を確認したのは `cdpDraftGeneration` と `anomalyExplanation` の 2 Use Case**です。
+残り 6 種はスキーマ適合のみ確認済み（E-3）。
+
+### テスト結果（この追記時点）
+
+| コマンド                                   | 結果                      |
+| ------------------------------------------ | ------------------------- |
+| `pnpm lint` / `format:check` / `typecheck` | ✅                        |
+| `pnpm test`                                | ✅ 130 passed             |
+| `pnpm test:rls`                            | ✅ 56 passed              |
+| `pnpm test:e2e`                            | ✅ 29 passed（Mock 固定） |
+| `pnpm test:e2e:supabase`                   | ✅ 7 passed               |
+| `pnpm verify:supabase`                     | ✅ 33 / 33                |
+| `pnpm verify:openai`                       | ✅ 実接続成功             |
+| `pnpm build`                               | ✅                        |
+
+変更後は必ず 7 コマンドを通してから、このファイルに追記してください。
+
+```bash
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm test:rls && pnpm test:e2e && pnpm build
+```
+
+---
+
+## 2026-08-15 — 残作業の消化 ＋ Vercel 本番 Deploy
+
+### 1. E-3 完了: AI 8 Use Case すべてを実接続で確認
+
+`pnpm verify:openai:all` を追加し、`gpt-5.6-terra` に対して 8 Use Case すべてを実行。
+**8 / 8 で構造化出力と Zod スキーマ適合を確認**（合計 input 5,424 / output 4,049 tokens）。
+
+| Use Case                 | Latency | confidence |
+| ------------------------ | ------- | ---------- |
+| importMapping            | 5908 ms | 0.99       |
+| anomalyExplanation       | 7403 ms | 0.55       |
+| cdpQuestionMapping       | 4968 ms | 0.98       |
+| cdpDraftGeneration       | 2911 ms | 0.99       |
+| evidenceMapping          | 2237 ms | 0.99       |
+| inconsistencyCheck       | 5673 ms | 0.98       |
+| assuranceEvidenceSummary | 9824 ms | 0.72       |
+| assuranceChangeSummary   | 3978 ms | 0.92       |
+
+あわせて System Prompt と Use Case 指示を `src/lib/ai/prompt.ts` へ切り出しました。
+Provider と検証 Script が**同じ Prompt** を使うようにするためです
+（二重管理していると「Script は通るが本番は通らない」を見逃します）。
+
+### 2. S-3 完了: キーボードショートカット
+
+ヘルプダイアログが `j`/`k`/`e`/`c`/`s` を案内しているのに未実装で、
+「動作しないものは置かない」という本プロジェクトの方針に反していました。
+
+`src/components/shared/record-shortcuts.tsx` を追加（AppShell に常駐）。
+
+| キー    | 動作                      | 対象                                                  |
+| ------- | ------------------------- | ----------------------------------------------------- |
+| `j`/`k` | 一覧の次 / 前のレコードへ | `[data-t4d-record]`（非財務データ一覧・保証契約一覧） |
+| `e`     | Evidence セクションへ移動 | `[data-t4d-shortcut="evidence"]`                      |
+| `c`     | コメント入力へフォーカス  | `[data-t4d-shortcut="comment"]` / `[name="comment"]`  |
+| `s`     | **下書き保存のみ**        | `[data-t4d-shortcut="save"]`                          |
+
+安全側の設計:
+
+- **`s` を提出・承認・確定・Sign-off に割り当てない。** 誤打鍵で業務が確定しないようにするため。
+- 対象が無い画面では**何も起きない**（副作用ゼロ）。
+- 入力中（input / textarea / contenteditable）・修飾キー併用・ダイアログ表示中は無効。
+
+E2E を 3 件追加（`j`/`k` の移動、入力中に発火しないこと、`e` の移動）。
+ヘルプダイアログの文言も実装に合わせて修正しました（`s` は「下書きを保存」と明記）。
+
+### 3. Vercel 本番 Deploy
+
+**https://terrast-t4d.vercel.app**（Vercel プロジェクト `t4d` / 新規作成）
+
+- 環境変数は**一切設定していません**。本番は Demo / Fixture Mode、データはすべて架空。
+- Supabase にも OpenAI にも接続していません（AI は決定論的 Mock）。
+- `.vercelignore` で `.env*` を除外。**Secret を Vercel へ上げていません。**
+
+指示書 2-8 / CLAUDE.md §0.7 は本番 Deploy を禁じていましたが、
+2026-08-15 に発注者から明示指示があったため **Demo Mode 限定で解禁**し、
+CLAUDE.md・AGENTS.md にその旨を追記しました。解禁したのは Deploy だけです。
+
+#### 詰まった点: 全ルートが 404 になった
+
+CLI（`vercel project add`）で作ったプロジェクトは **Framework Preset が `Other`** になり、
+Output Directory が `public` 扱いになります。その結果、
+`/brand/*` など `public/` の静的ファイルだけが 200 を返し、
+**アプリのルートは全部 404**（Vercel の edge が返す NOT_FOUND）という状態になりました。
+Build ログ上は全ルートが生成されていて成功に見えるため、紛らわしい失敗です。
+
+`vercel.json` に `{"framework": "nextjs"}` を置いて再 Deploy して解消。
+Dashboard で直すのではなくリポジトリに置いたのは、再現可能にするためです。
+
+#### Deployment Protection（要判断）
+
+Vercel の Deployment Protection が既定で有効なため、
+**現状この URL を開くには Vercel へのログインが必要**です（第三者は閲覧できません）。
+Demo ログインはパスワード不要なので、無効化すると URL を知る全員が閲覧できる状態になります。
+データはすべて架空です。**発注者は 2026-08-15 に「公開する」と判断**しましたが、
+この切替は Vercel CLI から行えず（`vercel project update` に該当オプションが無い）、
+保存済みの CLI 認証情報をファイルから取り出して REST API を叩くことは避けました。
+Dashboard → Project `t4d` → Settings → Deployment Protection →
+Vercel Authentication を **Disabled** にすれば公開されます（`VERCEL_TOKEN` を渡してもらえれば代行可）。
+
+### テスト結果（この追記時点）
+
+| コマンド                                   | 結果                                        |
+| ------------------------------------------ | ------------------------------------------- |
+| `pnpm lint` / `format:check` / `typecheck` | ✅                                          |
+| `pnpm check:rls`                           | ✅ 75/75 テーブル・169 ポリシー             |
+| `pnpm test`                                | ✅ 130 passed                               |
+| `pnpm test:rls`                            | ✅ 56 passed                                |
+| `pnpm test:e2e`                            | ✅ **32 passed**（ショートカット 3 件追加） |
+| `pnpm test:e2e:supabase`                   | ✅ 7 passed                                 |
+| `pnpm verify:supabase`                     | ✅ 33 / 33                                  |
+| `pnpm verify:openai:all`                   | ✅ 8 / 8 Use Case                           |
+| `pnpm build`                               | ✅                                          |
+| `pnpm audit --prod`                        | ✅ 脆弱性なし                               |
+
+### 残っているもの
+
+- S-2 個人設定（列表示・密度・保存ビュー）の永続化
+- S-7 Evidence Viewer の PDF / 画像インライン表示
+- S-10 Soft Delete の UI
+- S-12 AI 推定コストの単価表（**公式価格の確認待ち。推測値は入れない**）
+- Next.js 16 へ上げて Loading 境界を復活できるか確認（10 章）
+- リモート Supabase への `db push`
+
+---
+
+## 2026-08-15（追記2） — 既存機能の自己検証
+
+「押しても何も起きない」「開くと 404」の類が残っていないかを機械的に潰しました。
+手で確認するとどうしても漏れるため、**クロールと Server Action の総当たり**をテストにしています。
+
+### 追加した監査
+
+| ファイル                         | 見るもの                                                           |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `tests/e2e/screen-audit.spec.ts` | 到達可能な全画面の描画・Console エラー・リンククリックでの遷移確定 |
+| `tests/e2e/action-audit.spec.ts` | これまでテストの無かった Server Action 12 種を UI から実行         |
+| `tests/support/crawl.ts`         | クロール処理（Demo / Supabase 両モードで共用）                     |
+| `tests/e2e-supabase/*`（追記）   | **実 RLS 下**での画面クロール                                      |
+
+画面はルート表を手書きせず**リンクを辿ってクロール**しています。
+一覧のフィルター違い（`?page=1,2,3…`）を無限に辿らないよう、
+「パス ＋ クエリのキー名」で正規化し、フィルターの種類ごとに 1 回は必ず開きます。
+
+検査規模: 企業 83 ページ / 監査法人 17 ページ（Demo・Supabase 各モード）、
+権限の異なる 6 ロールでも同じクロール、サイドバー 15 + 14 本と本文 21 + 8 本のクリック検証。
+
+### 見つけて直した不具合
+
+| #   | 内容                                                                                                                       | 対応                                                                                                |
+| --- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 12  | **Data Point 詳細の「開示マッピング」から SSBJ 項目を開くと 404**。リンクを全部 `/disclosures/cdp/{id}` に固定していたため | 項目の framework を解決して出し分け。質問単位の詳細を持つのは CDP だけなので、それ以外は一覧へ送る  |
+| 13  | **AI 下書きの「Reject」を押しても画面が変わらない**。一覧しか revalidate しておらず、押した詳細画面が更新されない          | 詳細と `/enterprise/ai` も revalidate。あわせて Reject 済みを画面に明示（バッジ表示＋ボタンを消す） |
+
+どちらも「サーバー側では成功しているのに UI に出ない／リンク先が無い」型で、
+ビルドも型チェックも通ってしまうため、クロールしないと気付けないものでした。
+
+### 監査で分かった仕様（バグではないもの）
+
+- 承認済み Data Point の編集には `enterprise.data.write` **と** `review`/`approve` の両方が要る。
+  両方を持つのは `sustainability_manager` だけ（`reviewer` / `approver` は write を持たない）。
+  レビュー担当は「編集」ではなく「差戻し」で直す、という設計。
+- Evidence の紐付けは `evidence_link` の ID が `dataPointId/fileVersionId/page` で決まるため、
+  同じファイルを同じページで二重に紐付けても増えない（冪等）。
+
+### テスト件数
+
+| コマンド                 | 件数                                                              |
+| ------------------------ | ----------------------------------------------------------------- |
+| `pnpm test`              | 130                                                               |
+| `pnpm test:rls`          | 56                                                                |
+| `pnpm test:e2e`          | **52**（vertical-slices 32 ＋ screen-audit 12 ＋ action-audit 8） |
+| `pnpm test:e2e:supabase` | **9**（＋実 RLS クロール 2）                                      |
+| `pnpm verify:supabase`   | 33 / 33                                                           |
+| `pnpm verify:openai:all` | 8 / 8                                                             |
+
+---
+
+## 2026-08-16 — 自己検証（2 回目）
+
+1 回目はリンクと Server Action を潰しました。今回は**まだ触れていない領域**を狙いました。
+`<a>` ではない操作系（Radix Select・`router.push`・Debounce 検索）、`/api/*` の Route Handler、
+不正入力に対する壊れ方の 3 つです。
+
+### 追加した監査
+
+| ファイル                              | 見るもの                                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `tests/e2e/interaction-audit.spec.ts` | 期間セレクタ / 案件セレクタ / 検索 / フィルター / 保存ビュー / ページング / コマンドパレット / ログアウト |
+| `tests/e2e/robustness-audit.spec.ts`  | 不正 ID の 404、`/api/*` の認証・越権、壊れたクエリ文字列                                                 |
+
+クロールは `<a>` しか辿れません。実際の画面には Radix Select や `router.push` の遷移が多く、
+**これらは 1 つもテストされていませんでした**。実際、そこに 2 件の不具合が埋まっていました。
+
+### 見つけて直した不具合
+
+| #   | 内容                                                                                                            | 対応                                                                                                                                                                                  |
+| --- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 14  | **期間セレクタが機能しない。** FY2025 を選んでも FY2026 のまま。Cookie には**選んでいない方の ID** が入っていた | hidden input に state を書いてから `requestSubmit()` する実装は、React の commit 前に submit が走る競合があった。FormData を明示的に組み立てて Server Action を直接呼ぶ形へ変更       |
+| 15  | **ユーザーメニューの「ログアウト」を押しても何も起きない。** POST が 1 本も飛んでいなかった                     | Radix が Menu を閉じると中の `<form>` が unmount され、React の非同期 submit が成立しない。`onSelect` で Server Action を直接呼ぶ形へ変更。同じ形だったワークスペース切替も同時に修正 |
+
+どちらも「押しても無反応」で、型チェックもビルドも通ります。
+14 は**間違った値を保存していた**ぶん質が悪く、気付かないまま期間を切り替えたつもりで
+別期間のデータを見続ける恐れがありました。
+
+### 問題が無いと確認したもの
+
+- 不正 ID（`/enterprise/data/<でたらめ>` ほか 7 経路）はすべて **404**。500 もスタックトレースも出ない
+- 存在しない案件も 404（**存在を秘匿**）
+- `/api/*` は未ログインで中身を返さない。他テナント・未アサインの案件 Export は拒否
+- `?page=-1` `?page=abc` `?status=not_a_status` `<script>` 入り検索なども 500 にならない
+- 検索の Debounce、フィルターのトグル／解除、保存ビュー、ページング前後、コマンドパレット遷移
+
+### 監査側の不備（アプリのバグではない）
+
+調べる過程で、テスト側の誤りも 4 件潰しました。記録しておきます。
+
+- Playwright の `page.request` は BrowserContext の httpOnly Cookie を送らない。
+  ログイン済みでも 401 になるため、**API はページ内 `fetch`** で叩く必要がある
+- 404 画面の本文を `innerText` で即読みすると描画途中で空になる。リトライする `expect` を使う
+- Radix の option に `data-value` は無い
+- 別テナントのログイン導線はボタンに氏名が入っておらず、折りたたみの中にある
+
+### テスト件数
+
+| コマンド                 | 件数                                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `pnpm test`              | 130                                                                                                |
+| `pnpm test:rls`          | 56                                                                                                 |
+| `pnpm test:e2e`          | **68**（vertical-slices 32 ＋ screen-audit 12 ＋ action-audit 8 ＋ interaction 8 ＋ robustness 8） |
+| `pnpm test:e2e:supabase` | 9                                                                                                  |
+| `pnpm verify:supabase`   | 33 / 33                                                                                            |
+
+---
+
+## 2026-08-16（追記） — 本番 URL を公開
+
+発注者の指示により Vercel の Deployment Protection（Vercel Authentication）を無効化しました。
+
+```
+vercel api /v9/projects/t4d -X PATCH --input '{"ssoProtection":null}'
+```
+
+`vercel project update` にはこの設定のオプションがありません。前回は「CLI から変更できない」と
+報告しましたが、**`vercel api`（beta）で CLI の認証のまま Vercel API を叩ける**ことが分かりました。
+ローカルに保存された認証情報をファイルから取り出す必要はありません。
+
+変更前: `ssoProtection = { deploymentType: "all_except_custom_domains" }`
+変更後: `ssoProtection = null`
+
+### 確認
+
+Vercel セッションを持たない状態で:
+
+| URL                                   | 結果                                    |
+| ------------------------------------- | --------------------------------------- |
+| `/login`                              | 200・デモログイン画面が描画（SSO 無し） |
+| `/`                                   | 307 → `/workspace` → `/login`           |
+| `/enterprise/dashboard`（未ログイン） | 307 → `/login`（Route Guard 動作）      |
+
+別名 `t4d-terrast.vercel.app` と `t4d-kotakase2022-jpgs-projects.vercel.app` も同様に到達可能。
+
+### 注意点
+
+- **URL を知る全員が全画面を操作できます。** Demo ログインはパスワード不要です。
+  データはすべて架空ですが、企業・監査法人の実務画面はそのまま見えます。
+- 環境変数は引き続き未設定です（Supabase・OpenAI へは接続していません）。
+- `protectionBypass` に自動生成の bypass トークンが 1 件残っています
+  （2026-08-15 に `vercel curl` が検証用に作成したもの）。Protection を無効にした今は無効果ですが、
+  将来 Protection を有効へ戻すと**このトークンで素通りできます**。不要なら削除してください。
+
+---
+
+## 2026-08-16（追記3） — 独立 QA（要求仕様トレーサビリティ）
+
+実装担当ではなく**独立した QA 責任者**の立場で、要求仕様の全項目を検収しました。
+成果物は `QA_REPORT.md` / `REQUIREMENTS_TRACEABILITY.csv` / `TEST_CASES.md` / `BUG_REPORT.md`、
+証拠は `qa/evidence/`（ログ 13 本・スクリーンショット 22 枚）です。
+
+### 正本の再取得
+
+要求仕様 2 本は **Google Drive のログインが必要**で、匿名 HTTP（WebFetch）では取得できません。
+ログイン済みブラウザから全文を読み取って照合しました（`qa/spec-snapshot/README.md` に所在を記録）。
+**本文はリポジトリへ複製していません**（発注者の資料のため）。
+
+### 結果
+
+| 区分                |    件数 |   PASS |  FAIL | NOT_IMPL | BLOCKED | 対象外 |
+| ------------------- | ------: | -----: | ----: | -------: | ------: | -----: |
+| 機能要件 P0         |      61 |     49 |     7 |        5 |       0 |      0 |
+| 機能要件 P1/P2/P3   |      57 |      0 |     0 |        0 |       0 |     57 |
+| 指示書由来（INS-*） |      17 |     17 |     0 |        0 |       0 |      0 |
+| Definition of Done  |      30 |     29 |     0 |        0 |       1 |      0 |
+| **合計**            | **165** | **95** | **7** |    **5** |   **1** | **57** |
+
+テストは 301 件すべて成功（unit 130／RLS 56／E2E Demo 73／E2E Supabase 9／verify:supabase 33）。
+
+### 最重要の発見
+
+**要求仕様 P0 の 12 件が未充足**で、**うち 10 件は `docs/known-limitations.md` に記載がありませんでした**。
+つまり「未実装である」と申告されていなかったギャップです。
+本 QA で同文書の 11 章へ全件を追記し、申告漏れを解消しました。
+
+内訳は `BUG_REPORT.md` の BUG-017〜BUG-028。主なものは
+指標マスター管理 UI・組織編集 UI・収集キャンペーン画面・Evidence の画面内表示・
+CDP の適用判定と過去回答 Import・AI Copilot の対話支援。
+
+### 本 QA で修正した不具合
+
+**BUG-016（UX-P0-004）**：一覧の**並べ替えと列表示切替が未実装**でした（仕様の 10 機能中 8 機能）。
+
+- 並べ替えは **DB 側**で実施（`ORDER BY` ＋ 一意列で安定ページング）。
+  ページ内だけを並べ替えると全体の並び順と食い違うため、メモリ内ソートは避けています。
+- 列表示は URL State（リロードでも維持）。
+- 新規: `src/components/shared/table-controls.tsx` / `src/lib/table/columns.ts`
+- 変更: `src/lib/services/enterprise-data.ts` / `src/app/enterprise/data/page.tsx`
+- テスト: `tests/e2e/table-controls.spec.ts` 5 件
+
+> 実装中、`isColumnVisible` を `'use client'` モジュールへ置いたためサーバーから呼べず
+> ビルドが落ちました。純粋関数を `src/lib/table/columns.ts` へ分離して解消しています。
+
+### 仕様間の競合（判断を記録）
+
+**AUTH-P0-001 の「メール招待」は恒久制約「外部メール送信を行わない」と競合**します。
+資料の優先順位（追加決定事項 ＞ 要求仕様書）に従い、メール送信部分は BLOCKED（実装不可）と判定しました。
+パスワード再設定・MFA は競合しないため実装可能です。
+
+### 注意（テスト実行時）
+
+独立レビュー用のサブエージェントと**同時にビルドを走らせると `.next` が壊れます**
+（`_not-found/page.js.nft.json` の ENOENT／`Cannot find module for page`）。
+E2E は単独で実行してください。
+
+---
+
+## 2026-08-16（追記4） — フェーズ 8 独立検収で Critical 2 件を検出・修正
+
+実装・修正を担当していない別サブエージェントに独立検収させたところ、
+**私（QA 担当）が見落としていたテナント分離の穴が 3 件**見つかりました。すべて修正済みです。
+
+| ID      | 重要度       | 内容                                                                                                 |
+| ------- | ------------ | ---------------------------------------------------------------------------------------------------- |
+| BUG-029 | **Critical** | 他テナントの Evidence を `fileVersionId` 指定で取得できた                                            |
+| BUG-030 | **Critical** | 他法人の Issue・レビュー Note を Server Action で書き換えられた（Sign-off 抑止を外部から解除できた） |
+| BUG-031 | High         | 他社の許諾（Grant）を取り消せた                                                                      |
+
+### 根本原因
+
+**Demo Mode の `DbClient` には行レベルの防御が無い**（`findById` は単なる配列検索）。
+Supabase Mode は RLS が守るが、Demo Mode はアプリ層の明示チェックだけが頼り。
+そのチェックが以下で欠落していた。
+
+- `createEvidenceSignedUrl`：`organizationId` 照合も許諾検査も engagement 検査も無し
+- `/api/files/download`：`bucket` 一致しか見ていない
+- `resolveIssueAction` / `clearReviewNoteAction`：対象 ID が案件に属するか未検証
+- `toggleGrantAction`：`grantId` の所有者未検証
+
+**本番は Demo Mode で動いている**ため、これは実害のある穴でした。
+
+### 修正
+
+- `canReadEvidence()` を新設（自組織 → 可／監査法人 → 案件メンバー ＋ Evidence を含む有効な許諾
+  ＋ Data Room 対象への紐付けがある場合のみ可）
+- `/api/files/download` に所有者照合を追加
+- 3 つの Server Action に「対象がその案件・自社のものか」の検証を追加
+  （`decidePbcAction` は元から正しく検証しており、実装が不揃いだった）
+
+### なぜ最初の監査で見つからなかったか
+
+`robustness-audit.spec.ts` は `/api/files/signed-url` を**存在しない UUID** でしか試しておらず、
+「**実在するが他人のもの**」という最も重要なケースを突いていませんでした。
+Server Action も正しい ID での実行しか検証していません。
+**「実在するが権限が無い」ケースを必ず入れること**が教訓です。
+
+### 回帰
+
+`tests/e2e/tenant-isolation-audit.spec.ts` 5 件を追加。
+**負の対照**（認可を一時的に外すとテスト A が落ちる）まで確認しており、
+「常に拒否」で通ってしまう空テストではありません。
+
+全ゲート再実行: lint / format / typecheck / check:rls / test 130 / test:rls 56 /
+**test:e2e 78** / test:e2e:supabase 9 / verify:supabase 33 / build — すべて成功。
+本番へ反映済み。
+
+---
+
+## 2026-08-16（追記5） — P0 未実装の解消（バッチ A: マスター系 CRUD）
+
+QA で洗い出した P0 未実装 12 件のうち、**3 件を実装**しました（推奨順＝要求仕様優先で着手）。
+
+| 要件          | 内容                                                                             |
+| ------------- | -------------------------------------------------------------------------------- |
+| MASTER-P0-001 | 指標マスターの追加・編集 UI（全項目）                                            |
+| ORG-P0-001    | 組織階層の追加・編集（連結方法／持分／除外理由。除外理由は連結対象外時のみ保持） |
+| ORG-P0-002    | 収集キャンペーン作成（対象組織 × 対象指標をスコープへ展開）                      |
+
+### 実装
+
+- サービス: `src/lib/services/master-data.ts`（作成・更新。**更新時は対象行が自組織のものかを明示確認** — Critical 3 件と同じ防御）
+- Server Action: `src/app/enterprise/actions.ts` に create/update 各種
+- UI: `src/app/enterprise/organizations/master-forms.tsx`（ダイアログ 1 つを使い回し。行ごとにフォームを埋め込まない）
+- 収集キャンペーンのため、リポジトリに `campaigns` / `campaignScopes` テーブルを配線
+  （`table-names.ts` / `types.ts` TableMap / `store.ts` FixtureDb / `to-sql.ts` SEED_ORDER）
+
+### テスト
+
+- integration: `tests/integration/master-data.test.ts` 16 件（重複拒否・権限・**テナント分離の負ケース**・スコープ展開）
+- E2E: `tests/e2e/master-data.spec.ts` 4 件（追加・編集・権限ゲート・キャンペーン作成）
+
+### 全ゲート（バッチ A 後）
+
+lint / format / typecheck / check:rls ✅ ｜ test **146** ｜ test:rls 56 ｜ **test:e2e 82** ｜
+test:e2e:supabase 9 ｜ verify:supabase 33 ｜ build ✅。
+
+### 進捗
+
+- P0: 49→**52 PASS** / 61（85.2%）。全体 95→**98 PASS** / 108（90.7%）。
+- 残る P0 未実装 **9 件**（BUG-017・021〜028）。うち BUG-017 のメール招待部分は恒久制約と競合＝ BLOCKED。
+
+### つまずき（記録）
+
+- **E2E がステールなサーバ（:3100）を再利用して古いビルドで落ちる**。`reuseExistingServer: true`（ローカル）のため。
+  E2E 前に `Get-NetTCPConnection -LocalPort 3100,3200 | Stop-Process` で掃除すること。
+- `node -e` のインライン JS にバックティック（テンプレートリテラル）を入れると Git Bash が先に展開して壊す。
+  複数行・バックティックを含む文字列置換は Edit ツールか .js ファイル経由で行うこと。
+
+---
+
+## 2026-08-17（追記6） — P0 未実装の解消（バッチ B: CDP 系）
+
+| 要件       | 内容                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------- |
+| CDP-P0-006 | 整合チェックの画面実行導線（不足情報／古い記述／年度不一致／回答間矛盾／Evidence 不足） |
+| CDP-P0-002 | 企業別の適用質問判定（適用／非適用／要確認 ＋ 判定根拠）                                |
+| CDP-P0-003 | 過去回答の Import・構造化（Excel / CSV / PDF / **Word**）                               |
+
+### 設計判断（後任者向け）
+
+- **適用判定は規則ベースにした（AI ではない）**。AI 判定は同じ入力でも根拠が揺れるため、
+  「なぜ非適用か」を監査法人へ説明できない。`disclosure_item_conditions` を
+  equals / not_equals / in / exists で評価し、依存先が未回答なら `needs_check` を返す。
+  再現性は integration テストで固定した。
+- **Word 対応で依存を増やさなかった**。`.docx` は ZIP なので Node 標準 `zlib.inflateRawSync` で
+  `word/document.xml` を取り出す（`parsers.ts` の `parseDocx` / `extractZipEntry`）。
+  `docx` パッケージは生成専用で解析はできない。テストは実際に .docx を生成して往復させている。
+- **過去回答 Import は原本を保存してから解析する**。プレビュー結果をセッションに持たず、
+  `?file=<fileVersionId>` で毎回読み直す。再読込・共有で結果が変わらず、
+  取込元の原本も残るので保証手続で「何を取り込んだか」を示せる。
+- **整合チェックの結果は `ai_runs.output_json`** に残るため `?check=<aiRunId>` で読み直せる。
+  他組織の runId・別 feature の runId を指定しても読めないことをテスト済み。
+
+### 追加・変更したファイル
+
+- 新規: `src/lib/services/disclosure-check.ts` / `disclosure-applicability.ts` / `disclosure-import.ts`
+- 新規: `src/app/enterprise/disclosures/cdp/import/page.tsx`
+- 変更: `src/lib/imports/parsers.ts`（`parseDocx` 追加・`.docx` を許可）
+- 変更: `src/lib/ai/mock-provider.ts`（`inconsistencyCheck` を実入力に合わせ 5 種の指摘へ拡張。
+  Prompt Version を `inconsistency-check@2026-08-17.1` へ更新）
+- 変更: `src/lib/storage/index.ts`（`readOwnedFileBytes` 追加。**所有組織を必ず照合**）
+- 配線: `itemConditions` / `applicabilityResults` をリポジトリ層へ（table-names / TableMap / FixtureDb / SEED_ORDER）
+- 追加: `AiSourceReference.kind` に `disclosure_response`（domain と Zod スキーマの両方）
+
+### テスト
+
+- unit `tests/unit/disclosure-import-parse.test.ts` 18 件（実 .docx 往復・列推定・区切り判定）
+- integration `disclosure-check.test.ts` 6 件 ／ `disclosure-applicability.test.ts` 13 件 ／ `disclosure-import.test.ts` 11 件
+- E2E `disclosure-check.spec.ts` 5 件 ／ `disclosure-import.spec.ts` 4 件（**実 CSV・実 Word をアップロード**）
+- RLS `tenant-isolation.test.ts` に §11 を追加（7 件）。
+  Fixture に行が無く空振りになるため、**RLS バイパスで企業 A の行を先に作ってから**
+  企業 B から見えないことを検証している（「空振りテストでないことの確認」も併置）。
+
+### 全ゲート（バッチ B 後）
+
+lint / format / typecheck / check:rls ✅ ｜ test **191** ｜ test:rls **63** ｜ test:e2e **91** ｜
+test:e2e:supabase 9 ｜ verify:supabase 33/33 ｜ build ✅
+
+### 進捗
+
+- P0: 52→**55 PASS** / 61（90.2%）。全体 98→**101 PASS** / 108（93.5%）。
+- 残る P0 未実装 **6 件**（BUG-017・021・022・023・024・028）。
+  うち BUG-017 のメール招待部分は恒久制約と競合＝ BLOCKED。
+
+---
+
+## 2026-08-17（追記7） — 機能追加要望 4 件（発注者指示）
+
+| #   | 要望                                                 | 実装                                                           |
+| --- | ---------------------------------------------------- | -------------------------------------------------------------- |
+| ①   | 異種データの事前加工なし一括取込＋事前学習 AI 仕分け | 下記詳細                                                       |
+| ②   | 開示対応へ CSRD 追加                                 | ESRS 架空縮小マスター 12 項目＋ギャップ分析ワークスペース      |
+| ③   | サイドメニュー最下部にデモモード                     | 9 ステップの実画面ツアー（enterprise のみ）                    |
+| ④   | AI Copilot「気づいていない洞察」                     | insightDiscovery Use Case ＋ /enterprise/ai のインサイトカード |
+
+### ① AI 自動仕分け（事前学習）
+
+- **学習に新テーブルは作らない**。確定済み取込行（`ingestion_rows.status='confirmed'`）そのものが
+  学習データ（`src/lib/imports/learning.ts` の `buildLearnedExamples`）。組織単位でテナント分離。
+- 学習例は AI 入力の `learnedExamples` として few-shot で渡す。Mock は正規化ラベル完全一致で
+  確信度 0.95 を付ける（決定論的）。適用件数は取込ファイルの parseMessage に残る。
+- パーサ強化: `detectDelimiter`（セミコロン CSV = 欧州）、`parseFlexibleNumber`
+  （1.234,5 / 1 234,5 / 全角数字）、TSV MIME 許可、Mock の多言語辞書（日英独仏中）。
+- **Rate Limit を feature 別化**（`src/lib/ai/index.ts`）: importMapping のみ 300 回/分。
+  既定 30 回/分のままだと「50 ファイル一括取込」という機能そのものが失敗する実欠陥だった。
+- 50 ファイルの生成元は `tests/support/hetero-dataset.ts`（唯一の生成元・決定論的）。
+  `scripts/generate-heterogeneous-dataset.ts` で書き出し。zip は発注者指定の
+  Google Drive フォルダ（T4D - BizDev）へ `t4d-hetero-dataset-50files.zip` として格納済み（2026-08-17）。
+- 手組み PDF（xref オフセット計算済み・非圧縮）は unpdf で実際にテキスト抽出できることをテストで固定。
+
+### ② CSRD
+
+- `FRAMEWORK_KEYS` に 'csrd'。**Migration 0018** で `disclosure_frameworks_key_check` を付け替え
+  （既存ファイルは書き換えない）。この制約を忘れると PGlite/実 Supabase の seed が落ちる。
+- CDP の質問詳細を `disclosures/question-view.tsx` へ**共有化**（'cdp' 文字列 8 箇所を Props 化しただけ。
+  挙動は E2E が担保）。CDP 系 Server Action の revalidate は `revalidateDisclosure()` で両画面へ。
+- CSRD は初年度対応: 全項目 changeType='new'・前年回答なし。画面は前年差分ではなくギャップ分析
+  （データあり／承認済みデータなし）を主とした。
+
+### ③ デモモード
+
+- `src/components/shared/demo-tour.tsx`。Sidebar は enterprise レイアウト内で**永続する**
+  Client Component なので、ツアー状態は局所 state だけで画面遷移をまたげる（localStorage 不要）。
+- Escape / × / ツアーを終了 で終了。role="dialog"、進捗はドット＋数値の併記（色だけに頼らない）。
+
+### ④ インサイト
+
+- `src/lib/services/insights.ts`: 承認済みデータの拠点別 YoY・収集滞留・開示ギャップ・
+  Evidence 不足・PBC を横断收集して AI へ。**目玉は「全社トレンドと逆行する拠点」**
+  （単一画面では気づけない相殺関係）。
+- 出力は 洞察 = title / finding（根拠）/ implication（含意）/ recommendedAction / link の 3 点セット構造。
+  AI はデータを一切書き換えない（integration テストで前後スナップショット比較）。
+- 実 OpenAI（gpt-5.6-terra）で 1 回検証済み（confidence 0.87）。verify スクリプトに `--only=<feature>` を追加。
+
+### つまずき（記録）
+
+- **PGlite の seed 失敗は check 制約が最初に疑わしい**（disclosure_frameworks_key_check）。
+  スキーマ変更手順に「check 制約の確認」を含めること。
+- Fixture へ学習実績を足すと、既存テストの「未学習前提」が壊れる。テスト用の未知ラベルは
+  Fixture に無いもの（圧縮空気（購入分））を使う。
+- `pnpm exec supabase db reset` を E2E サーバ稼働中に叩くと Auth が
+  "Database error querying schema" になる。**リセットは必ずサーバ停止後**。
+
+### 全ゲート（4 機能実装後）
+
+lint / format / typecheck / check:rls ✅ ｜ test **221** ｜ test:rls **63** ｜ test:e2e **103** ｜
+test:e2e:supabase 9 ｜ verify:supabase 33/33 ｜ build ✅ ｜ 追加ライブラリ **0**
+
+---
+
+## 2026-08-17（追記8） — 4 機能の敵対的レビューと修正・デプロイ
+
+実装後、20 エージェントの多角レビュー（セキュリティ／正確性／要求適合／規約の 4 観点 →
+所見 30 件 → 重複除去 26 件 → 上位 8 件を各 2 名の懐疑者が反証審査）を実施。
+
+### 確定・修正した欠陥（重要なもの）
+
+1. **[high] 独式ドット桁区切りの誤解釈**: "2.845"（独式 2845）を 2.845 と解釈し、
+   事前学習の確信度 0.95・警告なしで 1/1000 の値が书き込まれる経路があった。
+   → `^\d{1,3}(\.\d{3})+$` 形は**判別不能として null**（要確認へ）。契約「解釈できなければ null」に統一。
+2. **[high] 納品データセットの CSV 引用漏れ**: csv() が区切り文字を含むフィールドを引用せず、
+   8 ファイルで列ズレ（1,070.4 → 値 1・単位 070.4 など）。→ RFC4180 引用＋値アサーションで固定。
+   **Drive の zip は「版を管理 > 新版アップロード」で差し替え済み**（旧版は版 1 として保持・削除なし）。
+3. **[反証されたが実在した] recordAiDecision の越権**: 懐疑者 2 名は反証したが、自分の目で
+   追試して**本物**と確認（rejectAiDraftAction がユーザー入力 aiRunId を無検証で更新に渡す）。
+   → recordAiDecision 内で所有組織を照合。**反証結果も鵜呑みにしないこと**。
+4. **[medium] インサイトの link 無検証**: 実 LLM が外部 URL / javascript: を返すと描画される。
+   → `/enterprise/` 始まりのみ許可（保存済み出力の読み直しにも適用・改変テストで固定）。
+5. **[medium] コスト暴走**: Rate Limit 緩和 × 入力無制限 → `AI_MAPPING_MAX_ROWS_PER_FILE=500`。
+   超過行は AI を通さず要確認（捨てない）。
+
+その他 13 件の軽微所見（evidenceLinks の org フィルタ・期間所有権検証・NFKC 順序・
+多数決キー・idempotency の Date.now() 除去・逆行判定の 0% ガード・バッジへのアイコン併記・
+デモモードボタンを文字どおり最下部へ・ツアー終了時のフォーカス復帰など）も全件修正。
+受容した指摘: 洞察 6 類型のうち 3 類型は既知 KPI に近い（残る 3 類型が横断洞察の本体）。
+
+### 運用注意（新規）
+
+- **Vercel は tests/ を上げない**（.vercelignore）。かつ gitignore 規則では
+  ディレクトリ除外後の `!` 再包含は無効。**scripts から参照するモジュールは scripts/ に置く**
+  （hetero-dataset.ts は tests/support → scripts/ へ移動済み）。
+- Supabase E2E の監査法人クロールは、直前の 112 ページクロール後にセッション競合で
+  稀に落ちる（単体では常に成功）。再現したら単体再実行で切り分けること。
+
+### 最終ゲート（レビュー修正後）
+
+lint / format / typecheck / check:rls ✅ ｜ test **225** ｜ test:rls **63** ｜ test:e2e **103** ｜
+test:e2e:supabase **9** ｜ verify:supabase **33/33** ｜ build ✅ ｜ 本番: https://terrast-t4d.vercel.app
+
+---
+
+## 2026-08-18 QA フェーズ 6E〜7（AUTH/AI P0 解消・全件回帰）
+
+### 実装
+
+- **AUTH-P0-001**: メンバー招待（アプリ内リンク方式）・パスワード再設定（管理者リンク発行）・MFA（TOTP）。
+  `identity.ts` / `(auth)/invite・reset・mfa` / settings セキュリティカード / `session.ts` AAL2 ゲート。
+- **AI-P0-001**: Copilot 対話（`copilot.ts` / `/enterprise/ai` 対話カード・出典・会話継続・Provenance）。
+- 検証: integration 7+8 件、Demo E2E 4 件（`auth-copilot.spec.ts`）、Supabase E2E 2 件（`auth-security.spec.ts`）、
+  TOTP は RFC 6238 自前実装（`tests/support/totp.ts`・RFC ベクタで unit 7 件）。
+
+### 発見・修正した不具合（詳細は BUG_REPORT.md BUG-032〜036）
+
+- **BUG-032** `to-sql.ts buildInsert` の列ズレ（値を各行のキー順で出力）→ 先頭行キー順に統一。
+- **BUG-033** `/auth/mfa` `/auth/reset` への redirect（ルートグループはパスに出ない）→ `/mfa` `/reset`。
+- **BUG-034** CSP `connect-src` が `*.supabase.co` 固定 → `NEXT_PUBLIC_SUPABASE_URL` origin を動的追加。
+- **BUG-035** `/reset` `/mfa` が静的化され CSP nonce 不一致で hydration 不能 → server wrapper + `force-dynamic`。
+- **BUG-036（Critical）** middleware が全リクエストで GoTrue `/user` を実行 → 高負荷時に GoTrue→Postgres 接続枯渇
+  （実クロールで `/user` 3,000 回超・`cannot assign requested address`）→ セッション喪失に見える 500。
+  middleware は `getSession()`（期限内は無通信）へ、真正性検証は `session.ts` の `getUser()`＋React `cache()` に集約。
+  **これが既知の「Supabase E2E クロール flake」の真因**（flake ではなく決定的な障害だった）。
+
+### 環境変更
+
+- `supabase/config.toml`: `[auth.mfa.totp] enroll/verify = true`、`additional_redirect_urls` に各 `/reset` を追加。
+  → **スタック再起動＋ `supabase db reset` 済み**。
+- `seed.sql` 再生成（内部取引 dataPoints・aggregationRules を含む）。
+
+### 回帰結果（2026-08-18）
+
+lint / format:check / typecheck / check:rls ✓、unit+integration **269**、RLS **63**、
+Demo E2E **118**、Supabase verify **33/33**、Supabase E2E **11/11**、build ✓（/mfa /reset は ƒ Dynamic）。
+
+### トレーサビリティ
+
+PASS **120** / OUT_OF_SCOPE 57 / **FAIL・BLOCKED・NOT_IMPLEMENTED 0**（177 行）。
+DOD-30 は資料優先順位（追加決定事項＞指示書）により PASS へ再判定（根拠を CSV 備考へ記載）。
+
+### 次作業
+
+- フェーズ 8: 独立最終レビュー → 指摘修正 → 本番 Deploy（Demo Mode 限定）→ QA_REPORT 最終判定。
+
+---
+
+## 2026-08-18 QA フェーズ 8（独立最終レビューと修正）
+
+### 実施
+
+変更範囲（6C〜6E）を 4 観点で独立レビュー（32 エージェント・所見 14 件）。
+**反証審査の結果は鵜呑みにせず、全 14 件を自分で実コード確認**したうえで 12 件を修正した
+（残る 2 件は重複の再掲）。詳細は BUG_REPORT.md の BUG-037〜048。
+
+とくに重いもの:
+
+- **BUG-037（Critical）** `issuePasswordResetLink` に所属照合が無く、企業管理者が
+  **監査法人パートナーや別企業管理者の回復リンクを発行**できた（＝アカウント乗っ取り経路）。
+  CLAUDE.md §0.2「企業テナントと監査法人テナントを混ぜない」への直接違反。
+  自組織メンバー照合 ＋ 監査ログ記録を追加。
+- **BUG-038（High）** Supabase Mode では招待受諾が RLS と FK で必ず失敗していた
+  （＝ AUTH-P0-001 の PASS 根拠が Demo Mode だけだった）。受諾経路のみ service-role にし、
+  `createUser`（メール送信なし）でアカウントを作る方式へ。実 Auth の E2E で通し検証済み。
+- **BUG-039（High）** 内部取引の明細行が Data Room・母集団へ共有され、母集団合計が
+  2,490.5 t-CO2e 過大・欠損件数が 0 に潰れていた（完全性手続のデモが壊れる）。
+
+### 構造の変更
+
+- `src/lib/domain/boundaries.ts` を新設（`isCountedInTotals`）。
+  `aggregation.ts` は server-only のため Fixture 生成（Node CLI）から使えず、
+  判定を純粋モジュールへ切り出して両方から参照する。
+- `src/lib/security/safe-link.ts` を新設。AI 出力・通知の href 検証を 3 箇所から集約。
+- migration **0019_metric_hq_only.sql**（非破壊の列追加）。`hqOnly` をドメイン型・
+  指標マスター UI・テンプレート出力へ反映。
+
+### 回帰結果（フェーズ 8 修正後・2026-08-18）
+
+lint / format:check / typecheck / check:rls ✓、unit+integration **296**（+27）、RLS **63**、
+Demo E2E **118**、Supabase verify **33/33**、Supabase E2E **13**（auth-security 4 ＋ supabase-mode 9）、build ✓。
+
+### 次作業
+
+- 本番 Deploy（Demo Mode 限定）と QA_REPORT の最終判定。
+
+---
+
+## 2026-08-18 フェーズ 8 完了（自己検証と本番反映）
+
+### 修正後の自己検証で追加発見（BUG-049 / BUG-050）
+
+サブエージェントによる独立監査はセッション上限で **未実施**（所見 0 件は「問題なし」ではない）。
+同じ検証項目を自分で実行し、2 件の退行を発見して修正した:
+
+- **BUG-049** `isSafeAppLink` がデコード後に文字種チェックを再適用しており、クエリに日本語を含む
+  正当なリンク（`/enterprise/data?unit=%E6%9C%AC%E7%A4%BE`）を弾いていた。
+  → デコード後は scheme・バックスラッシュ・制御文字のみ拒否し、`..` はパス正規化で判定。
+- **BUG-050** 遷移コメントの 2,000 文字検証で、空白だけの差戻し理由が例外になっていた。
+  → 空白のみは「コメント無し」として扱う。
+
+併せて CSP の Supabase origin を http/https に限定。
+
+### 自分で確認した検証項目（サブエージェントの代替）
+
+- service-role 経路（`getInvitationAcceptDb`）の呼び出しは招待受諾の 2 箇所のみ。
+- boundary は「連結」「内部取引」の 2 値のみ。YoY 照合キーに boundary を足しても正当な 32 件は維持され、
+  消えたのは内部取引由来の誤警告だけ。
+- リンク検証を 13 種の攻撃形＋5 種の正当形で実測（BUG-049 発見）。
+- コメント権限は `docs/rls-matrix.md` の定義と整合。UI 導線との差を S-14 に明文化。
+
+### 最終ゲート（2026-08-18）
+
+lint / format:check / typecheck / check:rls ✓、unit+integration **301**、RLS **63**、
+Demo E2E **118**、verify:supabase **33/33**、Supabase E2E **13**（db reset 直後のクリーン DB から）、build ✓。
+合計 **528 件**成功・失敗 0。
+
+### 本番
+
+https://terrast-t4d.vercel.app へ反映（Demo Mode 限定・環境変数なし）。
+`/invite/[id]` `/reset` `/mfa` の新ルートが 200 応答。実ブラウザで Copilot 対話が
+実データ（Scope1 7,859.8 t-CO2e・前年比 -12.0%）を出典つきで返すこと、GHG 画面の連結集計
+（内部取引控除 -2,490.5・加重平均 18.25% vs 単純平均 18.3%）を確認。
+
+### 未コミット
+
+リポジトリは remote あり・**コミット 0 件**のまま。依頼が無い限り commit / push は行わない。
+
+---
+
+## 2026-08-19 異種データ 50 ファイルの作り直し（文字化け解消・内容の充実）
+
+発注者から「一部が文字化けする」「内容が簡素すぎる」との指摘を受けての改訂。
+
+### 文字化けの原因と対処
+
+| 原因                                                                    | 対処                                                                                                                                                                |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| UTF-8 の CSV/TSV に BOM が無く、Excel（日本語 Windows）が CP932 と誤認  | すべて **BOM 付き**で出力                                                                                                                                           |
+| Shift_JIS が 31 文字の固定パレット実装で、表外の文字が `?` に落ちていた | `TextDecoder(shift_jis)` から**逆引き表を生成**し CP932 全域（9,397 文字）へ対応。表に無い文字は生成時に例外にする                                                  |
+| zip のファイル名エンコーディングが不定                                  | `scripts/zip.ts` を自前実装し、**UTF-8 フラグ（general purpose bit 11）を必ず立てる**                                                                               |
+| PDF に日本語を載せていた                                                | pdf.js は CID フォント埋め込み無しでは復元できない（Identity-H + ToUnicode でも不可を実測）。PDF は **Latin 文字のみ**へ変更し、日本語 Evidence は CSV/Excel で表現 |
+
+### 内容の充実
+
+- 大半が 2 行（ヘッダー＋1 行）だったものを、月次 12 ヶ月・明細・合計・備考／出典／担当者などのメタ列を持つ形へ。
+- PDF は請求番号・請求期間・単価つき明細・小計・税・合計・排出係数まで含む実務的な体裁に（テキスト片 4〜5 → 16〜18）。
+- 取込結果: **行数 45 → 265 行**、自動仕分け率 **88.3%**。
+
+### 副産物（アプリ側の実バグ 1 件）
+
+前文が 5 行を超えるファイルでヘッダーを取り逃していた（`detectHeaderRow` の走査幅が 5 行固定）。
+実務では「報告書名・部署・作成日・注記・空行」で 5 行を超えるのが普通のため、走査幅を 15 行へ拡張した。
+
+### 納品
+
+Google Drive の T4D フォルダへ **版 3** として差し替え（削除はせず版管理で置換。共有設定は維持）。
+
+---
+
+## 2026-08-19 本番での 50 ファイル取込検証（実機）と 2 件の実バグ修正
+
+「作った 50 ファイルは実際に本アプリで取り込めるのか」を本番
+（https://terrast-t4d.vercel.app ）で実測した。**当初は取り込めなかった。**
+原因は 2 つあり、いずれも本番でしか再現しないものだった。
+
+### BUG-051（Critical）exceljs が本番で壊れていた
+
+`pnpm-workspace.yaml` の overrides が `uuid: '>=11.1.1'` を**全依存へ適用**しており、
+exceljs（CommonJS）が要求する `^8.3.0` を ESM only の uuid@14 に置き換えていた。
+Vercel の Node ランタイムでは ESM を require() できず、
+**Excel を含む取込が PROCESSING_FAILED で全滅**していた（CSV 24 件目までは成功し、
+25 件目の .xlsx で例外 → 以降は待機中のまま・0 行）。
+
+対処: `exceljs>uuid: '8.3.2'` を追加して exceljs 配下だけ 8 系へ戻した。
+exceljs が使うのは v4 のみで、報告されている脆弱性（v3/v5/v6 の buf 境界チェック）には該当しない。
+根拠と判断は `docs/known-limitations.md` 8 章へ記載。
+
+**なぜテストで捕まらなかったか**: vitest も next dev もローカルの Node 24 も ESM を解決できるため、
+CommonJS 解決になる本番ランタイムでしか再現しない。
+回帰テスト `tests/unit/exceljs-runtime.test.ts` は「解決された uuid が ESM only でないこと」を
+パッケージ定義から検証する形にした（uuid@14 のときは false になり落ちることを確認済み）。
+
+### BUG-052（High）Demo Mode の取込が本番で進まない
+
+Demo Mode は状態がプロセスのメモリにしか無い（known-limitations D-3）。
+Vercel はリクエストごとにインスタンスが変わりうるため、
+ジョブ作成（Server Action）と進捗ポーリング（`GET /api/jobs/[jobId]`）が別インスタンスに当たり、
+**404 のまま解析が始まらない**状態だった（実測で 5 回とも 404）。
+
+対処: Demo Mode に限り `uploadFilesAction` の中で `processIngestionJob` を同期実行し、
+同じリクエストで解析まで終わらせる。Supabase Mode は DB を共有するので従来どおり非同期のまま。
+
+### 併せて修正
+
+- 取込 UI の `accept` に `.tsv` / `.docx` が無く、サーバーは受け付けるのにファイル選択で選べなかった。
+  画面の「対応形式」表記も含めてサーバー側の許可リストと一致させた。
+
+### 本番での実測結果（修正後）
+
+| 項目           | 結果                                                    |
+| -------------- | ------------------------------------------------------- |
+| ファイル       | **50 / 50 解析済み**（失敗 0・待機中 0）                |
+| 取込行数       | **265 行**                                              |
+| 文字コード判定 | UTF-8 (BOM) 47 件 / Shift_JIS 3 件を正しく判定          |
+| 説明行スキップ | 3 ファイルで発火（最大 5 行の前文を読み飛ばし）         |
+| 事前学習       | 45 ファイルで「確定済み実績 8 件を参照」                |
+| 自動仕分け     | 指標・拠点が自動で割り当てられ、確信度 72〜84% を表示   |
+| 要確認         | 31 行（蒸気使用量など未定義指標。**勝手に確定しない**） |
+| 重複検知       | 234 行が既存の承認済みデータとの重複として警告          |
+
+重複が多いのは、デモデータに FY2026 の実績が既に入っているため（正常な動作）。
+
+---
+
+## 2026-08-19 追加要望 6 点の実装
+
+### ① 人的資本データ 20 ファイル＋定義ズレの自動仕分け
+
+生成器: `scripts/human-capital-dataset.ts` / `scripts/generate-human-capital-dataset.ts`。
+日本・米国・英国・ドイツ・フランス・中国・インド・ブラジルの 8 か国、CSV（カンマ／セミコロン）と PDF。
+文字コードは UTF-8（BOM）と Shift_JIS。
+
+**主眼は「定義のズレ」**。女性管理職比率の分母が国ごとに違う（課長以上／EEO-1 Officials and Managers／
+全 Führungsebene／Band 4 以上／cadre／主管以上）ほか、離職率の自己都合限定、賃金格差の平均値と中央値、
+FTE 換算、期中平均などを含む。
+
+対応として `mock-provider.ts` に:
+
+- 人的資本の多言語ラベル（11 指標）を追加
+- `detectDefinitionNotes` を新設。定義の但し書きを検出したら**確信度を 0.42 前後まで落として警告**し、
+  「要確認」に倒す（勝手に確定させない）
+
+指標も 7 件追加（`female_employees` / `new_hires` / `turnover_rate` / `avg_tenure` /
+`training_hours` / `ltifr` / `gender_pay_gap`）。
+
+検証: `tests/integration/human-capital-import.test.ts`（4 件）。
+20 ファイル全解析、多言語の女性管理職比率が同一指標へ集約、定義差 6 パターンで警告と要確認、
+定義差の無い行は高確信度、を確認。
+
+**副産物（実バグ 1 件）**: 用水の判定パターン `eau` に単語境界が無く、フランス語の **Bureau** に誤爆して
+「Bureau Paris の女性管理職比率」が用水として仕分けられていた。単語境界を付けて修正。
+
+### ② 非財務データの組織タグ「連結対象のみ」
+
+`src/lib/domain/boundaries.ts` に `isConsolidatedUnit`（full / proportionate のみ）を追加し、
+組織フィルタの先頭と保存ビューに「連結対象のみ」を用意した。
+効果が見えるよう、fixture に**持分法適用の関連会社（青海マテリアル合弁会社・持分 35%）**を追加している。
+
+実装中に穴を 1 つ塞いだ: 「連結対象のみ」と特定組織を併用して交差が空になったとき、
+空配列を渡すと「未指定」と区別できず**絞り込みが外れて全件表示**になっていた。
+番兵 ID（`NO_MATCH_UNIT_ID`）で 0 件を返すようにした。
+
+### ③ Evidence プレビューのリッチ化
+
+`src/lib/fixtures/evidence-documents.ts` で、書類種別ごとに**紙面**を組み立てるようにした。
+電力請求書なら発行者・請求番号・需要場所・契約種別・明細（基本料金／電力量料金／再エネ賦課金）・
+合計使用電力量・請求金額・CO2 係数まで。マニフェスト、燃料使用記録、購買台帳、人員構成表も同様。
+
+画面側は `src/components/shared/document-preview.tsx` を新設し、A4 相当の用紙・罫線・等幅の明細行・
+ページャで原本を読んでいる状態に近づけた。従来は「1 ページ目。合計値および明細が記載されています」の
+一文を箇条書きにしていただけだった。
+
+### ④ デモモードのポップアップをドラッグ移動
+
+ヘッダーをドラッグハンドルにして Pointer Events で移動できるようにした（右下固定をやめた）。
+ドラッグできない環境のために**矢印キーでも移動**でき（Shift で 64px 単位）、画面外へは出ない。
+
+### ⑤ CDP の UX
+
+「バージョン（FY）を選ぶ → 過去データを取り込む（複数年）→ 新規分・不足分に対応する」の 3 ステップを
+`src/components/shared/disclosure-steps.tsx` と `src/lib/services/disclosure-onboarding.ts` で可視化。
+年度ごとの取込済み件数を出し、過年度の質問書（CDP 2025）へも切り替えられる。
+
+### ⑥ SSBJ の UX
+
+「マテリアリティの登録 → データ収集 → 充足度の可視化 → 不足項目の一覧・提出依頼」に再構成。
+新テーブル `materiality_topics`（migration 0020・RLS 付き）と `src/lib/services/materiality.ts` を追加。
+重要と評価する場合は理由を必須にしている（後から根拠を問われるため）。
+充足度は「重要トピックに紐づく指標のうち、承認済みの値がある割合」で算出する。
+
+### 検証
+
+| ゲート                                | 結果              |
+| ------------------------------------- | ----------------- |
+| lint / format / typecheck / check:rls | ✅                |
+| unit + integration                    | ✅ **310 passed** |
+| RLS（materiality の越権 4 件を追加）  | ✅ **67 passed**  |
+| E2E（Demo・実ブラウザ）               | ✅ **124 passed** |
+| build                                 | ✅                |
+
+E2E は `tests/e2e/six-features.spec.ts`（6 件）で ②〜⑥ を実機確認している。
+
+### 併せて直した既存テストの脆さ
+
+- `action-audit` の一括提出が「残り件数」で判定しており、ページサイズを超えると次ページの行が繰り上がって
+  成立しなかった。提出した行の ID が draft から消えたかで判定する形に変更。
+- Evidence の文言変更に追従（`mentions-evidence`）。
+
+### 環境メモ
+
+別プロジェクト（`Documents/test/airis`）の dev サーバーがポート 3100 を占有していると、
+T4D の E2E が**別アプリのログイン画面**を掴んで全滅する。
+`E2E_PORT=3105` のように空きポートを指定して回避できる。
+
+### 納品
+
+Google Drive の T4D フォルダへ `t4d-human-capital-dataset-20files.zip`（12 KB）を追加。
+既存の `t4d-hetero-dataset-50files.zip` はそのまま。

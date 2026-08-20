@@ -1,0 +1,24 @@
+# pnpm 11 のビルドスクリプト許可リスト。
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+
+# canvas は pdf.js（unpdf）の任意依存で、ネイティブレンダリング用。
+# T4D は extractText / getDocumentProxy しか使わないため不要。
+# 依存ツリーから外すことで canvas > @mapbox/node-pre-gyp > tar 系の脆弱性を解消する。
+ignoredOptionalDependencies:
+  - canvas
+
+# 推移的依存の脆弱性対応（pnpm audit --prod の結果に基づく）。
+#   postcss  … next 経由。GHSA-fxqj-rqcc-2cmp ほか
+#   sharp    … next 経由（画像最適化）
+#   uuid     … exceljs 経由。ただし **exceljs 配下だけは 8 系に戻す**:
+#              uuid 11 以降は ESM only で、CommonJS の exceljs が require('uuid') に
+#              失敗する（Vercel の Node ランタイムで PROCESSING_FAILED になり Excel 取込が壊れる）。
+#              uuid 8.3.2 に既知の脆弱性は無い（CVE は 3.x の Math.random 由来）。
+overrides:
+  postcss: '>=8.5.23'
+  sharp: '>=0.35.0'
+  uuid: '>=11.1.1'
+  exceljs>uuid: '8.3.2'

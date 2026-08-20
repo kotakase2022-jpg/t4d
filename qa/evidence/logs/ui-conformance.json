@@ -1,0 +1,122 @@
+[
+  {
+    "req": "UX-P0-004",
+    "check": "列表示切替",
+    "found": false,
+    "detail": " [button:has-text(\"列\"), [data-t4d-column-selector]] count=0"
+  },
+  {
+    "req": "UX-P0-004",
+    "check": "並べ替え",
+    "found": false,
+    "detail": " [th button, th a, [aria-sort], [data-sort]] count=0"
+  },
+  {
+    "req": "UX-P0-004",
+    "check": "固定列/Sticky",
+    "found": true,
+    "detail": " [.sticky, [class*=\"sticky\"]] count=1"
+  },
+  {
+    "req": "UX-P0-004",
+    "check": "複合フィルター",
+    "found": true,
+    "detail": " [[data-t4d-list-search]] count=1"
+  },
+  {
+    "req": "UX-P0-004",
+    "check": "一括選択",
+    "found": true,
+    "detail": " [input[name=\"selected\"]] count=25"
+  },
+  {
+    "req": "UX-P0-004",
+    "check": "保存ビュー",
+    "found": true,
+    "detail": " [a:has-text(\"要対応のみ\")] count=1"
+  },
+  {
+    "req": "UX-P0-004",
+    "check": "CSV出力",
+    "found": true,
+    "detail": " [a[href*=\"/api/exports/data-points\"]] count=2"
+  },
+  {
+    "req": "EVID-P0-002",
+    "check": "画面内ビューア",
+    "found": false,
+    "detail": " [iframe, embed, object, canvas, img[src*=\"evidence\"]] count=0"
+  },
+  {
+    "req": "EVID-P0-002",
+    "check": "該当箇所ハイライト",
+    "found": false,
+    "detail": " [mark, [data-highlight]] count=0"
+  },
+  {
+    "req": "DATA-P0-004",
+    "check": "前年度複製",
+    "found": false,
+    "detail": " [button:has-text(\"前年\"), button:has-text(\"複製\")] count=0"
+  },
+  {
+    "req": "ORG-P0-001",
+    "check": "組織の登録・編集UI",
+    "found": false,
+    "detail": " [form button[type=\"submit\"], button:has-text(\"追加\"), button:has-text(\"編集\")] count=0"
+  },
+  {
+    "req": "MASTER-P0-001",
+    "check": "指標マスター管理UI",
+    "found": false,
+    "detail": " [a[href*=\"metric\"], button:has-text(\"指標\")] count=0"
+  },
+  {
+    "req": "AUTH-P0-001",
+    "check": "ユーザー招待UI",
+    "found": false,
+    "detail": " [button:has-text(\"招待\"), a:has-text(\"招待\")] count=0"
+  },
+  {
+    "req": "AI-P0-001",
+    "check": "対話入力欄",
+    "found": false,
+    "detail": " [textarea, input[type=\"text\"][placeholder*=\"質問\"]] count=0"
+  },
+  {
+    "req": "CDP-P0-002",
+    "check": "適用判定表示",
+    "found": false,
+    "detail": " [:text(\"適用\"), :text(\"非適用\"), :text(\"要確認\")] count=0"
+  },
+  {
+    "req": "CDP-P0-003",
+    "check": "過去回答Import",
+    "found": false,
+    "detail": " [input[type=\"file\"], button:has-text(\"取込\")] count=0"
+  },
+  {
+    "req": "CDP-P0-006",
+    "check": "整合チェック実行",
+    "found": false,
+    "detail": " [button:has-text(\"チェック\"), button:has-text(\"整合\")] count=0"
+  },
+  {
+    "req": "WF-P0-002",
+    "check": "メンション",
+    "found": false,
+    "detail": " [[data-mention], :text(\"@\")] count=0"
+  },
+  {
+    "req": "ASSUR-P0-009",
+    "check": "三ペイン",
+    "found": false,
+    "detail": " [.grid-cols-3, [class*=\"grid-cols-3\"]] count=0"
+  },
+  {
+    "req": "ASSUR-P0-008",
+    "check": "再計算入力",
+    "found": true,
+    "detail": " [input[name*=\"recalc\"], :text(\"再計算\")] count=5"
+  }
+]

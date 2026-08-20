@@ -114,7 +114,7 @@ export async function uploadFilesAction(formData: FormData): Promise<void> {
   }
 
   revalidatePath('/enterprise/imports');
-  redirect(`/enterprise/imports/${job.id}`);
+  redirect(`/enterprise/imports/${job.id}?created=1`);
 }
 
 export async function confirmImportAction(formData: FormData): Promise<void> {
@@ -649,12 +649,30 @@ export async function pasteImportAction(formData: FormData): Promise<void> {
 // AI Copilot 対話（AI-P0-001）
 // ----------------------------------------------------------------------
 
-export async function askCopilotAction(formData: FormData): Promise<void> {
+/**
+ * Copilot への質問。**回答をそのまま返す**（リダイレクトしない）。
+ *
+ * Demo Mode の状態はプロセスのメモリにしか無いため（known-limitations D-3）、
+ * `?chat=<id>` へリダイレクトして読み直す方式だと、Vercel で別インスタンスに
+ * 当たったときに回答が表示されないまま終わってしまう。
+ * 呼び出し側（クライアント）が戻り値を保持して描画する。
+ */
+export async function askCopilotAction(formData: FormData): Promise<{
+  conversationId: string;
+  turn: {
+    runId: string;
+    question: string;
+    answer: string;
+    confidence: number;
+    provider: 'openai' | 'mock';
+    references: Array<{ label: string; link: string | null }>;
+  };
+}> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const shell = await loadEnterpriseShell();
 
-  const { conversationId } = await askCopilot(
+  const { conversationId, turn } = await askCopilot(
     db,
     ctx,
     {
@@ -665,8 +683,19 @@ export async function askCopilotAction(formData: FormData): Promise<void> {
     shell.periods,
   );
 
+  // Provenance 一覧（同じ画面の下部）を更新する
   revalidatePath('/enterprise/ai');
-  redirect(`/enterprise/ai?chat=${conversationId}`);
+  return {
+    conversationId,
+    turn: {
+      runId: turn.runId,
+      question: turn.question,
+      answer: turn.answer,
+      confidence: turn.confidence,
+      provider: turn.provider,
+      references: turn.references,
+    },
+  };
 }
 
 // ----------------------------------------------------------------------

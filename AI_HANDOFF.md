@@ -1188,3 +1188,42 @@ T4D の E2E が**別アプリのログイン画面**を掴んで全滅する。
 
 Google Drive の T4D フォルダへ `t4d-human-capital-dataset-20files.zip`（12 KB）を追加。
 既存の `t4d-hetero-dataset-50files.zip` はそのまま。
+
+---
+
+## 2026-08-20 全面自己検証（実操作ベース）
+
+「実装されているように見える」ではなく実際に動くかを、実ブラウザ・実 DB・実 API で検証した。
+
+### 追加した検証スイート
+
+- `tests/e2e/full-audit.spec.ts` … 全画面をロール別にクロールし、HTTP・コンソール・ネットワーク異常を検出
+- `tests/e2e/crud-persistence.spec.ts` … 作成→一覧反映→**リロード後も保持**→編集→反映を確認
+- `tests/e2e/authz-api-audit.spec.ts` … Server Action / API を直接叩いて権限とテナント分離を確認
+- `tests/e2e/edge-cases-audit.spec.ts` … 境界値・二重送信・空データ・不正クエリ・ブラウザバック
+- `tests/e2e/business-flow-audit.spec.ts` … 取込→確定→提出→承認→開示→保証の通し
+- `tests/e2e/ui-integrity-audit.spec.ts` … 1280/1440/1920px で横スクロール・はみ出しを検出
+- `tests/e2e/security-audit.spec.ts` … XSS・open redirect・CSP・アップロード検証
+- `tests/e2e-production/production-smoke.spec.ts` … 本番を実操作で確認（`pnpm test:e2e:prod`）
+
+### 見つけた問題（本番でのみ再現）
+
+BUG-053〜055（BUG_REPORT.md 参照）。いずれも Demo Mode の状態がインスタンス間で
+共有されないことに起因する。Cookie 永続化・リージョン固定・リダイレクト廃止で緩和した。
+
+### DB を直接確認した内容
+
+`docker exec supabase_db_t4d psql` で実スキーマを確認:
+
+- `materiality_topics` の列・CHECK・UNIQUE・外部キー・RLS ポリシー（select / write）
+- RLS が無効な public テーブルが **0 件**
+- 内部取引の明細が Data Room へ漏れていないこと（**0 件**）
+- `metric_definitions.hq_only`（true 16 / false 26）と人的資本 7 指標の投入
+- 持分法適用の組織（JV・35%）の存在
+
+### 検証環境で踏んだ落とし穴（次回のため）
+
+- 別プロジェクト（`Documents/test/airis`）が **ポート 3100** を占有していると、T4D の E2E が
+  別アプリのログイン画面を掴んで全滅する。`E2E_PORT=3105` で回避する。
+- Supabase E2E は `next build` を走らせるため、手動起動したサーバーの `.next` を上書きする。
+  同時に使うとチャンクが 400 になる。片方ずつ実行する。

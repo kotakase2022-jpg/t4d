@@ -30,7 +30,8 @@
     "verify:supabase": "tsx scripts/verify-supabase.ts",
     "test:e2e:supabase": "playwright test --config playwright.supabase.config.ts",
     "verify:openai": "tsx scripts/verify-openai.ts",
-    "verify:openai:all": "tsx scripts/verify-openai.ts --all"
+    "verify:openai:all": "tsx scripts/verify-openai.ts --all",
+    "test:e2e:prod": "playwright test --config playwright.production.config.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

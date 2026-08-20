@@ -74,25 +74,22 @@ test('Copilot 対話: 実データに基づく回答が根拠つきで返り、�
 
   await page.locator('input[name="question"]').fill('Scope1 の当年値と前年比は？');
   await page.getByRole('button', { name: '質問する' }).click();
-  await page.waitForURL(/chat=/);
 
   // 回答に数値と出典が含まれる（Mock は承認済み集計から決定論的に答える）
-  await expect(page.getByText(/t-CO2e です/).first()).toBeVisible();
+  await expect(page.getByText(/t-CO2e です/).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('出典').first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'GHG 集計' })).toBeVisible();
 
   // 2 ターン目（会話の継続）
   await page.locator('input[name="question"]').fill('収集の進捗は？');
   await page.getByRole('button', { name: '質問する' }).click();
-  await page.waitForURL(/chat=/);
-  await expect(page.getByText(/承認済み \d+ 件/).first()).toBeVisible();
+  await expect(page.getByText(/承認済み \d+ 件/).first()).toBeVisible({ timeout: 30_000 });
   // 1 ターン目も画面に残っている
   await expect(page.getByText('Scope1 の当年値と前年比は？')).toBeVisible();
 
-  // リロードしても会話が読み直せる（Provenance に記録）
+  // Provenance（AI 実行履歴）へ記録される。revalidate 後に一覧へ現れる
   await page.reload();
-  await expect(page.getByText('Scope1 の当年値と前年比は？')).toBeVisible();
-  await expect(page.getByText('収集の進捗は？')).toBeVisible();
+  await expect(page.locator('tbody tr', { hasText: 'Copilot 対話' }).first()).toBeVisible();
 });
 
 test('Copilot は分からないことに推測で答えない', async ({ page }) => {
@@ -100,6 +97,5 @@ test('Copilot は分からないことに推測で答えない', async ({ page }
   await page.goto('/enterprise/ai');
   await page.locator('input[name="question"]').fill('明日の天気を教えてください');
   await page.getByRole('button', { name: '質問する' }).click();
-  await page.waitForURL(/chat=/);
-  await expect(page.getByText('答えられる情報がありません')).toBeVisible();
+  await expect(page.getByText('答えられる情報がありません')).toBeVisible({ timeout: 30_000 });
 });

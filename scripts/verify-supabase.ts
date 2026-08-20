@@ -83,6 +83,32 @@ async function main() {
   const otherFirm = await signIn('other-assurance-manager@demo.local');
   check('7 アカウントすべてでログインできる', true);
 
+  // この検証は Sign-off と許諾を **実際に書き込む**。追記専用のため後から消せず、
+  // 同じ DB で 2 回目を走らせると重複キーで落ちる。そのとき「RLS が壊れた」と
+  // 誤読されるのが最も危険なので、先に汚れを検知し、理由を説明して止める。
+  const dirtyGrant = await entAdmin
+    .from('client_access_grants')
+    .select('id')
+    .eq('engagement_id', ENGAGEMENT_IDS.main)
+    .eq('subject_type', 'metric')
+    .eq('subject_id', metricId('AOMI', 'managers_total'));
+  const dirtySignoff = await firmManager
+    .from('signoffs')
+    .select('id')
+    .eq('engagement_id', ENGAGEMENT_IDS.main)
+    .eq('signoff_stage', 'prepared')
+    .eq('user_id', userId('assurance-manager@demo.local'));
+  if ((dirtyGrant.data?.length ?? 0) > 0 || (dirtySignoff.data?.length ?? 0) > 0) {
+    console.error('');
+    console.error('この DB では既に本スクリプトを実行済みです（Sign-off / 許諾が残っています）。');
+    console.error(
+      'Sign-off と許諾は追記専用で削除できないため、クリーンな DB からやり直してください。',
+    );
+    console.error('  pnpm exec supabase db reset && pnpm verify:supabase');
+    console.error('※ RLS の異常ではありません。');
+    process.exit(2);
+  }
+
   // ------------------------------------------------------------------
   console.log('\n2. テナント分離（企業 A ⇔ 企業 B）');
   {

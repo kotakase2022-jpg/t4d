@@ -11,6 +11,13 @@ import type { DbClient } from './types';
  */
 export async function getDb(): Promise<DbClient> {
   if (getAppMode() === 'demo') {
+    // Demo Mode の状態はプロセスのメモリにしか無い（known-limitations D-3）。
+    // Vercel で別インスタンスに当たっても直前の操作が消えないよう、
+    // Cookie に控えた変更を Fixture へ再適用してから返す。
+    const { readDemoEdits, applyDemoEdits } = await import('./demo-persistence');
+    const { getDemoDb } = await import('@/lib/fixtures/store');
+    const edits = await readDemoEdits();
+    if (edits.length > 0) applyDemoEdits(getDemoDb(), edits);
     return new DemoDbClient();
   }
   const { createSupabaseServerClient } = await import('@/lib/supabase/server');

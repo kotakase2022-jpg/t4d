@@ -1,4 +1,5 @@
 import { getDemoDb, type FixtureDb } from '@/lib/fixtures/store';
+import { appendDemoEdit, isPersistedTable } from './demo-persistence';
 import {
   applyQuery,
   matchesQueryFilters,
@@ -46,6 +47,17 @@ export class DemoDbClient implements DbClient {
     const target = this.table(table);
     const cloned = rows.map((r) => structuredClone(r));
     target.push(...cloned);
+
+    // Demo Mode は状態がプロセスのメモリにしか無いため、人の操作だけ Cookie にも残す
+    // （インスタンスが変わっても直前の操作が消えないようにする）。
+    if (isPersistedTable(table)) {
+      for (const row of cloned) {
+        const record = row as unknown as { id?: string };
+        if (record.id) {
+          await appendDemoEdit(table, record.id, row as unknown as Record<string, unknown>);
+        }
+      }
+    }
     return cloned.map((r) => structuredClone(r));
   }
 
@@ -56,6 +68,11 @@ export class DemoDbClient implements DbClient {
     if (index === -1 || !existing) throw new Error(`${String(table)} ${id} が見つかりません。`);
     const next = { ...existing, ...(patch as Record<string, unknown>) };
     target[index] = next;
+
+    // 変更のあった列だけを Cookie へ（Cookie の容量を圧迫しないため）
+    if (isPersistedTable(table)) {
+      await appendDemoEdit(table, id, patch as unknown as Record<string, unknown>);
+    }
     return structuredClone(next) as unknown as Row<K>;
   }
 

@@ -13,7 +13,8 @@ import { formatEstimatedCostUsd, formatJst } from '@/lib/format/datetime';
 import { loadConversation } from '@/lib/services/copilot';
 import { loadInsightResult } from '@/lib/services/insights';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { askCopilotAction, runInsightDiscoveryAction } from '../actions';
+import { runInsightDiscoveryAction } from '../actions';
+import { CopilotChat } from './copilot-chat';
 
 export const metadata = { title: 'AI Copilot' };
 
@@ -93,71 +94,18 @@ export default async function AiPage({
       <div className="space-y-3 p-4">
         <Card className="overflow-hidden border-brand-200">
           <SectionTitle title="Copilot 対話 — 権限内のデータに限定して答えます" />
-          <div className="space-y-2 p-3">
-            {conversation && conversation.turns.length > 0 && (
-              <ul className="space-y-2">
-                {conversation.turns.map((turn) => (
-                  <li key={turn.runId} className="space-y-1.5">
-                    <div className="ml-auto w-fit max-w-[80%] rounded-t4d bg-brand-100 px-2.5 py-1.5 text-[13px] text-brand-900">
-                      {turn.question}
-                    </div>
-                    <div className="w-fit max-w-[85%] rounded-t4d border border-line bg-surface px-2.5 py-1.5">
-                      <p className="text-[13px] text-ink">{turn.answer}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <AiGeneratedBadge provider={turn.provider} />
-                        <span className="text-[11px] text-ink-muted">
-                          確信度 {Math.round(turn.confidence * 100)}%
-                        </span>
-                        {turn.references.map((ref) =>
-                          ref.link ? (
-                            <Link
-                              key={ref.label}
-                              href={ref.link}
-                              className="text-[11px] text-brand-800 underline"
-                            >
-                              {ref.label}
-                            </Link>
-                          ) : (
-                            <span key={ref.label} className="text-[11px] text-ink-muted">
-                              {ref.label}
-                            </span>
-                          ),
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {canRunAi ? (
-              <form action={askCopilotAction} className="flex items-end gap-2">
-                {conversation && (
-                  <input type="hidden" name="conversationId" value={conversation.conversationId} />
-                )}
-                <label className="grow text-[12px] text-ink-muted">
-                  質問
-                  <input
-                    name="question"
-                    required
-                    placeholder="例: Scope1 の当年値と前年比は？ ／ 収集の進捗は？ ／ CDP の必須未回答は？"
-                    className="mt-0.5 block h-8 w-full rounded-t4d border border-line bg-surface px-2 text-[13px] text-ink"
-                  />
-                </label>
-                <Button type="submit" size="sm">
-                  <Bot aria-hidden="true" />
-                  質問する
-                </Button>
-              </form>
-            ) : (
-              <p className="text-[12px] text-ink-muted">
-                AI 実行権限（enterprise.ai.run）のあるロールのみ利用できます。
-              </p>
-            )}
-            <p className="text-[11px] text-ink-muted">
-              回答はこの組織の承認済みデータ・収集状況・開示状況のみを根拠にします。AI
-              は操作や確定を行いません。全ターンが AI 実行履歴（Provenance）に記録されます。
-            </p>
-          </div>
+          <CopilotChat
+            initialTurns={(conversation?.turns ?? []).map((t) => ({
+              runId: t.runId,
+              question: t.question,
+              answer: t.answer,
+              confidence: t.confidence,
+              provider: t.provider,
+              references: t.references,
+            }))}
+            initialConversationId={conversation?.conversationId ?? null}
+            canRunAi={canRunAi}
+          />
         </Card>
 
         <Card className="overflow-hidden border-brand-200">

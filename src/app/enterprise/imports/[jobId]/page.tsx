@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { getAppMode } from '@/lib/config';
 import { AlertTriangle, Check, FileWarning } from 'lucide-react';
 import { AiGeneratedBadge, JobStatusBadge } from '@/components/shared/badges';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -27,12 +28,58 @@ const ROW_STATUS_LABEL: Record<
   confirmed: { label: '確定済み', tone: 'brand' },
 };
 
-export default async function ImportJobPage({ params }: { params: Promise<{ jobId: string }> }) {
+export default async function ImportJobPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ jobId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { jobId } = await params;
+  const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const { db, ctx } = shell;
 
   const job = await db.findById('ingestionJobs', jobId);
+
+  // Demo Mode は状態がプロセスのメモリにしか無いため、Vercel で別インスタンスへ
+  // 振り分けられるとジョブが見つからないことがある（known-limitations D-3）。
+  // **取込直後（created=1）に限り**理由を示す。
+  // それ以外は存在秘匿のため 404 のままにする（他人が URL を推測した場合の情報漏れを防ぐ）。
+  if (!job && getAppMode() === 'demo' && query.created === '1') {
+    return (
+      <>
+        <PageHeader
+          title="取込ジョブ"
+          description="この環境では取込結果を保持できませんでした"
+          breadcrumbs={[
+            { label: '企業ワークスペース' },
+            { label: 'データ収集', href: '/enterprise/imports' },
+            { label: jobId.slice(0, 8) },
+          ]}
+        />
+        <div className="p-4">
+          <Card className="p-4">
+            <p className="text-[13px] text-ink">
+              デモ環境（Demo Mode）は取込結果をサーバーのメモリに保持します。
+              サーバーが複数ある構成では、直後の画面表示が別のサーバーへ割り振られると
+              結果を参照できないことがあります。
+            </p>
+            <p className="mt-2 text-[12px] text-ink-muted">
+              お手数ですが、もう一度「データ収集」からファイルを取り込んでください。
+              件数の少ないファイルであれば結果が保持されます。
+            </p>
+            <div className="mt-3">
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/enterprise/imports">データ収集へ戻る</Link>
+              </Button>
+            </div>
+          </Card>
+        </div>
+      </>
+    );
+  }
+
   if (!job || job.organizationId !== ctx.workspace.organizationId) notFound();
 
   const [jobFiles, rows] = await Promise.all([

@@ -1294,3 +1294,28 @@ RLS が **行が自分で名乗る列** を信頼していた（`assurance_firm_
 
 Cookie に載せるものを増やすときは、(a) 容量の取り合いになる相手がいること、
 (b) 復元後の行が型として完全であること、の 2 点を必ず確かめること。
+
+### 2026-08-24 残り 21 件を完了
+
+独立再監査で確定した 61 件の対応が、これで全部終わった（実対応 54 件）。
+最後の 21 件は認可 2・データ整合 9・UI / a11y 10。
+
+**この回で足した「壊れたら気づける」仕組み**
+
+- `tests/unit/schema-parity.test.ts` … 対応表と実スキーマのズレ、未使用テーブルの説明漏れ
+- `tests/unit/engagement-export-sheets.test.ts` … Export の案内と実物のズレ
+- `src/components/ui/submit-button.tsx` … 送信中の表示と二重送信防止（8 か所へ適用）
+- `src/lib/errors/user-facing.ts` の `ValidationError` … 入力の誤りを本番でも画面へ返す
+
+**判断を変えた点**
+
+`ai_feedback` テーブルは、ドキュメントが「採否を記録する」と書いていたが実装は触れて
+いなかった。採否は `ai_runs`（status / reviewed_by / accepted_at / rejected_at）と
+`audit_events` に既に残るため、**二重に持たず記述の方を実装へ合わせた**。
+使っていないテーブルは `docs/known-limitations.md` に理由付きで並べ、
+`schema-parity.test.ts` が「理由の書かれていない未使用テーブル」を検出する。
+
+**RLS の UPDATE は 0 行更新で例外にならない**
+
+権限の無いロールで UPDATE を試すテストは、例外の有無ではなく
+**値が変わっていないこと**で判定する。例外を期待すると必ず落ちる。

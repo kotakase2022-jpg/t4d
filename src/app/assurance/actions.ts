@@ -26,6 +26,20 @@ function base(engagementId: string): string {
 // Snapshot
 // ----------------------------------------------------------------------
 
+/**
+ * フォームの値を取り出す。
+ *
+ * `|| 既存値` にすると空文字も falsy なので、消したはずの結論や調書番号が
+ * 旧値へ巻き戻る。**項目が送られていない**ときだけ据え置き、
+ * 空文字で送られたら「消した」として null にする。
+ */
+function fieldOr(formData: FormData, name: string, current: string | null): string | null {
+  const raw = formData.get(name);
+  if (raw === null) return current;
+  const text = String(raw).trim();
+  return text === '' ? null : text;
+}
+
 export async function createSnapshotAction(formData: FormData): Promise<void> {
   const ctx = await requireAssuranceContext();
   const db = await getDb();
@@ -218,10 +232,10 @@ export async function updateTestAction(formData: FormData): Promise<void> {
   if (action === 'prepare') {
     await db.update('tests', testId, {
       status: 'prepared',
-      conclusionDraft: (formData.get('conclusionDraft') as string) || test.conclusionDraft,
+      conclusionDraft: fieldOr(formData, 'conclusionDraft', test.conclusionDraft),
       preparedBy: ctx.userId,
       preparedAt: now,
-      workpaperRef: (formData.get('workpaperRef') as string) || test.workpaperRef,
+      workpaperRef: fieldOr(formData, 'workpaperRef', test.workpaperRef),
       updatedAt: now,
       updatedBy: ctx.userId,
     });
@@ -239,8 +253,8 @@ export async function updateTestAction(formData: FormData): Promise<void> {
     });
   } else {
     await db.update('tests', testId, {
-      conclusionDraft: (formData.get('conclusionDraft') as string) || test.conclusionDraft,
-      workpaperRef: (formData.get('workpaperRef') as string) || test.workpaperRef,
+      conclusionDraft: fieldOr(formData, 'conclusionDraft', test.conclusionDraft),
+      workpaperRef: fieldOr(formData, 'workpaperRef', test.workpaperRef),
       updatedAt: now,
       updatedBy: ctx.userId,
     });

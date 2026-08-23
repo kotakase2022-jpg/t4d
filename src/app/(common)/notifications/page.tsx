@@ -6,7 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { requireSession } from '@/lib/auth/session';
 import { formatJst } from '@/lib/format/datetime';
+import { Button } from '@/components/ui/button';
 import { getDb } from '@/lib/repositories';
+import { markAllNotificationsReadAction, markNotificationReadAction } from './actions';
 
 export const metadata = { title: '通知' };
 
@@ -29,6 +31,8 @@ export default async function NotificationsPage() {
     limit: 50,
   });
 
+  const unreadCount = notifications.filter((n) => !n.readAt).length;
+
   return (
     <>
       <PageHeader
@@ -37,6 +41,13 @@ export default async function NotificationsPage() {
         breadcrumbs={[{ label: 'ホーム', href: '/workspace' }, { label: '通知' }]}
       />
       <div className="p-4">
+        {unreadCount > 0 && (
+          <form action={markAllNotificationsReadAction} className="mb-2 flex justify-end">
+            <Button type="submit" size="sm" variant="outline">
+              すべて既読にする（{unreadCount}）
+            </Button>
+          </form>
+        )}
         <Card>
           {notifications.length === 0 ? (
             <EmptyState
@@ -65,6 +76,14 @@ export default async function NotificationsPage() {
                         <Link href={n.href} className="text-[12px] text-brand-700 hover:underline">
                           対象を開く
                         </Link>
+                      )}
+                      {!n.readAt && (
+                        <form action={markNotificationReadAction} className="mt-1">
+                          <input type="hidden" name="notificationId" value={n.id} />
+                          <Button type="submit" size="xs" variant="outline">
+                            既読にする
+                          </Button>
+                        </form>
                       )}
                     </div>
                   </div>

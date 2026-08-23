@@ -16,6 +16,7 @@ import {
   createInvitationAction,
   issueResetLinkAction,
   revokeInvitationAction,
+  createGrantAction,
   toggleGrantAction,
 } from '../actions';
 
@@ -316,6 +317,83 @@ export default async function SettingsPage({
                   </div>
                 ))}
               </div>
+              {canManageGrants && (
+                <form
+                  action={createGrantAction}
+                  className="grid grid-cols-12 items-end gap-2 border-b border-line px-3 py-2"
+                >
+                  <label className="col-span-3 text-[12px] text-ink-muted">
+                    保証契約
+                    <select
+                      name="engagementId"
+                      required
+                      className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+                    >
+                      {engagements.map((engagement) => (
+                        <option key={engagement.id} value={engagement.id}>
+                          {engagement.code}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="col-span-2 text-[12px] text-ink-muted">
+                    種別
+                    <select
+                      name="subjectType"
+                      required
+                      className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+                    >
+                      <option value="metric">指標</option>
+                      <option value="organization_unit">組織・拠点</option>
+                      <option value="reporting_period">報告期間</option>
+                    </select>
+                  </label>
+                  {/*
+                    種別ごとに対象の選択肢が変わるが、サーバー描画のみで完結させるため
+                    3 種類をまとめて 1 つのセレクトに並べ、value に ID を持たせる。
+                    種別と対象の整合はサーバー側（createGrantAction）で確認する。
+                  */}
+                  <label className="col-span-5 text-[12px] text-ink-muted">
+                    対象
+                    <select
+                      name="subjectId"
+                      required
+                      className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+                    >
+                      <optgroup label="指標">
+                        {shell.metrics.map((metric) => (
+                          <option key={metric.id} value={metric.id}>
+                            {metric.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="組織・拠点">
+                        {shell.units.map((unit) => (
+                          <option key={unit.id} value={unit.id}>
+                            {unit.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="報告期間">
+                        {shell.periods.map((period) => (
+                          <option key={period.id} value={period.id}>
+                            {period.code}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </label>
+                  <label className="col-span-1 flex items-center gap-1 text-[12px] text-ink-muted">
+                    <input type="checkbox" name="includesEvidence" className="size-3.5" />
+                    Evidence
+                  </label>
+                  <div className="col-span-1">
+                    <Button type="submit" size="sm">
+                      許諾する
+                    </Button>
+                  </div>
+                </form>
+              )}
               <Table>
                 <THead>
                   <TR>

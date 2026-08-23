@@ -214,6 +214,26 @@ describe('母集団とサンプリング', () => {
     expect(view.population.completenessProcedureNote).toContain('P-01');
   });
 
+  it('Snapshot を固定すると母集団が構成される', async () => {
+    // 母集団は「Snapshot から構成した固定の集合」。作られないとサンプリングへ進めない。
+    const fresh = new DemoDbClient(createFixtureDb());
+    const before = await fresh.select('populations', { where: { engagementId: ENG } });
+
+    const snapshot = await createSnapshot(fresh, manager(), ENG, 'SNAP-回帰テスト');
+    const after = await fresh.select('populations', { where: { engagementId: ENG } });
+
+    expect(after.length).toBe(before.length + 1);
+    const created = after.find((pop) => pop.snapshotId === snapshot.id);
+    expect(created, 'Snapshot に紐づく母集団が作られている').toBeTruthy();
+    expect(created!.itemCount).toBeGreaterThan(0);
+    expect(created!.versionNo).toBe(before.length + 1);
+
+    const items = await fresh.select('populationItems', { where: { populationId: created!.id } });
+    expect(items).toHaveLength(created!.itemCount);
+    // 母集団の値は Snapshot の固定値（後から企業が変えても動かない）
+    expect(items.every((i) => typeof i.value === 'number')).toBe(true);
+  });
+
   it('判断による抽出は、選んだ項目だけを抽出する', async () => {
     // 画面に方式は並んでいたが、対象を選ぶ入力が無く、選ぶと必ず 0 件で失敗していた。
     const view = await loadPopulation(db, manager(), ENG);

@@ -22,6 +22,7 @@ import {
   parseSortKey,
   type DataPointFilters,
 } from '@/lib/services/enterprise-data';
+import { FlashMessage } from '@/components/shared/flash';
 import { can } from '@/lib/authorization/can';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { isColumnVisible } from '@/lib/table/columns';
@@ -147,6 +148,9 @@ export default async function DataListPage({
         }
       />
 
+      <div className="px-4 pt-3">
+        <FlashMessage searchParams={params} />
+      </div>
       <div className="p-4">
         <Card className="overflow-hidden">
           <FilterBar

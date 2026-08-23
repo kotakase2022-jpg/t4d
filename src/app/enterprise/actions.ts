@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { recordAiDecision } from '@/lib/ai';
 import { requireEnterpriseContext } from '@/lib/auth/session';
-import { assertCan, NotFoundError } from '@/lib/authorization/can';
+import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
@@ -44,7 +44,9 @@ import { confirmDisclosureImport } from '@/lib/services/disclosure-import';
 import { runInsightDiscovery } from '@/lib/services/insights';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { storeNewFile } from '@/lib/storage';
+import { GRANT_SUBJECT_TYPES } from '@/types/domain';
 import type {
+  GrantSubjectType,
   DataPointStatus,
   FrameworkKey,
   MaterialityLevel,
@@ -276,11 +278,16 @@ export async function saveCdpResponseAction(formData: FormData): Promise<void> {
   const responseId = String(formData.get('responseId') ?? '');
   const numericRaw = String(formData.get('answerNumeric') ?? '').replace(/,/g, '');
   const answerNumeric = numericRaw === '' ? null : Number(numericRaw);
+  // 数値として読めない入力を黙って null に落とすと、入力した値が消える。
+  // 空欄（未入力）と「数値でない文字列」は区別して、後者は理由を返す。
+  if (numericRaw !== '' && !Number.isFinite(answerNumeric)) {
+    throw new AuthorizationError('数値欄には数値を入力してください（例: 1234.5）。');
+  }
 
   await saveDisclosureResponse(db, ctx, {
     responseId,
     answerText: (formData.get('answerText') as string) ?? '',
-    answerNumeric: answerNumeric !== null && Number.isFinite(answerNumeric) ? answerNumeric : null,
+    answerNumeric,
     answerChoice: formData.getAll('answerChoice').map(String).filter(Boolean),
     aiRunId: (formData.get('aiRunId') as string) || null,
     editedFromAi: formData.get('editedFromAi') === 'true',
@@ -319,6 +326,116 @@ export async function transitionCdpResponseAction(formData: FormData): Promise<v
 // ----------------------------------------------------------------------
 // 監査法人への許諾
 // ----------------------------------------------------------------------
+
+/**
+ * 監査法人へのアクセス許諾を新規に付与する。
+ *
+ * 企業と監査法人の唯一の接続点は engagements と client_access_grants だけなので、
+ * ここが無いと新しい保証契約でデータを一切共有できない（CLAUDE.md §0.2）。
+ * 付与できるのは企業側の権限を持つ人だけで、対象が自社のものであることも確認する。
+ */
+export async function createGrantAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  assertCan(ctx, 'enterprise.grant.manage');
+  const db = await getDb();
+
+  const engagementId = String(formData.get('engagementId') ?? '');
+  const subjectType = String(formData.get('subjectType') ?? '') as GrantSubjectType;
+  const subjectId = String(formData.get('subjectId') ?? '');
+  const includesEvidence = formData.get('includesEvidence') === 'on';
+
+  if (!engagementId || !subjectType || !subjectId) {
+    throw new AuthorizationError('案件・種別・対象をすべて選んでください。');
+  }
+  if (!GRANT_SUBJECT_TYPES.includes(subjectType)) {
+    throw new AuthorizationError('許諾の種別が不正です。');
+  }
+
+  // 案件はフォーム由来。**自社がクライアントの案件か**を必ず確認する。
+  const engagement = await db.findById('engagements', engagementId);
+  if (!engagement || engagement.clientOrganizationId !== ctx.workspace.organizationId) {
+    throw new NotFoundError('保証契約が見つかりません。');
+  }
+
+  // 対象が「その種別のもので、かつ自社のもの」であることを確認する。
+  // 画面は 3 種別をまとめて 1 つのセレクトに並べているため、
+  // 種別と対象の組み合わせはここで必ず検証する。
+  const organizationId = ctx.workspace.organizationId;
+  const subjectExists = async (): Promise<boolean> => {
+    if (subjectType === 'metric') {
+      const rows = await db.select('metrics', {
+        where: { id: subjectId, organizationId },
+        limit: 1,
+      });
+      return rows.length > 0;
+    }
+    if (subjectType === 'organization_unit') {
+      const rows = await db.select('units', { where: { id: subjectId, organizationId }, limit: 1 });
+      return rows.length > 0;
+    }
+    if (subjectType === 'reporting_period') {
+      const rows = await db.select('periods', {
+        where: { id: subjectId, organizationId },
+        limit: 1,
+      });
+      return rows.length > 0;
+    }
+    return false;
+  };
+  if (!(await subjectExists())) {
+    throw new AuthorizationError('選んだ種別と対象の組み合わせが正しくありません。');
+  }
+
+  // 同じ対象の有効な許諾が既にあるなら二重に作らない（二重送信対策も兼ねる）
+  const existing = await db.select('grants', {
+    where: { engagementId, subjectType, subjectId, revokedAt: { isNull: true } },
+    limit: 1,
+  });
+  if (existing.length > 0) {
+    if (existing[0]!.includesEvidence !== includesEvidence) {
+      await db.update('grants', existing[0]!.id, {
+        includesEvidence,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    revalidatePath('/enterprise/settings');
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const id = fid('client_access_grant', `${engagementId}/${subjectType}/${subjectId}/${now}`);
+  await db.insert('grants', [
+    {
+      id,
+      engagementId,
+      clientOrganizationId: ctx.workspace.organizationId,
+      assuranceFirmId: engagement.assuranceFirmId,
+      subjectType,
+      subjectId,
+      includesEvidence,
+      grantedBy: ctx.userId,
+      grantedAt: now,
+      revokedBy: null,
+      revokedAt: null,
+      note: null,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: ctx.userId,
+      updatedBy: ctx.userId,
+    },
+  ]);
+
+  const { recordAuditEvent } = await import('@/lib/audit/logger');
+  await recordAuditEvent(db, ctx, {
+    eventType: 'access_grant_created',
+    resourceType: 'client_access_grant',
+    resourceId: id,
+    engagementId,
+    afterSummary: `${subjectType} / ${subjectId}${includesEvidence ? '（Evidence 共有あり）' : ''}`,
+  });
+
+  revalidatePath('/enterprise/settings');
+}
 
 export async function toggleGrantAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();

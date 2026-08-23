@@ -311,6 +311,11 @@ export async function createSnapshot(
   await db.insert('snapshots', [snapshot]);
   await db.insert('snapshotItems', snapshotItems);
 
+  // 母集団は「Snapshot から構成した固定の集合」（CLAUDE.md §8）。
+  // Snapshot を固定しても母集団が作られないと、サンプリング画面が
+  // 「母集団が作成されていません」のままで手続へ進めない。
+  await buildPopulationFromSnapshot(db, ctx, engagement, snapshot, snapshotItems, dataPoints);
+
   await recordAuditEvent(db, ctx, {
     eventType: 'snapshot_created',
     resourceType: 'assurance_snapshot',
@@ -320,6 +325,93 @@ export async function createSnapshot(
   });
 
   return snapshot;
+}
+
+/**
+ * Snapshot から母集団を構成する。
+ *
+ * 固定した各項目をそのまま母集団項目にし、組織名を層（stratum）に使う。
+ * 網羅性の突合として、Scope 上「対象」の件数と実際に入った件数の差を欠損として持つ。
+ */
+async function buildPopulationFromSnapshot(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  engagement: Engagement,
+  snapshot: AssuranceSnapshot,
+  snapshotItems: AssuranceSnapshotItem[],
+  dataPoints: DataPoint[],
+): Promise<Population | null> {
+  if (snapshotItems.length === 0) return null;
+
+  const existing = await db.select('populations', {
+    where: { engagementId: engagement.id },
+    orderBy: { column: 'versionNo', dir: 'desc' },
+    limit: 1,
+  });
+  const versionNo = (existing[0]?.versionNo ?? 0) + 1;
+  const populationId = fid('population', `${engagement.id}/${snapshot.id}`);
+
+  const unitIds = [...new Set(dataPoints.map((dp) => dp.unitId))];
+  const units =
+    unitIds.length > 0 ? await db.select('units', { where: { id: { in: unitIds } } }) : [];
+  const unitById = new Map(units.map((u) => [u.id, u]));
+
+  const items: PopulationItem[] = [];
+  for (const item of snapshotItems) {
+    const dp = dataPoints.find((d) => d.id === item.sourceId);
+    if (!dp) continue;
+    items.push({
+      id: fid('population_item', `${populationId}/${dp.id}`),
+      populationId,
+      engagementId: engagement.id,
+      assuranceFirmId: engagement.assuranceFirmId,
+      snapshotItemId: item.id,
+      sourceDataPointId: dp.id,
+      metricId: dp.metricId,
+      unitId: dp.unitId,
+      value: Number(item.valueSnapshot.value ?? 0),
+      unitOfMeasure: String(item.valueSnapshot.unitOfMeasure ?? ''),
+      stratum: unitById.get(dp.unitId)?.name ?? null,
+      excluded: false,
+      exclusionReason: null,
+    });
+  }
+  if (items.length === 0) return null;
+
+  const scopes = await db.select('engagementScopes', {
+    where: { engagementId: engagement.id, inclusion: 'included' },
+  });
+
+  const population: Population = {
+    id: populationId,
+    engagementId: engagement.id,
+    assuranceFirmId: engagement.assuranceFirmId,
+    snapshotId: snapshot.id,
+    name: `保証対象 Data Point 母集団（${snapshot.label}）`,
+    versionNo,
+    filter: {
+      metricIds: [...new Set(items.map((i) => i.metricId))],
+      unitIds: [...new Set(items.map((i) => i.unitId))],
+      reportingPeriodIds: [...new Set(dataPoints.map((dp) => dp.reportingPeriodId))],
+      minValue: null,
+      maxValue: null,
+    },
+    itemCount: items.length,
+    totalValue: Math.round(items.reduce((sum, i) => sum + i.value, 0) * 1000) / 1000,
+    missingCount: Math.max(0, scopes.length - items.length),
+    duplicateCount: 0,
+    excludedCount: 0,
+    reconciliationNote:
+      'Snapshot 固定時点の共有済み Data Point を母集団とした。差異は未承認または許諾範囲外による。',
+    completenessProcedureNote:
+      'Scope 上「対象」の件数と母集団件数を突合し、差分を欠損として記録した。',
+    createdAt: snapshot.frozenAt,
+    createdBy: ctx.userId,
+  };
+
+  await db.insert('populations', [population]);
+  await db.insert('populationItems', items);
+  return population;
 }
 
 /**

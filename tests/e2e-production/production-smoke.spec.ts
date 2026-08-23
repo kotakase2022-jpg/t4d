@@ -230,3 +230,44 @@ test('本番: 多言語・多形式のファイルを一括取込して AI が�
   // Shift_JIS のファイルが文字化けせずに読めている
   await expect(page.locator('#t4d-main')).toContainText('使用量');
 });
+
+test('本番: 企業が監査法人へアクセス許諾を新規付与できる', async ({ page }) => {
+  await prodLogin(page, '青海 太郎');
+  await page.goto(`${BASE}/enterprise/settings`);
+
+  const form = page.locator('form', { hasText: '許諾する' });
+  await expect(form, '許諾を新規付与するフォームが無い').toBeVisible();
+
+  await form.locator('select[name="subjectType"]').selectOption('metric');
+  await form.locator('select[name="subjectId"]').selectOption({ label: '水使用量' });
+  await form.getByRole('button', { name: '許諾する' }).click();
+  await page.waitForLoadState('networkidle');
+
+  await expect(page.locator('tr', { hasText: '水使用量' }).first()).toContainText('有効');
+});
+
+test('本番: 通知を既読にできる', async ({ page }) => {
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/notifications`);
+
+  const unreadBefore = await page.getByText('未読', { exact: true }).count();
+  expect(unreadBefore, '未読の通知が必要').toBeGreaterThan(0);
+
+  await page.getByRole('button', { name: '既読にする' }).first().click();
+  await page.waitForLoadState('networkidle');
+
+  expect(await page.getByText('未読', { exact: true }).count()).toBe(unreadBefore - 1);
+});
+
+test('本番: 入力の誤りが理由付きで画面に出る（digest だけにならない）', async ({ page }) => {
+  await prodLogin(page, '青海 太郎');
+  await page.goto(`${BASE}/enterprise/settings`);
+
+  const form = page.locator('form', { hasText: '許諾する' });
+  await form.locator('select[name="subjectType"]').selectOption('reporting_period');
+  await form.locator('select[name="subjectId"]').selectOption({ label: 'Scope1 排出量' });
+  await form.getByRole('button', { name: '許諾する' }).click();
+
+  await page.waitForURL(/error=/);
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('正しくありません');
+});

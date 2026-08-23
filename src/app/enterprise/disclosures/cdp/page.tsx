@@ -213,7 +213,8 @@ export default async function CdpWorkspacePage({
               </form>
             )}
             <Button variant="outline" size="sm" asChild>
-              <a href="/api/exports/cdp?format=xlsx" download>
+              {/* 期間を渡さないと常に collecting 期間が出力され、画面の選択と食い違う */}
+              <a href={`/api/exports/cdp?period=${workspace.period.id}&format=xlsx`} download>
                 <Download aria-hidden="true" />
                 XLSX
               </a>

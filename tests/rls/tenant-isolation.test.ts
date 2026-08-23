@@ -558,6 +558,47 @@ describe('10. URL 直打ち相当（ID 指定の単発取得）でも遮断さ�
     expect(rows[0]?.shared_with_client).toBe(true);
   });
 
+  it('他テナント名義の監査ログは書けない', async () => {
+    // 追記専用なので、混ぜられた偽の行は後から消せない。
+    const denied = await h.expectDenied(
+      ENT_A_ADMIN,
+      `insert into audit_events (id, actor_user_id, actor_organization_id, event_type, resource_type, created_at)
+       values (gen_random_uuid(), $1, $2, 'data_updated', 'data_point', now())`,
+      [ENT_A_ADMIN, ORG_IDS.soten],
+    );
+    expect(denied, '他組織名義の監査ログを書けてしまう').not.toBeNull();
+  });
+
+  it('参加していない案件の監査ログは書けない', async () => {
+    const denied = await h.expectDenied(
+      ENT_A_ADMIN,
+      `insert into audit_events (id, actor_user_id, actor_organization_id, engagement_id, event_type, resource_type, created_at)
+       values (gen_random_uuid(), $1, $2, $3, 'data_updated', 'data_point', now())`,
+      [ENT_A_ADMIN, ORG_IDS.aomi, ENGAGEMENT_IDS.other],
+    );
+    expect(denied).not.toBeNull();
+  });
+
+  it('自分の組織名義の監査ログは書ける（正常系を壊していない）', async () => {
+    await h.asUser(
+      ENT_A_ADMIN,
+      `insert into audit_events (id, actor_user_id, actor_organization_id, event_type, resource_type, created_at)
+       values (gen_random_uuid(), $1, $2, 'data_updated', 'data_point', now())`,
+      [ENT_A_ADMIN, ORG_IDS.aomi],
+    );
+  });
+
+  it('許諾行のクライアントは案件のクライアントと一致していなければ作れない', async () => {
+    const denied = await h.expectDenied(
+      ENT_A_ADMIN,
+      `insert into client_access_grants
+         (id, engagement_id, client_organization_id, assurance_firm_id, subject_type, subject_id, includes_evidence, granted_by, granted_at)
+       values (gen_random_uuid(), $1, $2, $3, 'metric', gen_random_uuid(), false, $4, now())`,
+      [ENGAGEMENT_IDS.main, ORG_IDS.soten, ORG_IDS.aoba, ENT_A_ADMIN],
+    );
+    expect(denied).not.toBeNull();
+  });
+
   it('監査法人はクライアントの PBC 回答本文を書き換えられない', async () => {
     // CLAUDE.md §0.3「監査法人はクライアント原本を更新しない」。
     // 受領判定（decision）だけが監査法人側の操作。

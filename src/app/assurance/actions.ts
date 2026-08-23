@@ -1,10 +1,16 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { runAi } from '@/lib/ai';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { requireAssuranceContext } from '@/lib/auth/session';
-import { assertCan, assertEngagementMember, NotFoundError } from '@/lib/authorization/can';
+import {
+  assertCan,
+  assertEngagementMember,
+  AuthorizationError,
+  NotFoundError,
+} from '@/lib/authorization/can';
 import { fid } from '@/lib/fixtures/ids';
 import { getDb } from '@/lib/repositories';
 import {
@@ -14,7 +20,14 @@ import {
   detectSnapshotChanges,
   loadEngagement,
 } from '@/lib/services/assurance';
-import type { SamplingMethod, SignoffStage } from '@/types/domain';
+import { ASSURANCE_ROLES } from '@/types/domain';
+import type {
+  AssuranceLevel,
+  AssuranceRole,
+  Engagement,
+  SamplingMethod,
+  SignoffStage,
+} from '@/types/domain';
 
 /** 監査法人ワークスペースの Server Actions。 */
 
@@ -580,4 +593,195 @@ export async function summarizeChangesAction(formData: FormData): Promise<void> 
   });
 
   revalidatePath(`${base(engagementId)}/data-room`);
+}
+
+// ----------------------------------------------------------------------
+// 保証契約そのものの管理（作成・チーム）
+// ----------------------------------------------------------------------
+
+/**
+ * 新しい保証契約を起票する。
+ *
+ * 監査法人が契約を受注しても案件を作れないと、Fixture の 1 件を眺めるだけになる。
+ * クライアントは **既に取引のある企業**（自法人の既存案件のクライアント）に限る。
+ * 全企業の一覧を監査法人へ見せるとテナント分離が崩れるため、ここは広げない。
+ */
+export async function createEngagementAction(formData: FormData): Promise<void> {
+  const ctx = await requireAssuranceContext();
+  assertCan(ctx, 'assurance.engagement.manage');
+  const db = await getDb();
+
+  const clientOrganizationId = String(formData.get('clientOrganizationId') ?? '');
+  const clientReportingPeriodId = String(formData.get('clientReportingPeriodId') ?? '');
+  const code = String(formData.get('code') ?? '').trim();
+  const name = String(formData.get('name') ?? '').trim();
+  const assuranceLevel = String(formData.get('assuranceLevel') ?? 'limited') as AssuranceLevel;
+  const frameworkKey = String(formData.get('frameworkKey') ?? 'ssbj') as Engagement['frameworkKey'];
+  const plannedStartDate = String(formData.get('plannedStartDate') ?? '');
+  const deadlineDate = String(formData.get('deadlineDate') ?? '');
+
+  if (!clientOrganizationId || !clientReportingPeriodId || !code || !name) {
+    throw new AuthorizationError('クライアント・期間・案件コード・案件名は必須です。');
+  }
+  if (plannedStartDate && deadlineDate && deadlineDate < plannedStartDate) {
+    throw new AuthorizationError('期限は開始日より後の日付にしてください。');
+  }
+
+  // 取引のあるクライアントに限る（アサインされている案件から導く）
+  const firmId = ctx.workspace.organizationId;
+  const existing = await db.select('engagements', { where: { assuranceFirmId: firmId } });
+  const knownClients = new Set(
+    existing.filter((e) => ctx.engagementIds.includes(e.id)).map((e) => e.clientOrganizationId),
+  );
+  if (!knownClients.has(clientOrganizationId)) {
+    throw new AuthorizationError('取引のあるクライアントを選んでください。');
+  }
+  // 期間はそのクライアントのものであること
+  const periods = await db.select('periods', {
+    where: { id: clientReportingPeriodId, organizationId: clientOrganizationId },
+    limit: 1,
+  });
+  if (periods.length === 0) {
+    throw new AuthorizationError('選んだ期間はそのクライアントのものではありません。');
+  }
+  if (existing.some((e) => e.code === code)) {
+    throw new AuthorizationError('同じ案件コードが既にあります。');
+  }
+
+  const now = new Date().toISOString();
+  const engagementId = fid('engagement', `${firmId}/${code}`);
+  await db.insert('engagements', [
+    {
+      id: engagementId,
+      assuranceFirmId: firmId,
+      clientOrganizationId,
+      clientReportingPeriodId,
+      code,
+      name,
+      assuranceLevel,
+      frameworkKey,
+      status: 'planning',
+      plannedStartDate: plannedStartDate || now.slice(0, 10),
+      deadlineDate: deadlineDate || now.slice(0, 10),
+      partnerUserId: null,
+      managerUserId: null,
+      materialityBasis: null,
+      materialityValue: null,
+      materialityUnit: null,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: ctx.userId,
+      updatedBy: ctx.userId,
+    },
+  ]);
+
+  // 起票した本人をメンバーにしないと、自分で作った案件が見えない
+  await db.insert('engagementMembers', [
+    {
+      id: fid('engagement_member', `${engagementId}/${ctx.userId}`),
+      engagementId,
+      assuranceFirmId: firmId,
+      userId: ctx.userId,
+      roleKey: 'assurance_manager',
+      assignedAt: now,
+      assignedBy: ctx.userId,
+      removedAt: null,
+    },
+  ]);
+
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_created',
+    resourceType: 'engagement',
+    resourceId: engagementId,
+    engagementId,
+    afterSummary: `${code} ${name}`,
+  });
+
+  revalidatePath('/assurance/engagements');
+  redirect(`${base(engagementId)}/overview`);
+}
+
+/** 案件のチームを変更する（追加・解除） */
+export async function assignEngagementMemberAction(formData: FormData): Promise<void> {
+  const ctx = await requireAssuranceContext();
+  assertCan(ctx, 'assurance.engagement.manage');
+  const db = await getDb();
+
+  const engagementId = String(formData.get('engagementId') ?? '');
+  assertEngagementMember(ctx, engagementId);
+
+  const engagement = await db.findById('engagements', engagementId);
+  if (!engagement || engagement.assuranceFirmId !== ctx.workspace.organizationId) {
+    throw new NotFoundError('案件が見つかりません。');
+  }
+
+  const remove = String(formData.get('remove') ?? '') === 'true';
+  const memberId = String(formData.get('memberId') ?? '');
+  const now = new Date().toISOString();
+
+  if (remove) {
+    const member = await db.findById('engagementMembers', memberId);
+    if (!member || member.engagementId !== engagementId) {
+      throw new NotFoundError('メンバーが見つかりません。');
+    }
+    if (member.userId === ctx.userId) {
+      throw new AuthorizationError('自分自身をチームから外すことはできません。');
+    }
+    await db.update('engagementMembers', memberId, { removedAt: now });
+    await recordAuditEvent(db, ctx, {
+      eventType: 'data_updated',
+      resourceType: 'engagement_member',
+      resourceId: memberId,
+      engagementId,
+      afterSummary: 'チームから解除',
+    });
+    revalidatePath(`${base(engagementId)}/overview`);
+    return;
+  }
+
+  const userId = String(formData.get('userId') ?? '');
+  const roleKey = String(formData.get('roleKey') ?? '') as AssuranceRole;
+  if (!userId || !ASSURANCE_ROLES.includes(roleKey)) {
+    throw new AuthorizationError('担当者と役割を選んでください。');
+  }
+
+  // 自法人のメンバーだけをアサインできる
+  const memberships = await db.select('memberships', {
+    where: { organizationId: ctx.workspace.organizationId, userId },
+    limit: 1,
+  });
+  if (memberships.length === 0) {
+    throw new AuthorizationError('自法人のメンバーだけをアサインできます。');
+  }
+
+  const already = await db.select('engagementMembers', { where: { engagementId, userId } });
+  const active = already.find((m) => m.removedAt === null);
+  if (active) {
+    await db.update('engagementMembers', active.id, { roleKey });
+  } else if (already.length > 0) {
+    await db.update('engagementMembers', already[0]!.id, { removedAt: null, roleKey });
+  } else {
+    await db.insert('engagementMembers', [
+      {
+        id: fid('engagement_member', `${engagementId}/${userId}`),
+        engagementId,
+        assuranceFirmId: engagement.assuranceFirmId,
+        userId,
+        roleKey,
+        assignedAt: now,
+        assignedBy: ctx.userId,
+        removedAt: null,
+      },
+    ]);
+  }
+
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_updated',
+    resourceType: 'engagement_member',
+    resourceId: engagementId,
+    engagementId,
+    afterSummary: `${roleKey} をアサイン`,
+  });
+
+  revalidatePath(`${base(engagementId)}/overview`);
 }

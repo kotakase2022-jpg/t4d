@@ -24,9 +24,25 @@ export interface ExportSheet<T> {
 // CSV
 // ----------------------------------------------------------------------
 
+/**
+ * 表計算ソフトが数式として解釈する先頭文字。
+ *
+ * `=cmd|...` のような文字列をそのまま出すと、CSV を開いた相手の環境で
+ * 数式として実行されうる（数式インジェクション）。企業が入力した文字列が
+ * 監査法人の手元で開かれる経路があるため、出力側で無害化する。
+ */
+const FORMULA_TRIGGERS = ['=', '+', '-', '@', '\t', '\r'];
+
 function csvCell(value: string | number | null): string {
   if (value === null || value === undefined) return '';
-  const text = String(value);
+  // 数値はそのまま出す（負数を壊さない）
+  if (typeof value === 'number') return String(value);
+
+  let text = String(value);
+  if (text.length > 0 && FORMULA_TRIGGERS.includes(text[0]!)) {
+    // 先頭に ' を付けると、値は読めるまま数式として評価されなくなる
+    text = `'${text}`;
+  }
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

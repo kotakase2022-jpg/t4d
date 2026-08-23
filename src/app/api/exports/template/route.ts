@@ -9,7 +9,7 @@ import { buildTemplateWorkbook } from '@/lib/services/data-entry';
  * 標準入力テンプレート（Excel）のダウンロード（DATA-P0-004）。
  * 記入後はそのまま「データ収集」へドロップすれば再取込できる標準形で出す。
  */
-export async function GET() {
+export async function GET(request: Request) {
   const session = await getSession();
   const ctx = session?.context;
   if (!ctx || ctx.workspace.organizationType !== 'enterprise') {
@@ -26,7 +26,11 @@ export async function GET() {
     db.select('units', { where: { organizationId, deletedAt: { isNull: true } } }),
     db.select('periods', { where: { organizationId } }),
   ]);
+  // 画面で選んでいる期間を優先する。渡されないと常に collecting 期間になり、
+  // 過年度を見ているときにテンプレートだけ別の年度で出てしまう。
+  const periodId = new URL(request.url).searchParams.get('period');
   const period =
+    periods.find((p) => p.id === periodId) ??
     periods.find((p) => p.status === 'collecting') ??
     periods.sort((a, b) => (a.endDate < b.endDate ? 1 : -1))[0];
   if (!period) return NextResponse.json({ error: 'no_period' }, { status: 404 });

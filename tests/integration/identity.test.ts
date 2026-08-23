@@ -151,3 +151,28 @@ describe('招待のライフサイクル', () => {
     expect(otherList.find((i) => i.id === invitation.id)).toBeUndefined();
   });
 });
+
+describe('招待できるロールの検証', () => {
+  /**
+   * 画面のロール一覧は見た目の制限にすぎない。
+   * 企業テナントへ監査法人ロールや platform_admin を混ぜられると、
+   * 受諾した時点でその権限を持ってしまう。
+   */
+  it('企業ワークスペースで監査法人ロールを指定した招待は拒否される', async () => {
+    await expect(
+      createInvitation(db, admin(), {
+        email: 'invalid-role@demo.local',
+        roleKeys: ['assurance_manager'] as never,
+      }),
+    ).rejects.toThrow(/指定できないロール/);
+  });
+
+  it('platform_admin を混ぜた招待は拒否される', async () => {
+    await expect(
+      createInvitation(db, admin(), {
+        email: 'invalid-role2@demo.local',
+        roleKeys: ['viewer', 'platform_admin'] as never,
+      }),
+    ).rejects.toThrow(/指定できないロール/);
+  });
+});

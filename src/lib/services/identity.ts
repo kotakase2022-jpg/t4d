@@ -4,6 +4,7 @@ import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
 import { randomUUID } from 'node:crypto';
 import { fid } from '@/lib/fixtures/ids';
+import { ASSURANCE_ROLES, ENTERPRISE_ROLES } from '@/types/domain';
 import type { DbClient } from '@/lib/repositories/types';
 import type { AuthorizationContext, Invitation, Profile, RoleKey, Uuid } from '@/types/domain';
 
@@ -85,6 +86,15 @@ export async function createInvitation(
   }
   if (input.roleKeys.length === 0) {
     throw new Error('ロールを 1 つ以上選んでください。');
+  }
+  // 画面のロール一覧は見た目の制限にすぎない。サーバー側で必ず確かめる。
+  // 企業テナントへ監査法人ロールや platform_admin を混ぜられると、
+  // 受諾した時点でその権限を持ってしまう。
+  const allowedRoles: readonly string[] =
+    ctx.workspace.organizationType === 'assurance_firm' ? ASSURANCE_ROLES : ENTERPRISE_ROLES;
+  const invalid = input.roleKeys.filter((role) => !allowedRoles.includes(role));
+  if (invalid.length > 0) {
+    throw new Error(`このワークスペースでは指定できないロールです: ${invalid.join(', ')}`);
   }
   const organizationId = ctx.workspace.organizationId;
 

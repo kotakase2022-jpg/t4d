@@ -48,7 +48,7 @@ export default async function ImportsPage() {
               title="ファイルを取り込む"
               action={
                 <Button variant="outline" size="xs" asChild>
-                  <a href="/api/exports/template" download>
+                  <a href={`/api/exports/template?period=${shell.currentPeriod.id}`} download>
                     <FileSpreadsheet aria-hidden="true" />
                     標準テンプレートをダウンロード
                   </a>

@@ -129,3 +129,40 @@ describe('日時フォーマット（Asia/Tokyo 固定・DB は UTC）', () => {
     expect(formatPercent(15.25)).toBe('15.3%');
   });
 });
+
+describe('CSV の数式インジェクション対策', () => {
+  /**
+   * 企業が入力した文字列は、CSV として監査法人の手元で開かれる。
+   * `=` などで始まる値をそのまま出すと、開いた環境で数式として評価されうる。
+   */
+  const sheet = {
+    name: 'テスト',
+    columns: [
+      { key: 'name', header: '指標', value: (r: { name: string }) => r.name },
+      { key: 'value', header: '値', value: () => -12.5 },
+    ],
+    rows: [
+      { name: '=1+1' },
+      { name: '+HYPERLINK("http://example.test")' },
+      { name: '-2+3' },
+      { name: '@SUM(A1)' },
+      { name: '通常の文字列' },
+    ],
+  };
+
+  it('数式として解釈される先頭文字を無害化する', () => {
+    const csv = toCsv(sheet);
+    expect(csv).toContain("'=1+1");
+    expect(csv).toContain("'+HYPERLINK");
+    expect(csv).toContain("'-2+3");
+    expect(csv).toContain("'@SUM(A1)");
+  });
+
+  it('通常の文字列と数値（負数を含む）は変えない', () => {
+    const csv = toCsv(sheet);
+    expect(csv).toContain('通常の文字列');
+    expect(csv).not.toContain("'通常の文字列");
+    expect(csv).toContain('-12.5');
+    expect(csv).not.toContain("'-12.5");
+  });
+});

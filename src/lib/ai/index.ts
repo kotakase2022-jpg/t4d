@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
+import { assertCan } from '@/lib/authorization/can';
 import { getOpenAiConfig } from '@/lib/config';
 import { fid } from '@/lib/fixtures/ids';
 import type { DbClient } from '@/lib/repositories/types';
@@ -215,6 +216,14 @@ export async function recordAiDecision(
   if (!target || target.organizationId !== ctx.workspace.organizationId) {
     throw new Error('AI 実行が見つかりません。');
   }
+
+  // 採否は「誰がいつ AI 下書きを採用しなかったか」という監査証跡になる。
+  // 生成と同じ権限を要求する（CLAUDE.md §6「AI 出力は人の操作で確定する」の
+  // 「人」を定義しないと、閲覧しかできないロールが証跡を確定できてしまう）。
+  assertCan(
+    ctx,
+    target.featureType.startsWith('assurance') ? 'assurance.ai.run' : 'enterprise.ai.run',
+  );
 
   const now = new Date().toISOString();
   await db.update('aiRuns', aiRunId, {

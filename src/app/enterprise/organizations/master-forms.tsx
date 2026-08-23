@@ -171,9 +171,41 @@ function MetricForm({ metric, onDone }: { metric?: MetricDefinition; onDone: () 
             defaultValue={
               metric?.yoyWarningRatio == null
                 ? ''
-                : String(Math.round(metric.yoyWarningRatio * 100))
+                : // 整数へ丸めると、再保存のたびに値が変わってしまう
+                  String(Number((metric.yoyWarningRatio * 100).toFixed(4)))
             }
             placeholder="空欄で判定なし"
+          />
+        </Field>
+        <Field label="下限（任意）">
+          <Input
+            name="minValue"
+            inputMode="decimal"
+            defaultValue={metric?.minValue ?? ''}
+            placeholder="空欄で判定なし"
+          />
+        </Field>
+        <Field label="上限（任意）">
+          <Input
+            name="maxValue"
+            inputMode="decimal"
+            defaultValue={metric?.maxValue ?? ''}
+            placeholder="空欄で判定なし"
+          />
+        </Field>
+        {/* 比率指標は分子・分母の指標コードを持つ（検証で分子≦分母を見る） */}
+        <Field label="分子の指標コード（比率のみ）">
+          <Input
+            name="numeratorMetricCode"
+            defaultValue={metric?.numeratorMetricCode ?? ''}
+            placeholder="例 managers_female"
+          />
+        </Field>
+        <Field label="分母の指標コード（比率のみ）">
+          <Input
+            name="denominatorMetricCode"
+            defaultValue={metric?.denominatorMetricCode ?? ''}
+            placeholder="例 managers_total"
           />
         </Field>
         <Field label="算定式" span={2}>

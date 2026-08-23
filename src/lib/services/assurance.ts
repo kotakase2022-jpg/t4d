@@ -16,6 +16,7 @@ import type {
   AssuranceSnapshotItem,
   AuthorizationContext,
   DataPoint,
+  IsoDateTime,
   Engagement,
   GrantSubjectType,
   MetricDefinition,
@@ -657,6 +658,8 @@ export interface SampleTestView {
   reviewedBy: Uuid | null;
   conclusionDraft: string | null;
   workpaperRef: string | null;
+  /** 調書そのものの更新日時。画面の描画時刻と取り違えない */
+  updatedAt: IsoDateTime;
   completedProcedureIds: Uuid[];
   hasException: boolean;
   selectionReason: string;
@@ -729,6 +732,7 @@ export async function loadTestingWorkspace(
       reviewedBy: test.reviewedBy,
       conclusionDraft: test.conclusionDraft,
       workpaperRef: test.workpaperRef,
+      updatedAt: test.updatedAt,
       completedProcedureIds: testResults.map((r) => r.procedureId),
       hasException: testResults.some((r) => r.result === 'exception'),
       selectionReason: item.selectionReason,

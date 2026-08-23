@@ -486,7 +486,7 @@ export default async function TestingPage({
                       ).length
                     } / ${procedures.filter((p) => p.required).length}`}
                   />
-                  <Row label="更新" value={formatJst(new Date().toISOString())} />
+                  <Row label="更新" value={formatJst(selected.updatedAt)} />
                 </dl>
               </Card>
             )}

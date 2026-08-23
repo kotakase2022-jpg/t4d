@@ -558,6 +558,81 @@ describe('10. URL 直打ち相当（ID 指定の単発取得）でも遮断さ�
     expect(rows[0]?.shared_with_client).toBe(true);
   });
 
+  it('AI 実行権限の無いロールは AI 出力の採否を確定できない', async () => {
+    // 採否は「誰がいつ AI 下書きを採用しなかったか」という監査証跡になる。
+    const runId = await seedAiRun();
+
+    // RLS の UPDATE は条件に合わないと「0 行更新」になり、例外にはならない。
+    // 例外の有無ではなく、値が変わっていないことで判定する。
+    await h.asUser(ENT_A_SITE, 'update ai_runs set status = $1 where id = $2', ['rejected', runId]);
+
+    const [row] = await h.asSuperuser<{ status: string }>(
+      'select status from ai_runs where id = $1',
+      [runId],
+    );
+    expect(row!.status, '権限の無いロールが AI の採否を確定できてしまう').toBe('succeeded');
+  });
+
+  it('AI 実行権限のあるロールは採否を確定できる', async () => {
+    const runId = await seedAiRun();
+    await h.asUser(ENT_A_ADMIN, 'update ai_runs set status = $1 where id = $2', [
+      'accepted',
+      runId,
+    ]);
+    const [after] = await h.asSuperuser<{ status: string }>(
+      'select status from ai_runs where id = $1',
+      [runId],
+    );
+    expect(after!.status).toBe('accepted');
+  });
+
+  it('同じ項目を何度直しても、Snapshot 変更は 1 行に畳まれる', async () => {
+    // 版が増えるたびに行が積み上がると、監査人の「影響なし」評価が埋もれ、
+    // 変更の件数も実態より多く見える。
+    const [item] = await h.asSuperuser<{ id: string; source_id: string }>(
+      'select id, source_id from assurance_snapshot_items limit 1',
+    );
+    expect(item, 'Snapshot 項目が seed に必要').toBeTruthy();
+
+    const before = await h.asSuperuser<{ id: string }>(
+      "select id from snapshot_changes where snapshot_item_id = $1 and change_kind = 'version_added'",
+      [item!.id],
+    );
+
+    for (const value of [111, 222, 333]) {
+      await h.asSuperuser(
+        `insert into data_point_versions
+           (id, data_point_id, organization_id, version_no, value, unit_of_measure, status,
+            source_type, content_hash, created_at, created_by)
+         values (gen_random_uuid(), $1,
+                 (select organization_id from data_points where id = $1),
+                 (select coalesce(max(version_no), 0) + 1 from data_point_versions where data_point_id = $1),
+                 $2, 't', 'draft', 'manual', md5(random()::text), now(), null)`,
+        [item!.source_id, value],
+      );
+    }
+
+    const after = await h.asSuperuser<{ id: string; after_summary: string }>(
+      "select id, after_summary from snapshot_changes where snapshot_item_id = $1 and change_kind = 'version_added'",
+      [item!.id],
+    );
+    expect(after, '同じ項目の同種の変更は 1 行にまとまる').toHaveLength(1);
+    expect(after[0]!.after_summary, '最新の値で上書きされる').toContain('333');
+    expect(before.length).toBeLessThanOrEqual(1);
+  });
+
+  it('無関係な企業は他社案件の許諾を作れない', async () => {
+    // 許諾は企業と監査法人の唯一の接続点。共有範囲を第三者が広げられてはいけない。
+    const denied = await h.expectDenied(
+      ENT_B_ADMIN,
+      `insert into client_access_grants
+         (id, engagement_id, client_organization_id, assurance_firm_id, subject_type, subject_id, includes_evidence, granted_by, granted_at)
+       values (gen_random_uuid(), $1, $2, $3, 'metric', gen_random_uuid(), true, $4, now())`,
+      [ENGAGEMENT_IDS.main, ORG_IDS.aomi, ORG_IDS.aoba, ENT_B_ADMIN],
+    );
+    expect(denied).not.toBeNull();
+  });
+
   it('他テナント名義の監査ログは書けない', async () => {
     // 追記専用なので、混ぜられた偽の行は後から消せない。
     const denied = await h.expectDenied(
@@ -946,3 +1021,18 @@ describe('11. 本 QA で新たにアプリへ露出したテーブルの越権',
     expect(rows).toHaveLength(1);
   });
 });
+
+/** 検証用の AI 実行を 1 件作る（seed には無いため） */
+async function seedAiRun(): Promise<string> {
+  const [row] = await h.asSuperuser<{ id: string }>(
+    `insert into ai_runs
+       (id, organization_id, feature_type, provider, model, prompt_version,
+        input_reference_ids, output_json, source_references, confidence, warnings,
+        latency_ms, token_usage, estimated_cost_usd, status, created_at)
+     values (gen_random_uuid(), '${ORG_IDS.aomi}', 'cdpDraftGeneration', 'mock', 'mock-1', 'v1',
+             '{}', '{}'::jsonb, '[]'::jsonb, 0.8, '{}', 10,
+             '{"input":0,"output":0,"total":0}'::jsonb, 0, 'succeeded', now())
+     returning id`,
+  );
+  return row!.id;
+}

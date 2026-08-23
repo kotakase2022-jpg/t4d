@@ -7,7 +7,7 @@ import { recordAiDecision } from '@/lib/ai';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
-import { withUserFacingError } from '@/lib/errors/user-facing';
+import { ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
 import { getDb } from '@/lib/repositories';
@@ -230,16 +230,30 @@ export async function linkEvidenceAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const dataPointId = String(formData.get('dataPointId') ?? '');
-  const pageRaw = String(formData.get('page') ?? '');
-  await linkEvidence(db, ctx, {
-    dataPointId,
-    fileVersionId: String(formData.get('fileVersionId') ?? ''),
-    page: pageRaw ? Number(pageRaw) : null,
-    cellRef: (formData.get('cellRef') as string) || null,
-    note: (formData.get('note') as string) || null,
+  const pageRaw = String(formData.get('page') ?? '').trim();
+
+  await withUserFacingError(`/enterprise/data/${dataPointId}`, async () => {
+    // ページは正の整数のみ。数字以外は NaN のまま保存されて黙って消え、
+    // 小数は Supabase Mode で型エラーになる。
+    let page: number | null = null;
+    if (pageRaw !== '') {
+      const parsed = Number(pageRaw);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new ValidationError('ページは 1 以上の整数で入力してください。');
+      }
+      page = parsed;
+    }
+
+    await linkEvidence(db, ctx, {
+      dataPointId,
+      fileVersionId: String(formData.get('fileVersionId') ?? ''),
+      page,
+      cellRef: (formData.get('cellRef') as string) || null,
+      note: (formData.get('note') as string) || null,
+    });
+    revalidatePath(`/enterprise/data/${dataPointId}`);
+    revalidatePath('/enterprise/evidence');
   });
-  revalidatePath(`/enterprise/data/${dataPointId}`);
-  revalidatePath('/enterprise/evidence');
 }
 
 export async function uploadEvidenceAction(formData: FormData): Promise<void> {
@@ -623,18 +637,22 @@ export async function respondPbcAction(formData: FormData): Promise<void> {
 export async function createMetricAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  await createMetricDefinition(db, ctx, parseMetricInput(formGetter(formData)));
-  revalidatePath('/enterprise/organizations');
-  revalidatePath('/enterprise/settings');
+  await withUserFacingError('/enterprise/organizations', async () => {
+    await createMetricDefinition(db, ctx, parseMetricInput(formGetter(formData)));
+    revalidatePath('/enterprise/organizations');
+    revalidatePath('/enterprise/settings');
+  });
 }
 
 export async function updateMetricAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const metricId = String(formData.get('metricId') ?? '');
-  await updateMetricDefinition(db, ctx, metricId, parseMetricInput(formGetter(formData)));
-  revalidatePath('/enterprise/organizations');
-  revalidatePath('/enterprise/settings');
+  await withUserFacingError('/enterprise/organizations', async () => {
+    await updateMetricDefinition(db, ctx, metricId, parseMetricInput(formGetter(formData)));
+    revalidatePath('/enterprise/organizations');
+    revalidatePath('/enterprise/settings');
+  });
 }
 
 /** 報告年度を作る。作れないと翌年度の収集・開示に入れない。 */

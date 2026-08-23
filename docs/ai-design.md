@@ -65,15 +65,15 @@ Responses API の構造化出力・Zod スキーマ適合を検証）。
 
 ## 4. AI 出力の UI 表示
 
-| 表示                         | 実装                                                             |
-| ---------------------------- | ---------------------------------------------------------------- |
-| AI 生成 Badge                | `AiGeneratedBadge provider="openai"`                             |
-| Mock Badge                   | `AiGeneratedBadge provider="mock"` → 「Mock / AI未接続」         |
-| 参照元一覧                   | `ai_runs.source_references`                                      |
-| 対象年度                     | 参照元と実行コンテキストに含む                                   |
-| Confidence                   | パーセント表示                                                   |
-| 推測／不足                   | `warnings` / `missingInformation`                                |
-| 採用 / 編集して採用 / Reject | `recordAiDecision()` が `ai_feedback` と `ai_runs.status` へ記録 |
+| 表示                         | 実装                                                                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AI 生成 Badge                | `AiGeneratedBadge provider="openai"`                                                                                                                  |
+| Mock Badge                   | `AiGeneratedBadge provider="mock"` → 「Mock / AI未接続」                                                                                              |
+| 参照元一覧                   | `ai_runs.source_references`                                                                                                                           |
+| 対象年度                     | 参照元と実行コンテキストに含む                                                                                                                        |
+| Confidence                   | パーセント表示                                                                                                                                        |
+| 推測／不足                   | `warnings` / `missingInformation`                                                                                                                     |
+| 採用 / 編集して採用 / Reject | `recordAiDecision()` が `ai_runs` の status / reviewed_by / accepted_at / rejected_at と `audit_events` へ記録（`ai_feedback` は Phase 1 では未使用） |
 
 ## 5. 禁止事項と、それをどう担保しているか
 

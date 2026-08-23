@@ -8,6 +8,7 @@ import {
   can,
   NotFoundError,
 } from '@/lib/authorization/can';
+import { ValidationError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import {
   assertValidCommentBody,
@@ -331,16 +332,29 @@ export async function linkEvidence(
     throw new NotFoundError('Evidence ファイルが見つかりません。');
   }
 
+  // 同じファイル・同じページでも、参照するセルが違えば別の紐付け。
+  // ID にセル参照を含めないと、Demo Mode では同じ ID の行が増え、
+  // Supabase Mode では主キー衝突でエラーになる（DB の一意制約は cell_ref を含む）。
+  const page = input.page ?? null;
+  const cellRef = input.cellRef?.trim() || null;
+
+  const existing = await db.select('evidenceLinks', {
+    where: { targetType: 'data_point', targetId: dp.id, fileVersionId: input.fileVersionId },
+  });
+  if (existing.some((link) => link.page === page && link.cellRef === cellRef)) {
+    throw new ValidationError('この箇所は既に紐付いています。');
+  }
+
   const now = new Date().toISOString();
   await db.insert('evidenceLinks', [
     {
-      id: fid('evidence_link', `${dp.id}/${input.fileVersionId}/${input.page ?? 'x'}`),
+      id: fid('evidence_link', `${dp.id}/${input.fileVersionId}/${page ?? 'x'}/${cellRef ?? 'x'}`),
       organizationId: dp.organizationId,
       fileVersionId: input.fileVersionId,
       targetType: 'data_point',
       targetId: dp.id,
-      page: input.page ?? null,
-      cellRef: input.cellRef ?? null,
+      page,
+      cellRef,
       fragmentId: null,
       sourceUrl: null,
       coveragePeriodStart: null,

@@ -74,10 +74,24 @@ export interface MetricInput {
   reportingFrequency: 'annual' | 'quarterly' | 'monthly';
   responsibleDepartment: string | null;
   yoyWarningRatio: number | null;
+  /** 妥当な値の下限・上限。検証（範囲外チェック）で使う */
+  minValue: number | null;
+  maxValue: number | null;
+  /** 比率指標の分子・分母（指標コード） */
+  numeratorMetricCode: string | null;
+  denominatorMetricCode: string | null;
 }
 
 /** FormData から MetricInput を組み立てる（検証込み）。 */
 export function parseMetricInput(get: (key: string) => string): MetricInput {
+  const input = buildMetricInput(get);
+  if (input.minValue !== null && input.maxValue !== null && input.minValue > input.maxValue) {
+    throw new ValidationError('下限は上限以下にしてください。');
+  }
+  return input;
+}
+
+function buildMetricInput(get: (key: string) => string): MetricInput {
   return {
     code: requireText(get('code'), '指標コード', 40),
     name: requireText(get('name'), '指標名'),
@@ -99,8 +113,17 @@ export function parseMetricInput(get: (key: string) => string): MetricInput {
     responsibleDepartment: get('responsibleDepartment').trim() || null,
     yoyWarningRatio: (() => {
       const pct = optionalNumber(get('yoyWarningPercent'));
-      return pct === null ? null : pct / 100;
+      if (pct === null) return null;
+      // 「±%」なので負値は意味を持たない。0 も「変動を一切許さない」で使い道が無い。
+      if (pct <= 0 || pct > 1000) {
+        throw new ValidationError('前年変動許容は 0 より大きく 1000 以下の % で入力してください。');
+      }
+      return pct / 100;
     })(),
+    minValue: optionalNumber(get('minValue')),
+    maxValue: optionalNumber(get('maxValue')),
+    numeratorMetricCode: get('numeratorMetricCode').trim() || null,
+    denominatorMetricCode: get('denominatorMetricCode').trim() || null,
   };
 }
 
@@ -133,8 +156,8 @@ export async function createMetricDefinition(
     baseUnit: input.baseUnit,
     dataType: input.dataType,
     aggregationMethod: input.aggregationMethod,
-    numeratorMetricCode: null,
-    denominatorMetricCode: null,
+    numeratorMetricCode: input.numeratorMetricCode,
+    denominatorMetricCode: input.denominatorMetricCode,
     formula: input.formula,
     requiresEvidence: input.requiresEvidence,
     hqOnly: input.hqOnly,
@@ -142,8 +165,8 @@ export async function createMetricDefinition(
     reportingFrequency: input.reportingFrequency,
     responsibleDepartment: input.responsibleDepartment,
     yoyWarningRatio: input.yoyWarningRatio,
-    minValue: null,
-    maxValue: null,
+    minValue: input.minValue,
+    maxValue: input.maxValue,
     createdAt: now,
     updatedAt: now,
     createdBy: ctx.userId,
@@ -186,6 +209,10 @@ export async function updateMetricDefinition(
     reportingFrequency: input.reportingFrequency,
     responsibleDepartment: input.responsibleDepartment,
     yoyWarningRatio: input.yoyWarningRatio,
+    minValue: input.minValue,
+    maxValue: input.maxValue,
+    numeratorMetricCode: input.numeratorMetricCode,
+    denominatorMetricCode: input.denominatorMetricCode,
     updatedAt: now,
     updatedBy: ctx.userId,
   });

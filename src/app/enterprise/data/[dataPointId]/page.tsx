@@ -8,6 +8,7 @@ import {
   ValidationBadge,
 } from '@/components/shared/badges';
 import { CommentBox } from '@/components/shared/comment-box';
+import { FlashMessage } from '@/components/shared/flash';
 import { MentionText } from '@/components/shared/mention-text';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
@@ -263,6 +264,10 @@ export default async function DataPointDetailPage({
           </>
         }
       />
+
+      <div className="px-4 pt-3">
+        <FlashMessage searchParams={query} />
+      </div>
 
       <div className="grid grid-cols-3 gap-3 p-4">
         {/* 左: 定義と値 */}

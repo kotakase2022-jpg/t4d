@@ -130,28 +130,60 @@ test('メンション付きコメントで、相手に通知が届く', async ({
   expect((notes ?? []).length, 'メンションされた本人へ通知が作られている').toBeGreaterThan(0);
 });
 
-test('監査法人は許諾された Evidence を実際に開ける（Signed URL が発行される）', async ({
-  page,
-}) => {
-  // Storage の RLS は「パスに含まれる組織のメンバーか」しか見ないため、
-  // 監査法人（クライアント組織のメンバーではない）は自分の JWT では署名を発行できない。
-  // 許諾の判定は canReadEvidence() が済ませているので、そこを通った経路だけ通す。
+test('監査法人は許諾された Evidence の Signed URL を取得できる', async ({ page }) => {
+  // Storage の RLS は「パスに含まれる組織のメンバーか」しか見ない。
+  // 監査法人はクライアント組織のメンバーではないため、自分の JWT では署名を発行できず、
+  // 許諾があっても Evidence を開けなかった。
+  //
+  // Supabase Storage は「権限が無い」ときも「実体が無い」ときも Object not found を返す。
+  // 区別するために、**実体を置いてから**発行を試す。実体があるのに開けなければ権限の問題。
+  const db = admin();
+
+  const { data: engagement } = await db.from('engagements').select('id').limit(1).single();
+  const { data: items } = await db
+    .from('data_room_items')
+    .select('source_id')
+    .eq('engagement_id', engagement!.id)
+    .is('withdrawn_at', null);
+  const sourceIds = (items ?? []).map((i) => i.source_id as string);
+  expect(sourceIds.length, 'Data Room に共有された Data Point が seed に必要').toBeGreaterThan(0);
+
+  const { data: links } = await db
+    .from('evidence_links')
+    .select('file_version_id')
+    .eq('target_type', 'data_point')
+    .in('target_id', sourceIds)
+    .limit(1);
+  expect((links ?? []).length, 'Evidence が紐づいた行が seed に必要').toBeGreaterThan(0);
+  const fileVersionId = links![0]!.file_version_id as string;
+
+  const { data: version } = await db
+    .from('file_versions')
+    .select('storage_key, file_id')
+    .eq('id', fileVersionId)
+    .single();
+  const { data: file } = await db
+    .from('files')
+    .select('bucket')
+    .eq('id', version!.file_id as string)
+    .single();
+
+  // Fixture のファイルは実体を持たないので、検証用に置く（service role）
+  const upload = await db.storage
+    .from(file!.bucket as string)
+    .upload(version!.storage_key as string, new Blob([new Uint8Array([37, 80, 68, 70])]), {
+      contentType: 'application/pdf',
+      upsert: true,
+    });
+  expect(upload.error, `検証用ファイルを置けない: ${upload.error?.message}`).toBeNull();
+
   await login(page, 'assurance-manager@demo.local');
-
-  await page.goto('/assurance/engagements');
-  const engagementLink = page.locator('a[href^="/assurance/engagements/"]').first();
-  await expect(engagementLink).toBeVisible();
-  const href = (await engagementLink.getAttribute('href'))!;
-  const engagementId = href.split('/')[3]!;
-
-  await page.goto(`/assurance/engagements/${engagementId}/data-room`);
-  await expect(page.locator('#t4d-main')).toBeVisible();
-
-  const evidenceLink = page.locator('a[href*="/api/files/"]').first();
-  if ((await evidenceLink.count()) === 0) {
-    test.skip(true, 'この案件の Data Room に Evidence 付きの行が無い');
-  }
-  const fileHref = (await evidenceLink.getAttribute('href'))!;
-  const res = await page.request.get(fileHref, { maxRedirects: 0 });
-  expect([200, 302, 307], `Evidence を開けない (status=${res.status()})`).toContain(res.status());
+  const res = await page.request.get(
+    `/api/files/signed-url?fileVersionId=${fileVersionId}&engagementId=${engagement!.id}`,
+    { maxRedirects: 0 },
+  );
+  const body = res.status() >= 400 ? await res.text() : '';
+  expect([302, 307], `Evidence を開けない (status=${res.status()} body=${body})`).toContain(
+    res.status(),
+  );
 });

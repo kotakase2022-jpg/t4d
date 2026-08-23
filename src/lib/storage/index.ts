@@ -22,6 +22,14 @@ import type {
  * - Virus Scan の接続点を Interface 化する。
  */
 
+/** Storage に実体が無い（Fixture 由来など）。権限の問題とは区別する */
+export class StorageObjectMissingError extends Error {
+  constructor(key: string) {
+    super(`Storage に実体がありません: ${key}`);
+    this.name = 'StorageObjectMissingError';
+  }
+}
+
 export interface StorageAdapter {
   readonly kind: 'demo' | 'supabase';
   put(bucket: StorageBucket, key: string, bytes: Uint8Array, contentType: string): Promise<void>;
@@ -130,7 +138,14 @@ class SupabaseStorageAdapter implements StorageAdapter {
     const { data, error } = await client.storage
       .from(bucket)
       .createSignedUrl(key, expiresInSeconds);
-    if (error || !data) throw new Error(`Signed URL の発行に失敗しました: ${error?.message}`);
+    if (error || !data) {
+      // 実体が無い（Fixture 由来のファイルなど）ときは 500 にせず、
+      // 呼び出し側が「実体が無い」と分かる形で返す。
+      if (/not found/i.test(error?.message ?? '')) {
+        throw new StorageObjectMissingError(key);
+      }
+      throw new Error(`Signed URL の発行に失敗しました: ${error?.message}`);
+    }
     return data.signedUrl;
   }
 }

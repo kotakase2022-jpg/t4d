@@ -20,15 +20,18 @@ import {
   userId,
 } from '../src/lib/fixtures/dataset';
 import { LOCAL_DEMO_PASSWORD } from '../src/lib/fixtures/to-sql';
+import { localSupabaseEnv } from './local-supabase-env';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
-
-if (!url || !publishableKey) {
-  console.error(
-    'NEXT_PUBLIC_SUPABASE_URL と NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY が必要です。\n' +
-      '`supabase status` の値を渡してください。',
-  );
+// 接続情報は環境変数があればそれを、無ければ `supabase status` から読む。
+// キーの形をした文字列をリポジトリへ置かないための共通処理（scripts/local-supabase-env.ts）。
+let url = '';
+let publishableKey = '';
+try {
+  const env = localSupabaseEnv();
+  url = env.url;
+  publishableKey = env.publishableKey;
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 }
 

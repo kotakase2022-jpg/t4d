@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getDb } from '@/lib/repositories';
-import { createEvidenceSignedUrl } from '@/lib/storage';
+import { createEvidenceSignedUrl, StorageObjectMissingError } from '@/lib/storage';
 
 /**
  * Evidence の Signed URL を発行し、そのままリダイレクトする。
@@ -19,10 +19,27 @@ export async function GET(request: Request) {
   if (!fileVersionId) return NextResponse.json({ error: 'bad_request' }, { status: 400 });
 
   const db = await getDb();
-  const result = await createEvidenceSignedUrl(db, session.context, fileVersionId, {
-    expiresInSeconds: 120,
-    engagementId,
-  });
+  let result;
+  try {
+    result = await createEvidenceSignedUrl(db, session.context, fileVersionId, {
+      expiresInSeconds: 120,
+      engagementId,
+    });
+  } catch (error) {
+    // 権限は通ったが実体が無い場合。500 にすると「壊れている」ように見えるので、
+    // download 経路と同じく 410 と理由を返す。
+    if (error instanceof StorageObjectMissingError) {
+      return NextResponse.json(
+        {
+          error: 'content_unavailable',
+          message:
+            'ファイルの実体がありません（Fixture 由来のファイルは実体を持ちません）。取込からアップロードし直してください。',
+        },
+        { status: 410 },
+      );
+    }
+    throw error;
+  }
 
   if (!result) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 

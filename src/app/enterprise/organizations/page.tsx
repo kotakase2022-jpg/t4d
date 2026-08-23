@@ -1,4 +1,5 @@
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { FlashMessage } from '@/components/shared/flash';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
@@ -8,10 +9,18 @@ import { loadEnterpriseShell } from '@/lib/services/shell';
 import {
   AddMetricButton,
   AddUnitButton,
+  AddReportingPeriodButton,
   CreateCampaignButton,
   EditMetricButton,
   EditUnitButton,
 } from './master-forms';
+
+const PERIOD_STATUS_LABEL: Record<string, string> = {
+  planning: '計画中',
+  collecting: '収集中',
+  reviewing: 'レビュー中',
+  closed: 'クローズ',
+};
 
 export const metadata = { title: '組織・拠点' };
 
@@ -30,7 +39,12 @@ const CONSOLIDATION_LABEL: Record<string, string> = {
   excluded: '連結対象外',
 };
 
-export default async function OrganizationsPage() {
+export default async function OrganizationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const canManageOrg = can(shell.ctx, 'enterprise.org.manage');
   const canManageMetric = can(shell.ctx, 'enterprise.metric.manage');
@@ -81,6 +95,7 @@ export default async function OrganizationsPage() {
       />
 
       <div className="space-y-3 p-4">
+        <FlashMessage searchParams={query} />
         <Card className="overflow-hidden">
           <SectionTitle
             title={`組織階層（${shell.units.length}）`}
@@ -159,6 +174,41 @@ export default async function OrganizationsPage() {
                     </Badge>
                   </TD>
                   <TD>{formatJstDate(period.submissionDueDate)}</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <SectionTitle
+            title={`報告年度（${shell.periods.length}）`}
+            action={canManagePeriod ? <AddReportingPeriodButton /> : undefined}
+          />
+          <Table>
+            <THead>
+              <TR>
+                <TH>コード</TH>
+                <TH>表示名</TH>
+                <TH>期間</TH>
+                <TH>提出期限</TH>
+                <TH>状態</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {shell.periods.map((period) => (
+                <TR key={period.id}>
+                  <TD className="font-medium">{period.code}</TD>
+                  <TD>{period.label}</TD>
+                  <TD className="text-[12px] text-ink-muted">
+                    {period.startDate} 〜 {period.endDate}
+                  </TD>
+                  <TD className="text-[12px] text-ink-muted">{period.submissionDueDate ?? '—'}</TD>
+                  <TD>
+                    <Badge tone={period.status === 'collecting' ? 'brand' : 'neutral'}>
+                      {PERIOD_STATUS_LABEL[period.status]}
+                    </Badge>
+                  </TD>
                 </TR>
               ))}
             </TBody>

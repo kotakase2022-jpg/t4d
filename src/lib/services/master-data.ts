@@ -3,6 +3,7 @@ import 'server-only';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
 import { fid } from '@/lib/fixtures/ids';
+import { ValidationError } from '@/lib/errors/user-facing';
 import type { DbClient } from '@/lib/repositories/types';
 import {
   AGGREGATION_METHODS,
@@ -16,6 +17,8 @@ import {
   type MetricCategory,
   type MetricDataType,
   type MetricDefinition,
+  type PeriodStatus,
+  type ReportingPeriod,
   type OrganizationUnit,
   type UnitType,
   type Uuid,
@@ -423,12 +426,111 @@ export async function createCollectionCampaign(
   );
   await db.insert('campaignScopes', scopes);
 
+  // キャンペーンを作っただけでは誰も動けない。
+  // 対象の組織ごとにタスクを起こし、担当者へ通知する。
+  const tasks = ownedUnits.map((unit) => ({
+    id: fid('task', `${campaignId}/${unit.id}`),
+    organizationId,
+    title: `${name}: ${unit.name} のデータ提出`,
+    description: `対象指標 ${ownedMetrics.length} 件。期限までに値と Evidence を登録してください。`,
+    targetType: 'collection_campaign',
+    targetId: campaignId,
+    assigneeUserId: input.ownerUserId,
+    dueDate: input.dueDate,
+    status: 'open' as const,
+    priority: 'medium' as const,
+    engagementId: null,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: ctx.userId,
+    updatedBy: ctx.userId,
+  }));
+  if (tasks.length > 0) await db.insert('tasks', tasks);
+
+  if (input.ownerUserId && input.ownerUserId !== ctx.userId) {
+    await db.insert('notifications', [
+      {
+        id: fid('notification', `${campaignId}/${input.ownerUserId}`),
+        organizationId,
+        userId: input.ownerUserId,
+        title: `収集キャンペーン「${name}」の担当になりました`,
+        body: `対象 ${ownedUnits.length} 組織 × ${ownedMetrics.length} 指標。期限 ${input.dueDate}`,
+        category: 'task' as const,
+        href: '/enterprise/workflows',
+        readAt: null,
+        createdAt: now,
+      },
+    ]);
+  }
+
   await recordAuditEvent(db, ctx, {
     eventType: 'data_created',
     resourceType: 'collection_campaign',
     resourceId: campaignId,
-    afterSummary: `収集キャンペーンを作成: ${name}（${scopes.length} スコープ）`,
+    afterSummary: `収集キャンペーンを作成: ${name}（${scopes.length} スコープ / ${tasks.length} タスク）`,
   });
 
   return { campaignId, scopeCount: scopes.length };
+}
+
+/**
+ * 報告年度（Reporting Period）を作る。
+ *
+ * 期間を作る手段が無いと、収集キャンペーンも非財務データも
+ * Fixture 由来の年度しか扱えず、翌年度の運用に入れない。
+ */
+export interface ReportingPeriodInput {
+  code: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  status: PeriodStatus;
+  submissionDueDate: string | null;
+}
+
+export async function createReportingPeriod(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: ReportingPeriodInput,
+): Promise<ReportingPeriod> {
+  assertCan(ctx, 'enterprise.org.manage');
+  const organizationId = ctx.workspace.organizationId;
+
+  const code = input.code.trim();
+  const label = input.label.trim();
+  if (!code || !label) throw new ValidationError('年度コードと表示名は必須です。');
+  if (input.endDate <= input.startDate) {
+    throw new ValidationError('終了日は開始日より後の日付にしてください。');
+  }
+
+  const existing = await db.select('periods', { where: { organizationId, code }, limit: 1 });
+  if (existing.length > 0) {
+    throw new ValidationError(`年度コード「${code}」は既に存在します。`);
+  }
+
+  const now = new Date().toISOString();
+  const period: ReportingPeriod = {
+    id: fid('reporting_period', `${organizationId}/${code}`),
+    organizationId,
+    code,
+    label,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    status: input.status,
+    submissionDueDate: input.submissionDueDate,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: ctx.userId,
+    updatedBy: ctx.userId,
+  };
+  await db.insert('periods', [period]);
+
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_created',
+    resourceType: 'reporting_period',
+    resourceId: period.id,
+    afterSummary: `報告年度を作成: ${code} ${label}`,
+  });
+
+  return period;
 }

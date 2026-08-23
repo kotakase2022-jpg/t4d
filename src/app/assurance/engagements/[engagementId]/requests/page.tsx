@@ -11,7 +11,7 @@ import { can } from '@/lib/authorization/can';
 import { FIXTURE_TODAY } from '@/lib/config';
 import { formatJst, formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
-import { loadEngagementOr404 } from '@/lib/services/assurance';
+import { loadEngagementOr404, loadDataRoom } from '@/lib/services/assurance';
 import { createPbcAction, decidePbcAction } from '../../../actions';
 import { EngagementHeader } from '../engagement-header';
 
@@ -41,10 +41,22 @@ export default async function RequestsPage({
 
   const canManage = can(ctx, 'assurance.pbc.manage');
 
+  // 依頼の対象に選べるのは Data Room に共有済みの Data Point だけ
+  const { rows: dataRoomRows } = await loadDataRoom(db, ctx, engagementId);
+  const targetOptions = dataRoomRows.map((row) => ({
+    id: row.dataPointId,
+    label: `${row.metric?.name ?? '指標'} ／ ${row.unit?.name ?? '組織'}`,
+  }));
+  const targetLabel = (id: string): string =>
+    targetOptions.find((option) => option.id === id)?.label ?? id.slice(0, 8);
+
+  // 全 9 状態をどれかの列に必ず入れる。
+  // 以前は rejected / overdue がどの列にも入らず、差戻し中の依頼が盤面から消えていた。
   const board = {
     draft: requests.filter((r) => r.status === 'draft'),
-    sent: requests.filter((r) => ['sent', 'acknowledged'].includes(r.status)),
+    sent: requests.filter((r) => ['sent', 'acknowledged', 'overdue'].includes(r.status)),
     submitted: requests.filter((r) => ['submitted', 'under_review'].includes(r.status)),
+    rejected: requests.filter((r) => r.status === 'rejected'),
     closed: requests.filter((r) => ['accepted', 'closed'].includes(r.status)),
   };
 
@@ -53,10 +65,11 @@ export default async function RequestsPage({
       <EngagementHeader context={context} page="PBC／資料依頼" />
 
       <div className="space-y-3 p-4">
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           <StatusColumn label="下書き" count={board.draft.length} />
           <StatusColumn label="送付済み・未提出" count={board.sent.length} tone="warning" />
           <StatusColumn label="提出済み・確認中" count={board.submitted.length} tone="brand" />
+          <StatusColumn label="差戻し・再提出待ち" count={board.rejected.length} tone="danger" />
           <StatusColumn label="受理・クローズ" count={board.closed.length} tone="success" />
         </div>
 
@@ -84,6 +97,21 @@ export default async function RequestsPage({
                   <option value="high">高</option>
                   <option value="medium">中</option>
                   <option value="low">低</option>
+                </select>
+              </label>
+              <label className="col-span-2 text-[12px] text-ink-muted">
+                対象（任意）
+                <select
+                  name="targetId"
+                  defaultValue=""
+                  className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+                >
+                  <option value="">指定しない</option>
+                  {targetOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="col-span-3 text-[12px] text-ink-muted">
@@ -131,6 +159,11 @@ export default async function RequestsPage({
                         期限 {formatJstDate(request.dueDate)}
                       </span>
                     </div>
+                    {request.targetType === 'data_point' && request.targetId && (
+                      <p className="mt-1 text-[11px] text-ink-muted">
+                        対象: {targetLabel(request.targetId)}
+                      </p>
+                    )}
                     <p className="mt-1 text-[12px] text-ink-muted">{request.description}</p>
 
                     {request.internalNote && (
@@ -214,7 +247,7 @@ function StatusColumn({
 }: {
   label: string;
   count: number;
-  tone?: 'neutral' | 'brand' | 'warning' | 'success';
+  tone?: 'neutral' | 'brand' | 'warning' | 'success' | 'danger';
 }) {
   const color =
     tone === 'warning'
@@ -223,7 +256,9 @@ function StatusColumn({
         ? 'text-success'
         : tone === 'brand'
           ? 'text-brand-800'
-          : 'text-ink';
+          : tone === 'danger'
+            ? 'text-danger'
+            : 'text-ink';
   return (
     <Card>
       <div className="px-3 py-2">

@@ -14,6 +14,7 @@ import { Input, Textarea } from '@/components/ui/input';
 import type { MetricDefinition, OrganizationUnit, ReportingPeriod } from '@/types/domain';
 import {
   createCampaignAction,
+  createReportingPeriodAction,
   createMetricAction,
   createUnitAction,
   updateMetricAction,
@@ -403,6 +404,77 @@ export function EditUnitButton({
             <DialogDescription className="sr-only">既存の組織を更新します。</DialogDescription>
           </DialogHeader>
           <UnitForm unit={unit} units={units} onDone={() => setOpen(false)} />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ----------------------------------------------------------------------
+// 報告年度（Reporting Period）
+// ----------------------------------------------------------------------
+
+/**
+ * 報告年度を作る。
+ * 期間を作れないと、収集キャンペーンも非財務データも Fixture 由来の年度しか扱えない。
+ */
+export function AddReportingPeriodButton() {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <>
+      <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
+        <Plus aria-hidden="true" />
+        報告年度を追加
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg p-0">
+          <DialogHeader className="border-b border-line px-4 py-2">
+            <DialogTitle>報告年度を追加</DialogTitle>
+            <DialogDescription className="sr-only">
+              年度コード・表示名・期間・状態を指定して報告年度を作成します。
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            action={createReportingPeriodAction}
+            onSubmit={() => setOpen(false)}
+            className="grid grid-cols-2 gap-2 p-4"
+          >
+            <label className="text-[12px] text-ink-muted">
+              年度コード
+              <Input name="code" required placeholder="FY2027" className="mt-0.5" />
+            </label>
+            <label className="text-[12px] text-ink-muted">
+              表示名
+              <Input name="label" required placeholder="2027年度" className="mt-0.5" />
+            </label>
+            <label className="text-[12px] text-ink-muted">
+              開始日
+              <Input name="startDate" type="date" required className="mt-0.5" />
+            </label>
+            <label className="text-[12px] text-ink-muted">
+              終了日
+              <Input name="endDate" type="date" required className="mt-0.5" />
+            </label>
+            <label className="text-[12px] text-ink-muted">
+              状態
+              <select name="status" defaultValue="planning" className={selectClass}>
+                <option value="planning">計画中</option>
+                <option value="collecting">収集中</option>
+                <option value="reviewing">レビュー中</option>
+                <option value="closed">クローズ</option>
+              </select>
+            </label>
+            <label className="text-[12px] text-ink-muted">
+              提出期限（任意）
+              <Input name="submissionDueDate" type="date" className="mt-0.5" />
+            </label>
+            <div className="col-span-2 flex justify-end">
+              <Button type="submit" size="sm">
+                作成
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
     </>

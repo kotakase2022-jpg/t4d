@@ -74,7 +74,9 @@ test('Data Point で AI に Evidence 候補を探させられる（紐付けは�
 test('監査法人が Evidence を AI に要約させられる（結論は出さない）', async ({ page }) => {
   await loginAs(page, DEMO_USERS.assuranceManager);
   await page.goto('/assurance/engagements');
+  // 他のテストが起票した案件ではなく、Fixture の案件を使う
   const href = (await page
+    .locator('tr', { hasText: 'ENG-2026-001' })
     .locator('a[href^="/assurance/engagements/"]')
     .first()
     .getAttribute('href'))!;

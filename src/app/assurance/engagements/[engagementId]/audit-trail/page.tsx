@@ -1,4 +1,5 @@
 import { SectionTitle } from '@/components/shared/page-header';
+import { Pagination } from '@/components/shared/pagination';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -14,18 +15,27 @@ export const metadata = { title: '監査ログ' };
 
 export default async function AuditTrailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ engagementId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { engagementId } = await params;
   const ctx = await requireAssuranceContext();
   const db = await getDb();
   const context = await loadEngagementOr404(db, ctx, engagementId);
 
+  // 200 件で無言に打ち切ると、見出しの件数が総件数のように見えて
+  // 「これで全部だ」と誤解される。総件数を出し、ページで辿れるようにする。
+  const PAGE_SIZE = 100;
+  const query = await searchParams;
+  const page = Math.max(1, Number(typeof query.page === 'string' ? query.page : '1') || 1);
+  const total = await db.count('auditEvents', { where: { engagementId } });
   const events = await db.select('auditEvents', {
     where: { engagementId },
     orderBy: { column: 'createdAt', dir: 'desc' },
-    limit: 200,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
   });
   const actorIds = [
     ...new Set(events.map((e) => e.actorUserId).filter((id): id is string => !!id)),
@@ -54,7 +64,7 @@ export default async function AuditTrailPage({
         </Card>
 
         <Card className="overflow-hidden">
-          <SectionTitle title={`案件の監査イベント（${events.length}）`} />
+          <SectionTitle title={`案件の監査イベント（表示 ${events.length} / 全 ${total}）`} />
           {events.length === 0 ? (
             <EmptyState title="記録がありません" />
           ) : (
@@ -101,6 +111,15 @@ export default async function AuditTrailPage({
                 </TBody>
               </Table>
             </div>
+          )}
+          {total > PAGE_SIZE && (
+            <Pagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={total}
+              basePath={`/assurance/engagements/${engagementId}/audit-trail`}
+              searchParams={query}
+            />
           )}
         </Card>
 

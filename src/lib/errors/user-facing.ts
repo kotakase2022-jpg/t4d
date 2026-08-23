@@ -16,6 +16,19 @@ import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
  * error.tsx へ投げて digest だけを見せる。
  */
 
+/**
+ * 入力の誤りなど、**利用者にそのまま見せてよい**エラー。
+ *
+ * 内部エラー（Error）と区別するために型を分ける。区別しないと、
+ * 本番で内部メッセージを露出させるか、逆に必要な指摘まで隠すかの二択になる。
+ */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
 /** URL に載せるメッセージの上限。長い文面は画面側で扱いにくいので切る */
 const MAX_MESSAGE_LENGTH = 160;
 
@@ -27,7 +40,11 @@ function isControlFlowError(error: unknown): boolean {
 }
 
 export function isUserFacingError(error: unknown): error is Error {
-  return error instanceof AuthorizationError || error instanceof NotFoundError;
+  return (
+    error instanceof AuthorizationError ||
+    error instanceof NotFoundError ||
+    error instanceof ValidationError
+  );
 }
 
 /**

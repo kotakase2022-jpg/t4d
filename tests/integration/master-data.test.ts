@@ -276,6 +276,43 @@ describe('収集キャンペーン（ORG-P0-002）', () => {
     expect(scopes.every((s) => s.dueDate === '2026-06-30')).toBe(true);
   });
 
+  it('キャンペーンを作ると担当者へタスクと通知が作られる', async () => {
+    // スコープを展開するだけでは誰も動けない。タスクと通知まで作る。
+    const [periods, units, metrics] = await Promise.all([
+      db.select('periods', { where: { organizationId: ORG_IDS.aomi } }),
+      db.select('units', { where: { organizationId: ORG_IDS.aomi } }),
+      db.select('metrics', {
+        where: { organizationId: ORG_IDS.aomi, deletedAt: { isNull: true } },
+      }),
+    ]);
+    const targetUnits = units.filter((u) => u.unitType !== 'supplier').slice(0, 2);
+    const owner = userId('site-user@demo.local');
+
+    const tasksBefore = await db.select('tasks', { where: { organizationId: ORG_IDS.aomi } });
+    const notificationsBefore = await db.select('notifications', { where: { userId: owner } });
+
+    const result = await createCollectionCampaign(db, admin(), {
+      name: 'FY2026 タスク生成テスト',
+      reportingPeriodId: periods[0]!.id,
+      dueDate: '2026-07-31',
+      description: null,
+      unitIds: targetUnits.map((u) => u.id),
+      metricIds: metrics.slice(0, 2).map((m) => m.id),
+      ownerUserId: owner,
+    });
+
+    const tasksAfter = await db.select('tasks', { where: { targetId: result.campaignId } });
+    expect(tasksAfter, '対象組織ごとにタスクが作られる').toHaveLength(targetUnits.length);
+    expect(tasksAfter.every((t) => t.assigneeUserId === owner)).toBe(true);
+    expect(tasksAfter.every((t) => t.dueDate === '2026-07-31')).toBe(true);
+    expect((await db.select('tasks', { where: { organizationId: ORG_IDS.aomi } })).length).toBe(
+      tasksBefore.length + targetUnits.length,
+    );
+
+    const notificationsAfter = await db.select('notifications', { where: { userId: owner } });
+    expect(notificationsAfter.length, '担当者へ通知が届く').toBe(notificationsBefore.length + 1);
+  });
+
   it('対象組織・指標が未選択だと拒否する', async () => {
     const periods = await db.select('periods', { where: { organizationId: ORG_IDS.aomi } });
     await expect(

@@ -292,6 +292,20 @@ export async function createPbcAction(formData: FormData): Promise<void> {
   const now = new Date().toISOString();
   const code = `PBC-${String(existing.length + 1).padStart(3, '0')}`;
 
+  // 対象は Data Room に共有済みの Data Point だけを許す（他社のデータを指させない）
+  const requestedTargetId = String(formData.get('targetId') ?? '');
+  let targetId: string | null = null;
+  if (requestedTargetId) {
+    const shared = await db.select('dataRoomItems', {
+      where: { engagementId, sourceType: 'data_point', sourceId: requestedTargetId },
+      limit: 1,
+    });
+    if (shared.length === 0) {
+      throw new AuthorizationError('対象は Data Room に共有済みのデータから選んでください。');
+    }
+    targetId = requestedTargetId;
+  }
+
   await db.insert('pbcRequests', [
     {
       id: fid('pbc_request', `${engagementId}/${code}`),
@@ -301,8 +315,9 @@ export async function createPbcAction(formData: FormData): Promise<void> {
       code,
       title: String(formData.get('title') ?? '').trim() || '資料依頼',
       description: String(formData.get('description') ?? ''),
-      targetType: null,
-      targetId: null,
+      // 「何についての依頼か」を持たせる。null のままだと企業側が対象を辿れない。
+      targetType: targetId ? 'data_point' : null,
+      targetId,
       dueDate: String(formData.get('dueDate') ?? new Date().toISOString().slice(0, 10)),
       priority: String(formData.get('priority') ?? 'medium') as
         'critical' | 'high' | 'medium' | 'low',

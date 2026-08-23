@@ -52,6 +52,7 @@ import type {
   DataPointStatus,
   FrameworkKey,
   MaterialityLevel,
+  PeriodStatus,
   ResponseStatus,
   RoleKey,
   Uuid,
@@ -634,6 +635,25 @@ export async function updateMetricAction(formData: FormData): Promise<void> {
   await updateMetricDefinition(db, ctx, metricId, parseMetricInput(formGetter(formData)));
   revalidatePath('/enterprise/organizations');
   revalidatePath('/enterprise/settings');
+}
+
+/** 報告年度を作る。作れないと翌年度の収集・開示に入れない。 */
+export async function createReportingPeriodAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const { createReportingPeriod } = await import('@/lib/services/master-data');
+
+  await withUserFacingError('/enterprise/organizations', async () => {
+    await createReportingPeriod(db, ctx, {
+      code: String(formData.get('code') ?? ''),
+      label: String(formData.get('label') ?? ''),
+      startDate: String(formData.get('startDate') ?? ''),
+      endDate: String(formData.get('endDate') ?? ''),
+      status: String(formData.get('status') ?? 'planning') as PeriodStatus,
+      submissionDueDate: (formData.get('submissionDueDate') as string) || null,
+    });
+    revalidatePath('/enterprise/organizations');
+  });
 }
 
 export async function createUnitAction(formData: FormData): Promise<void> {

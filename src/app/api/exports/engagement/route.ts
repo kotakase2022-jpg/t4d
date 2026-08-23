@@ -79,6 +79,11 @@ export async function GET(request: Request) {
   const changes = snapshot ? await detectSnapshotChanges(db, ctx, snapshot.id) : [];
   const samples = await db.select('samples', { where: { engagementId } });
   const procedures = await db.select('procedures', { where: { engagementId } });
+  // 画面が案内している「サンプル項目」「保証手続」も出力する
+  const sampleItems =
+    samples.length > 0
+      ? await db.select('sampleItems', { where: { sampleId: { in: samples.map((s) => s.id) } } })
+      : [];
   const testResults = await db.select('testResults', { where: { engagementId } });
   const responses =
     pbcRequests.length > 0
@@ -166,6 +171,30 @@ export async function GET(request: Request) {
         { key: 'createdAt', header: '作成', value: (r) => formatJst(r.createdAt) },
       ],
       rows: samples,
+    },
+    {
+      name: 'サンプル項目',
+      columns: [
+        {
+          key: 'sample',
+          header: 'サンプル',
+          value: (r) => samples.find((s) => s.id === r.sampleId)?.name ?? '',
+        },
+        { key: 'order', header: '順', value: (r) => r.sortOrder, numeric: true },
+        { key: 'stratum', header: '層', value: (r) => r.stratum ?? '' },
+        { key: 'reason', header: '選定理由', value: (r) => r.selectionReason },
+      ],
+      rows: sampleItems,
+    },
+    {
+      name: '保証手続',
+      columns: [
+        { key: 'code', header: 'コード', value: (r) => r.code },
+        { key: 'title', header: '手続', value: (r) => r.title },
+        { key: 'required', header: '必須', value: (r) => (r.required ? 'はい' : '') },
+        { key: 'description', header: '内容', value: (r) => r.description ?? '' },
+      ],
+      rows: procedures,
     },
     {
       name: 'テスト',

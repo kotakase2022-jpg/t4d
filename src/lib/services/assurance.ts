@@ -15,7 +15,9 @@ import type {
   AssuranceSnapshot,
   AssuranceSnapshotItem,
   AuthorizationContext,
+  DataPoint,
   Engagement,
+  GrantSubjectType,
   MetricDefinition,
   OrganizationUnit,
   Population,
@@ -111,6 +113,45 @@ export interface DataRoomRow {
   evidenceCount: number;
 }
 
+/**
+ * 監査法人が読める Data Point だけに絞る。
+ *
+ * DB 側の `t4d.assurance_can_read_data_point()`（0011_authorization_functions.sql）と
+ * **同じ条件**を実装している。企業側で承認済みであること、削除されていないこと、
+ * 指標・組織・期間のすべてに有効な（取り消されていない）許諾があること。
+ *
+ * Demo Mode には RLS が無いため、ここを通さないと
+ * 「取り消した許諾が効かない」「未承認の下書きが監査法人に見える」が起きる。
+ */
+async function filterReadableForAssurance(
+  db: DbClient,
+  engagementId: Uuid,
+  dataPoints: DataPoint[],
+): Promise<DataPoint[]> {
+  if (dataPoints.length === 0) return [];
+
+  const grants = await db.select('grants', {
+    where: { engagementId, revokedAt: { isNull: true } },
+  });
+  const grantedBySubject = new Map<GrantSubjectType, Set<Uuid>>();
+  for (const g of grants) {
+    const set = grantedBySubject.get(g.subjectType) ?? new Set<Uuid>();
+    set.add(g.subjectId);
+    grantedBySubject.set(g.subjectType, set);
+  }
+  const covers = (subject: GrantSubjectType, id: Uuid): boolean =>
+    grantedBySubject.get(subject)?.has(id) ?? false;
+
+  return dataPoints.filter(
+    (dp) =>
+      dp.status === 'approved' &&
+      dp.deletedAt === null &&
+      covers('metric', dp.metricId) &&
+      covers('organization_unit', dp.unitId) &&
+      covers('reporting_period', dp.reportingPeriodId),
+  );
+}
+
 export async function loadDataRoom(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -129,10 +170,18 @@ export async function loadDataRoom(
   const changedIds = new Set(changes.map((c) => c.snapshotItemId));
 
   const dataPointIds = items.map((i) => i.sourceId);
-  const dataPoints =
+  const allDataPoints =
     dataPointIds.length > 0
       ? await db.select('dataPoints', { where: { id: { in: dataPointIds } } })
       : [];
+
+  // 許諾と承認状態は **アプリ層でも** 見る。
+  // Supabase Mode では t4d.assurance_can_read_data_point() が同じ判定をするが、
+  // Demo Mode（本番の動作モード）には RLS が無く、ここが唯一の防御になる。
+  // 判定条件は上記 SQL 関数と一致させること（片方だけ変えない）。
+  const readable = await filterReadableForAssurance(db, engagementId, allDataPoints);
+  const dataPoints = readable;
+  const readableIds = new Set(readable.map((dp) => dp.id));
 
   const metricIds = [...new Set(dataPoints.map((dp) => dp.metricId))];
   const unitIds = [...new Set(dataPoints.map((dp) => dp.unitId))];
@@ -152,24 +201,26 @@ export async function loadDataRoom(
   const metricById = new Map(metrics.map((m) => [m.id, m]));
   const unitById = new Map(units.map((u) => [u.id, u]));
 
-  const rows: DataRoomRow[] = items.map((item) => {
-    const dp = dataPoints.find((d) => d.id === item.sourceId);
-    const version = versions.find((v) => v.id === dp?.currentVersionId);
-    const snapshotItem = snapshotItems.find((s) => s.sourceId === item.sourceId);
-    return {
-      dataPointId: item.sourceId,
-      metric: dp ? (metricById.get(dp.metricId) ?? null) : null,
-      unit: dp ? (unitById.get(dp.unitId) ?? null) : null,
-      currentValue: dp?.value ?? null,
-      currentUnitOfMeasure: dp?.unitOfMeasure ?? '',
-      currentVersionNo: version?.versionNo ?? null,
-      clientStatus: String(item.clientApprovalStatus),
-      sharedAt: item.sharedAt,
-      snapshotIncluded: Boolean(snapshotItem),
-      changedSinceSnapshot: snapshotItem ? changedIds.has(snapshotItem.id) : false,
-      evidenceCount: evidenceLinks.filter((l) => l.targetId === item.sourceId).length,
-    };
-  });
+  const rows: DataRoomRow[] = items
+    .filter((item) => readableIds.has(item.sourceId))
+    .map((item) => {
+      const dp = dataPoints.find((d) => d.id === item.sourceId);
+      const version = versions.find((v) => v.id === dp?.currentVersionId);
+      const snapshotItem = snapshotItems.find((s) => s.sourceId === item.sourceId);
+      return {
+        dataPointId: item.sourceId,
+        metric: dp ? (metricById.get(dp.metricId) ?? null) : null,
+        unit: dp ? (unitById.get(dp.unitId) ?? null) : null,
+        currentValue: dp?.value ?? null,
+        currentUnitOfMeasure: dp?.unitOfMeasure ?? '',
+        currentVersionNo: version?.versionNo ?? null,
+        clientStatus: String(item.clientApprovalStatus),
+        sharedAt: item.sharedAt,
+        snapshotIncluded: Boolean(snapshotItem),
+        changedSinceSnapshot: snapshotItem ? changedIds.has(snapshotItem.id) : false,
+        evidenceCount: evidenceLinks.filter((l) => l.targetId === item.sourceId).length,
+      };
+    });
 
   return { rows, snapshot };
 }
@@ -422,6 +473,14 @@ export async function createSample(
   });
 
   if (selection.length === 0) {
+    // 方式ごとに「なぜ 0 件になったか」を分けて伝える。
+    // 判断による抽出で対象未選択のときに一般的な文言を出すと、
+    // 入力ミスだと誤解されて原因にたどり着けない。
+    if (input.method === 'judgmental') {
+      throw new AuthorizationError(
+        '判断による抽出では、対象の項目を 1 件以上選んでください（「判断による抽出の対象を選ぶ」から選択できます）。',
+      );
+    }
     throw new AuthorizationError('抽出条件に一致する項目がありません。条件を見直してください。');
   }
 

@@ -32,6 +32,12 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: false,
   },
   serverExternalPackages: ['exceljs', 'unpdf', 'docx'],
+  experimental: {
+    // 取込は Server Action でファイルを受け取る。Next.js の既定は 1MB で、
+    // 画面表示とサーバー側検証（MAX_UPLOAD_BYTES = 25MB）より先に弾かれてしまう。
+    // 「1 ファイル 25MB まで」という案内と実際の受け入れ量を一致させる。
+    serverActions: { bodySizeLimit: '25mb' },
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

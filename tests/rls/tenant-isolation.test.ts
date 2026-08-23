@@ -138,6 +138,34 @@ describe('2. Assurance Firm A から Assurance Firm B を見られない', () =>
     );
     expect(rows).toHaveLength(0);
   });
+
+  // 案件メンバー行は「どの法人の案件か」を自分で名乗る列を持つ。
+  // ポリシーがその列だけを見ていると、他法人の案件を指しながら自分の法人を名乗って
+  // メンバー登録でき、以後 is_engagement_member() が真になって全部見えてしまう。
+  it('くろべのマネージャーはあおばの案件へ自分を登録できない（自分の法人を名乗っても）', async () => {
+    const denied = await h.expectDenied(
+      FIRM_B_MANAGER,
+      `insert into engagement_members (id, engagement_id, assurance_firm_id, user_id, role_key)
+       values (gen_random_uuid(), $1, $2, $3, 'assurance_manager')`,
+      [ENGAGEMENT_IDS.main, ORG_IDS.kurobe, FIRM_B_MANAGER],
+    );
+    expect(denied, '他法人の案件へ自己アサインできてしまう').not.toBeNull();
+
+    const seen = await h.asUser(FIRM_B_MANAGER, 'select id from engagements where id = $1', [
+      ENGAGEMENT_IDS.main,
+    ]);
+    expect(seen, '登録が通ると案件そのものが見えるようになる').toHaveLength(0);
+  });
+
+  it('くろべのマネージャーはあおばの案件へ他法人名義でもメンバーを追加できない', async () => {
+    const denied = await h.expectDenied(
+      FIRM_B_MANAGER,
+      `insert into engagement_members (id, engagement_id, assurance_firm_id, user_id, role_key)
+       values (gen_random_uuid(), $1, $2, $3, 'assurance_manager')`,
+      [ENGAGEMENT_IDS.main, ORG_IDS.aoba, FIRM_B_MANAGER],
+    );
+    expect(denied).not.toBeNull();
+  });
 });
 
 describe('3. 未アサインの監査法人ユーザーが案件を見られない', () => {
@@ -528,6 +556,43 @@ describe('10. URL 直打ち相当（ID 指定の単発取得）でも遮断さ�
     // 共有フラグが立っている 1 件のみ見える
     expect(rows).toHaveLength(1);
     expect(rows[0]?.shared_with_client).toBe(true);
+  });
+
+  it('監査法人はクライアントの PBC 回答本文を書き換えられない', async () => {
+    // CLAUDE.md §0.3「監査法人はクライアント原本を更新しない」。
+    // 受領判定（decision）だけが監査法人側の操作。
+    const [response] = await h.asSuperuser<{ id: string; body: string }>(
+      'select id, body from pbc_request_responses limit 1',
+    );
+    expect(response, 'PBC 回答が seed に必要').toBeTruthy();
+
+    const denied = await h.expectDenied(
+      FIRM_A_MANAGER,
+      'update pbc_request_responses set body = $1 where id = $2',
+      ['監査人による改ざん', response!.id],
+    );
+    expect(denied, 'クライアントの提出内容を書き換えられてしまう').not.toBeNull();
+
+    const [after] = await h.asSuperuser<{ body: string }>(
+      'select body from pbc_request_responses where id = $1',
+      [response!.id],
+    );
+    expect(after!.body).toBe(response!.body);
+  });
+
+  it('監査法人は受領判定（decision）は更新できる', async () => {
+    const [response] = await h.asSuperuser<{ id: string }>(
+      'select id from pbc_request_responses limit 1',
+    );
+    await h.asUser(FIRM_A_MANAGER, 'update pbc_request_responses set decision = $1 where id = $2', [
+      'accepted',
+      response!.id,
+    ]);
+    const [after] = await h.asSuperuser<{ decision: string }>(
+      'select decision from pbc_request_responses where id = $1',
+      [response!.id],
+    );
+    expect(after!.decision).toBe('accepted');
   });
 
   it('企業ユーザーは PBC の内部メモ列を含む draft を取得できない', async () => {

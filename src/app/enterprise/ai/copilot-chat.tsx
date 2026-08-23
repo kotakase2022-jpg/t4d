@@ -108,10 +108,7 @@ export function CopilotChat({
       )}
 
       {error && (
-        <p
-          role="alert"
-          className="rounded-t4d bg-danger-50 px-2 py-1.5 text-[12px] text-danger-900"
-        >
+        <p role="alert" className="rounded-t4d bg-danger-soft px-2 py-1.5 text-[12px] text-danger">
           {error}
         </p>
       )}

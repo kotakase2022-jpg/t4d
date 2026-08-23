@@ -155,14 +155,25 @@ export class SupabaseDbClient implements DbClient {
     return data ? rowFromSql<Row<K>>(data as Record<string, unknown>) : null;
   }
 
+  /**
+   * 行を追加する。
+   *
+   * **書いた行を読み返さない**（PostgREST の RETURNING を要求しない）。
+   * RLS では INSERT が通っても、返す行は SELECT ポリシーで評価される。
+   * 次の 2 つは「書けるが自分では読めない」行で、読み返すと必ず失敗する。
+   *
+   *  - notifications … SELECT は user_id = auth.uid()。他人宛のメンション通知
+   *  - audit_events  … SELECT は common.audit.read が必要。この権限を持たないロール
+   *                    （15 中 10。拠点担当・レビュー担当・承認者など）の操作記録
+   *
+   * ID も日時もアプリ側で決めているため、DB から受け取り直す必要はない。
+   * 呼び出し側も戻り値を使っていない（全 46 箇所）。
+   */
   async insert<K extends TableName>(table: K, rows: Row<K>[]): Promise<Row<K>[]> {
     const payload = rows.map((r) => rowToSql(r as unknown as Record<string, unknown>));
-    const { data, error } = await this.client
-      .from(SQL_TABLE_NAMES[table])
-      .insert(payload)
-      .select('*');
+    const { error } = await this.client.from(SQL_TABLE_NAMES[table]).insert(payload);
     if (error) throw new Error(`insert ${SQL_TABLE_NAMES[table]}: ${error.message}`);
-    return ((data ?? []) as Record<string, unknown>[]).map((r) => rowFromSql<Row<K>>(r));
+    return rows;
   }
 
   async update<K extends TableName>(table: K, id: Uuid, patch: Partial<Row<K>>): Promise<Row<K>> {

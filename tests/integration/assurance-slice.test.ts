@@ -113,6 +113,35 @@ describe('Data Room（Read-only・許諾範囲のみ）', () => {
     expect(dataPointIds).toContain(dataPointId('HQ', 'scope1', 'FY2026'));
   });
 
+  it('許諾（Grant）を取り消すと Data Room から消える', async () => {
+    // 既存テストは dataRoomItems の取り下げを試していたが、
+    // 企業が実際に押すのは「許諾の取消」。Demo Mode には RLS が無いので、
+    // アプリ層が grants を見ていないと取消が効かない。
+    const before = await loadDataRoom(db, manager(), ENG);
+    const target = metricId('AOMI', 'scope1');
+    expect(before.rows.filter((r) => r.metric?.id === target).length).toBeGreaterThan(0);
+
+    for (const g of await db.select('grants', { where: { engagementId: ENG } })) {
+      if (g.subjectType === 'metric' && g.subjectId === target) {
+        await db.update('grants', g.id, { revokedAt: new Date().toISOString() });
+      }
+    }
+
+    const after = await loadDataRoom(db, manager(), ENG);
+    expect(after.rows.filter((r) => r.metric?.id === target)).toHaveLength(0);
+  });
+
+  it('企業が承認を取り消した値は Data Room に出ない', async () => {
+    const shared = await db.select('dataRoomItems', {
+      where: { engagementId: ENG, sourceType: 'data_point', withdrawnAt: { isNull: true } },
+    });
+    const first = shared[0]!;
+    await db.update('dataPoints', first.sourceId, { status: 'draft' });
+
+    const after = await loadDataRoom(db, manager(), ENG);
+    expect(after.rows.map((r) => r.dataPointId)).not.toContain(first.sourceId);
+  });
+
   it('Data Room の行はすべて Snapshot 済みで、Snapshot 後変更が 2 件検出される', async () => {
     const { rows, snapshot } = await loadDataRoom(db, manager(), ENG);
     expect(snapshot).not.toBeNull();
@@ -183,6 +212,42 @@ describe('母集団とサンプリング', () => {
       Math.max(0, view.expectedInScope - view.population.itemCount),
     );
     expect(view.population.completenessProcedureNote).toContain('P-01');
+  });
+
+  it('判断による抽出は、選んだ項目だけを抽出する', async () => {
+    // 画面に方式は並んでいたが、対象を選ぶ入力が無く、選ぶと必ず 0 件で失敗していた。
+    const view = await loadPopulation(db, manager(), ENG);
+    if (!view) throw new Error('population missing');
+    const picked = view.items.slice(0, 3).map((i) => i.id);
+
+    const sample = await createSample(db, staff(), {
+      engagementId: ENG,
+      populationId: view.population.id,
+      name: 'SMP-JUDGMENTAL',
+      method: 'judgmental',
+      seed: 'JUDGMENTAL-1',
+      parameters: { targetSize: 3, selectedItemIds: picked },
+      rationale: '重要と判断した項目を名指しで選定した。',
+    });
+
+    const items = await db.select('sampleItems', { where: { sampleId: sample.id } });
+    expect(items.map((i) => i.populationItemId).sort()).toEqual([...picked].sort());
+  });
+
+  it('判断による抽出で対象未選択なら、理由の分かるエラーになる', async () => {
+    const view = await loadPopulation(db, manager(), ENG);
+    if (!view) throw new Error('population missing');
+    await expect(
+      createSample(db, staff(), {
+        engagementId: ENG,
+        populationId: view.population.id,
+        name: 'SMP-EMPTY',
+        method: 'judgmental',
+        seed: 'JUDGMENTAL-2',
+        parameters: { targetSize: 3 },
+        rationale: 'テスト',
+      }),
+    ).rejects.toThrow(/対象の項目を 1 件以上選んで/);
   });
 
   it('同じ Seed のサンプルは同じ項目を選ぶ（再現可能）', async () => {

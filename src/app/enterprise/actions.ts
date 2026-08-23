@@ -159,15 +159,37 @@ export async function transitionDataPointAction(formData: FormData): Promise<voi
   revalidatePath('/enterprise/dashboard');
 }
 
-export async function bulkTransitionAction(formData: FormData): Promise<void> {
+/** 一括操作の結果。画面へ返して件数と失敗理由を見せる */
+export interface BulkTransitionState {
+  succeeded: number;
+  failures: Array<{ id: string; reason: string }>;
+  message: string;
+}
+
+export async function bulkTransitionAction(
+  _previous: BulkTransitionState | null,
+  formData: FormData,
+): Promise<BulkTransitionState> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const ids = formData.getAll('selected').map(String);
   const to = String(formData.get('to') ?? '') as DataPointStatus;
-  if (ids.length === 0) return;
-  await bulkTransition(db, ctx, ids, to);
+  if (ids.length === 0) {
+    return { succeeded: 0, failures: [], message: '対象が選択されていません。' };
+  }
+
+  // 一括操作は 1 件ずつ権限・状態遷移を検査するため、部分的に失敗する。
+  // 結果を捨てると「押しても何も起きない」ように見えるので、必ず画面へ返す。
+  const result = await bulkTransition(db, ctx, ids, to);
   revalidatePath('/enterprise/data');
   revalidatePath('/enterprise/dashboard');
+
+  const reasons = [...new Set(result.failures.map((f) => f.reason))];
+  const message =
+    result.failures.length === 0
+      ? `${result.succeeded} 件を更新しました。`
+      : `${result.succeeded} 件を更新し、${result.failures.length} 件は変更できませんでした（${reasons.join(' / ')}）。`;
+  return { succeeded: result.succeeded, failures: result.failures, message };
 }
 
 export async function updateDataPointAction(formData: FormData): Promise<void> {

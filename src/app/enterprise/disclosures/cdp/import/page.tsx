@@ -133,8 +133,8 @@ export default async function DisclosureImportPage({
         )}
 
         {error && (
-          <Card className="border-danger-300 bg-danger-50 p-3">
-            <p className="flex items-center gap-1.5 text-[13px] text-danger-900">
+          <Card className="border-danger/40 bg-danger-soft p-3">
+            <p className="flex items-center gap-1.5 text-[13px] text-danger">
               <CircleAlert className="size-4" aria-hidden="true" />
               {error}
             </p>
@@ -153,7 +153,7 @@ export default async function DisclosureImportPage({
             />
 
             {preview.warnings.length > 0 && (
-              <ul className="border-b border-line bg-warning-50 px-3 py-1.5 text-[12px] text-warning-900">
+              <ul className="border-b border-line bg-warning-soft px-3 py-1.5 text-[12px] text-[#8a5d00]">
                 {preview.warnings.map((w) => (
                   <li key={w}>{w}</li>
                 ))}

@@ -135,7 +135,7 @@ export default async function EvidenceViewerPage({
             <SectionTitle title="プレビュー" />
             {!stored ? (
               <div>
-                <p className="border-b border-line bg-warning-50 px-3 py-1.5 text-[12px] text-warning-900">
+                <p className="border-b border-line bg-warning-soft px-3 py-1.5 text-[12px] text-[#8a5d00]">
                   原本ファイルの実体はこの環境に保管されていません（Demo Mode の Fixture）。
                   下は取込時に抽出した内容を紙面として再構成したものです。
                 </p>

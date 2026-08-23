@@ -61,7 +61,7 @@ export default async function SsbjPage() {
       detail: materiality.registered ? (
         <span>重要と評価: {materiality.materialCount} トピック</span>
       ) : (
-        <span className="text-warning-900">未登録（下の表で評価してください）</span>
+        <span className="text-[#8a5d00]">未登録（下の表で評価してください）</span>
       ),
     },
     {
@@ -182,7 +182,7 @@ export default async function SsbjPage() {
                   <TD className="text-[11px] text-ink-muted">
                     {topic.totalMetricCount} 件
                     {topic.missingMetricNames.length > 0 && (
-                      <span className="ml-1 text-warning-900">
+                      <span className="ml-1 text-[#8a5d00]">
                         （未収集: {topic.missingMetricNames.join('・')}）
                       </span>
                     )}
@@ -201,10 +201,10 @@ export default async function SsbjPage() {
                           <span
                             className={`block h-full rounded-full ${
                               topic.coverage >= 80
-                                ? 'bg-success-600'
+                                ? 'bg-success'
                                 : topic.coverage >= 50
-                                  ? 'bg-warning-600'
-                                  : 'bg-danger-600'
+                                  ? 'bg-warning'
+                                  : 'bg-danger'
                             }`}
                             style={{ width: `${topic.coverage}%` }}
                           />

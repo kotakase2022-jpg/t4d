@@ -1,5 +1,8 @@
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 
+import type { FixtureDb } from '@/lib/fixtures/store';
+import type { TableName } from './types';
+
 /**
  * Demo Mode の変更差分を Cookie へ収めるための符号化。
  *
@@ -101,10 +104,19 @@ export function encodeDemoEdits(edits: DemoEdit[]): string {
   );
 }
 
+/**
+ * 展開後の上限。Cookie は 4KB 弱でも、圧縮を効かせれば展開後は数百 MB になりうる。
+ * 偽造 Cookie 1 つでプロセスのメモリを枯渇させられないよう、展開時点で打ち切る。
+ * 正規の Cookie は 40KB 程度（取込 45 行）に収まる。
+ */
+const MAX_INFLATED_BYTES = 512 * 1024;
+
 export function decodeDemoEdits(raw: string): DemoEdit[] {
   try {
     if (raw.startsWith(VERSION_2)) {
-      const json = inflateRawSync(Buffer.from(raw.slice(1), 'base64url')).toString('utf8');
+      const json = inflateRawSync(Buffer.from(raw.slice(1), 'base64url'), {
+        maxOutputLength: MAX_INFLATED_BYTES,
+      }).toString('utf8');
       const parsed = unpack(JSON.parse(json));
       return Array.isArray(parsed) ? (parsed as DemoEdit[]) : [];
     }
@@ -114,5 +126,58 @@ export function decodeDemoEdits(raw: string): DemoEdit[] {
   } catch {
     // 壊れた Cookie で画面が落ちないよう、空として扱う
     return [];
+  }
+}
+
+/** Cookie に記録する対象テーブル（画面から人が編集するもの） */
+const PERSISTED_TABLES = new Set<TableName>([
+  // 取込系。1 ファイル数行程度のデモ操作なら Cookie に収まる。
+  // 大量ファイルの取込は収まらないため、その場合は同一インスタンス内でのみ参照できる
+  // （docs/known-limitations.md D-3 に記載）。
+  'ingestionJobs',
+  'ingestionJobFiles',
+  'ingestionRows',
+  'materialityTopics',
+  'comments',
+  'dataPoints',
+  'dataPointVersions',
+  'disclosureResponses',
+  'metrics',
+  'units',
+  'notifications',
+]);
+
+export function isPersistedTable(table: TableName): boolean {
+  return PERSISTED_TABLES.has(table);
+}
+
+/**
+ * Fixture へ変更を再適用する。
+ * 対象行が見つからない場合（別インスタンスで作られた新規行など）は無視する。
+ *
+ * **Cookie の中身は信用しない。** httpOnly は JavaScript から読めなくするだけで、
+ * 攻撃者が自分で Cookie ヘッダーを組み立てて送るのは防げない。
+ * Fixture DB はプロセス全体で共有されるため、検証せずに適用すると
+ * 「1 リクエストで全利用者のデータを書き換える」ことができてしまう。
+ *
+ * そこで、書き込み時と**同じ許可リスト**をここでも通す。
+ * これにより organizationMemberships（ロール注入）・auditEvents・signoffs・grants
+ * といった、なりすましや証跡の改ざんに使える表には一切届かない。
+ */
+export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
+  for (const edit of edits) {
+    // 書き込み側の許可リスト（isPersistedTable）と対にする。
+    // 片側だけの防御は、Cookie を偽造されると意味を持たない。
+    if (!isPersistedTable(edit.t as TableName)) continue;
+    const rows = db[edit.t as TableName] as unknown as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(rows)) continue;
+    if (!edit.v || typeof edit.v !== 'object' || Array.isArray(edit.v)) continue;
+    const row = rows.find((r) => r.id === edit.id);
+    if (row) {
+      Object.assign(row, edit.v);
+    } else if ('id' in edit.v) {
+      // 新規作成された行（コメントなど）は、そのまま足す
+      rows.push({ ...edit.v });
+    }
   }
 }

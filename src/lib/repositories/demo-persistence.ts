@@ -1,8 +1,12 @@
 import 'server-only';
 
 import { cookies } from 'next/headers';
-import type { FixtureDb } from '@/lib/fixtures/store';
-import { decodeDemoEdits, encodeDemoEdits, type DemoEdit } from './demo-edit-codec';
+import {
+  decodeDemoEdits,
+  encodeDemoEdits,
+  isPersistedTable,
+  type DemoEdit,
+} from './demo-edit-codec';
 import type { TableName } from './types';
 
 /**
@@ -27,28 +31,6 @@ import type { TableName } from './types';
 const COOKIE_NAME = 't4d.demo-edits';
 /** Cookie の実サイズ上限。ヘッダー全体を圧迫しない範囲に抑える */
 const MAX_BYTES = 3800;
-
-/** Cookie に記録する対象テーブル（画面から人が編集するもの） */
-const PERSISTED_TABLES = new Set<TableName>([
-  // 取込系。1 ファイル数行程度のデモ操作なら Cookie に収まる。
-  // 大量ファイルの取込は収まらないため、その場合は同一インスタンス内でのみ参照できる
-  // （docs/known-limitations.md D-3 に記載）。
-  'ingestionJobs',
-  'ingestionJobFiles',
-  'ingestionRows',
-  'materialityTopics',
-  'comments',
-  'dataPoints',
-  'dataPointVersions',
-  'disclosureResponses',
-  'metrics',
-  'units',
-  'notifications',
-]);
-
-export function isPersistedTable(table: TableName): boolean {
-  return PERSISTED_TABLES.has(table);
-}
 
 /** 現在の Cookie に入っている変更を読む */
 export async function readDemoEdits(): Promise<DemoEdit[]> {
@@ -106,20 +88,4 @@ export async function appendDemoEdit(
   }
 }
 
-/**
- * Fixture へ変更を再適用する。
- * 対象行が見つからない場合（別インスタンスで作られた新規行など）は無視する。
- */
-export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
-  for (const edit of edits) {
-    const rows = db[edit.t as TableName] as unknown as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(rows)) continue;
-    const row = rows.find((r) => r.id === edit.id);
-    if (row) {
-      Object.assign(row, edit.v);
-    } else if (edit.v && typeof edit.v === 'object' && 'id' in edit.v) {
-      // 新規作成された行（コメントなど）は、そのまま足す
-      rows.push({ ...edit.v });
-    }
-  }
-}
+export { applyDemoEdits, isPersistedTable } from './demo-edit-codec';

@@ -140,7 +140,7 @@ export default async function CdpWorkspacePage({
             {importedPeriods.map((p) => `${p.periodLabel}（${p.responseCount} 件）`).join(' ／ ')}
           </span>
         ) : (
-          <span className="text-warning-900">まだ過去回答がありません</span>
+          <span className="text-[#8a5d00]">まだ過去回答がありません</span>
         ),
       action: can(shell.ctx, 'enterprise.disclosure.write')
         ? { label: '過去回答を取り込む', href: '/enterprise/disclosures/cdp/import' }

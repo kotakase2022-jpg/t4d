@@ -122,6 +122,49 @@ export default async function SamplingPage({
                       className="mt-0.5"
                     />
                   </label>
+                  {/*
+                    「判断による抽出」は監査人が対象を名指しする方式なので、
+                    ここで選ばないと該当 0 件になり、必ず失敗する。
+                    他の方式では無視されるため、常に置いておく。
+                  */}
+                  <details className="col-span-6 rounded-t4d border border-line">
+                    <summary className="cursor-pointer px-2 py-1.5 text-[12px] text-ink-muted">
+                      判断による抽出の対象を選ぶ（{view.items.length} 件から）
+                    </summary>
+                    <div className="max-h-64 overflow-y-auto border-t border-line">
+                      <Table>
+                        <THead>
+                          <TR>
+                            <TH>選択</TH>
+                            <TH>指標</TH>
+                            <TH>組織</TH>
+                            <TH align="right">値</TH>
+                            <TH>単位</TH>
+                          </TR>
+                        </THead>
+                        <TBody>
+                          {view.items.map((item) => (
+                            <TR key={item.id}>
+                              <TD>
+                                <input
+                                  type="checkbox"
+                                  name="selectedItemIds"
+                                  value={item.id}
+                                  aria-label={`${item.metricName}（${item.unitName}）を判断による抽出の対象にする`}
+                                  className="size-3.5 accent-brand-600"
+                                />
+                              </TD>
+                              <TD className="font-medium">{item.metricName}</TD>
+                              <TD>{item.unitName}</TD>
+                              <TD align="right">{formatNumber(item.value)}</TD>
+                              <TD>{item.unitOfMeasure}</TD>
+                            </TR>
+                          ))}
+                        </TBody>
+                      </Table>
+                    </div>
+                  </details>
+
                   <label className="col-span-6 text-[12px] text-ink-muted">
                     選定理由（調書に残ります）
                     <Textarea

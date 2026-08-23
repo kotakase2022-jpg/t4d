@@ -26,7 +26,21 @@ export interface StorageAdapter {
   readonly kind: 'demo' | 'supabase';
   put(bucket: StorageBucket, key: string, bytes: Uint8Array, contentType: string): Promise<void>;
   get(bucket: StorageBucket, key: string): Promise<Uint8Array | null>;
-  createSignedUrl(bucket: StorageBucket, key: string, expiresInSeconds: number): Promise<string>;
+  /**
+   * 署名付き URL を発行する。
+   *
+   * `authorized` は「アプリ層の認可を通過済み」であることを示す。
+   * 監査法人はクライアント組織のメンバーではないため、Storage の RLS
+   * （t4d_private_read_own_org）では自組織のオブジェクトしか読めない。
+   * 許諾に基づく閲覧は canReadEvidence() が判定済みなので、
+   * その場合だけ Service Role で発行する（docs/storage-model.md 5 章）。
+   */
+  createSignedUrl(
+    bucket: StorageBucket,
+    key: string,
+    expiresInSeconds: number,
+    options?: { authorized?: boolean },
+  ): Promise<string>;
 }
 
 /** ウイルススキャンの接続点。Phase 1 は skipped を返すだけ。 */
@@ -103,9 +117,16 @@ class SupabaseStorageAdapter implements StorageAdapter {
     bucket: StorageBucket,
     key: string,
     expiresInSeconds: number,
+    options: { authorized?: boolean } = {},
   ): Promise<string> {
-    const { createSupabaseServerClient } = await import('@/lib/supabase/server');
-    const client = await createSupabaseServerClient();
+    const { createSupabaseServerClient, createSupabaseServiceRoleClient } =
+      await import('@/lib/supabase/server');
+    // 認可済みの経路だけ Service Role を使う。
+    // Storage の RLS は「オブジェクトのパスに含まれる組織のメンバーか」しか見ないため、
+    // 許諾で読める監査法人をここで締め出してしまう（署名の発行自体が失敗する）。
+    const client = options.authorized
+      ? createSupabaseServiceRoleClient()
+      : await createSupabaseServerClient();
     const { data, error } = await client.storage
       .from(bucket)
       .createSignedUrl(key, expiresInSeconds);
@@ -320,7 +341,15 @@ export async function createEvidenceSignedUrl(
   if (!file || file.deletedAt) return null;
 
   // 2. Signed URL 発行
-  const url = await getStorageAdapter().createSignedUrl(file.bucket, version.storageKey, expiresIn);
+  // canReadEvidence() を通過している＝許諾と案件メンバーシップを確認済み
+  const url = await getStorageAdapter().createSignedUrl(
+    file.bucket,
+    version.storageKey,
+    expiresIn,
+    {
+      authorized: true,
+    },
+  );
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
   await db.insert('storageAccessEvents', [

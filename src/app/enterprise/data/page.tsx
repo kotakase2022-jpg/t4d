@@ -336,7 +336,12 @@ export default async function DataListPage({
           />
         </Card>
 
-        <BulkActionBar />
+        <BulkActionBar
+          canWrite={can(shell.ctx, 'enterprise.data.write')}
+          canApprove={
+            can(shell.ctx, 'enterprise.data.review') || can(shell.ctx, 'enterprise.data.approve')
+          }
+        />
       </div>
     </>
   );

@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
+  applyDemoEdits,
   decodeDemoEdits,
   encodeDemoEdits,
   type DemoEdit,
@@ -138,5 +140,67 @@ describe('Demo Mode の変更差分の符号化', () => {
     const edits = ingestionJob(25);
     const plain = Buffer.from(JSON.stringify(edits), 'utf8').toString('base64url').length;
     expect(plain / encodeDemoEdits(edits).length).toBeGreaterThan(3);
+  });
+});
+
+describe('Cookie の中身を信用しない', () => {
+  /**
+   * httpOnly は JavaScript から読めなくするだけで、
+   * 攻撃者が自分で Cookie ヘッダーを組み立てて送るのは防げない。
+   * Fixture DB はプロセス全体で共有されるため、検証せずに適用すると
+   * 1 リクエストで全利用者のデータを書き換えられてしまう。
+   */
+  function fixtureLike() {
+    return {
+      comments: [] as Record<string, unknown>[],
+      organizationMemberships: [
+        { id: 'm1', userId: 'u1', organizationId: 'org-a', roleKeys: ['viewer'] },
+      ] as Record<string, unknown>[],
+      auditEvents: [{ id: 'a1', eventType: 'login_success' }] as Record<string, unknown>[],
+      signoffs: [] as Record<string, unknown>[],
+      grants: [] as Record<string, unknown>[],
+    };
+  }
+
+  it('許可リストに無い表（メンバーシップ）は書き換えられない', () => {
+    const db = fixtureLike();
+    applyDemoEdits(db as never, [
+      { t: 'organizationMemberships', id: 'm1', v: { roleKeys: ['enterprise_admin'] } },
+    ]);
+    expect(db.organizationMemberships[0]!.roleKeys).toEqual(['viewer']);
+  });
+
+  it('許可リストに無い表へ行を挿入できない（ロール注入・証跡の捏造）', () => {
+    const db = fixtureLike();
+    applyDemoEdits(db as never, [
+      {
+        t: 'organizationMemberships',
+        id: 'injected',
+        v: {
+          id: 'injected',
+          userId: 'attacker',
+          organizationId: 'org-b',
+          roleKeys: ['platform_admin'],
+        },
+      },
+      { t: 'auditEvents', id: 'a1', v: { eventType: '改ざん' } },
+      { t: 'signoffs', id: 's1', v: { id: 's1', signoffStage: 'partner_approved' } },
+      { t: 'grants', id: 'g1', v: { id: 'g1', revokedAt: null } },
+    ]);
+    expect(db.organizationMemberships).toHaveLength(1);
+    expect(db.auditEvents[0]!.eventType).toBe('login_success');
+    expect(db.signoffs).toHaveLength(0);
+    expect(db.grants).toHaveLength(0);
+  });
+
+  it('許可された表（コメント）は従来どおり適用される', () => {
+    const db = fixtureLike();
+    applyDemoEdits(db as never, [{ t: 'comments', id: 'c1', v: { id: 'c1', body: '本文' } }]);
+    expect(db.comments).toHaveLength(1);
+  });
+
+  it('展開後が大きすぎる Cookie は展開せず空で返す（圧縮爆弾）', () => {
+    const bomb = deflateRawSync(Buffer.alloc(4 * 1024 * 1024, 0x41)).toString('base64url');
+    expect(decodeDemoEdits('2' + bomb)).toEqual([]);
   });
 });

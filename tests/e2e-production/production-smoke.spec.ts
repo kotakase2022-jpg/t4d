@@ -291,3 +291,52 @@ test('本番: 監査法人が新しい案件を起票できる', async ({ page }
   await page.waitForURL(/\/assurance\/engagements\/[^/]+\/overview/);
   await expect(page.locator('#t4d-main')).toContainText('本番スモークの保証契約');
 });
+
+test('本番: SSBJ の開示ドラフトを出力できる', async ({ page }) => {
+  await prodLogin(page, '青海 太郎');
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj`);
+
+  const link = page.getByRole('link', { name: /開示ドラフト（DOCX）/ });
+  await expect(link, 'SSBJ の Export 導線が無い').toBeVisible();
+
+  const href = (await link.getAttribute('href'))!;
+  const res = await page.evaluate(async (p) => {
+    const r = await fetch(p, { credentials: 'include' });
+    return { status: r.status, disposition: r.headers.get('content-disposition') ?? '' };
+  }, href);
+  expect(res.status).toBe(200);
+  expect(decodeURIComponent(res.disposition)).toContain('SSBJ');
+});
+
+test('本番: AI に異常値の原因を説明させられる（値は変わらない）', async ({ page }) => {
+  await prodLogin(page, '青海 太郎');
+  await page.goto(`${BASE}/enterprise/data?flag=validation_error`);
+  const href = (await page.locator('a[href^="/enterprise/data/"]').first().getAttribute('href'))!;
+  await page.goto(`${BASE}${href}`);
+
+  const valueBefore = await page.locator('input[name="value"]').inputValue();
+  await page.getByRole('button', { name: 'AI に原因を説明させる' }).click();
+  await page.waitForURL(/explain=/);
+
+  await expect(page.getByText('考えられる原因:').first()).toBeVisible();
+  expect(await page.locator('input[name="value"]').inputValue()).toBe(valueBefore);
+});
+
+test('本番: 報告年度を追加できる', async ({ page }) => {
+  await prodLogin(page, '青海 太郎');
+  await page.goto(`${BASE}/enterprise/organizations`);
+
+  await expect(page.getByRole('heading', { name: /報告年度（/ })).toBeVisible();
+  await page.getByRole('button', { name: '報告年度を追加' }).click();
+
+  const code = `FY${2040 + (Date.now() % 50)}`;
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[name="code"]').fill(code);
+  await dialog.locator('input[name="label"]').fill(`${code} 年度`);
+  await dialog.locator('input[name="startDate"]').fill('2040-04-01');
+  await dialog.locator('input[name="endDate"]').fill('2041-03-31');
+  await dialog.getByRole('button', { name: '作成' }).click();
+  await page.waitForLoadState('networkidle');
+
+  await expect(page.locator('tr', { hasText: code }).first()).toBeVisible();
+});

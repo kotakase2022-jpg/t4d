@@ -14,6 +14,23 @@ import type { Uuid } from '@/types/domain';
  * Demo / Fixture Mode の DbClient。
  * インメモリ配列に対して同じ Query 契約を実装する。
  */
+/**
+ * Cookie へ残す内容を軽くする。
+ *
+ * **列は落とさない**（落とすと、別インスタンスで復元したときに欠けた列を読む箇所が壊れる。
+ * 実際に取込のジョブ画面が内部エラーになった）。
+ * 代わりに、読み直しに使わない大きな値だけを空にする。
+ *
+ * 取込マッピングの出力は行数ぶんの対応表で最も大きいが、
+ * プレビューが読むのは ingestionRows のほうで、この出力は使わない。
+ * 残しておくと同じ Cookie に載っている取込結果を押し出してしまう。
+ */
+function persistedColumns(table: TableName, row: unknown): Record<string, unknown> {
+  const record = row as Record<string, unknown>;
+  if (table !== 'aiRuns' || record.featureType !== 'importMapping') return record;
+  return { ...record, outputJson: {} };
+}
+
 export class DemoDbClient implements DbClient {
   readonly mode = 'demo' as const;
 
@@ -54,7 +71,7 @@ export class DemoDbClient implements DbClient {
       for (const row of cloned) {
         const record = row as unknown as { id?: string };
         if (record.id) {
-          await appendDemoEdit(table, record.id, row as unknown as Record<string, unknown>);
+          await appendDemoEdit(table, record.id, persistedColumns(table, row));
         }
       }
     }

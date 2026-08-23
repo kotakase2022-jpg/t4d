@@ -161,6 +161,9 @@ const PERSISTED_TABLES = new Set<TableName>([
   'engagements',
   'engagementMembers',
   'grants',
+  // AI の実行結果。?run=<id> で読み直す画面が多く、
+  // 持ち回さないと「実行したのに何も出ない」になる。
+  'aiRuns',
 ]);
 
 export function isPersistedTable(table: TableName): boolean {
@@ -177,7 +180,7 @@ export function isPersistedTable(table: TableName): boolean {
  * 「1 リクエストで全利用者のデータを書き換える」ことができてしまう。
  *
  * そこで、書き込み時と**同じ許可リスト**をここでも通す。
- * これにより organizationMemberships（ロール注入）・auditEvents・signoffs・grants
+ * これにより organizationMemberships（ロール注入）・membershipRoles・auditEvents・signoffs
  * といった、なりすましや証跡の改ざんに使える表には一切届かない。
  */
 export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {

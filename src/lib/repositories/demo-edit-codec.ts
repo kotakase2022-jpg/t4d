@@ -129,7 +129,18 @@ export function decodeDemoEdits(raw: string): DemoEdit[] {
   }
 }
 
-/** Cookie に記録する対象テーブル（画面から人が編集するもの） */
+/**
+ * Cookie に記録する対象テーブル（画面から人が編集するもの）。
+ *
+ * この一覧は書き込み時と読み取り時の**両方**で使う。
+ * ここに無い表は Cookie 経由で一切触れないので、なりすましや証跡の改ざんに
+ * 使える表（organizationMemberships / membershipRoles / auditEvents / signoffs）は
+ * 意図的に外している。
+ *
+ * 逆に、ここへ入れた表は「偽の Cookie で作られた行」が混ざりうる。
+ * Demo Mode のデータはすべて架空で、デモアカウントは誰でも使える前提
+ * （docs/known-limitations.md D-4）なので、デモとして見せたい操作を優先している。
+ */
 const PERSISTED_TABLES = new Set<TableName>([
   // 取込系。1 ファイル数行程度のデモ操作なら Cookie に収まる。
   // 大量ファイルの取込は収まらないため、その場合は同一インスタンス内でのみ参照できる
@@ -145,6 +156,11 @@ const PERSISTED_TABLES = new Set<TableName>([
   'metrics',
   'units',
   'notifications',
+  // 起票した案件・付与した許諾も持ち回す。
+  // 入れないと「作った直後に開くと 404」になる（本番スモークで再現した）。
+  'engagements',
+  'engagementMembers',
+  'grants',
 ]);
 
 export function isPersistedTable(table: TableName): boolean {

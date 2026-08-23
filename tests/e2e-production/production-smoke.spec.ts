@@ -190,7 +190,11 @@ test('本番: 監査法人ワークスペースが Read-only で動く', async (
   await page.goto(`${BASE}/assurance/engagements`);
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  const base = (await page
+  // Demo Mode の在庫はインスタンスごとに違う（別セッションが起票した案件が
+  // 一覧にだけ出ることがある）。判定を安定させるため Fixture の案件を名指しする。
+  const row = page.locator('tr', { hasText: 'ENG-2026-001' });
+  await expect(row, 'Fixture の案件が一覧に無い').toBeVisible();
+  const base = (await row
     .locator('a[href^="/assurance/engagements/"]')
     .first()
     .getAttribute('href'))!.replace(/\/[^/]*$/, '');
@@ -270,4 +274,20 @@ test('本番: 入力の誤りが理由付きで画面に出る（digest だけ�
 
   await page.waitForURL(/error=/);
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('正しくありません');
+});
+
+test('本番: 監査法人が新しい案件を起票できる', async ({ page }) => {
+  await prodLogin(page, '青葉 健');
+  await page.goto(`${BASE}/assurance/engagements`);
+
+  const form = page.locator('form', { hasText: '起票' });
+  await expect(form, '案件を起票するフォームが無い').toBeVisible();
+
+  const code = `ENG-PROD-${Math.floor(Date.now() % 100000)}`;
+  await form.locator('input[name="code"]').fill(code);
+  await form.locator('input[name="name"]').fill('本番スモークの保証契約');
+  await form.getByRole('button', { name: '起票' }).click();
+
+  await page.waitForURL(/\/assurance\/engagements\/[^/]+\/overview/);
+  await expect(page.locator('#t4d-main')).toContainText('本番スモークの保証契約');
 });

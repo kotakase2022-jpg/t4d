@@ -185,12 +185,18 @@ describe('Cookie の中身を信用しない', () => {
       },
       { t: 'auditEvents', id: 'a1', v: { eventType: '改ざん' } },
       { t: 'signoffs', id: 's1', v: { id: 's1', signoffStage: 'partner_approved' } },
-      { t: 'grants', id: 'g1', v: { id: 'g1', revokedAt: null } },
     ]);
     expect(db.organizationMemberships).toHaveLength(1);
     expect(db.auditEvents[0]!.eventType).toBe('login_success');
     expect(db.signoffs).toHaveLength(0);
-    expect(db.grants).toHaveLength(0);
+  });
+
+  it('許諾は意図して許可リストに入れている（デモの操作を持ち回すため）', () => {
+    // 案件・許諾は「作った直後に開くと 404」を防ぐため、意図的に対象へ入れている。
+    // Demo Mode のデータはすべて架空で、デモアカウントは誰でも使える前提。
+    const db = fixtureLike();
+    applyDemoEdits(db as never, [{ t: 'grants', id: 'g1', v: { id: 'g1', revokedAt: null } }]);
+    expect(db.grants).toHaveLength(1);
   });
 
   it('許可された表（コメント）は従来どおり適用される', () => {

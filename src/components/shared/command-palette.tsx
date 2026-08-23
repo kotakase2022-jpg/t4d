@@ -129,35 +129,56 @@ export function CommandPalette({
             }}
             placeholder="画面を検索（例: サンプリング、CDP、母集団）"
             aria-label="コマンドパレット検索"
+            // 上下キーで動く「選択中の候補」を支援技術へ伝える。
+            // これが無いと、読み上げでは何が選ばれているか分からない。
+            role="combobox"
+            aria-expanded
+            aria-controls="t4d-cmdk-list"
+            aria-autocomplete="list"
+            aria-activedescendant={
+              filtered[activeIndex] ? `t4d-cmdk-option-${activeIndex}` : undefined
+            }
             className="h-7 w-full bg-transparent text-[13px] outline-none placeholder:text-ink-muted/70"
           />
           <kbd className="rounded border border-line px-1 text-[11px] text-ink-muted">Esc</kbd>
         </div>
-        <ul className="max-h-80 overflow-y-auto p-1" role="listbox" aria-label="検索結果">
+        {/*
+          listbox の直下は option だけにする（li でくるむと構造が不正になり、
+          支援技術が候補を数えられない）。
+        */}
+        <div
+          id="t4d-cmdk-list"
+          role="listbox"
+          aria-label="検索結果"
+          className="max-h-80 overflow-y-auto p-1"
+        >
           {filtered.length === 0 && (
-            <li className="px-3 py-6 text-center text-[12px] text-ink-muted">
+            <p className="px-3 py-6 text-center text-[12px] text-ink-muted">
               一致する画面がありません
-            </li>
+            </p>
           )}
           {filtered.map((entry, index) => (
-            <li key={`${entry.group}-${entry.href}-${entry.label}`}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={index === activeIndex}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => go(entry.href)}
-                className={cn(
-                  'flex w-full items-center justify-between gap-2 rounded-[4px] px-2 py-1.5 text-left text-[13px]',
-                  index === activeIndex ? 'bg-brand-50 text-brand-900' : 'text-ink',
-                )}
-              >
-                <span className="truncate">{entry.label}</span>
-                <span className="shrink-0 text-[11px] text-ink-muted">{entry.group}</span>
-              </button>
-            </li>
+            // 候補は combobox の作法どおり、フォーカスを持たない（入力欄に留めたまま
+            // aria-activedescendant で選択中を伝える）。キー操作は入力欄側で処理している。
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+            <div
+              key={`${entry.group}-${entry.href}-${entry.label}`}
+              id={`t4d-cmdk-option-${index}`}
+              role="option"
+              tabIndex={-1}
+              aria-selected={index === activeIndex}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => go(entry.href)}
+              className={cn(
+                'flex w-full cursor-pointer items-center justify-between gap-2 rounded-[4px] px-2 py-1.5 text-left text-[13px]',
+                index === activeIndex ? 'bg-brand-50 text-brand-900' : 'text-ink',
+              )}
+            >
+              <span className="truncate">{entry.label}</span>
+              <span className="shrink-0 text-[11px] text-ink-muted">{entry.group}</span>
+            </div>
           ))}
-        </ul>
+        </div>
       </DialogContent>
     </Dialog>
   );

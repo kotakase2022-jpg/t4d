@@ -1,4 +1,5 @@
 import { ShieldCheck, UserPlus } from 'lucide-react';
+import { MembershipStatusBadge } from '@/components/shared/badges';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -141,9 +142,7 @@ export default async function SettingsPage({
                             .join(' / ')}
                     </TD>
                     <TD>
-                      <Badge tone={membership.status === 'active' ? 'success' : 'neutral'}>
-                        {membership.status}
-                      </Badge>
+                      <MembershipStatusBadge status={membership.status} />
                     </TD>
                   </TR>
                 );

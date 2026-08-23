@@ -35,6 +35,9 @@ export const DialogContent = React.forwardRef<
         className={cn(
           'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
           'rounded-t4d-lg border border-line bg-surface shadow-lg focus:outline-none',
+          // 画面が低いとき・ブラウザの拡大表示のときに、
+          // 下端の送信ボタンへ到達できなくなるのを防ぐ（内側だけスクロールさせる）。
+          'flex max-h-[90dvh] flex-col overflow-y-auto',
           className,
         )}
         {...props}

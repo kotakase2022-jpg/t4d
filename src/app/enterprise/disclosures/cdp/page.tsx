@@ -21,6 +21,7 @@ import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-head
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
@@ -217,19 +218,27 @@ export default async function CdpWorkspacePage({
             {can(shell.ctx, 'enterprise.ai.run') && (
               <form action={runQuestionMappingAction}>
                 <input type="hidden" name="frameworkKey" value="cdp" />
-                <Button type="submit" variant="secondary" size="sm">
-                  <Sparkles aria-hidden="true" />
+                <SubmitButton
+                  variant="secondary"
+                  size="sm"
+                  icon={<Sparkles aria-hidden="true" />}
+                  pendingLabel="実行中…"
+                >
                   質問マッピングを実行
-                </Button>
+                </SubmitButton>
               </form>
             )}
             {can(shell.ctx, 'enterprise.ai.run') && (
               <form action={runConsistencyCheckAction}>
                 <input type="hidden" name="framework" value="cdp" />
-                <Button type="submit" variant="secondary" size="sm">
-                  <ShieldCheck aria-hidden="true" />
+                <SubmitButton
+                  variant="secondary"
+                  size="sm"
+                  icon={<ShieldCheck aria-hidden="true" />}
+                  pendingLabel="実行中…"
+                >
                   整合チェックを実行
-                </Button>
+                </SubmitButton>
               </form>
             )}
             <Button variant="outline" size="sm" asChild>

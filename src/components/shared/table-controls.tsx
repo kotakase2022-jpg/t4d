@@ -2,9 +2,10 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowDown, ArrowUp, ArrowUpDown, Columns3 } from 'lucide-react';
 import {
+  DropdownMenuCheckboxItem,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
@@ -77,6 +78,7 @@ export function ColumnSelector({
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const raw = searchParams.get('cols');
   const visible = raw
@@ -118,29 +120,28 @@ export function ColumnSelector({
       <DropdownMenuContent align="end" className="min-w-[200px]">
         <DropdownMenuLabel>表示する列</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {/*
+          Radix のメニュー項目（DropdownMenuCheckboxItem）を使う。
+          素の <Link> や <input> を並べると、矢印キーでの移動も Enter での決定も効かず、
+          支援技術にはチェック状態が伝わらない。
+        */}
         {columns.map((column) => {
           const locked = alwaysVisible.includes(column.key);
           const checked = visible.has(column.key);
-          if (locked) {
-            return (
-              <div
-                key={column.key}
-                className="flex items-center gap-2 px-2 py-1.5 text-[13px] text-ink-muted"
-              >
-                <input type="checkbox" checked readOnly disabled className="size-3.5" />
-                {column.label}（常に表示）
-              </div>
-            );
-          }
           return (
-            <Link
+            <DropdownMenuCheckboxItem
               key={column.key}
-              href={hrefFor(column.key)}
-              className="flex items-center gap-2 rounded-[4px] px-2 py-1.5 text-[13px] text-ink hover:bg-brand-50"
+              checked={locked ? true : checked}
+              disabled={locked}
+              onSelect={(event) => {
+                // メニューを閉じずに複数列を切り替えられるようにする
+                event.preventDefault();
+                if (!locked) router.push(hrefFor(column.key), { scroll: false });
+              }}
             >
-              <input type="checkbox" checked={checked} readOnly className="size-3.5" />
               {column.label}
-            </Link>
+              {locked ? '（常に表示）' : ''}
+            </DropdownMenuCheckboxItem>
           );
         })}
       </DropdownMenuContent>

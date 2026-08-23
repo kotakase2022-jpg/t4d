@@ -1003,11 +1003,13 @@ export async function saveMaterialityTopicAction(formData: FormData): Promise<vo
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const { saveMaterialityTopic } = await import('@/lib/services/materiality');
-  await saveMaterialityTopic(db, ctx, {
-    reportingPeriodId: String(formData.get('reportingPeriodId') ?? ''),
-    topicKey: String(formData.get('topicKey') ?? ''),
-    materiality: String(formData.get('materiality') ?? 'not_assessed') as MaterialityLevel,
-    rationale: String(formData.get('rationale') ?? ''),
+  await withUserFacingError('/enterprise/disclosures/ssbj', async () => {
+    await saveMaterialityTopic(db, ctx, {
+      reportingPeriodId: String(formData.get('reportingPeriodId') ?? ''),
+      topicKey: String(formData.get('topicKey') ?? ''),
+      materiality: String(formData.get('materiality') ?? 'not_assessed') as MaterialityLevel,
+      rationale: String(formData.get('rationale') ?? ''),
+    });
+    revalidatePath('/enterprise/disclosures/ssbj');
   });
-  revalidatePath('/enterprise/disclosures/ssbj');
 }

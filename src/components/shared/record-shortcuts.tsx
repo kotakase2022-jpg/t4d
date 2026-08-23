@@ -9,7 +9,7 @@ import * as React from 'react';
  *
  *   j / k … 一覧の次 / 前のレコードへ移動（`[data-t4d-record]` を辿る）
  *   e     … Evidence セクションへ移動（`[data-t4d-shortcut="evidence"]`）
- *   c     … コメント入力へフォーカス（`[data-t4d-shortcut="comment"]` / `[name="comment"]`）
+ *   c     … コメント入力へフォーカス（`[data-t4d-shortcut="comment"]`）
  *   s     … 下書き保存（`[data-t4d-shortcut="save"]`）
  *
  * 設計上の約束:
@@ -95,11 +95,9 @@ export function RecordShortcuts() {
           break;
         case 'c':
           event.preventDefault();
-          focusFirst([
-            '[data-t4d-shortcut="comment"]',
-            'input[name="comment"]',
-            'textarea[name="comment"]',
-          ]);
+          // 印だけを見る。name="comment" を拾うと、Data Point 詳細では
+          // 差戻し理由の入力欄へ飛んでしまう（コメント欄ではない）。
+          focusFirst(['[data-t4d-shortcut="comment"]']);
           break;
         case 's': {
           const save = document.querySelector<HTMLElement>('[data-t4d-shortcut="save"]');

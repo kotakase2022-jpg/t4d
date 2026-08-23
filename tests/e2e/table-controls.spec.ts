@@ -55,7 +55,9 @@ test('列表示を切り替えられ、URL に保持される', async ({ page })
 
   const before = await page.locator('thead th').count();
   await page.locator('[data-t4d-column-selector]').click();
-  await page.getByRole('link', { name: '単位' }).click();
+  // 列の切り替えは Radix のメニュー項目（矢印キー・Enter でも操作できる）
+  await page.getByRole('menuitemcheckbox', { name: '単位' }).click();
+  await page.keyboard.press('Escape');
 
   await page.waitForURL(/[?&]cols=/, { timeout: 12_000 });
   await expect(page.locator('#t4d-main')).toBeVisible();
@@ -70,7 +72,9 @@ test('指標列は常に表示され、外せない', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
   await gotoEnterprise(page, 'data');
   await page.locator('[data-t4d-column-selector]').click();
-  await expect(page.getByText('指標（常に表示）')).toBeVisible();
+  const locked = page.getByRole('menuitemcheckbox', { name: /指標（常に表示）/ });
+  await expect(locked).toBeVisible();
+  await expect(locked).toBeDisabled();
 });
 
 test('不正な sort / cols を渡しても壊れない', async ({ page }) => {

@@ -8,6 +8,7 @@ import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
 import { can } from '@/lib/authorization/can';
@@ -305,9 +306,9 @@ export async function QuestionDetailView({
                 </label>
 
                 <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <Button type="submit" size="sm" data-t4d-shortcut="save">
+                  <SubmitButton size="sm" data-t4d-shortcut="save" pendingLabel="保存中…">
                     保存（下書き）
-                  </Button>
+                  </SubmitButton>
                 </div>
               </form>
             ) : (
@@ -370,10 +371,14 @@ export async function QuestionDetailView({
               {can(ctx, 'enterprise.ai.run') && row.response && (
                 <form action={generateCdpDraftAction}>
                   <input type="hidden" name="responseId" value={row.response.id} />
-                  <Button type="submit" size="sm" variant="secondary">
-                    <Bot aria-hidden="true" />
+                  <SubmitButton
+                    size="sm"
+                    variant="secondary"
+                    icon={<Bot aria-hidden="true" />}
+                    pendingLabel="生成中…"
+                  >
                     ドラフトを生成
-                  </Button>
+                  </SubmitButton>
                 </form>
               )}
 

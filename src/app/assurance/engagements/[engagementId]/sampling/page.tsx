@@ -2,7 +2,7 @@ import { ListChecks } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
@@ -175,10 +175,13 @@ export default async function SamplingPage({
                     />
                   </label>
                   <div className="col-span-6">
-                    <Button type="submit" size="sm">
-                      <ListChecks aria-hidden="true" />
+                    <SubmitButton
+                      size="sm"
+                      icon={<ListChecks aria-hidden="true" />}
+                      pendingLabel="抽出中…"
+                    >
                       サンプルを抽出
-                    </Button>
+                    </SubmitButton>
                   </div>
                 </form>
               </Card>

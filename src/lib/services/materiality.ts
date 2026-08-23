@@ -3,6 +3,7 @@ import 'server-only';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
 import { fid } from '@/lib/fixtures/ids';
+import { ValidationError } from '@/lib/errors/user-facing';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -215,7 +216,7 @@ export async function saveMaterialityTopic(
   }
   // 重要と判断したものは、なぜ重要なのかを残す（後から監査で問われる）
   if (isMaterial(input.materiality) && !rationale) {
-    throw new Error('重要と評価する場合は、その理由を入力してください。');
+    throw new ValidationError('重要と評価する場合は、その理由を入力してください。');
   }
 
   const organizationId = ctx.workspace.organizationId;

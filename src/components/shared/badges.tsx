@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type {
+  MembershipStatus,
   DataPointStatus,
   IssueSeverity,
   JobStatus,
@@ -277,6 +278,31 @@ export function ReadOnlyBadge({ label = 'Read-only（企業原本）' }: { label
     <Badge tone="neutral">
       <Lock className="size-3" aria-hidden="true" />
       {label}
+    </Badge>
+  );
+}
+
+const MEMBERSHIP_STATUS_MAP: Record<
+  MembershipStatus,
+  { label: string; tone: Tone; Icon: typeof Check }
+> = {
+  invited: { label: '招待中', tone: 'outline', Icon: Send },
+  active: { label: '有効', tone: 'success', Icon: Check },
+  suspended: { label: '停止中', tone: 'danger', Icon: Lock },
+};
+
+/**
+ * メンバーの状態。
+ * 生の enum（invited / active / suspended）をそのまま出すと、
+ * 日本語 UI の中で読み手が意味を推測することになる。
+ * 色だけに頼らないよう、ラベルとアイコンを併記する。
+ */
+export function MembershipStatusBadge({ status }: { status: MembershipStatus }) {
+  const s = MEMBERSHIP_STATUS_MAP[status];
+  return (
+    <Badge tone={s.tone}>
+      <s.Icon className="size-3" aria-hidden="true" />
+      {s.label}
     </Badge>
   );
 }

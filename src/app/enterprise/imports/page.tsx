@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { ClipboardPaste, FileSpreadsheet, FileUp, Upload } from 'lucide-react';
 import { JobStatusBadge } from '@/components/shared/badges';
+import { FileDropZone } from '@/components/shared/file-drop-zone';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -79,13 +81,13 @@ export default async function ImportsPage() {
                 </p>
               </div>
 
-              <label
-                htmlFor="import-files"
+              <FileDropZone
+                inputId="import-files"
                 className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-t4d-lg border-2 border-dashed border-line bg-surface-muted px-4 py-8 text-center transition-colors hover:border-brand-400 hover:bg-brand-50"
               >
                 <FileUp className="size-6 text-brand-600" aria-hidden="true" />
                 <span className="text-[13px] font-medium text-ink">
-                  クリックしてファイルを選択（複数可）
+                  クリックしてファイルを選択（複数可）／ ここへドロップ
                 </span>
                 <span className="text-[11px] text-ink-muted">
                   対応形式: .csv / .tsv / .xlsx / .xlsm / .pdf / .docx ／ 1 ファイル 25MB まで
@@ -98,13 +100,12 @@ export default async function ImportsPage() {
                   accept=".csv,.tsv,.xlsx,.xlsm,.pdf,.docx,text/csv,text/tab-separated-values,application/pdf"
                   className="sr-only"
                 />
-              </label>
+              </FileDropZone>
 
               <div className="flex items-center gap-2">
-                <Button type="submit" size="sm">
-                  <Upload aria-hidden="true" />
+                <SubmitButton size="sm" icon={<Upload aria-hidden="true" />} pendingLabel="解析中…">
                   取込を開始
-                </Button>
+                </SubmitButton>
                 <span className="text-[11px] text-ink-muted">
                   アップロード後は取込ジョブ画面へ移動し、進捗が表示されます。
                   テンプレートに記入したファイルもここへドロップしてください。
@@ -130,10 +131,13 @@ export default async function ImportsPage() {
                 <span className="text-[11px] text-ink-muted">
                   ファイルと同じ経路（AI 仕分け → プレビュー → 確定）で取り込まれます。
                 </span>
-                <Button type="submit" size="sm">
-                  <ClipboardPaste aria-hidden="true" />
+                <SubmitButton
+                  size="sm"
+                  icon={<ClipboardPaste aria-hidden="true" />}
+                  pendingLabel="解析中…"
+                >
                   貼り付け内容を取り込む
-                </Button>
+                </SubmitButton>
               </div>
             </form>
           </Card>

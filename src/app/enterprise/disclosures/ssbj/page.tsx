@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { CircleAlert, FlaskConical, Send, Target, Download } from 'lucide-react';
 import { DisclosureSteps, type DisclosureStep } from '@/components/shared/disclosure-steps';
+import { FlashMessage } from '@/components/shared/flash';
 import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -32,7 +33,12 @@ function coverageTone(coverage: number): 'success' | 'warning' | 'danger' {
   return 'danger';
 }
 
-export default async function SsbjPage() {
+export default async function SsbjPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const canWrite = can(shell.ctx, 'enterprise.disclosure.write');
 
@@ -116,6 +122,7 @@ export default async function SsbjPage() {
       />
 
       <div className="space-y-3 p-4">
+        <FlashMessage searchParams={query} />
         <DisclosureSteps steps={steps} />
 
         {/* 充足度の可視化 */}

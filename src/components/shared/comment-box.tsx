@@ -50,6 +50,8 @@ export function CommentBox({
       <input type="hidden" name="href" value={href} />
       <Textarea
         ref={textareaRef}
+        // ショートカット「c」の飛び先。名前ではなくこの印で特定する
+        data-t4d-shortcut="comment"
         name="body"
         rows={2}
         required

@@ -7,6 +7,7 @@ import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatEstimatedCostUsd, formatJst } from '@/lib/format/datetime';
@@ -337,10 +338,9 @@ export default async function ImportJobPage({
                   確定すると Data Point 台帳へ反映されます（既存データがある場合は新しい Version
                   が追加されます）。AI の推定は候補であり、確定は人が行います。
                 </p>
-                <Button type="submit" size="sm">
-                  <Check aria-hidden="true" />
+                <SubmitButton size="sm" icon={<Check aria-hidden="true" />} pendingLabel="確定中…">
                   選択した行を確定
-                </Button>
+                </SubmitButton>
               </div>
             </form>
           )}

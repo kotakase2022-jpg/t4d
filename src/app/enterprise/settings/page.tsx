@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
+import { FlashMessage } from '@/components/shared/flash';
 import { can } from '@/lib/authorization/can';
 import { roleLabel } from '@/lib/authorization/roles';
 import { Input } from '@/components/ui/input';
@@ -35,7 +36,8 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const resetIssued = (await searchParams).reset === 'issued';
+  const params = await searchParams;
+  const resetIssued = params.reset === 'issued';
   // リンク本体は httpOnly Cookie（JS から読めない）。表示はサーバー側で読んで行う。
   const { cookies } = await import('next/headers');
   const resetLink = resetIssued ? ((await cookies()).get('t4d.reset-link')?.value ?? null) : null;
@@ -106,6 +108,9 @@ export default async function SettingsPage({
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: '設定' }]}
       />
 
+      <div className="px-4 pt-3">
+        <FlashMessage searchParams={params} />
+      </div>
       <div className="space-y-3 p-4">
         <Card className="overflow-hidden">
           <SectionTitle title={`メンバー（${memberships.length}）`} />

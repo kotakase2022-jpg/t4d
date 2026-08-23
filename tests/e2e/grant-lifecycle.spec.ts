@@ -51,5 +51,7 @@ test('種別と対象の組み合わせが不正な付与はサーバー側で�
   await form.locator('select[name="subjectId"]').selectOption({ label: 'Scope1 排出量' });
   await form.getByRole('button', { name: '許諾する' }).click();
 
-  await expect(page.locator('#t4d-main')).toContainText(/正しくありません|できませんでした/);
+  // 本番ビルドでは例外メッセージが伏せられるため、?error= で戻して表示する
+  await page.waitForURL(/error=/);
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('正しくありません');
 });

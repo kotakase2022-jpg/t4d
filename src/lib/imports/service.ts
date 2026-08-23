@@ -494,6 +494,12 @@ export async function confirmIngestionJob(
   const period = periods.find((p) => p.id === job.reportingPeriodId);
   if (!period) throw new NotFoundError('報告期間が見つかりません。');
 
+  // 1 行ずつ書きながら途中で権限エラーを投げると、
+  // 「半分だけ台帳に入った状態で全画面エラー」になる。書く前にまとめて確かめる。
+  for (const decision of decisions) {
+    if (decision.include && decision.unitId) assertUnitInScope(ctx, decision.unitId);
+  }
+
   const result: ConfirmResult = { created: 0, updated: 0, skipped: 0 };
 
   for (const decision of decisions) {

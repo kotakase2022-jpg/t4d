@@ -140,6 +140,56 @@ describe('Import → Preview → Confirm', () => {
     ).rejects.toThrow(/担当外/);
   });
 
+  it('担当範囲外の拠点が混ざった確定は、1 件も書かずに失敗する', async () => {
+    // 1 行ずつ書きながら途中で権限エラーを投げると、
+    // 「半分だけ台帳に入った状態で全画面エラー」になる。
+    const ctx = siteUser();
+    const job = await createIngestionJob(db, ctx, {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      unitId: UNIT_IDS.east,
+      idempotencyKey: 'fail-fast-job',
+      files: [{ name: 'a.csv', type: 'text/csv', bytes: new TextEncoder().encode(CSV) }],
+    });
+    await processIngestionJob(db, ctx, job.id);
+    const rows = await db.select('ingestionRows', { where: { jobId: job.id } });
+    const waterRow = rows.find((r) => r.metricId === metricId('AOMI', 'water'));
+    expect(waterRow).toBeDefined();
+    if (!waterRow) return;
+
+    const versionsBefore = await db.select('dataPointVersions', {
+      where: { dataPointId: dataPointId('EAST', 'water', 'FY2026') },
+    });
+
+    await expect(
+      confirmIngestionJob(db, ctx, job.id, [
+        {
+          rowId: waterRow.id,
+          include: true,
+          metricId: waterRow.metricId,
+          unitId: waterRow.unitId,
+          value: waterRow.value,
+          unitOfMeasure: waterRow.unitOfMeasure,
+        },
+        {
+          // 担当外（本社）の行を混ぜる
+          rowId: waterRow.id,
+          include: true,
+          metricId: waterRow.metricId,
+          unitId: UNIT_IDS.hq,
+          value: 1,
+          unitOfMeasure: waterRow.unitOfMeasure,
+        },
+      ]),
+    ).rejects.toThrow(/担当外/);
+
+    const versionsAfter = await db.select('dataPointVersions', {
+      where: { dataPointId: dataPointId('EAST', 'water', 'FY2026') },
+    });
+    expect(versionsAfter.length, '失敗したのに一部だけ書き込まれている').toBe(
+      versionsBefore.length,
+    );
+  });
+
   it('確定すると Data Point に新しい Version が追加される', async () => {
     const ctx = siteUser();
     const job = await createIngestionJob(db, ctx, {

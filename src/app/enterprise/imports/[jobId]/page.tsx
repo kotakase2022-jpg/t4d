@@ -96,7 +96,14 @@ export default async function ImportJobPage({
   const aiRun = aiRunId ? await db.findById('aiRuns', aiRunId) : null;
 
   const period = shell.periods.find((p) => p.id === job.reportingPeriodId);
-  const editableUnits = shell.units.filter((u) => u.unitType !== 'supplier');
+  // 担当範囲外の拠点を選べてしまうと、確定時に権限エラーで全画面エラーになる。
+  // 投入画面（imports/page.tsx）と同じ条件で絞る。
+  const editableUnits = shell.units.filter(
+    (u) =>
+      u.unitType !== 'supplier' &&
+      (shell.ctx.workspace.unitScopeIds.length === 0 ||
+        shell.ctx.workspace.unitScopeIds.includes(u.id)),
+  );
   const pendingRows = rows.filter((r) => r.status !== 'confirmed' && r.status !== 'rejected');
   const confirmed = rows.filter((r) => r.status === 'confirmed').length;
 

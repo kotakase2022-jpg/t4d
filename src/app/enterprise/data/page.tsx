@@ -48,7 +48,8 @@ export default async function DataListPage({
 
   // 組織タグ「連結対象のみ」は仮想のタグ。選択されたら連結対象の組織 ID へ展開する
   // （持分法適用・対象外の組織を落とす）。実在の組織 ID と併用もできる。
-  const rawUnitIds = toArray(params.unit);
+  // 空文字の unit=（過去のブックマーク等）が来ても全件が消えないようにする
+  const rawUnitIds = toArray(params.unit).filter(Boolean);
   const consolidatedOnly = rawUnitIds.includes(CONSOLIDATED_UNIT_TAG);
   const consolidatedUnitIds = shell.units.filter(isConsolidatedUnit).map((u) => u.id);
   const explicitUnitIds = rawUnitIds.filter((id) => id !== CONSOLIDATED_UNIT_TAG);
@@ -189,7 +190,16 @@ export default async function DataListPage({
               },
             ]}
             savedViews={[
-              { label: '自分の担当', query: `unit=${shell.ctx.workspace.unitScopeIds[0] ?? ''}` },
+              // 「自分の担当」は担当拠点が設定されている人にだけ意味がある。
+              // 全社スコープ（unitScopeIds が空）の人に出すと、空クエリで常に 0 件になる。
+              ...(shell.ctx.workspace.unitScopeIds.length > 0
+                ? [
+                    {
+                      label: '自分の担当',
+                      query: shell.ctx.workspace.unitScopeIds.map((id) => `unit=${id}`).join('&'),
+                    },
+                  ]
+                : []),
               { label: '連結対象のみ', query: `unit=${CONSOLIDATED_UNIT_TAG}` },
               { label: '要対応のみ', query: 'flag=validation_error' },
               { label: '承認待ち', query: 'flag=review_pending' },

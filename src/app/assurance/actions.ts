@@ -785,3 +785,23 @@ export async function assignEngagementMemberAction(formData: FormData): Promise<
 
   revalidatePath(`${base(engagementId)}/overview`);
 }
+
+/**
+ * Evidence を AI に要約させる（AI-P1 Evidence 要約（監査））。
+ *
+ * **要約であり保証結論ではない。** 手続の実施と結論は監査人が行う。
+ */
+export async function summarizeEvidenceAction(formData: FormData): Promise<void> {
+  const ctx = await requireAssuranceContext();
+  const db = await getDb();
+  const engagementId = String(formData.get('engagementId') ?? '');
+  const fileVersionId = String(formData.get('fileVersionId') ?? '');
+
+  const { summarizeEvidenceForAssurance } = await import('@/lib/services/ai-assist');
+  const { run } = await summarizeEvidenceForAssurance(db, ctx, engagementId, fileVersionId);
+
+  revalidatePath(`${base(engagementId)}/testing`);
+  redirect(
+    `${base(engagementId)}/testing?evidenceSummary=${run.id}&fileVersionId=${fileVersionId}`,
+  );
+}

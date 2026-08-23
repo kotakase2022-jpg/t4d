@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { AlertTriangle, Check, FileSearch } from 'lucide-react';
+import { AlertTriangle, Check, FileSearch, Sparkles } from 'lucide-react';
 import { ReadOnlyBadge, TestStatusBadge } from '@/components/shared/badges';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
@@ -12,7 +12,12 @@ import { can } from '@/lib/authorization/can';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
 import { loadEngagementOr404, loadTestingWorkspace } from '@/lib/services/assurance';
-import { recordTestResultAction, updateTestAction } from '../../../actions';
+import { loadEvidenceSummary } from '@/lib/services/ai-assist';
+import {
+  recordTestResultAction,
+  summarizeEvidenceAction,
+  updateTestAction,
+} from '../../../actions';
 import { EngagementHeader } from '../engagement-header';
 
 export const metadata = { title: '保証手続・調書' };
@@ -34,6 +39,15 @@ export default async function TestingPage({
   const selectedId = typeof query.item === 'string' ? query.item : rows[0]?.sampleItemId;
   const selected = rows.find((r) => r.sampleItemId === selectedId) ?? rows[0];
   const base = `/assurance/engagements/${engagementId}/testing`;
+
+  // Evidence の AI 要約は ?evidenceSummary=<aiRunId>&fileVersionId=<id> で読み直す
+  const canRunAi = can(ctx, 'assurance.ai.run');
+  const summaryRunId = typeof query.evidenceSummary === 'string' ? query.evidenceSummary : null;
+  const summaryFileVersionId = typeof query.fileVersionId === 'string' ? query.fileVersionId : null;
+  const evidenceSummary =
+    summaryRunId && summaryFileVersionId
+      ? await loadEvidenceSummary(db, ctx, summaryRunId, summaryFileVersionId)
+      : null;
 
   const results = selected
     ? await db.select('testResults', { where: { testId: selected.testId } })
@@ -373,12 +387,58 @@ export default async function TestingPage({
                         <div className="text-[11px] text-ink-muted">
                           {link.page ? `p.${link.page}` : ''} {link.cellRef ?? ''}
                         </div>
+                        {version && canRunAi && (
+                          <form action={summarizeEvidenceAction} className="mt-1">
+                            <input type="hidden" name="engagementId" value={engagementId} />
+                            <input type="hidden" name="fileVersionId" value={version.id} />
+                            <Button type="submit" size="xs" variant="outline">
+                              <Sparkles aria-hidden="true" />
+                              AI に要約させる
+                            </Button>
+                          </form>
+                        )}
                       </li>
                     );
                   })}
                 </ul>
               )}
             </Card>
+
+            {evidenceSummary && (
+              <Card>
+                <SectionTitle
+                  title="Evidence の AI 要約"
+                  action={
+                    <span className="text-[11px] text-ink-muted">
+                      要約であり保証結論ではありません
+                    </span>
+                  }
+                />
+                <div className="space-y-1.5 px-3 py-2">
+                  <p className="text-[12px] text-ink">{evidenceSummary.summary.summary}</p>
+                  {evidenceSummary.summary.keyFigures.length > 0 && (
+                    <ul className="space-y-0.5">
+                      {evidenceSummary.summary.keyFigures.map((figure, index) => (
+                        <li key={index} className="text-[11px] text-ink-muted">
+                          {figure.label}: {figure.value}
+                          {figure.locator ? `（${figure.locator}）` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div>
+                    <p className="text-[11px] font-medium text-ink">確かめること</p>
+                    <ul className="list-disc pl-4">
+                      {evidenceSummary.summary.pointsToVerify.map((point, index) => (
+                        <li key={index} className="text-[11px] text-ink-muted">
+                          {point}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </Card>
+            )}
 
             {fragments.length > 0 && (
               <Card>

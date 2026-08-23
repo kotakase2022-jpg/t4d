@@ -39,11 +39,32 @@ export default async function AlertsPage() {
   const unitById = dataset.unitById;
   const dataPointById = new Map(dataset.dataPoints.map((dp) => [dp.id, dp]));
 
+  // 画面の説明文が挙げる 7 種のうち、未提出・資料依頼・質問更新が抜けていた。
+  const unsubmitted = dataset.dataPoints.filter(
+    (dp) => dp.status === 'not_started' || dp.status === 'draft',
+  );
+  // draft の PBC は企業側へ届いていない（監査法人の下書き）ので除く
+  const pbcRequests = await shell.db.select('pbcRequests', {
+    where: { clientOrganizationId: shell.ctx.workspace.organizationId },
+  });
+  const openPbc = pbcRequests.filter((r) => r.status !== 'draft' && r.status !== 'accepted');
+  // 開示質問は組織ではなく「フレームワークの版」に属する（マスターは共通）
+  const disclosureResponses = await shell.db.select('disclosureResponses', {
+    where: { organizationId: shell.ctx.workspace.organizationId },
+  });
+  const respondedItemIds = new Set(disclosureResponses.map((r) => r.itemId));
+  const allItems = await shell.db.select('disclosureItems', {});
+  const changedItems = allItems.filter(
+    (item) =>
+      (item.changeType === 'new' || item.changeType === 'changed') &&
+      !respondedItemIds.has(item.id),
+  ).length;
+
   return (
     <>
       <PageHeader
         title="統合アラートセンター"
-        description="未提出・期限超過・異常値・Evidence 不足・承認後変更を重要度別に集約します。行をクリックすると対象へ直接遷移します。"
+        description="未提出・期限超過・異常値・資料依頼・開示質問の更新を集約します。行をクリックすると対象へ直接遷移します。"
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'アラート' }]}
       />
 
@@ -52,7 +73,75 @@ export default async function AlertsPage() {
           <SummaryCard label="検証エラー" value={errors.length} tone="danger" />
           <SummaryCard label="検証警告" value={warnings.length} tone="warning" />
           <SummaryCard label="期限超過タスク" value={overdueTasks.length} tone="danger" />
+          <SummaryCard label="未提出データ" value={unsubmitted.length} tone="warning" />
+          <SummaryCard label="未回答の資料依頼" value={openPbc.length} tone="warning" />
+          <SummaryCard label="新規・変更の開示質問" value={changedItems} tone="warning" />
         </div>
+
+        <Card className="overflow-hidden">
+          <SectionTitle
+            title={`未提出のデータ（${unsubmitted.length}）`}
+            action={
+              <Link
+                href="/enterprise/data?status=not_started&status=draft"
+                className="text-[12px] text-brand-700 hover:underline"
+              >
+                一覧で開く
+              </Link>
+            }
+          />
+          {unsubmitted.length === 0 ? (
+            <EmptyState title="未提出のデータはありません" />
+          ) : (
+            <ul className="divide-y divide-line">
+              {unsubmitted.slice(0, 10).map((dp) => (
+                <li key={dp.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                  <Link
+                    href={`/enterprise/data/${dp.id}`}
+                    className="truncate text-[12px] text-brand-700 hover:underline"
+                  >
+                    {metricById.get(dp.metricId)?.name ?? '指標'} ／{' '}
+                    {unitById.get(dp.unitId)?.name ?? '組織'}
+                  </Link>
+                  <Badge tone="warning">{dp.status === 'draft' ? '作成中' : '未着手'}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card className="overflow-hidden">
+          <SectionTitle
+            title={`監査法人からの資料依頼（${openPbc.length}）`}
+            action={
+              <Link
+                href="/enterprise/workflows"
+                className="text-[12px] text-brand-700 hover:underline"
+              >
+                ワークフローで開く
+              </Link>
+            }
+          />
+          {openPbc.length === 0 ? (
+            <EmptyState title="未回答の資料依頼はありません" />
+          ) : (
+            <ul className="divide-y divide-line">
+              {openPbc.map((request) => (
+                <li key={request.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                  <Link
+                    href="/enterprise/workflows"
+                    className="truncate text-[12px] text-brand-700 hover:underline"
+                  >
+                    {request.code} {request.title}
+                  </Link>
+                  <Badge tone={isOverdue(request.dueDate, FIXTURE_TODAY) ? 'danger' : 'neutral'}>
+                    期限 {request.dueDate}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
 
         <Card className="overflow-hidden">
           <SectionTitle title={`データ品質アラート（${dataset.validations.length}）`} />
@@ -107,7 +196,13 @@ export default async function AlertsPage() {
             <ul className="divide-y divide-line">
               {overdueTasks.map((task) => (
                 <li key={task.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                  <span className="text-[12px] text-ink">{task.title}</span>
+                  {/* 「行をクリックすると対象へ直接遷移します」と案内している以上、遷移先を必ず持たせる */}
+                  <Link
+                    href={taskHref(task.targetType, task.targetId)}
+                    className="truncate text-[12px] text-brand-700 hover:underline"
+                  >
+                    {task.title}
+                  </Link>
                   <Badge tone="danger">期限 {task.dueDate}</Badge>
                 </li>
               ))}
@@ -117,6 +212,14 @@ export default async function AlertsPage() {
       </div>
     </>
   );
+}
+
+/** タスクの対象から遷移先を決める。分からないときは一覧へ送る。 */
+function taskHref(targetType: string, targetId: string | null): string {
+  if (targetType === 'data_point' && targetId) return `/enterprise/data/${targetId}`;
+  if (targetType === 'pbc_request') return '/enterprise/workflows';
+  if (targetType === 'disclosure_response') return '/enterprise/disclosures/cdp';
+  return '/enterprise/workflows';
 }
 
 function SummaryCard({

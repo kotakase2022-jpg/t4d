@@ -11,6 +11,7 @@ import {
   Minus,
   ShieldCheck,
   TriangleAlert,
+  Sparkles,
   Upload,
 } from 'lucide-react';
 import { AiGeneratedBadge, PriorityBadge, ResponseStatusBadge } from '@/components/shared/badges';
@@ -26,11 +27,16 @@ import { can } from '@/lib/authorization/can';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { filterDisclosureRows, loadDisclosureWorkspace } from '@/lib/services/disclosure';
 import { loadApplicability, type Applicability } from '@/lib/services/disclosure-applicability';
+import { loadQuestionMapping } from '@/lib/services/ai-assist';
 import { loadConsistencyCheck } from '@/lib/services/disclosure-check';
 import { loadDisclosureOnboarding } from '@/lib/services/disclosure-onboarding';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { ItemChangeType } from '@/types/domain';
-import { evaluateApplicabilityAction, runConsistencyCheckAction } from '../../actions';
+import {
+  evaluateApplicabilityAction,
+  runConsistencyCheckAction,
+  runQuestionMappingAction,
+} from '../../actions';
 
 export const metadata = { title: 'CDP' };
 
@@ -94,6 +100,11 @@ export default async function CdpWorkspacePage({
 
   // 整合チェック結果は ?check=<aiRunId> で読み直す（CDP-P0-006）
   const checkRunId = typeof params.check === 'string' ? params.check : null;
+  // 質問マッピングの候補は ?mapping=<aiRunId> で読み直す（候補のまま。確定は人が行う）
+  const mappingRunId = typeof params.mapping === 'string' ? params.mapping : null;
+  const mapping = mappingRunId
+    ? await loadQuestionMapping(shell.db, shell.ctx, mappingRunId)
+    : null;
   const check = checkRunId ? await loadConsistencyCheck(shell.db, shell.ctx, checkRunId) : null;
 
   // 適用判定（CDP-P0-002）。未実行なら空の Map なので列は「未判定」になる
@@ -202,6 +213,15 @@ export default async function CdpWorkspacePage({
                   </Button>
                 </form>
               </>
+            )}
+            {can(shell.ctx, 'enterprise.ai.run') && (
+              <form action={runQuestionMappingAction}>
+                <input type="hidden" name="frameworkKey" value="cdp" />
+                <Button type="submit" variant="secondary" size="sm">
+                  <Sparkles aria-hidden="true" />
+                  質問マッピングを実行
+                </Button>
+              </form>
             )}
             {can(shell.ctx, 'enterprise.ai.run') && (
               <form action={runConsistencyCheckAction}>
@@ -328,6 +348,44 @@ export default async function CdpWorkspacePage({
               非適用の質問も一覧には残ります。判定根拠はバッジにカーソルを合わせると表示されます。
             </span>
           </div>
+        )}
+
+        {mapping && (
+          <Card className="overflow-hidden">
+            <SectionTitle
+              title={`質問マッピングの候補（${mapping.mappings.length} 件）`}
+              action={
+                <span className="flex items-center gap-2">
+                  <AiGeneratedBadge provider={mapping.run.provider} />
+                  <span className="text-[11px] text-ink-muted">
+                    候補です。実際の紐付けは質問ごとに確定してください
+                  </span>
+                </span>
+              }
+            />
+            <div className="t4d-scroll-x">
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>質問</TH>
+                    <TH>指標コード</TH>
+                    <TH>根拠</TH>
+                    <TH align="right">確信度</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {mapping.mappings.map((row) => (
+                    <TR key={row.itemCode}>
+                      <TD className="font-medium">{row.itemCode}</TD>
+                      <TD>{row.metricCode ?? '—'}</TD>
+                      <TD className="text-[12px] text-ink-muted">{row.rationale}</TD>
+                      <TD align="right">{Math.round(row.confidence * 100)}%</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </div>
+          </Card>
         )}
 
         {check && (

@@ -29,6 +29,39 @@ export default async function ReportsPage() {
         { label: 'DOCX（開示ドラフト）', href: `/api/exports/cdp?period=${period.id}&format=docx` },
       ],
     },
+    {
+      title: 'SSBJ 開示ドラフト',
+      description:
+        'SSBJ の開示要求ごとに、回答本文・マッピング指標・当年値／前年値を出力します（開示原稿の下書き用）。',
+      links: [
+        {
+          label: 'CSV',
+          href: `/api/exports/cdp?framework=ssbj&period=${period.id}&format=csv`,
+        },
+        {
+          label: 'XLSX',
+          href: `/api/exports/cdp?framework=ssbj&period=${period.id}&format=xlsx`,
+        },
+        {
+          label: 'DOCX（開示ドラフト）',
+          href: `/api/exports/cdp?framework=ssbj&period=${period.id}&format=docx`,
+        },
+      ],
+    },
+    {
+      title: 'CSRD 開示ドラフト',
+      description: 'CSRD（ESRS）の開示要求ごとに、回答本文とマッピング指標を出力します。',
+      links: [
+        {
+          label: 'CSV',
+          href: `/api/exports/cdp?framework=csrd&period=${period.id}&format=csv`,
+        },
+        {
+          label: 'XLSX',
+          href: `/api/exports/cdp?framework=csrd&period=${period.id}&format=xlsx`,
+        },
+      ],
+    },
   ];
 
   return (

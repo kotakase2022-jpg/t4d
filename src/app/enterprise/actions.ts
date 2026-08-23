@@ -311,6 +311,65 @@ export async function saveCdpResponseAction(formData: FormData): Promise<void> {
   revalidateDisclosure(response?.itemId ?? null);
 }
 
+/**
+ * 検証で出た指摘の原因を AI に説明させる（AI-P1 異常値の説明）。
+ *
+ * AI は指摘するだけで、値の修正も検証結果の解消も行わない。
+ * 結果は ai_runs に残るので、`?explain=<runId>` で同じ画面から読み直せる。
+ */
+export async function explainAnomaliesAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const dataPointId = String(formData.get('dataPointId') ?? '');
+
+  const { explainDataPointAnomalies } = await import('@/lib/services/anomaly-explanation');
+  const { run } = await explainDataPointAnomalies(db, ctx, dataPointId);
+
+  revalidatePath(`/enterprise/data/${dataPointId}`);
+  redirect(`/enterprise/data/${dataPointId}?explain=${run.id}`);
+}
+
+/**
+ * 開示質問と指標の対応候補を AI に出させる（AI-P1 CDP 質問マッピング）。
+ * 候補を出すだけで、マッピングの確定は人が行う。
+ */
+export async function runQuestionMappingAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const frameworkKey = String(formData.get('frameworkKey') ?? 'cdp') as FrameworkKey;
+
+  const shell = await loadEnterpriseShell();
+  const { runQuestionMapping } = await import('@/lib/services/ai-assist');
+  await withUserFacingError(`/enterprise/disclosures/${frameworkKey}`, async () => {
+    const { run } = await runQuestionMapping(
+      db,
+      ctx,
+      frameworkKey,
+      shell.currentPeriod,
+      shell.periods,
+    );
+    revalidatePath(`/enterprise/disclosures/${frameworkKey}`);
+    redirect(`/enterprise/disclosures/${frameworkKey}?mapping=${run.id}`);
+  });
+}
+
+/**
+ * Data Point に紐付けられそうな Evidence を AI に探させる（AI-P1 Evidence 自動マッピング）。
+ * 候補を出すだけで、紐付けは人が「紐付ける」を押して確定する。
+ */
+export async function suggestEvidenceAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const dataPointId = String(formData.get('dataPointId') ?? '');
+
+  const { suggestEvidenceForDataPoint } = await import('@/lib/services/ai-assist');
+  await withUserFacingError(`/enterprise/data/${dataPointId}`, async () => {
+    const { run } = await suggestEvidenceForDataPoint(db, ctx, dataPointId);
+    revalidatePath(`/enterprise/data/${dataPointId}`);
+    redirect(`/enterprise/data/${dataPointId}?evidence=${run.id}`);
+  });
+}
+
 export async function rejectAiDraftAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();

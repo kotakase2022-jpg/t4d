@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Check, FileText, History, Send, Undo2 } from 'lucide-react';
+import { Check, FileText, History, Send, Sparkles, Undo2 } from 'lucide-react';
 import {
   DataPointStatusBadge,
   EvidenceBadge,
@@ -22,8 +22,12 @@ import { loadActiveValidations } from '@/lib/services/validation-store';
 import { listMentionCandidates } from '@/lib/services/comments';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { summarizeValidations } from '@/lib/validation/data-point-rules';
+import { loadEvidenceSuggestion } from '@/lib/services/ai-assist';
+import { loadAnomalyExplanation } from '@/lib/services/anomaly-explanation';
 import {
+  explainAnomaliesAction,
   linkEvidenceAction,
+  suggestEvidenceAction,
   transitionDataPointAction,
   updateDataPointAction,
 } from '../../actions';
@@ -32,10 +36,13 @@ export const metadata = { title: 'Data Point 詳細' };
 
 export default async function DataPointDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ dataPointId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { dataPointId } = await params;
+  const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const { db, ctx } = shell;
 
@@ -56,6 +63,23 @@ export default async function DataPointDetailPage({
 
   // この Data Point の未解消の検証結果だけを取得する（期間全体は読み込まない）
   const validations = await loadActiveValidations(db, ctx.workspace.organizationId, [dataPoint.id]);
+
+  // AI による原因の説明は ?explain=<aiRunId> で読み直す（実行結果は ai_runs に残る）
+  const canRunAi = can(ctx, 'enterprise.ai.run');
+  const explainRunId = typeof query.explain === 'string' ? query.explain : null;
+  const explanation = explainRunId
+    ? await loadAnomalyExplanation(db, ctx, explainRunId, dataPoint)
+    : null;
+  // 候補に出た fileVersionId を表示名へ直す
+  const fileNameOf = (fileVersionId: string): string => {
+    const version = fileVersions.find((v) => v.id === fileVersionId);
+    const file = version ? allFiles.find((f) => f.id === version.fileId) : null;
+    return file?.originalName ?? fileVersionId.slice(0, 8);
+  };
+  const evidenceRunId = typeof query.evidence === 'string' ? query.evidence : null;
+  const suggestion = evidenceRunId
+    ? await loadEvidenceSuggestion(db, ctx, evidenceRunId, dataPoint.id)
+    : null;
   const summary = summarizeValidations(validations).byDataPoint.get(dataPoint.id) ?? {
     errors: 0,
     warnings: 0,
@@ -404,14 +428,46 @@ export default async function DataPointDetailPage({
             {validations.length === 0 ? (
               <EmptyState title="検証エラー・警告はありません" />
             ) : (
-              <ul className="divide-y divide-line">
-                {validations.map((v) => (
-                  <li key={v.id} className="flex items-start gap-2 px-3 py-2">
-                    <SeverityBadge severity={v.severity} />
-                    <span className="text-[12px] text-ink">{v.message}</span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="divide-y divide-line">
+                  {validations.map((v) => (
+                    <li key={v.id} className="flex items-start gap-2 px-3 py-2">
+                      <SeverityBadge severity={v.severity} />
+                      <span className="text-[12px] text-ink">{v.message}</span>
+                    </li>
+                  ))}
+                </ul>
+                {canRunAi && (
+                  <form action={explainAnomaliesAction} className="border-t border-line px-3 py-2">
+                    <input type="hidden" name="dataPointId" value={dataPoint.id} />
+                    <Button type="submit" size="xs" variant="outline">
+                      <Sparkles aria-hidden="true" />
+                      AI に原因を説明させる
+                    </Button>
+                  </form>
+                )}
+                {explanation && (
+                  <div className="border-t border-line px-3 py-2">
+                    <p className="text-[11px] text-ink-muted">
+                      AI の推定（確信度 {Math.round(explanation.run.confidence * 100)}%）。
+                      指摘のみで、値は変更されません。
+                    </p>
+                    <ul className="mt-1 space-y-1.5">
+                      {explanation.findings.map((finding, index) => (
+                        <li key={index} className="rounded-t4d bg-surface-muted px-2 py-1.5">
+                          <p className="text-[12px] text-ink">
+                            <span className="font-medium">考えられる原因:</span>{' '}
+                            {finding.likelyCause}
+                          </p>
+                          <p className="mt-0.5 text-[12px] text-ink-muted">
+                            <span className="font-medium">次の一手:</span> {finding.suggestedAction}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
           </Card>
 
@@ -485,6 +541,34 @@ export default async function DataPointDetailPage({
                   紐付ける
                 </Button>
               </form>
+            )}
+            {canRunAi && (
+              <form action={suggestEvidenceAction} className="border-t border-line px-3 py-2">
+                <input type="hidden" name="dataPointId" value={dataPoint.id} />
+                <Button type="submit" size="xs" variant="outline">
+                  <Sparkles aria-hidden="true" />
+                  AI に Evidence 候補を探させる
+                </Button>
+              </form>
+            )}
+            {suggestion && (
+              <div className="border-t border-line px-3 py-2">
+                <p className="text-[11px] text-ink-muted">
+                  AI の候補（確信度 {Math.round(suggestion.run.confidence * 100)}%）。
+                  紐付けは上のフォームで確定してください。
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {suggestion.candidates.map((candidate, index) => (
+                    <li key={index} className="rounded-t4d bg-surface-muted px-2 py-1.5">
+                      <p className="text-[12px] text-ink">
+                        {fileNameOf(candidate.fileVersionId)}
+                        {candidate.page !== null ? ` / p.${candidate.page}` : ''}
+                      </p>
+                      <p className="text-[11px] text-ink-muted">{candidate.excerpt}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </Card>
 

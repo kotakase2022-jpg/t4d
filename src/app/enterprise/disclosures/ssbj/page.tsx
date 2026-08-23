@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CircleAlert, FlaskConical, Send, Target } from 'lucide-react';
+import { CircleAlert, FlaskConical, Send, Target, Download } from 'lucide-react';
 import { DisclosureSteps, type DisclosureStep } from '@/components/shared/disclosure-steps';
 import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
@@ -102,6 +102,17 @@ export default async function SsbjPage() {
           </span>
         }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: '開示対応' }, { label: 'SSBJ' }]}
+        actions={
+          <Button variant="outline" size="sm" asChild>
+            <a
+              href={`/api/exports/cdp?framework=ssbj&period=${shell.currentPeriod.id}&format=docx`}
+              download
+            >
+              <Download aria-hidden="true" />
+              開示ドラフト（DOCX）
+            </a>
+          </Button>
+        }
       />
 
       <div className="space-y-3 p-4">

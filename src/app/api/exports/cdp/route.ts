@@ -14,6 +14,7 @@ import {
 } from '@/lib/exports';
 import { getDb } from '@/lib/repositories';
 import { loadDisclosureWorkspace, type DisclosureQuestionRow } from '@/lib/services/disclosure';
+import { FRAMEWORK_KEYS, type FrameworkKey } from '@/types/domain';
 
 const CHANGE_LABEL: Record<string, string> = {
   new: '新規',
@@ -22,7 +23,12 @@ const CHANGE_LABEL: Record<string, string> = {
   retired: '廃止',
 };
 
-/** CDP 回答の CSV / XLSX / 簡易 DOCX Export（指示書 7.1-16 / DISC-P0-002）。 */
+/**
+ * 開示回答の CSV / XLSX / 簡易 DOCX Export（指示書 7.1-16 / DISC-P0-002）。
+ *
+ * 以前は CDP 固定で、SSBJ / CSRD の開示ドラフトを出す手段が無かった。
+ * `?framework=` で切り替える（既定は互換のため cdp）。
+ */
 export async function GET(request: Request) {
   const session = await getSession();
   if (!session?.context) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -33,6 +39,11 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const format = (url.searchParams.get('format') ?? 'csv') as ExportFormat;
+  const frameworkParam = url.searchParams.get('framework') ?? 'cdp';
+  if (!FRAMEWORK_KEYS.includes(frameworkParam as FrameworkKey)) {
+    return NextResponse.json({ error: 'unknown_framework' }, { status: 400 });
+  }
+  const framework = frameworkParam as FrameworkKey;
 
   const db = await getDb();
   const organizationId = ctx.workspace.organizationId;
@@ -48,16 +59,17 @@ export async function GET(request: Request) {
   const metrics = await db.select('metrics', {
     where: { organizationId, deletedAt: { isNull: true } },
   });
-  const workspace = await loadDisclosureWorkspace(db, ctx, 'cdp', period, periods, metrics);
+  const workspace = await loadDisclosureWorkspace(db, ctx, framework, period, periods, metrics);
   if (!workspace) return NextResponse.json({ error: 'no_framework' }, { status: 404 });
 
-  const baseName = `T4D_CDP回答_${ctx.workspace.organizationName}_${period.code}`;
+  const frameworkLabel = framework.toUpperCase();
+  const baseName = `T4D_${frameworkLabel}回答_${ctx.workspace.organizationName}_${period.code}`;
 
   await recordAuditEvent(db, ctx, {
     eventType: 'export_created',
     resourceType: 'disclosure_responses',
-    afterSummary: `CDP ${workspace.rows.length} 問を ${format.toUpperCase()} で出力`,
-    metadata: { period: period.code, format },
+    afterSummary: `${frameworkLabel} ${workspace.rows.length} 問を ${format.toUpperCase()} で出力`,
+    metadata: { period: period.code, format, framework },
   });
 
   if (format === 'docx') {
@@ -91,7 +103,7 @@ export async function GET(request: Request) {
       },
     });
 
-    const buffer = await toDocx(`CDP 回答ドラフト ${period.code}`, sections);
+    const buffer = await toDocx(`${frameworkLabel} 回答ドラフト ${period.code}`, sections);
     return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
         'Content-Type': EXPORT_CONTENT_TYPES.docx,
@@ -148,7 +160,7 @@ export async function GET(request: Request) {
     },
   ];
 
-  const sheet = { name: `CDP_${period.code}`, columns, rows: workspace.rows };
+  const sheet = { name: `${frameworkLabel}_${period.code}`, columns, rows: workspace.rows };
 
   if (format === 'xlsx') {
     const buffer = await toXlsx([sheet], baseName);

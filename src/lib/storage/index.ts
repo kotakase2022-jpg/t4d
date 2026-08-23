@@ -294,7 +294,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
  *              かつ当該ファイルが案件の Data Room 対象へ紐付いている場合のみ可
  *  - それ以外 → 不可（存在を秘匿するため null を返す）
  */
-async function canReadEvidence(
+export async function canReadEvidence(
   db: DbClient,
   ctx: AuthorizationContext,
   version: { id: Uuid; organizationId: Uuid },

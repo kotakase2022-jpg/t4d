@@ -88,12 +88,8 @@ const METRIC_HINTS: Array<[RegExp, string, string]> = [
   // 'eau' は単語境界を付ける（境界が無いと Bureau / Niveau などに誤爆する）
   [/用水|水使用|water|wasser|\beau\b|用水量|取水|耗水/i, 'water', 'm3'],
   [/廃棄物|waste|abfall|abfälle|déchets|废弃物|废物|垃圾/i, 'waste', 't'],
-  [
-    /従業員|employee|headcount|mitarbeiter|beschäftigte|effectif|salariés|员工|従業員数/i,
-    'employees',
-    '人',
-  ],
-  // --- 人的資本（多言語・多国。具体的な指標ほど先に置く） ---
+  // --- 人的資本（多言語・多国。具体的な指標ほど先に置く。
+  //     汎用の「従業員数」は最後（"headcount" が何にでも現れるため） ---
   [
     /女性管理職比率|female manager(ial)? ratio|women in management|%\s*women in management|frauenanteil in führungspositionen|frauenquote|part des femmes cadres|女性管理[职職]比[例率]/i,
     'female_manager_ratio',
@@ -138,6 +134,11 @@ const METRIC_HINTS: Array<[RegExp, string, string]> = [
     /男女(間)?賃金格差|賃金格差|gender pay gap|equal pay|pay ratio|entgeltgleichheit|lohnl[üu]cke|[ée]cart de r[ée]mun[ée]ration|index (de l')?[ée]galit[ée]|男女薪酬|薪酬差[距异異]/i,
     'gender_pay_gap',
     '%',
+  ],
+  [
+    /従業員|employee|headcount|mitarbeiter|beschäftigte|effectif|salariés|员工|従業員数/i,
+    'employees',
+    '人',
   ],
   [/管理職|managers|management|führungskräfte|cadres|管理[职職]/i, 'managers_total', '人'],
   [/女性役員/i, 'female_officers', '人'],

@@ -10,6 +10,7 @@ import {
   NotFoundError,
 } from '@/lib/authorization/can';
 import { contentHash, fid } from '@/lib/fixtures/ids';
+import { findBoundaryConflicts } from './boundary';
 import { recomputePeriodValidations } from '@/lib/services/validation-store';
 import { storeNewFile } from '@/lib/storage';
 import type { DbClient } from '@/lib/repositories/types';
@@ -386,6 +387,37 @@ export async function processIngestionJob(
           updatedAt: now,
         });
       });
+    }
+
+    // バウンダリ（集計範囲）の差異検出。
+    // 同じ指標に「正社員のみ」と「派遣を含む」のような範囲の違う行が混在したら、
+    // 数字だけで丸めずに要確認へ倒す。規則ベース（根拠が再現し、説明できる）。
+    {
+      const fileNameById = new Map(jobFiles.map((f) => [f.id, f.originalName]));
+      const conflicts = findBoundaryConflicts(
+        allRows
+          .filter((row) => row.metricId)
+          .map((row) => ({
+            id: row.id,
+            metricId: row.metricId!,
+            fileName: fileNameById.get(row.jobFileId) ?? '',
+            text: [
+              Object.entries(row.raw)
+                .map(([key, value]) => `${key} ${value}`)
+                .join(' '),
+              fileNameById.get(row.jobFileId) ?? '',
+            ].join(' '),
+          })),
+      );
+      for (const row of allRows) {
+        const found = conflicts.get(row.id);
+        if (!found || found.length === 0) continue;
+        row.warnings = [...row.warnings, ...found];
+        if (row.status === 'mapped') {
+          row.status = 'needs_review';
+          warningRows += 1;
+        }
+      }
     }
 
     // 重複検出（既存 Data Point と業務キーが一致するもの）

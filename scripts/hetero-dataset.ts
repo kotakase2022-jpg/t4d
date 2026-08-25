@@ -148,7 +148,7 @@ export function buildSimplePdf(lines: string[]): Uint8Array {
 // Excel
 // ----------------------------------------------------------------------
 
-async function buildXlsx(
+export async function buildXlsx(
   sheets: Array<{ name: string; rows: (string | number)[][]; boldFirstRow?: boolean }>,
 ): Promise<Uint8Array> {
   const ExcelJS = (await import('exceljs')).default;

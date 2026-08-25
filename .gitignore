@@ -54,3 +54,6 @@ supabase/.env
 
 .vercel
 .env*
+
+# Claude Code ローカル設定（起動構成など）
+.claude/

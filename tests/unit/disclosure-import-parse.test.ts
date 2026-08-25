@@ -127,6 +127,17 @@ describe('連続テキストからの抽出', () => {
     ]);
     expect(answers[0]?.itemCode).toBe('SSBJ-G1');
   });
+
+  it('SSBJ 正式マスターのコード（一般-9 / 気候-47(1) / 気候-56-2 / 実務-7）を区切りとして扱う', () => {
+    const { answers } = extractFromLines([
+      { text: '一般-9 監督機関はサステナビリティ委員会です。', locator: '段落 1' },
+      { text: '気候-47(1) 9052.7 t-CO2e です。', locator: '段落 2' },
+      { text: '気候-56-2 デリバティブは除外していません。', locator: '段落 3' },
+      { text: '実務-7 SHK 制度の方法は選択していません。', locator: '段落 4' },
+    ]);
+    expect(answers.map((a) => a.itemCode)).toEqual(['一般-9', '気候-47(1)', '気候-56-2', '実務-7']);
+    expect(answers[1]?.answerText).toContain('9052.7');
+  });
 });
 
 describe('Word (.docx) の解析', () => {

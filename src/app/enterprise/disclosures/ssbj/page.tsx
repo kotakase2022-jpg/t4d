@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CircleAlert, FlaskConical, Send, Target, Download } from 'lucide-react';
+import { CircleAlert, FlaskConical, ScrollText, Send, Target, Download } from 'lucide-react';
 import { DisclosureSteps, type DisclosureStep } from '@/components/shared/disclosure-steps';
 import { FlashMessage } from '@/components/shared/flash';
 import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatNumber } from '@/lib/format/datetime';
+import { SSBJ_FRAMEWORK_INFO } from '@/lib/frameworks/ssbj-2026';
 import { loadDisclosureWorkspace } from '@/lib/services/disclosure';
 import { CATEGORY_LABEL, loadMateriality, MATERIALITY_LABEL } from '@/lib/services/materiality';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -103,6 +104,12 @@ export default async function SsbjPage({
               <Badge tone="warning">
                 <FlaskConical className="size-3" aria-hidden="true" />
                 架空の縮小マスター
+              </Badge>
+            )}
+            {workspace && !workspace.isFixture && (
+              <Badge tone="success">
+                <ScrollText className="size-3" aria-hidden="true" />
+                正式基準準拠（転載許可取得済み）
               </Badge>
             )}
           </span>
@@ -312,7 +319,19 @@ export default async function SsbjPage({
                     <TR key={row.item.id}>
                       <TD className="font-mono text-[11px]">{row.item.code}</TD>
                       <TD>{row.item.section}</TD>
-                      <TD className="max-w-[380px]">{row.item.questionText}</TD>
+                      <TD className="max-w-[380px]">
+                        {row.item.questionText}
+                        {row.item.guidance && (
+                          <details className="mt-0.5">
+                            <summary className="cursor-pointer text-[11px] text-ink-muted">
+                              基準の原文を表示
+                            </summary>
+                            <p className="mt-1 rounded-t4d bg-surface-muted p-2 text-[11px] leading-relaxed text-ink-muted">
+                              {row.item.guidance}
+                            </p>
+                          </details>
+                        )}
+                      </TD>
                       <TD>{row.item.answerType}</TD>
                       <TD>{row.item.required ? <Badge tone="brand">必須</Badge> : '—'}</TD>
                       <TD className="text-[11px]">
@@ -338,6 +357,13 @@ export default async function SsbjPage({
             </Table>
           )}
         </Card>
+
+        {/* 正式基準を収録しているため、出所と転載許可を必ず明示する */}
+        {workspace && !workspace.isFixture && (
+          <p className="text-[11px] leading-relaxed text-ink-muted">
+            {SSBJ_FRAMEWORK_INFO.attribution}
+          </p>
+        )}
       </div>
     </>
   );

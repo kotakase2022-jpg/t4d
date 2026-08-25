@@ -26,7 +26,6 @@ import {
   PROCEDURE_SPECS,
   REVIEW_NOTE_SPECS,
   SCOPE3_PURCHASE_ROWS,
-  SSBJ_ITEM_SPECS,
   UNIT_IDS,
   at,
   buildDataPointSeeds,
@@ -35,6 +34,7 @@ import {
   metricId,
   userId,
 } from './dataset';
+import { SSBJ_FRAMEWORK_INFO, SSBJ_MASTER_ITEMS } from '@/lib/frameworks/ssbj-2026';
 import { contentHash, fid } from './ids';
 import type {
   Alert,
@@ -811,8 +811,8 @@ export function createFixtureDb(): FixtureDb {
     {
       id: ssbjFrameworkId,
       key: 'ssbj',
-      name: 'SSBJ 開示項目（架空縮小版）',
-      description: '正式基準ではありません。マッピング確認用の架空マスターです。',
+      name: SSBJ_FRAMEWORK_INFO.name,
+      description: SSBJ_FRAMEWORK_INFO.description,
     },
   );
 
@@ -841,10 +841,11 @@ export function createFixtureDb(): FixtureDb {
     {
       id: ssbj2026,
       frameworkId: ssbjFrameworkId,
-      year: 2026,
-      label: 'SSBJ 2026（架空）',
+      year: SSBJ_FRAMEWORK_INFO.year,
+      label: SSBJ_FRAMEWORK_INFO.versionLabel,
       status: 'published',
-      isFixture: true,
+      // 正式基準の条文（SSBJ の転載許可取得済み）なので架空フラグを立てない
+      isFixture: false,
       createdAt: at(120),
     },
   );
@@ -905,20 +906,22 @@ export function createFixtureDb(): FixtureDb {
     }
   }
 
-  SSBJ_ITEM_SPECS.forEach((spec, index) => {
+  // SSBJ は正式基準の条文マスター（src/lib/frameworks/ssbj-2026.ts）。
+  // questionText に要約タイトル、guidance に原文を入れる。
+  SSBJ_MASTER_ITEMS.forEach((spec, index) => {
     db.disclosureItems.push({
       id: fid('disclosure_item', `ssbj/2026/${spec.code}`),
       frameworkVersionId: ssbj2026,
       code: spec.code,
       section: spec.section,
       sortOrder: index,
-      questionText: spec.questionText,
-      guidance: spec.guidance,
+      questionText: spec.title,
+      guidance: spec.text,
       answerType: spec.answerType,
-      options: spec.options ?? [],
+      options: [],
       required: spec.required,
       parentCode: null,
-      changeType: spec.changeType2026,
+      changeType: spec.changeType,
       previousItemCode: null,
       createdAt: at(120),
     });
@@ -1008,7 +1011,7 @@ export function createFixtureDb(): FixtureDb {
     }
   }
 
-  for (const spec of SSBJ_ITEM_SPECS) {
+  for (const spec of SSBJ_MASTER_ITEMS) {
     if (!spec.metricCode) continue;
     db.disclosureMappings.push({
       id: fid('disclosure_mapping', `ssbj/2026/${spec.code}/${spec.metricCode}`),

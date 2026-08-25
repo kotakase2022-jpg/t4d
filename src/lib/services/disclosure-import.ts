@@ -41,8 +41,13 @@ export interface ImportPreview {
   warnings: string[];
 }
 
-/** 質問コードらしき文字列（CDP: C1.1 / C1.1b、SSBJ: SSBJ-G1 など）。 */
-const ITEM_CODE_PATTERN = /\b([A-Z]{1,6}\d*(?:[-.]\d+[a-z]?)+|[A-Z]{2,6}-[A-Z]\d+)\b/;
+/**
+ * 質問コードらしき文字列。
+ * CDP: C1.1 / C1.1b、CSRD: E1-6 など英字コードに加え、
+ * SSBJ 正式マスターの「一般-9」「気候-47(1)」「気候-56-2」「実務-7」を認識する。
+ */
+const ITEM_CODE_PATTERN =
+  /((?:一般|気候|実務)-\d{1,3}(?:-\d)?(?:\(\d\))?|\b(?:[A-Z]{1,6}\d*(?:[-.]\d+[a-z]?)+|[A-Z]{2,6}-[A-Z]\d+)\b)/;
 
 /** 表のヘッダーから「質問コード列」「回答列」を推定する。 */
 export function detectAnswerColumns(headers: string[]): {

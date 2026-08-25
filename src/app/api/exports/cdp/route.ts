@@ -12,6 +12,7 @@ import {
   type ExportColumn,
   type ExportFormat,
 } from '@/lib/exports';
+import { SSBJ_FRAMEWORK_INFO } from '@/lib/frameworks/ssbj-2026';
 import { getDb } from '@/lib/repositories';
 import { loadDisclosureWorkspace, type DisclosureQuestionRow } from '@/lib/services/disclosure';
 import { FRAMEWORK_KEYS, type FrameworkKey } from '@/types/domain';
@@ -92,6 +93,8 @@ export async function GET(request: Request) {
         `対象期間: ${period.label}`,
         `質問書: ${workspace.versionLabel}${workspace.isFixture ? '（架空の縮小マスター）' : ''}`,
         `承認済み: ${workspace.summary.approved} / ${workspace.summary.total} 問`,
+        // 正式基準（SSBJ）は転載許可に基づく収録のため、Export にも出所を残す
+        ...(framework === 'ssbj' && !workspace.isFixture ? [SSBJ_FRAMEWORK_INFO.attribution] : []),
       ],
       table: {
         headers: ['区分', '件数'],

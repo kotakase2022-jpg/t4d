@@ -58,7 +58,7 @@ test('XSS: 検索クエリに script を入れても実行されない', async (
   expect(await page.locator('img[src="x"]').count()).toBe(0);
 });
 
-test('Open redirect: 外部 URL へのリダイレクトが起きない', async ({ page }) => {
+test('Open redirect: 外部 URL へのリダイレクトが起きない', async ({ page, baseURL }) => {
   await loginAs(page, DEMO_USERS.sustainability);
 
   for (const q of [
@@ -70,7 +70,8 @@ test('Open redirect: 外部 URL へのリダイレクトが起きない', async 
     // 同一オリジンに留まっていること（クエリに外部 URL が残るのは無害。
     // アプリはこれらのパラメータを遷移先として使っていない）
     const host = new URL(page.url()).host;
-    expect(host, `${q} で外部へ飛ばされた`).toBe('127.0.0.1:3105');
+    // ポート直書きだと E2E_PORT に依存して落ちるため、baseURL から導出する
+    expect(host, `${q} で外部へ飛ばされた`).toBe(new URL(baseURL ?? '').host);
   }
 });
 

@@ -901,7 +901,7 @@ export function dataPointId(unitCode: string, metricCode: string, periodCode: st
 }
 
 // ----------------------------------------------------------------------
-// CDP / SSBJ 架空マスター
+// CDP 架空マスター（SSBJ は src/lib/frameworks/ssbj-2026.ts の正式版マスターへ移行済み）
 // ----------------------------------------------------------------------
 
 interface DisclosureItemSpec {
@@ -1050,103 +1050,6 @@ export const CDP_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'text',
     required: false,
     changeType2026: 'new',
-  },
-];
-
-export const SSBJ_ITEM_SPECS: DisclosureItemSpec[] = [
-  {
-    code: 'SSBJ-G1',
-    section: 'ガバナンス',
-    questionText: 'サステナビリティ関連のリスク・機会を監視する統治機関を記載してください。',
-    guidance: '',
-    answerType: 'text',
-    required: true,
-    changeType2026: 'carry_forward',
-  },
-  {
-    code: 'SSBJ-G2',
-    section: 'ガバナンス',
-    questionText: '経営者の役割を記載してください。',
-    guidance: '',
-    answerType: 'text',
-    required: true,
-    changeType2026: 'carry_forward',
-  },
-  {
-    code: 'SSBJ-S1',
-    section: '戦略',
-    questionText: '識別したサステナビリティ関連のリスク・機会を記載してください。',
-    guidance: '',
-    answerType: 'text',
-    required: true,
-    changeType2026: 'carry_forward',
-  },
-  {
-    code: 'SSBJ-S2',
-    section: '戦略',
-    questionText: 'ビジネスモデルおよびバリューチェーンへの影響を記載してください。',
-    guidance: '',
-    answerType: 'text',
-    required: true,
-    changeType2026: 'carry_forward',
-  },
-  {
-    code: 'SSBJ-S3',
-    section: '戦略',
-    questionText: '気候関連のシナリオ分析結果を記載してください。',
-    guidance: '',
-    answerType: 'text',
-    required: false,
-    changeType2026: 'changed',
-  },
-  {
-    code: 'SSBJ-R1',
-    section: 'リスク管理',
-    questionText: 'リスクの識別・評価・管理プロセスを記載してください。',
-    guidance: '',
-    answerType: 'text',
-    required: true,
-    changeType2026: 'carry_forward',
-  },
-  {
-    code: 'SSBJ-M1',
-    section: '指標及び目標',
-    questionText: 'Scope1 排出量（t-CO2e）',
-    guidance: '',
-    answerType: 'numeric',
-    required: true,
-    changeType2026: 'carry_forward',
-    metricCode: 'scope1',
-  },
-  {
-    code: 'SSBJ-M2',
-    section: '指標及び目標',
-    questionText: 'Scope2 排出量（t-CO2e）',
-    guidance: '',
-    answerType: 'numeric',
-    required: true,
-    changeType2026: 'carry_forward',
-    metricCode: 'scope2',
-  },
-  {
-    code: 'SSBJ-M3',
-    section: '指標及び目標',
-    questionText: 'Scope3 排出量（t-CO2e）',
-    guidance: '',
-    answerType: 'numeric',
-    required: true,
-    changeType2026: 'changed',
-    metricCode: 'scope3_cat1',
-  },
-  {
-    code: 'SSBJ-M4',
-    section: '指標及び目標',
-    questionText: '女性管理職比率（%）',
-    guidance: '',
-    answerType: 'numeric',
-    required: true,
-    changeType2026: 'carry_forward',
-    metricCode: 'female_manager_ratio',
   },
 ];
 

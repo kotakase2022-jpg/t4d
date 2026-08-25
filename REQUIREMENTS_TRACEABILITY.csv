@@ -223,3 +223,6 @@ R2-029,独立再監査 2026-08-24,列表示メニューのキーボード操作,
 R2-030,独立再監査 2026-08-24,送信中の表示と二重送信防止,時間のかかる全フォーム,全ロール,-,送信する,pending 中は無効化され進行が分かる,src/components/ui/submit-button.tsx,E2E-UI-02,実ブラウザ,tests/e2e/ui-affordances.spec.ts,PASS,BUG-105,8 か所へ適用
 R2-031,独立再監査 2026-08-24,コマンドパレットの支援技術対応,全画面,全ロール,パレットを開く,検索して候補を選ぶ,選択中の候補が伝わる,src/components/shared/command-palette.tsx,E2E-UI-03,実ブラウザ,tests/e2e/ui-affordances.spec.ts,PASS,BUG-106,combobox + aria-activedescendant
 R2-032,独立再監査 2026-08-24,ファイルのドラッグ&ドロップ,/enterprise/imports,企業,-,ファイルを枠へ落とす,選択済みとして扱われる,src/components/shared/file-drop-zone.tsx,E2E-UI-04,実ブラウザ,tests/e2e/ui-affordances.spec.ts,PASS,BUG-110,案内と挙動を一致させた
+R2-033,機能追加 2026-08-24,50 ファイルの一括取込（本番 Demo Mode）,/enterprise/imports,企業,50 ファイルを用意,一括投入 → プレビュー → 確定,265 行が仕分けされ台帳へ反映される,src/app/enterprise/imports/upload-form.tsx,PROD-BULK-01,本番実ブラウザ,tests/e2e-production/production-smoke.spec.ts,PASS,BUG-112,sessionStorage で持ち回す
+R2-034,機能追加 2026-08-24,51 ファイル以上の拒否,/enterprise/imports,企業,51 ファイルを用意,一括投入,件数付きで理由が表示される,src/app/enterprise/actions.ts,E2E-BULK-02,実ブラウザ,tests/e2e/zz-bulk-50-import.spec.ts,PASS,-,上限は MAX_FILES_PER_IMPORT
+R2-035,機能追加 2026-08-24,Supabase Mode のファイルアップロード,/enterprise/imports,企業,実 Supabase 接続,50 ファイルを投入しリロード,DB から読み直せる,src/lib/storage/index.ts,SUP-BULK-01,Supabase E2E,tests/e2e-supabase/bulk-import.spec.ts,PASS,BUG-113,外部キー順序を修正

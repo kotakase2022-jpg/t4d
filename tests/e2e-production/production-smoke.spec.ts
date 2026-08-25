@@ -340,3 +340,31 @@ test('本番: 報告年度を追加できる', async ({ page }) => {
 
   await expect(page.locator('tr', { hasText: code }).first()).toBeVisible();
 });
+
+test('本番: 50 ファイルを一括取込し、プレビューから確定まで通る', async ({ page }) => {
+  test.setTimeout(300_000);
+  const dataset = await buildHeterogeneousDataset();
+  const files = dataset.slice(0, 50).map((f) => ({
+    name: f.name,
+    mimeType: f.mimeType,
+    buffer: Buffer.from(f.bytes),
+  }));
+  expect(files.length).toBe(50);
+
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/imports`);
+  await page.locator('input[name="files"]').setInputFiles(files);
+  await page.getByRole('button', { name: '取込を開始' }).click();
+  await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 240_000 });
+
+  // インスタンスが変わっても、タブが預かった内容からプレビューが出る
+  const rows = page.locator('input[name^="value:"]');
+  await expect(rows.first()).toBeVisible({ timeout: 120_000 });
+  const count = await rows.count();
+  expect(count, '50 ファイル分の行が出ていない').toBeGreaterThan(50);
+
+  // 確定して台帳へ反映
+  await page.getByRole('button', { name: '選択した行を確定' }).click();
+  await page.waitForURL(/\/enterprise\/data/, { timeout: 120_000 });
+  await expect(page.getByRole('status')).toContainText('取込内容を確定');
+});

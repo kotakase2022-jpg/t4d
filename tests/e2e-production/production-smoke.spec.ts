@@ -296,6 +296,13 @@ test('本番: SSBJ の開示ドラフトを出力できる', async ({ page }) =>
   await prodLogin(page, '青海 太郎');
   await page.goto(`${BASE}/enterprise/disclosures/ssbj`);
 
+  // 正式基準マスター（133 項目・転載許可・出所表記）が本番に載っていること。
+  // 旧デプロイのままでもスモークが通ってしまった実績があるため、内容で判定する
+  await expect(page.getByText('正式基準準拠（転載許可取得済み）')).toBeVisible();
+  await expect(page.getByText('開示項目（133）')).toBeVisible();
+  await expect(page.getByText('出所：サステナビリティ基準委員会', { exact: false })).toBeVisible();
+  await expect(page.locator('#t4d-main')).not.toContainText('架空の縮小マスター');
+
   const link = page.getByRole('link', { name: /開示ドラフト（DOCX）/ });
   await expect(link, 'SSBJ の Export 導線が無い').toBeVisible();
 

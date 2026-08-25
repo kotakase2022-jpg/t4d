@@ -368,3 +368,29 @@ test('本番: 50 ファイルを一括取込し、プレビューから確定ま
   await page.waitForURL(/\/enterprise\/data/, { timeout: 120_000 });
   await expect(page.getByRole('status')).toContainText('取込内容を確定');
 });
+
+test('本番: 人的資本 20 ファイルの同時取込でバウンダリ差異が検知される', async ({ page }) => {
+  test.setTimeout(300_000);
+  const { buildHumanCapitalDataset } = await import('../../scripts/human-capital-dataset');
+  const dataset = await buildHumanCapitalDataset();
+  expect(dataset).toHaveLength(20);
+
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/imports`);
+  await page
+    .locator('input[name="files"]')
+    .setInputFiles(
+      dataset.map((f) => ({ name: f.name, mimeType: f.mimeType, buffer: Buffer.from(f.bytes) })),
+    );
+  await page.getByRole('button', { name: '取込を開始' }).click();
+  await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 240_000 });
+
+  const rows = page.locator('input[name^="value:"]');
+  await expect(rows.first()).toBeVisible({ timeout: 120_000 });
+  expect(await rows.count(), '明細の深さが出ていない').toBeGreaterThan(300);
+
+  const main = page.locator('#t4d-main');
+  await expect(main.getByText(/バウンダリ差異（雇用範囲）/).first()).toBeVisible();
+  await expect(main.getByText(/バウンダリ差異（管理職の定義）/).first()).toBeVisible();
+  await expect(main.getByText(/集計範囲を揃えてから確定してください/).first()).toBeVisible();
+});

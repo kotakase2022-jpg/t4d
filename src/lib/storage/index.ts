@@ -256,8 +256,12 @@ export async function storeNewFile(
     createdBy: ctx.userId,
   };
 
-  await db.insert('files', [file]);
+  // files.current_version_id は file_versions を指す外部キー（遅延可）。
+  // PostgREST は文ごとに別トランザクションなので、先に版を指したまま files を入れると
+  // その時点で違反になる。版を作ってから指し直す。
+  await db.insert('files', [{ ...file, currentVersionId: null }]);
   await db.insert('fileVersions', [version]);
+  await db.update('files', file.id, { currentVersionId: versionId });
   await recordAuditEvent(db, ctx, {
     eventType: 'file_uploaded',
     resourceType: 'file',

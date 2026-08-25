@@ -6,11 +6,11 @@ import { redirect } from 'next/navigation';
 import { recordAiDecision } from '@/lib/ai';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorization/can';
-import { getAppMode } from '@/lib/config';
-import { ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
+import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
 import { getDb } from '@/lib/repositories';
+import { MAX_FILES_PER_IMPORT, type ImportPreviewPayload } from './imports/preview-types';
 import { sha256Hex } from '@/lib/storage';
 import {
   bulkTransition,
@@ -72,7 +72,14 @@ function formGetter(formData: FormData): (key: string) => string {
 // 取込
 // ----------------------------------------------------------------------
 
-export async function uploadFilesAction(formData: FormData): Promise<void> {
+/** 投入の結果。プレビューはブラウザ側で持ち回るため、行の内容ごと返す */
+export type UploadResult =
+  { ok: true; preview: ImportPreviewPayload } | { ok: false; message: string };
+
+export async function uploadFilesAction(
+  _previous: UploadResult | null,
+  formData: FormData,
+): Promise<UploadResult> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
 
@@ -82,7 +89,13 @@ export async function uploadFilesAction(formData: FormData): Promise<void> {
   const files = formData.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
 
   if (files.length === 0) {
-    throw new Error('ファイルが選択されていません。');
+    return { ok: false, message: 'ファイルが選択されていません。' };
+  }
+  if (files.length > MAX_FILES_PER_IMPORT) {
+    return {
+      ok: false,
+      message: `一度に取り込めるのは ${MAX_FILES_PER_IMPORT} ファイルまでです（${files.length} ファイル選択されています）。`,
+    };
   }
 
   const payload = await Promise.all(
@@ -107,29 +120,67 @@ export async function uploadFilesAction(formData: FormData): Promise<void> {
     ].join('|'),
   );
 
-  const job = await createIngestionJob(db, ctx, {
-    reportingPeriodId,
-    unitId,
-    files: payload,
-    idempotencyKey,
-  });
-
-  // Demo Mode は状態がプロセスのメモリにしか無い（known-limitations D-3）。
-  // Vercel のようにリクエストごとにインスタンスが変わる環境では、
-  // 別リクエストのポーリング（GET /api/jobs/[jobId]）がジョブを見つけられず
-  // 404 のまま解析が始まらない。この経路だけは**同じリクエスト内で**処理を終わらせる。
-  // Supabase Mode は DB が共有されるため、従来どおり非同期ジョブのままにする。
-  if (getAppMode() === 'demo') {
-    const { processIngestionJob } = await import('@/lib/imports/service');
-    try {
-      await processIngestionJob(db, ctx, job.id);
-    } catch {
-      // 解析に失敗してもジョブ画面へは遷移させる（画面側がファイル単位の失敗を表示する）
-    }
+  let job;
+  try {
+    job = await createIngestionJob(db, ctx, {
+      reportingPeriodId,
+      unitId,
+      files: payload,
+      idempotencyKey,
+    });
+  } catch (error) {
+    if (isUserFacingError(error)) return { ok: false, message: error.message };
+    throw error;
   }
 
+  // Demo Mode は状態がプロセスのメモリにしか無い（known-limitations D-3）。
+  // 別リクエストのポーリングではジョブを見つけられないため、
+  // この経路だけは**同じリクエスト内で**解析まで終わらせる。
+  // Supabase Mode は DB が共有されるので従来どおり非同期ジョブでよいが、
+  // プレビューを同じ形で返すためにこちらも同期実行にしている。
+  const { processIngestionJob } = await import('@/lib/imports/service');
+  try {
+    await processIngestionJob(db, ctx, job.id);
+  } catch {
+    // 解析に失敗してもプレビューへは進む（ファイル単位の失敗は画面に出す）
+  }
+
+  const [rows, jobFiles] = await Promise.all([
+    db.select('ingestionRows', { where: { jobId: job.id }, orderBy: { column: 'rowIndex' } }),
+    db.select('ingestionJobFiles', { where: { jobId: job.id } }),
+  ]);
+
   revalidatePath('/enterprise/imports');
-  redirect(`/enterprise/imports/${job.id}?created=1`);
+
+  return {
+    ok: true,
+    preview: {
+      jobId: job.id,
+      reportingPeriodId,
+      fileNames: jobFiles.map((f) => f.originalName),
+      failedFiles: jobFiles
+        .filter((f) => f.parseStatus === 'failed' || f.parseStatus === 'needs_ocr')
+        .map((f) => ({
+          name: f.originalName,
+          message: f.parseMessage ?? '解析できませんでした',
+        })),
+      rows: rows
+        .filter((row) => row.status !== 'confirmed' && row.status !== 'rejected')
+        .map((row) => ({
+          id: row.id,
+          rowIndex: row.rowIndex,
+          raw: row.raw,
+          sourceLocator: row.sourceLocator,
+          metricId: row.metricId,
+          unitId: row.unitId,
+          value: row.value,
+          unitOfMeasure: row.unitOfMeasure,
+          confidence: row.confidence,
+          warnings: row.warnings,
+          status: row.status,
+        })),
+    },
+  };
 }
 
 export async function confirmImportAction(formData: FormData): Promise<void> {
@@ -151,7 +202,22 @@ export async function confirmImportAction(formData: FormData): Promise<void> {
     };
   });
 
-  await confirmIngestionJob(db, ctx, jobId, decisions);
+  // ジョブが別インスタンスのメモリにしか無い場合に備えて、
+  // 画面から一緒に送られてきた期間と元資料の位置を渡す（Demo Mode 対策）。
+  const sourceLocatorByRowId: Record<string, string> = {};
+  for (const rowId of rowIds) {
+    const locator = formData.get(`sourceLocator:${rowId}`);
+    if (typeof locator === 'string' && locator) sourceLocatorByRowId[rowId] = locator;
+  }
+  const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
+
+  await confirmIngestionJob(
+    db,
+    ctx,
+    jobId,
+    decisions,
+    reportingPeriodId ? { reportingPeriodId, sourceLocatorByRowId } : undefined,
+  );
   revalidatePath('/enterprise/imports');
   revalidatePath('/enterprise/data');
   redirect('/enterprise/data?flash=imported');

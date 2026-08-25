@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { ClipboardPaste, FileSpreadsheet, FileUp, Upload } from 'lucide-react';
+import { ClipboardPaste, FileSpreadsheet } from 'lucide-react';
 import { JobStatusBadge } from '@/components/shared/badges';
-import { FileDropZone } from '@/components/shared/file-drop-zone';
+import { UploadForm } from './upload-form';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatJst } from '@/lib/format/datetime';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { pasteImportAction, uploadFilesAction } from '../actions';
+import { pasteImportAction } from '../actions';
 
 export const metadata = { title: 'データ収集' };
 
@@ -57,61 +57,11 @@ export default async function ImportsPage() {
                 </Button>
               }
             />
-            <form action={uploadFilesAction} className="space-y-3 p-3">
-              <input type="hidden" name="reportingPeriodId" value={shell.currentPeriod.id} />
-
-              <div className="flex items-end gap-3">
-                <label className="text-[12px] text-ink-muted">
-                  対象組織・拠点
-                  <select
-                    name="unitId"
-                    defaultValue={editableUnits[0]?.id ?? 'auto'}
-                    className="mt-0.5 block h-7 w-[220px] rounded-t4d border border-line bg-surface px-2 text-[13px]"
-                  >
-                    <option value="auto">ファイル内容から自動判定</option>
-                    {editableUnits.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p className="pb-1 text-[12px] text-ink-muted">
-                  対象期間: <span className="text-ink">{shell.currentPeriod.label}</span>
-                </p>
-              </div>
-
-              <FileDropZone
-                inputId="import-files"
-                className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-t4d-lg border-2 border-dashed border-line bg-surface-muted px-4 py-8 text-center transition-colors hover:border-brand-400 hover:bg-brand-50"
-              >
-                <FileUp className="size-6 text-brand-600" aria-hidden="true" />
-                <span className="text-[13px] font-medium text-ink">
-                  クリックしてファイルを選択（複数可）／ ここへドロップ
-                </span>
-                <span className="text-[11px] text-ink-muted">
-                  対応形式: .csv / .tsv / .xlsx / .xlsm / .pdf / .docx ／ 1 ファイル 25MB まで
-                </span>
-                <input
-                  id="import-files"
-                  type="file"
-                  name="files"
-                  multiple
-                  accept=".csv,.tsv,.xlsx,.xlsm,.pdf,.docx,text/csv,text/tab-separated-values,application/pdf"
-                  className="sr-only"
-                />
-              </FileDropZone>
-
-              <div className="flex items-center gap-2">
-                <SubmitButton size="sm" icon={<Upload aria-hidden="true" />} pendingLabel="解析中…">
-                  取込を開始
-                </SubmitButton>
-                <span className="text-[11px] text-ink-muted">
-                  アップロード後は取込ジョブ画面へ移動し、進捗が表示されます。
-                  テンプレートに記入したファイルもここへドロップしてください。
-                </span>
-              </div>
-            </form>
+            <UploadForm
+              reportingPeriodId={shell.currentPeriod.id}
+              reportingPeriodLabel={shell.currentPeriod.label}
+              units={editableUnits.map((u) => ({ id: u.id, name: u.name }))}
+            />
           </Card>
         )}
 

@@ -1,33 +1,21 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAppMode } from '@/lib/config';
-import { AlertTriangle, Check, FileWarning } from 'lucide-react';
+import { AlertTriangle, FileWarning } from 'lucide-react';
 import { AiGeneratedBadge, JobStatusBadge } from '@/components/shared/badges';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatEstimatedCostUsd, formatJst } from '@/lib/format/datetime';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { confirmImportAction } from '../../actions';
 import { JobPoller } from './job-poller';
+import { ImportPreviewTable } from '../preview-table';
+import { ImportPreviewFallback } from './preview-fallback';
 
 export const metadata = { title: '取込プレビュー' };
-
-const ROW_STATUS_LABEL: Record<
-  string,
-  { label: string; tone: 'neutral' | 'brand' | 'success' | 'warning' | 'danger' }
-> = {
-  pending: { label: '未処理', tone: 'neutral' },
-  mapped: { label: 'マッピング済み', tone: 'success' },
-  needs_review: { label: '要確認', tone: 'warning' },
-  duplicate: { label: '重複', tone: 'warning' },
-  rejected: { label: '除外', tone: 'neutral' },
-  confirmed: { label: '確定済み', tone: 'brand' },
-};
 
 export default async function ImportJobPage({
   params,
@@ -44,43 +32,35 @@ export default async function ImportJobPage({
   const job = await db.findById('ingestionJobs', jobId);
 
   // Demo Mode は状態がプロセスのメモリにしか無いため、Vercel で別インスタンスへ
-  // 振り分けられるとジョブが見つからないことがある（known-limitations D-3）。
-  // **取込直後（created=1）に限り**理由を示す。
-  // それ以外は存在秘匿のため 404 のままにする（他人が URL を推測した場合の情報漏れを防ぐ）。
+  // 振り分けられるとジョブが見つからない（known-limitations D-3）。
+  // 投入したブラウザは取込内容を持っているので、そこから同じ画面を描く。
+  // **取込直後（created=1）に限る**。それ以外は存在秘匿のため 404 のままにする。
   if (!job && getAppMode() === 'demo' && query.created === '1') {
+    const fallbackShell = await loadEnterpriseShell();
     return (
       <>
         <PageHeader
-          title="取込ジョブ"
-          description="この環境では取込結果を保持できませんでした"
+          title="取込プレビュー"
+          description="このタブが保持している取込内容を表示しています"
           breadcrumbs={[
             { label: '企業ワークスペース' },
             { label: 'データ収集', href: '/enterprise/imports' },
             { label: jobId.slice(0, 8) },
           ]}
         />
-        <div className="p-4">
-          <Card className="p-4">
-            <p className="text-[13px] text-ink">
-              デモ環境（Demo Mode）は取込結果をサーバーのメモリに保持します。
-              サーバーが複数ある構成では、直後の画面表示が別のサーバーへ割り振られると
-              結果を参照できないことがあります。
-            </p>
-            <p className="mt-2 text-[12px] text-ink-muted">
-              直近の操作はブラウザの Cookie に控えていますが、Cookie の上限（約 4KB）があるため、
-              おおよそ 25 行を超える取込は保持できません。
-              お手数ですが、ファイルを分けて取り込んでください（2 ファイル程度なら保持されます）。
-            </p>
-            <p className="mt-2 text-[12px] text-ink-muted">
-              実 Supabase
-              へ接続した環境ではこの制限はありません（ファイル数・行数の制限なく取り込めます）。
-            </p>
-            <div className="mt-3">
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/enterprise/imports">データ収集へ戻る</Link>
-              </Button>
-            </div>
-          </Card>
+        <div className="space-y-3 p-4">
+          <ImportPreviewFallback
+            jobId={jobId}
+            metrics={fallbackShell.metrics.map((m) => ({ id: m.id, name: m.name }))}
+            units={fallbackShell.units
+              .filter(
+                (u) =>
+                  u.unitType !== 'supplier' &&
+                  (fallbackShell.ctx.workspace.unitScopeIds.length === 0 ||
+                    fallbackShell.ctx.workspace.unitScopeIds.includes(u.id)),
+              )
+              .map((u) => ({ id: u.id, name: u.name }))}
+          />
         </div>
       </>
     );
@@ -215,134 +195,25 @@ export default async function ImportJobPage({
               }
             />
           ) : (
-            <form action={confirmImportAction}>
-              <input type="hidden" name="jobId" value={job.id} />
-              <div className="t4d-scroll-x">
-                <Table className="t4d-sticky-head">
-                  <THead>
-                    <TR>
-                      <TH className="w-10">取込</TH>
-                      <TH>元データ</TH>
-                      <TH className="w-[200px]">指標</TH>
-                      <TH className="w-[160px]">組織</TH>
-                      <TH className="w-[120px]">値</TH>
-                      <TH className="w-[90px]">単位</TH>
-                      <TH className="w-[90px]">信頼度</TH>
-                      <TH>状態・警告</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {pendingRows.map((row) => {
-                      const status = ROW_STATUS_LABEL[row.status] ?? ROW_STATUS_LABEL.pending;
-                      return (
-                        <TR key={row.id}>
-                          <TD>
-                            <input type="hidden" name="rowId" value={row.id} />
-                            <input
-                              type="checkbox"
-                              name={`include:${row.id}`}
-                              defaultChecked={row.status === 'mapped'}
-                              aria-label={`行 ${row.rowIndex} を取り込む`}
-                              className="size-3.5 accent-[#0b57a4]"
-                            />
-                          </TD>
-                          <TD className="max-w-[240px]">
-                            <div className="truncate text-[11px] text-ink-muted">
-                              {Object.entries(row.raw)
-                                .map(([k, v]) => `${k}: ${v}`)
-                                .join(' / ')}
-                            </div>
-                            <div className="text-[11px] text-ink-muted">{row.sourceLocator}</div>
-                          </TD>
-                          <TD>
-                            <select
-                              name={`metricId:${row.id}`}
-                              defaultValue={row.metricId ?? ''}
-                              aria-label={`行 ${row.rowIndex} の指標`}
-                              className="h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px]"
-                            >
-                              <option value="">（未選択）</option>
-                              {shell.metrics.map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.name}
-                                </option>
-                              ))}
-                            </select>
-                          </TD>
-                          <TD>
-                            <select
-                              name={`unitId:${row.id}`}
-                              defaultValue={row.unitId ?? ''}
-                              aria-label={`行 ${row.rowIndex} の組織`}
-                              className="h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px]"
-                            >
-                              <option value="">（未選択）</option>
-                              {editableUnits.map((u) => (
-                                <option key={u.id} value={u.id}>
-                                  {u.name}
-                                </option>
-                              ))}
-                            </select>
-                          </TD>
-                          <TD>
-                            <input
-                              name={`value:${row.id}`}
-                              defaultValue={row.value ?? ''}
-                              inputMode="decimal"
-                              aria-label={`行 ${row.rowIndex} の値`}
-                              className="tnum h-7 w-full rounded-t4d border border-line px-1 text-right text-[12px]"
-                            />
-                          </TD>
-                          <TD>
-                            <input
-                              name={`unitOfMeasure:${row.id}`}
-                              defaultValue={row.unitOfMeasure ?? ''}
-                              aria-label={`行 ${row.rowIndex} の単位`}
-                              className="h-7 w-full rounded-t4d border border-line px-1 text-[12px]"
-                            />
-                          </TD>
-                          <TD>
-                            <span
-                              className={
-                                row.confidence >= 0.7
-                                  ? 'tnum text-success'
-                                  : row.confidence >= 0.4
-                                    ? 'tnum text-[#8a5d00]'
-                                    : 'tnum text-danger'
-                              }
-                            >
-                              {Math.round(row.confidence * 100)}%
-                            </span>
-                          </TD>
-                          <TD>
-                            <Badge tone={status?.tone ?? 'neutral'}>{status?.label}</Badge>
-                            {row.warnings.length > 0 && (
-                              <ul className="mt-0.5 space-y-0.5">
-                                {row.warnings.map((w, i) => (
-                                  <li key={i} className="text-[11px] text-[#8a5d00]">
-                                    ⚠ {w}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </TD>
-                        </TR>
-                      );
-                    })}
-                  </TBody>
-                </Table>
-              </div>
-
-              <div className="flex items-center justify-between gap-3 border-t border-line px-3 py-2">
-                <p className="text-[11px] text-ink-muted">
-                  確定すると Data Point 台帳へ反映されます（既存データがある場合は新しい Version
-                  が追加されます）。AI の推定は候補であり、確定は人が行います。
-                </p>
-                <SubmitButton size="sm" icon={<Check aria-hidden="true" />} pendingLabel="確定中…">
-                  選択した行を確定
-                </SubmitButton>
-              </div>
-            </form>
+            <ImportPreviewTable
+              jobId={job.id}
+              reportingPeriodId={job.reportingPeriodId}
+              rows={pendingRows.map((row) => ({
+                id: row.id,
+                rowIndex: row.rowIndex,
+                raw: row.raw,
+                sourceLocator: row.sourceLocator,
+                metricId: row.metricId,
+                unitId: row.unitId,
+                value: row.value,
+                unitOfMeasure: row.unitOfMeasure,
+                confidence: row.confidence,
+                warnings: row.warnings,
+                status: row.status,
+              }))}
+              metrics={shell.metrics.map((m) => ({ id: m.id, name: m.name }))}
+              units={editableUnits.map((u) => ({ id: u.id, name: u.name }))}
+            />
           )}
         </Card>
 

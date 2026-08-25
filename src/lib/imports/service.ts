@@ -476,22 +476,36 @@ export async function confirmIngestionJob(
   ctx: AuthorizationContext,
   jobId: Uuid,
   decisions: RowDecision[],
+  /**
+   * ジョブがこのインスタンスのメモリに無い場合の補い。
+   *
+   * Demo Mode の取込結果はプロセスのメモリにしか無く、確定のリクエストが
+   * 別インスタンスへ届くとジョブも行も見つからない（known-limitations D-3）。
+   * 画面から一緒に送られてくる「対象期間」と「元資料の位置」で補えば、
+   * 台帳への反映は同じようにできる。
+   */
+  fallback?: { reportingPeriodId: Uuid; sourceLocatorByRowId: Record<string, string> },
 ): Promise<ConfirmResult> {
   assertCan(ctx, 'enterprise.data.write');
 
+  const organizationId = ctx.workspace.organizationId;
   const job = await db.findById('ingestionJobs', jobId);
-  if (!job || job.organizationId !== ctx.workspace.organizationId) {
+  if (job && job.organizationId !== organizationId) {
+    throw new NotFoundError('取込ジョブが見つかりません。');
+  }
+  if (!job && !fallback) {
     throw new NotFoundError('取込ジョブが見つかりません。');
   }
 
-  const rows = await db.select('ingestionRows', { where: { jobId } });
+  const rows = job ? await db.select('ingestionRows', { where: { jobId } }) : [];
   const rowById = new Map(rows.map((r) => [r.id, r]));
   const [metrics, units, periods] = await Promise.all([
-    db.select('metrics', { where: { organizationId: job.organizationId } }),
-    db.select('units', { where: { organizationId: job.organizationId } }),
-    db.select('periods', { where: { organizationId: job.organizationId } }),
+    db.select('metrics', { where: { organizationId } }),
+    db.select('units', { where: { organizationId } }),
+    db.select('periods', { where: { organizationId } }),
   ]);
-  const period = periods.find((p) => p.id === job.reportingPeriodId);
+  const periodId = job?.reportingPeriodId ?? fallback!.reportingPeriodId;
+  const period = periods.find((p) => p.id === periodId);
   if (!period) throw new NotFoundError('報告期間が見つかりません。');
 
   // 1 行ずつ書きながら途中で権限エラーを投げると、
@@ -504,12 +518,17 @@ export async function confirmIngestionJob(
 
   for (const decision of decisions) {
     const row = rowById.get(decision.rowId);
-    if (!row) continue;
+    // 行がこのインスタンスに無い場合は、画面から送られてきた情報で補う
+    const sourceLocator =
+      row?.sourceLocator ?? fallback?.sourceLocatorByRowId[decision.rowId] ?? null;
+
     if (!decision.include || !decision.metricId || !decision.unitId || decision.value === null) {
-      await db.update('ingestionRows', row.id, {
-        status: 'rejected',
-        updatedAt: new Date().toISOString(),
-      });
+      if (row) {
+        await db.update('ingestionRows', row.id, {
+          status: 'rejected',
+          updatedAt: new Date().toISOString(),
+        });
+      }
       result.skipped += 1;
       continue;
     }
@@ -529,26 +548,30 @@ export async function confirmIngestionJob(
       period,
       value: decision.value,
       unitOfMeasure: decision.unitOfMeasure ?? metric.unit,
-      sourceReference: `${row.sourceLocator ?? '取込'}（ジョブ ${job.id.slice(0, 8)}）`,
+      sourceReference: `${sourceLocator ?? '取込'}（ジョブ ${jobId.slice(0, 8)}）`,
     });
 
     if (outcome === 'created') result.created += 1;
     else result.updated += 1;
 
-    await db.update('ingestionRows', row.id, {
-      status: 'confirmed',
-      metricId: decision.metricId,
-      unitId: decision.unitId,
-      value: decision.value,
-      unitOfMeasure: decision.unitOfMeasure,
-      updatedAt: new Date().toISOString(),
-    });
+    if (row) {
+      await db.update('ingestionRows', row.id, {
+        status: 'confirmed',
+        metricId: decision.metricId,
+        unitId: decision.unitId,
+        value: decision.value,
+        unitOfMeasure: decision.unitOfMeasure,
+        updatedAt: new Date().toISOString(),
+      });
+    }
   }
 
-  await db.update('ingestionJobs', jobId, {
-    status: 'completed',
-    finishedAt: new Date().toISOString(),
-  });
+  if (job) {
+    await db.update('ingestionJobs', jobId, {
+      status: 'completed',
+      finishedAt: new Date().toISOString(),
+    });
+  }
 
   await recordAuditEvent(db, ctx, {
     eventType: 'data_created',

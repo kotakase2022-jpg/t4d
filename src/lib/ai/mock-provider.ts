@@ -2,6 +2,7 @@ import { createRng, stableHash } from '@/lib/fixtures/ids';
 import { normalizeLabel } from '@/lib/imports/learning';
 import { classifyColumns, pickValueCell } from '@/lib/imports/column-roles';
 import { parseFlexibleNumber } from '@/lib/imports/number';
+import type { SsbjCoverageStatus as SsbjCoverage } from '@/types/domain';
 import { AI_SCHEMAS, PROMPT_VERSIONS, type AiFeature, type AiOutputOf } from './schemas';
 import { AiProviderError, type AiInvocation, type AiProvider, type AiResult } from './types';
 
@@ -433,6 +434,91 @@ function buildMockOutput<F extends AiFeature>(
         warnings: [
           'AI が生成した下書きです。人が内容を確認し、編集のうえ承認してください。',
           ...(missing.length > 0 ? ['不足情報があります。断定的な記述を避けてください。'] : []),
+        ],
+        sources,
+      };
+    }
+
+    case 'ssbjGapAnalysis': {
+      const itemCode = String(input.itemCode ?? '');
+      const title = String(input.title ?? '');
+      const requirementText = String(input.requirementText ?? '');
+      const required = input.required === true;
+      const documents =
+        (input.documents as Array<{ name: string; page: string; excerpt: string }>) ?? [];
+      const metricValues =
+        (input.metricValues as Array<{ label: string; value: number; unit: string }>) ?? [];
+      const hasProcess = input.hasApprovalWorkflow === true;
+      const sources = (input.sources as never[]) ?? [];
+
+      // 決定論的に「どの資料のどこに該当記述があったか」を選ぶ。
+      // 実運用では取り込んだ資料の全文検索結果が入る想定で、Mock は既存資料から選ぶ。
+      const hit = documents.length > 0 ? documents[Math.floor(rng() * documents.length)]! : null;
+
+      // 3 観点の判定。根拠が無いものを「対応済み」にしない
+      const disclosureStatus: SsbjCoverage = !hit
+        ? 'not_covered'
+        : hit.excerpt.length > 120
+          ? 'mostly_covered'
+          : 'partial';
+      const dataStatus: SsbjCoverage =
+        metricValues.length === 0
+          ? 'not_covered'
+          : metricValues.length >= 2
+            ? 'covered'
+            : 'partial';
+      const processStatus: SsbjCoverage = hasProcess ? 'partial' : 'not_covered';
+
+      const missing: string[] = [];
+      // 該当箇所が見つからない、または記述が短い場合は「書ききれていない事項がある」と扱う
+      missing.push(`${title}のうち、記述が確認できない事項があります。`);
+      if (/頻度|どの頻度|モニタリング/.test(requirementText)) {
+        missing.push('取締役会・経営者への報告頻度');
+      }
+      if (/プロセス|統制|手続/.test(requirementText)) {
+        missing.push('監督プロセスおよび意思決定への反映方法');
+      }
+      if (/時間軸|短期|中期|長期/.test(requirementText)) {
+        missing.push('短期・中期・長期の定義と、計画期間との関係');
+      }
+      if (/定量的|財務的影響|金額/.test(requirementText)) {
+        missing.push('財務的影響の定量的情報、または定量化していない理由');
+      }
+      if (dataStatus === 'not_covered') {
+        missing.push('開示に必要な数値が台帳に存在しません（データ収集が必要）。');
+      }
+      if (processStatus === 'not_covered') {
+        missing.push('情報を継続的に収集・確認・承認する仕組みが確認できません。');
+      }
+
+      const comment = hit
+        ? `${hit.name} ${hit.page} に関連する記述が見つかりました。ただし、SSBJ ${itemCode} が求める事項のうち、上記「不足している情報」に挙げた点について十分な説明が確認できません。`
+        : `既存の開示資料から、SSBJ ${itemCode} に対応する記述を見つけられませんでした。未対応として扱い、記載の要否を確認してください。`;
+
+      const recommendation =
+        dataStatus === 'not_covered'
+          ? 'まず必要な数値の収集方法を決め、データ収集項目として担当部署へ依頼してください。数値が揃ってから開示文章を作成します。'
+          : disclosureStatus === 'not_covered'
+            ? '該当する記述が無いため、追加開示の要否を判断してください。重要性なしと整理する場合は、その理由を記録してください。'
+            : '不足している事項について、追加開示を検討してください。あわせて、記載内容の根拠資料と承認履歴を残せる運用にしてください。';
+
+      return {
+        itemCode,
+        disclosureStatus,
+        dataStatus,
+        processStatus,
+        comment,
+        missingInformation: missing,
+        recommendation,
+        sourceDocument: hit?.name ?? null,
+        sourcePage: hit?.page ?? null,
+        sourceExcerpt: hit?.excerpt ?? null,
+        confidence: hit ? 0.62 + rng() * 0.16 : 0.34 + rng() * 0.12,
+        warnings: [
+          'AI による判定です。最終判定は担当者が確認して確定してください。',
+          ...(required
+            ? []
+            : ['この要求事項は条件付きの規定です。自社が対象となるかを先に確認してください。']),
         ],
         sources,
       };

@@ -875,6 +875,147 @@ export interface ResponseEvidenceLink {
   createdAt: IsoDateTime;
 }
 
+// ----------------------------------------------------------------------
+// SSBJ ギャップ分析
+//
+// SSBJ 対応は「要求事項を ○△× で採点する」ものではない。
+//   ① その企業に適用される要求事項か（適用区分）
+//   ② その情報に重要性があるか（重要性）
+//   ③ 現在どこまで対応できているか（対応状況）
+// を分けて管理する。さらに③は 1 つの要求事項に対して
+//   開示（資料に書かれているか）／データ（社内で取得できているか）／
+//   業務プロセス・内部統制（継続的に正確に集められる仕組みがあるか）
+// の 3 観点で別々に評価する。
+//
+// AI の判定はそのまま最終判定にしない。必ず担当者の確認を挟む
+// （AI は確定しない・CLAUDE.md §0.4）。
+// ----------------------------------------------------------------------
+
+/** 対応状況。単純な ○△× ではなく、現在の状況が具体的に分かる 5 段階 */
+export const SSBJ_COVERAGE_STATUSES = [
+  'covered',
+  'mostly_covered',
+  'partial',
+  'not_covered',
+  'unconfirmed',
+] as const;
+export type SsbjCoverageStatus = (typeof SSBJ_COVERAGE_STATUSES)[number];
+
+/** ギャップの種類（開示／データ／業務プロセス・内部統制） */
+export const SSBJ_GAP_KINDS = ['disclosure', 'data', 'process'] as const;
+export type SsbjGapKind = (typeof SSBJ_GAP_KINDS)[number];
+
+/** 適用区分。対応状況とは別に管理する */
+export const SSBJ_APPLICABILITIES = ['applicable', 'not_applicable'] as const;
+export type SsbjApplicability = (typeof SSBJ_APPLICABILITIES)[number];
+
+/** 重要性。適用区分・対応状況とは別に管理する */
+export const SSBJ_MATERIALITIES = ['material', 'not_material', 'not_assessed'] as const;
+export type SsbjMateriality = (typeof SSBJ_MATERIALITIES)[number];
+
+/** 担当者による確認の結果（AI 判定を承認したか、修正したか） */
+export const SSBJ_REVIEW_DECISIONS = ['approved', 'modified'] as const;
+export type SsbjReviewDecision = (typeof SSBJ_REVIEW_DECISIONS)[number];
+
+/** 優先度の 3 段階 */
+export const SSBJ_PRIORITIES = ['high', 'medium', 'low'] as const;
+export type SsbjPriority = (typeof SSBJ_PRIORITIES)[number];
+
+/**
+ * 要求事項ごとの評価。組織 × 報告期間 × 要求事項で一意。
+ *
+ * 優先度は保存しない。重要性・3 観点の対応状況・必須区分から毎回計算する
+ * （保存すると入力が変わったときに古い優先度が残り、根拠と食い違うため）。
+ */
+export interface SsbjAssessment extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  /** disclosure_items.id（SSBJ 版の要求事項） */
+  itemId: Uuid;
+
+  applicability: SsbjApplicability;
+  applicabilityReason: string;
+  materiality: SsbjMateriality;
+  materialityReason: string;
+
+  /** ③ 対応状況を 3 観点で持つ */
+  disclosureStatus: SsbjCoverageStatus;
+  dataStatus: SsbjCoverageStatus;
+  processStatus: SsbjCoverageStatus;
+
+  /** AI による判定（候補）。承認されるまで最終判定にはならない */
+  aiStatus: SsbjCoverageStatus | null;
+  aiComment: string;
+  /** 不足している情報の列挙 */
+  aiMissingInfo: string[];
+  aiRecommendation: string;
+  aiRunId: Uuid | null;
+  aiEvaluatedAt: IsoDateTime | null;
+
+  /** AI が既存資料から見つけた該当箇所（判定の根拠） */
+  sourceDocument: string | null;
+  sourcePage: string | null;
+  sourceExcerpt: string | null;
+
+  /** 担当者による確認 */
+  reviewDecision: SsbjReviewDecision | null;
+  reviewedBy: Uuid | null;
+  reviewedAt: IsoDateTime | null;
+  reviewComment: string;
+
+  /** 最終判定。担当者が確認して初めて入る */
+  finalStatus: SsbjCoverageStatus | null;
+
+  /** 担当部署・担当者（要求事項の一次窓口） */
+  ownerDepartment: string;
+  ownerUserId: Uuid | null;
+
+  /** 前年度の評価から引き継いだか */
+  carriedOverFrom: Uuid | null;
+  /** 今年度に再評価が必要と判定された理由（引き継ぎ時に設定） */
+  recheckReason: string;
+}
+
+/** 対応区分。ギャップに対して何をするか */
+export const SSBJ_ACTION_TYPES = [
+  'data_collection',
+  'disclosure_addition',
+  'governance',
+  'policy',
+  'internal_control',
+  'system',
+  'calculation_method',
+] as const;
+export type SsbjActionType = (typeof SSBJ_ACTION_TYPES)[number];
+
+/** 対応状況（対応計画側） */
+export const SSBJ_ACTION_STATUSES = ['not_started', 'in_progress', 'in_review', 'done'] as const;
+export type SsbjActionStatus = (typeof SSBJ_ACTION_STATUSES)[number];
+
+/**
+ * 対応計画。ギャップ（要求事項 × 観点）ごとに、誰がいつまでに何をするかを持つ。
+ * データ収集が必要な場合は `linkedMetricCode` で指標マスターへ接続する。
+ */
+export interface SsbjActionPlan extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  assessmentId: Uuid;
+  /** どの観点のギャップに対する対応か */
+  gapKind: SsbjGapKind;
+  title: string;
+  detail: string;
+  actionType: SsbjActionType;
+  department: string;
+  assigneeUserId: Uuid | null;
+  dueDate: IsoDate | null;
+  priority: SsbjPriority;
+  status: SsbjActionStatus;
+  /** データ収集項目を作った場合の指標コード */
+  linkedMetricCode: string | null;
+}
+
 // ======================================================================
 // 10.7 Import / AI
 // ======================================================================
@@ -961,6 +1102,7 @@ export const AI_FEATURE_TYPES = [
   'anomalyExplanation',
   'cdpQuestionMapping',
   'cdpDraftGeneration',
+  'ssbjGapAnalysis',
   'evidenceMapping',
   'inconsistencyCheck',
   'insightDiscovery',

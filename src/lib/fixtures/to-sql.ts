@@ -68,6 +68,8 @@ export const SEED_ORDER: TableName[] = [
   'disclosureResponseVersions',
   'disclosureMappings',
   'responseEvidenceLinks',
+  'ssbjAssessments',
+  'ssbjActionPlans',
   'ingestionJobs',
   'ingestionJobFiles',
   'aiRuns',

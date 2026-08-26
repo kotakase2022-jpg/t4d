@@ -50,6 +50,8 @@ export const SQL_TABLE_NAMES: Record<TableName, string> = {
   disclosureResponseVersions: 'disclosure_response_versions',
   disclosureMappings: 'disclosure_mappings',
   responseEvidenceLinks: 'response_evidence_links',
+  ssbjAssessments: 'ssbj_assessments',
+  ssbjActionPlans: 'ssbj_action_plans',
 
   ingestionJobs: 'ingestion_jobs',
   ingestionJobFiles: 'ingestion_job_files',

@@ -94,6 +94,13 @@ import type {
   Profile,
   ReportingPeriod,
   ResponseEvidenceLink,
+  SsbjActionPlan,
+  SsbjActionStatus,
+  SsbjActionType,
+  SsbjAssessment,
+  SsbjCoverageStatus,
+  SsbjGapKind,
+  SsbjPriority,
   ReviewNote,
   Sample,
   SampleItem,
@@ -149,6 +156,8 @@ export interface FixtureDb {
   disclosureResponseVersions: DisclosureResponseVersion[];
   disclosureMappings: DisclosureMapping[];
   responseEvidenceLinks: ResponseEvidenceLink[];
+  ssbjAssessments: SsbjAssessment[];
+  ssbjActionPlans: SsbjActionPlan[];
 
   ingestionJobs: IngestionJob[];
   ingestionJobFiles: IngestionJobFile[];
@@ -233,6 +242,8 @@ export function createFixtureDb(): FixtureDb {
     disclosureResponseVersions: [],
     disclosureMappings: [],
     responseEvidenceLinks: [],
+    ssbjAssessments: [],
+    ssbjActionPlans: [],
     ingestionJobs: [],
     ingestionJobFiles: [],
     ingestionRows: [],
@@ -1026,6 +1037,274 @@ export function createFixtureDb(): FixtureDb {
       confirmedAt: at(100),
       ...audit(at(100), at(100), userId('sustainability@demo.local')),
     });
+  }
+
+  // ------------------------------------------------------------------
+  // SSBJ ギャップ評価
+  //
+  // 133 要求事項それぞれについて、適用区分・重要性・3 観点の対応状況を持つ。
+  // 「初年度の途中」を想定した分布にしてある（対応済みが積み上がりつつ、
+  // データ整備と業務プロセスの整備が遅れている状態）。決定論的に割り当てる。
+  // ------------------------------------------------------------------
+  {
+    const period = PERIOD_IDS.fy2026;
+    const owner = userId('sustainability@demo.local');
+    const reviewer = userId('reviewer@demo.local');
+
+    /** 決定論的な擬似乱数（項目コードから作る。実行のたびに同じ分布になる） */
+    const bucket = (code: string, mod: number): number => {
+      let h = 0;
+      for (const ch of code) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      return h % mod;
+    };
+
+    const DEPARTMENTS = [
+      'サステナビリティ推進部',
+      '経営企画部',
+      '財務経理部',
+      '人事総務部',
+      '生産本部',
+    ];
+
+    SSBJ_MASTER_ITEMS.forEach((spec, index) => {
+      const itemId = fid('disclosure_item', `ssbj/2026/${spec.code}`);
+      const seed = bucket(spec.code, 100);
+
+      // 実務対応基準（温対法 SHK 制度を選択していない）は対象外
+      const notApplicable = spec.code.startsWith('実務-') && seed % 2 === 0;
+      // 金融活動に関する要求事項は当社に重要性なし
+      const notMaterial = /ファイナンスド|金融活動|カーボン・クレジット/.test(spec.title);
+
+      let disclosure: SsbjCoverageStatus;
+      let data: SsbjCoverageStatus;
+      let process: SsbjCoverageStatus;
+      if (notApplicable || notMaterial) {
+        disclosure = 'unconfirmed';
+        data = 'unconfirmed';
+        process = 'unconfirmed';
+      } else if (seed < 26) {
+        // 3 観点そろって対応できている
+        disclosure = 'covered';
+        data = 'covered';
+        process = 'covered';
+      } else if (seed < 40) {
+        // 開示は済み、データと仕組みが仕上げ段階
+        disclosure = 'covered';
+        data = 'mostly_covered';
+        process = 'mostly_covered';
+      } else if (seed < 62) {
+        // 書いてはあるが、データか仕組みが途中
+        disclosure = seed < 52 ? 'covered' : 'mostly_covered';
+        data = 'partial';
+        process = 'partial';
+      } else if (seed < 84) {
+        // データか仕組みが無く、継続的な開示ができない
+        disclosure = seed < 74 ? 'partial' : 'not_covered';
+        data = seed < 70 ? 'partial' : 'not_covered';
+        process = 'not_covered';
+      } else {
+        // まだ確認していない
+        disclosure = 'unconfirmed';
+        data = 'unconfirmed';
+        process = 'unconfirmed';
+      }
+
+      const reviewed = !notApplicable && !notMaterial && seed < 88 && seed % 7 !== 0;
+      const aiEvaluated = !notApplicable && seed < 96;
+      const combined = [disclosure, data, process].includes('not_covered')
+        ? 'not_covered'
+        : [disclosure, data, process].includes('unconfirmed')
+          ? 'unconfirmed'
+          : [disclosure, data, process].includes('partial')
+            ? 'partial'
+            : [disclosure, data, process].includes('mostly_covered')
+              ? 'mostly_covered'
+              : 'covered';
+
+      const missing: string[] = [];
+      if (disclosure !== 'covered') missing.push(`${spec.title}のうち、記述が確認できない事項`);
+      if (data === 'not_covered') missing.push('開示に必要な数値が台帳に存在しません');
+      if (process === 'not_covered') missing.push('継続的に収集・承認する仕組みが未整備です');
+
+      db.ssbjAssessments.push({
+        id: fid('ssbj_assessment', `${ORG_IDS.aomi}/${period}/${spec.code}`),
+        organizationId: ORG_IDS.aomi,
+        reportingPeriodId: period,
+        itemId,
+        applicability: notApplicable ? 'not_applicable' : 'applicable',
+        applicabilityReason: notApplicable
+          ? '温対法 SHK 制度の方法を用いていないため、本実務対応基準の適用対象外です。'
+          : '',
+        materiality: notMaterial ? 'not_material' : seed < 78 ? 'material' : 'not_assessed',
+        materialityReason: notMaterial
+          ? '当社は資産運用・商業銀行・保険のいずれの活動も行っていないため、重要性なしと判断しました。'
+          : '',
+        disclosureStatus: disclosure,
+        dataStatus: data,
+        processStatus: process,
+        aiStatus: aiEvaluated ? combined : null,
+        aiComment: aiEvaluated
+          ? `統合報告書2026 の該当箇所に関連する記述が見つかりました。ただし SSBJ ${spec.code} が求める事項のうち、不足している情報に挙げた点について十分な説明が確認できません。`
+          : '',
+        aiMissingInfo: aiEvaluated ? missing : [],
+        aiRecommendation: aiEvaluated
+          ? data === 'not_covered'
+            ? 'まず必要な数値の収集方法を決め、データ収集項目として担当部署へ依頼してください。'
+            : '不足している事項について、追加開示を検討してください。'
+          : '',
+        aiRunId: null,
+        aiEvaluatedAt: aiEvaluated ? at(30) : null,
+        sourceDocument: aiEvaluated ? '統合報告書2026' : null,
+        sourcePage: aiEvaluated ? `${28 + (index % 60)} ページ` : null,
+        sourceExcerpt: aiEvaluated
+          ? 'サステナビリティ委員会は、気候関連を含むサステナビリティ関連のリスク及び機会について四半期ごとに審議し、その結果を取締役会へ報告しています。'
+          : null,
+        reviewDecision: reviewed ? (seed % 3 === 0 ? 'modified' : 'approved') : null,
+        reviewedBy: reviewed ? reviewer : null,
+        reviewedAt: reviewed ? at(24) : null,
+        reviewComment: reviewed
+          ? seed % 3 === 0
+            ? '記載箇所を確認し、開示の対応状況を一段引き下げました。'
+            : 'AI の判定内容を確認し、妥当と判断しました。'
+          : '',
+        finalStatus: reviewed ? combined : null,
+        ownerDepartment: DEPARTMENTS[bucket(spec.code, DEPARTMENTS.length)] ?? DEPARTMENTS[0]!,
+        ownerUserId: owner,
+        carriedOverFrom: null,
+        recheckReason: spec.changeType === 'new' ? 'SSBJ 基準の改正で追加された要求事項です。' : '',
+        ...audit(at(40), reviewed ? at(24) : at(40), owner),
+      });
+    });
+
+    // 対応計画。優先度の高いギャップから 6 件を起票済みにしておく
+    const planSpecs: Array<{
+      code: string;
+      gapKind: SsbjGapKind;
+      title: string;
+      detail: string;
+      actionType: SsbjActionType;
+      department: string;
+      dueDate: string;
+      priority: SsbjPriority;
+      status: SsbjActionStatus;
+      linkedMetricCode: string | null;
+    }> = [
+      {
+        code: '気候-47(3)',
+        gapKind: 'data',
+        title: 'スコープ3 カテゴリー別排出量の収集方法を決めて収集する',
+        detail:
+          'カテゴリー1 以外の排出量が算定できていない。カテゴリーごとの算定方法（金額ベース／物量ベース）を決めたうえで、調達部・物流部から一次データを集める。',
+        actionType: 'data_collection',
+        department: '調達部',
+        dueDate: '2026-11-28',
+        priority: 'high',
+        status: 'in_progress',
+        linkedMetricCode: 'scope3_cat1',
+      },
+      {
+        code: '気候-10',
+        gapKind: 'disclosure',
+        title: '取締役会への報告頻度と監督プロセスを追加開示する',
+        detail:
+          '監督主体は記載済みだが、報告の頻度と、監督結果を経営判断へ反映するプロセスの記述が不足している。統合報告書のガバナンス章へ追記する。',
+        actionType: 'disclosure_addition',
+        department: '経営企画部',
+        dueDate: '2026-10-31',
+        priority: 'high',
+        status: 'in_progress',
+        linkedMetricCode: null,
+      },
+      {
+        code: '気候-63',
+        gapKind: 'process',
+        title: '排出量の算定根拠と承認履歴を残す運用へ切り替える',
+        detail:
+          '子会社から表計算ファイルをメールで集めているだけで、証跡と承認履歴が残っていない。本システムのデータ収集・承認フローへ移行する。',
+        actionType: 'internal_control',
+        department: 'サステナビリティ推進部',
+        dueDate: '2026-12-19',
+        priority: 'high',
+        status: 'not_started',
+        linkedMetricCode: null,
+      },
+      {
+        code: '一般-29',
+        gapKind: 'process',
+        title: 'サステナビリティ関連リスクの識別・評価プロセスを規程化する',
+        detail:
+          '全社のリスク管理プロセスへ統合されている程度を説明できるよう、リスク管理規程へサステナビリティ関連リスクの取扱いを明記する。',
+        actionType: 'policy',
+        department: '経営企画部',
+        dueDate: '2027-01-30',
+        priority: 'medium',
+        status: 'not_started',
+        linkedMetricCode: null,
+      },
+      {
+        code: '気候-84',
+        gapKind: 'data',
+        title: '役員報酬に占める気候関連評価項目の割合を集計する',
+        detail:
+          '報酬委員会の評価表から、気候関連の評価項目に結び付く報酬の割合を算定できるようにする。',
+        actionType: 'calculation_method',
+        department: '人事総務部',
+        dueDate: '2026-12-05',
+        priority: 'medium',
+        status: 'not_started',
+        linkedMetricCode: null,
+      },
+      {
+        code: '気候-92',
+        gapKind: 'disclosure',
+        title: '温室効果ガス排出目標の対象範囲と算定基礎を明記する',
+        detail:
+          '目標が企業全体に適用されるのか一部か、絶対量か原単位かを明記する。中間目標の内容も併記する。',
+        actionType: 'disclosure_addition',
+        department: 'サステナビリティ推進部',
+        dueDate: '2026-11-14',
+        priority: 'medium',
+        status: 'in_review',
+        linkedMetricCode: null,
+      },
+    ];
+
+    for (const [index, plan] of planSpecs.entries()) {
+      const assessmentId = fid('ssbj_assessment', `${ORG_IDS.aomi}/${period}/${plan.code}`);
+      db.ssbjActionPlans.push({
+        id: fid('ssbj_action_plan', `${ORG_IDS.aomi}/${period}/${plan.code}/${plan.gapKind}`),
+        organizationId: ORG_IDS.aomi,
+        reportingPeriodId: period,
+        assessmentId,
+        gapKind: plan.gapKind,
+        title: plan.title,
+        detail: plan.detail,
+        actionType: plan.actionType,
+        department: plan.department,
+        assigneeUserId: index % 2 === 0 ? owner : userId('approver@demo.local'),
+        dueDate: plan.dueDate,
+        priority: plan.priority,
+        status: plan.status,
+        linkedMetricCode: plan.linkedMetricCode,
+        ...audit(at(28), at(20), owner),
+      });
+    }
+
+    // データ収集項目（対応計画から作られたもの）。担当と期限を持つ
+    const scope3MetricId = metricId('AOMI', 'scope3_cat1');
+    for (const [index, unitId] of [UNIT_IDS.hq, UNIT_IDS.east, UNIT_IDS.west].entries()) {
+      db.metricAssignments.push({
+        id: fid('metric_assignment', `${scope3MetricId}/${unitId}/${period}`),
+        organizationId: ORG_IDS.aomi,
+        metricId: scope3MetricId,
+        unitId,
+        reportingPeriodId: period,
+        ownerUserId: index === 0 ? owner : userId('site-user@demo.local'),
+        reviewerUserId: reviewer,
+        dueDate: '2026-11-28',
+        ...audit(at(28), at(28), owner),
+      });
+    }
   }
 
   // ------------------------------------------------------------------

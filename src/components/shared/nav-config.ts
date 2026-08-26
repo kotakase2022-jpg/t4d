@@ -83,7 +83,30 @@ export const ENTERPRISE_NAV: NavItem[] = [
     keywords: ['disclosure', '開示'],
     children: [
       { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
-      { label: 'SSBJ', href: '/enterprise/disclosures/ssbj', icon: FileSpreadsheet },
+      {
+        label: 'SSBJ 対応状況',
+        href: '/enterprise/disclosures/ssbj',
+        icon: Gauge,
+        keywords: ['SSBJ', 'ギャップ', '全体状況'],
+      },
+      {
+        label: 'SSBJ 要求事項',
+        href: '/enterprise/disclosures/ssbj/requirements',
+        icon: ListChecks,
+        keywords: ['SSBJ', '要求事項', 'ギャップ分析'],
+      },
+      {
+        label: 'SSBJ 対応計画',
+        href: '/enterprise/disclosures/ssbj/plans',
+        icon: ClipboardList,
+        keywords: ['SSBJ', '対応計画', '担当', '期限'],
+      },
+      {
+        label: 'SSBJ データ収集',
+        href: '/enterprise/disclosures/ssbj/collection',
+        icon: Database,
+        keywords: ['SSBJ', 'データ収集', '不足データ'],
+      },
       { label: 'CSRD', href: '/enterprise/disclosures/csrd', icon: FileSpreadsheet },
       { label: 'MSCI', href: '/enterprise/disclosures/msci', icon: FileSpreadsheet },
       { label: 'FTSE', href: '/enterprise/disclosures/ftse', icon: FileSpreadsheet },

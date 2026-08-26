@@ -10,6 +10,15 @@ import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/e
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
 import { getDb } from '@/lib/repositories';
+import {
+  carryOverSsbjAssessments,
+  createActionPlan,
+  createDataCollectionItem,
+  runSsbjGapAnalysis,
+  saveSsbjReview,
+  saveSsbjScope,
+  updateActionPlan,
+} from '@/lib/services/ssbj-gap';
 import { MAX_FILES_PER_IMPORT, type ImportPreviewPayload } from './imports/preview-types';
 import { sha256Hex } from '@/lib/storage';
 import {
@@ -1078,4 +1087,164 @@ export async function saveMaterialityTopicAction(formData: FormData): Promise<vo
     });
     revalidatePath('/enterprise/disclosures/ssbj');
   });
+}
+
+// ----------------------------------------------------------------------
+// SSBJ ギャップ分析
+// ----------------------------------------------------------------------
+
+/** SSBJ の各画面を再検証する（詳細を更新したら一覧と全体状況にも効かせる） */
+function revalidateSsbj(itemId: string | null): void {
+  revalidatePath('/enterprise/disclosures/ssbj');
+  revalidatePath('/enterprise/disclosures/ssbj/requirements');
+  revalidatePath('/enterprise/disclosures/ssbj/plans');
+  revalidatePath('/enterprise/disclosures/ssbj/collection');
+  if (itemId) revalidatePath(`/enterprise/disclosures/ssbj/requirements/${itemId}`);
+}
+
+/** 手順 3: 対象判定・重要性判断 */
+export async function saveSsbjScopeAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const itemId = String(formData.get('itemId') ?? '');
+  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+    await saveSsbjScope(db, ctx, {
+      assessmentId: String(formData.get('assessmentId') ?? ''),
+      applicability:
+        formData.get('applicability') === 'not_applicable' ? 'not_applicable' : 'applicable',
+      applicabilityReason: String(formData.get('applicabilityReason') ?? ''),
+      materiality: String(formData.get('materiality') ?? 'not_assessed') as
+        'material' | 'not_material' | 'not_assessed',
+      materialityReason: String(formData.get('materialityReason') ?? ''),
+      ownerDepartment: String(formData.get('ownerDepartment') ?? ''),
+    });
+  });
+  revalidateSsbj(itemId);
+}
+
+/** 手順 4: 人工知能によるギャップ分析 */
+export async function runSsbjGapAnalysisAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const itemId = String(formData.get('itemId') ?? '');
+  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+    await runSsbjGapAnalysis(db, ctx, String(formData.get('assessmentId') ?? ''));
+  });
+  revalidateSsbj(itemId);
+}
+
+/** 手順 5: 担当者による確認（ここで最終判定が入る） */
+export async function saveSsbjReviewAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const itemId = String(formData.get('itemId') ?? '');
+  const coverage = (name: string) =>
+    String(formData.get(name) ?? 'unconfirmed') as
+      'covered' | 'mostly_covered' | 'partial' | 'not_covered' | 'unconfirmed';
+  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+    await saveSsbjReview(db, ctx, {
+      assessmentId: String(formData.get('assessmentId') ?? ''),
+      decision: formData.get('decision') === 'approve_ai' ? 'approve_ai' : 'modify',
+      disclosureStatus: coverage('disclosureStatus'),
+      dataStatus: coverage('dataStatus'),
+      processStatus: coverage('processStatus'),
+      comment: String(formData.get('comment') ?? ''),
+    });
+  });
+  revalidateSsbj(itemId);
+}
+
+/** 手順 7: 対応計画に追加 */
+export async function createSsbjActionPlanAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const itemId = String(formData.get('itemId') ?? '');
+  const dueDate = String(formData.get('dueDate') ?? '');
+  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+    await createActionPlan(db, ctx, {
+      assessmentId: String(formData.get('assessmentId') ?? ''),
+      gapKind: String(formData.get('gapKind') ?? 'disclosure') as 'disclosure' | 'data' | 'process',
+      title: String(formData.get('title') ?? ''),
+      detail: String(formData.get('detail') ?? ''),
+      actionType: String(formData.get('actionType') ?? 'disclosure_addition') as
+        | 'data_collection'
+        | 'disclosure_addition'
+        | 'governance'
+        | 'policy'
+        | 'internal_control'
+        | 'system'
+        | 'calculation_method',
+      department: String(formData.get('department') ?? ''),
+      assigneeUserId: (formData.get('assigneeUserId') as string) || null,
+      dueDate: dueDate === '' ? null : dueDate,
+      priority: String(formData.get('priority') ?? 'medium') as 'high' | 'medium' | 'low',
+    });
+  });
+  revalidateSsbj(itemId);
+}
+
+/** 対応計画の更新（担当・期限・対応状況） */
+export async function updateSsbjActionPlanAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const dueDate = String(formData.get('dueDate') ?? '');
+  await withUserFacingError('/enterprise/disclosures/ssbj/plans', async () => {
+    await updateActionPlan(db, ctx, {
+      planId: String(formData.get('planId') ?? ''),
+      status: String(formData.get('status') ?? 'not_started') as
+        'not_started' | 'in_progress' | 'in_review' | 'done',
+      department: String(formData.get('department') ?? ''),
+      assigneeUserId: (formData.get('assigneeUserId') as string) || null,
+      dueDate: dueDate === '' ? null : dueDate,
+      priority: String(formData.get('priority') ?? 'medium') as 'high' | 'medium' | 'low',
+    });
+  });
+  revalidateSsbj(null);
+}
+
+/** 手順 8: データ収集項目を作成 */
+export async function createSsbjDataCollectionAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  await withUserFacingError('/enterprise/disclosures/ssbj/plans', async () => {
+    await createDataCollectionItem(db, ctx, {
+      planId: String(formData.get('planId') ?? ''),
+      metricCode: String(formData.get('metricCode') ?? ''),
+      metricName: String(formData.get('metricName') ?? ''),
+      unit: String(formData.get('unit') ?? ''),
+      unitId: String(formData.get('unitId') ?? ''),
+      ownerUserId: (formData.get('ownerUserId') as string) || null,
+      dueDate: String(formData.get('dueDate') ?? ''),
+      requiresEvidence: formData.get('requiresEvidence') === 'on',
+      department: String(formData.get('department') ?? ''),
+    });
+  });
+  revalidateSsbj(null);
+}
+
+/**
+ * 前年度評価の引き継ぎ。
+ * 毎年ゼロから評価し直さず、前年の判断を持ち越したうえで
+ * 「今年度に再評価が必要な要求事項」に理由を付ける。
+ */
+export async function carryOverSsbjAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const periodId = String(formData.get('reportingPeriodId') ?? '');
+
+  await withUserFacingError('/enterprise/disclosures/ssbj', async () => {
+    const periods = await db.select('periods', {
+      where: { organizationId: ctx.workspace.organizationId },
+    });
+    const current = periods.find((p) => p.id === periodId);
+    if (!current) throw new NotFoundError('報告期間が見つかりません。');
+    const previous = periods
+      .filter((p) => p.startDate < current.startDate)
+      .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
+    if (!previous) {
+      throw new ValidationError('前年度の報告期間がないため、引き継ぐ評価がありません。');
+    }
+    await carryOverSsbjAssessments(db, ctx, current, previous);
+  });
+  revalidateSsbj(null);
 }

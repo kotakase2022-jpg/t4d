@@ -91,6 +91,31 @@ export const cdpDraftGenerationSchema = z.object({
 });
 export type CdpDraftGenerationOutput = z.infer<typeof cdpDraftGenerationSchema>;
 
+// 4.5 ssbjGapAnalysis — SSBJ 要求事項と現在の開示内容の比較
+//
+// 「対応済み／未対応」を返すだけでは、担当者は次に何をすればよいか分からない。
+// 何が不足しているのかを列挙し、どの資料の何ページを根拠にそう判定したのかを返す。
+// これは候補であって最終判定ではない（担当者の確認を経て finalStatus になる）。
+export const ssbjGapAnalysisSchema = z.object({
+  itemCode: z.string(),
+  /** 開示・データ・業務プロセスの 3 観点それぞれの判定 */
+  disclosureStatus: z.enum(['covered', 'mostly_covered', 'partial', 'not_covered', 'unconfirmed']),
+  dataStatus: z.enum(['covered', 'mostly_covered', 'partial', 'not_covered', 'unconfirmed']),
+  processStatus: z.enum(['covered', 'mostly_covered', 'partial', 'not_covered', 'unconfirmed']),
+  /** 評価コメント（なぜその判定になったか） */
+  comment: z.string(),
+  /** 不足している情報の列挙 */
+  missingInformation: z.array(z.string()),
+  /** 推奨される対応 */
+  recommendation: z.string(),
+  /** 既存資料のどこを根拠にしたか */
+  sourceDocument: z.string().nullable(),
+  sourcePage: z.string().nullable(),
+  sourceExcerpt: z.string().nullable(),
+  ...base,
+});
+export type SsbjGapAnalysisOutput = z.infer<typeof ssbjGapAnalysisSchema>;
+
 // 5. evidenceMapping — Evidence 該当箇所の候補
 export const evidenceMappingSchema = z.object({
   candidates: z.array(
@@ -201,6 +226,7 @@ export const AI_SCHEMAS = {
   anomalyExplanation: anomalyExplanationSchema,
   cdpQuestionMapping: cdpQuestionMappingSchema,
   cdpDraftGeneration: cdpDraftGenerationSchema,
+  ssbjGapAnalysis: ssbjGapAnalysisSchema,
   evidenceMapping: evidenceMappingSchema,
   inconsistencyCheck: inconsistencyCheckSchema,
   insightDiscovery: insightDiscoverySchema,
@@ -218,6 +244,7 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   anomalyExplanation: 'anomaly-explanation@2026-08-14.1',
   cdpQuestionMapping: 'cdp-question-mapping@2026-08-14.1',
   cdpDraftGeneration: 'cdp-draft-generation@2026-08-14.1',
+  ssbjGapAnalysis: 'ssbj-gap-analysis@2026-08-26.1',
   evidenceMapping: 'evidence-mapping@2026-08-14.1',
   inconsistencyCheck: 'inconsistency-check@2026-08-17.1',
   insightDiscovery: 'insight-discovery@2026-08-17.1',

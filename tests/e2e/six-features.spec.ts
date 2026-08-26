@@ -117,14 +117,17 @@ test('⑤ CDP がバージョン選択 → 過去データ取込 → 一覧の�
   await expect(page.getByRole('link', { name: '過去回答を取り込む' })).toBeVisible();
 });
 
-test('⑥ SSBJ がマテリアリティ登録 → 収集 → 充足度 → 不足一覧の順になる', async ({ page }) => {
+test('⑥ SSBJ が対象判定 → 分析 → 確認 → 対応計画 → データ収集の順になる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/disclosures/ssbj');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  await expect(page.getByText('マテリアリティを登録する')).toBeVisible();
-  await expect(page.getByText('対象データを集める')).toBeVisible();
-  await expect(page.getByText('不足項目に対応する')).toBeVisible();
+  // 基本フローが「ギャップを見つけて終わり」ではないことを画面上で示す
+  await expect(page.getByText('対象判定・重要性判断')).toBeVisible();
+  await expect(page.getByText('人工知能によるギャップ分析')).toBeVisible();
+  await expect(page.getByText('担当者による確認')).toBeVisible();
+  await expect(page.getByText('対応計画の作成')).toBeVisible();
+  await expect(page.getByText('データ収集・開示・内部統制')).toBeVisible();
 
   // 充足度が数値で可視化されている
   await expect(page.getByText('マテリアリティ充足度')).toBeVisible();

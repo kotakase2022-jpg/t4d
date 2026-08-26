@@ -69,6 +69,8 @@ import type {
   Profile,
   ReportingPeriod,
   ResponseEvidenceLink,
+  SsbjActionPlan,
+  SsbjAssessment,
   ReviewNote,
   Sample,
   SampleItem,
@@ -125,6 +127,8 @@ export interface TableMap {
   disclosureResponseVersions: DisclosureResponseVersion;
   disclosureMappings: DisclosureMapping;
   responseEvidenceLinks: ResponseEvidenceLink;
+  ssbjAssessments: SsbjAssessment;
+  ssbjActionPlans: SsbjActionPlan;
 
   ingestionJobs: IngestionJob;
   ingestionJobFiles: IngestionJobFile;

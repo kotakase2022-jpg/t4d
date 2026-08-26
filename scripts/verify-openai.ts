@@ -89,6 +89,23 @@ const INPUTS: Record<AiFeature, unknown> = {
     approvedData: [{ metricCode: 'GHG_SCOPE1', value: 7859.8, unit: 't-CO2e', period: 'FY2026' }],
     previousAnswer: { period: 'FY2025', text: '8931.6 t-CO2e', numeric: 8931.6 },
   },
+  ssbjGapAnalysis: {
+    itemCode: '気候-10',
+    title: '監督に責任を負うガバナンス機関・個人の開示',
+    requirementText:
+      '10. 気候関連のリスク及び機会の監督に責任を負うガバナンス機関の名称又は当該責任を負う個人の役職名、報告の頻度、監督プロセスを開示しなければならない。',
+    required: true,
+    documents: [
+      {
+        name: '統合報告書2026',
+        page: '42 ページ',
+        excerpt: 'サステナビリティ委員会が気候関連の課題を審議し、取締役会へ報告しています。',
+      },
+    ],
+    metricValues: [{ label: 'Scope1 排出量', value: 7859.8, unit: 't-CO2e' }],
+    hasApprovalWorkflow: true,
+    sources: [],
+  },
   evidenceMapping: {
     fragments: [
       {

@@ -33,6 +33,23 @@ const INVOCATION_INPUTS: Record<AiFeature, Record<string, unknown>> = {
     metricValues: [{ label: 'Scope1', value: 8500, unit: 't-CO2e', periodLabel: 'FY2026' }],
     sources: [],
   },
+  ssbjGapAnalysis: {
+    itemCode: '気候-10',
+    title: '監督に責任を負うガバナンス機関・個人の開示',
+    requirementText:
+      '10. 第9項の目的を達成するため、気候関連のリスク及び機会の監督に責任を負うガバナンス機関又は個人に関して、次の事項を開示しなければならない。',
+    required: true,
+    documents: [
+      {
+        name: '統合報告書2026',
+        page: '42 ページ',
+        excerpt: 'サステナビリティ委員会が気候関連の課題を審議し、取締役会へ報告しています。',
+      },
+    ],
+    metricValues: [{ label: 'Scope1 排出量', value: 7859.8, unit: 't-CO2e' }],
+    hasApprovalWorkflow: true,
+    sources: [],
+  },
   evidenceMapping: {
     targetCode: 'scope1',
     fragments: [

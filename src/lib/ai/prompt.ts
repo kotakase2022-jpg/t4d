@@ -33,6 +33,8 @@ export const AI_FEATURE_INSTRUCTIONS: Record<AiFeature, string> = {
     '開示質問と社内の指標マスターの対応候補を提示してください。定量指標に対応しない記述式質問は metricCode を null にしてください。',
   cdpDraftGeneration:
     '承認済みデータ・前年回答・Evidence を根拠に、開示質問への回答ドラフトと更新理由を作成してください。根拠のない内容は書かず、不足情報は missingInformation に列挙してください。',
+  ssbjGapAnalysis:
+    'SSBJ の要求事項と、企業が現在開示している内容を突き合わせ、開示・データ・業務プロセス（内部統制）の 3 観点それぞれの対応状況を判定してください。判定の根拠として、どの資料の何ページの記述を見たのかを必ず返してください。該当箇所が見つからない場合は「対応済み」にせず not_covered とし、その旨を comment に書いてください。不足している情報は missingInformation に具体的に列挙し、企業が次に取るべき対応を recommendation に 1 つ提示してください。これは候補であり、最終判定は担当者が行います。',
   evidenceMapping:
     '文書から抽出されたテキスト断片のうち、対象の指標・開示項目の根拠になりうる箇所を提示してください。',
   inconsistencyCheck: '回答間の矛盾、対象年度の不一致、古い記述、Evidence 不足を検出してください。',

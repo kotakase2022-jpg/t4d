@@ -1005,6 +1005,84 @@ describe('11. 本 QA で新たにアプリへ露出したテーブルの越権',
     expect(rows.length).toBeGreaterThan(0);
   });
 
+  // --- SSBJ ギャップ評価・対応計画 ---
+
+  it('企業 B の管理者は企業 A の SSBJ 評価を取得できない', async () => {
+    const rows = await h.asUser(
+      ENT_B_ADMIN,
+      'select id from ssbj_assessments where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('企業 B の管理者は企業 A の SSBJ 評価を作成できない', async () => {
+    const item = await h.asUser(
+      ENT_A_ADMIN,
+      `select i.id from disclosure_items i
+         join disclosure_framework_versions v on v.id = i.framework_version_id
+         join disclosure_frameworks f on f.id = v.framework_id
+        where f.key = 'ssbj' limit 1`,
+      [],
+    );
+    await expect(
+      h.asUser(
+        ENT_B_ADMIN,
+        `insert into ssbj_assessments (organization_id, reporting_period_id, item_id)
+         values ($1, $2, $3)`,
+        [ORG_IDS.aomi, PERIOD_IDS.fy2026, (item[0] as { id: string }).id],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('企業 B の管理者は企業 A の SSBJ 評価を更新できない', async () => {
+    // RLS の USING に外れるため 0 行更新になる（例外にはならない）
+    const updated = await h.asUser(
+      ENT_B_ADMIN,
+      `update ssbj_assessments set final_status = 'covered'
+         where organization_id = $1 returning id`,
+      [ORG_IDS.aomi],
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it('企業 A の管理者は自社の SSBJ 評価を参照できる（false negative でないこと）', async () => {
+    const rows = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from ssbj_assessments where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it('企業 B の管理者は企業 A の対応計画を取得できない', async () => {
+    const rows = await h.asUser(
+      ENT_B_ADMIN,
+      'select id from ssbj_action_plans where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('企業 B の管理者は企業 A の対応計画を更新できない', async () => {
+    const updated = await h.asUser(
+      ENT_B_ADMIN,
+      `update ssbj_action_plans set status = 'done'
+         where organization_id = $1 returning id`,
+      [ORG_IDS.aomi],
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it('企業 A の管理者は自社の対応計画を参照できる（false negative でないこと）', async () => {
+    const rows = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from ssbj_action_plans where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
   it('企業 A の管理者は自社の収集キャンペーンを作成できる（false negative でないこと）', async () => {
     await h.asUser(
       ENT_A_ADMIN,

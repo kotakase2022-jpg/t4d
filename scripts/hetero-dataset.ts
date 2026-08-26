@@ -148,12 +148,19 @@ export function buildSimplePdf(lines: string[]): Uint8Array {
 // Excel
 // ----------------------------------------------------------------------
 
+/** Excel の docProps へ入れる固定日時。再生成しても同じバイト列になるようにする。 */
+const FIXED_TIMESTAMP = new Date('2026-04-01T00:00:00.000Z');
+
 export async function buildXlsx(
   sheets: Array<{ name: string; rows: (string | number)[][]; boldFirstRow?: boolean }>,
 ): Promise<Uint8Array> {
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
   wb.creator = 'T4D サンプル生成器';
+  // ExcelJS は既定で現在時刻を docProps へ埋める。同じ入力から同じバイト列を得るため、
+  // 作成・更新日時を固定する（データ本体は mulberry32 で既に決定論的）。
+  wb.created = FIXED_TIMESTAMP;
+  wb.modified = FIXED_TIMESTAMP;
   for (const sheet of sheets) {
     const ws = wb.addWorksheet(sheet.name);
     for (const row of sheet.rows) ws.addRow(row);

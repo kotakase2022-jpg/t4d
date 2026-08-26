@@ -37,4 +37,13 @@ test('20 ファイルを同時取込し、バウンダリ差異が警告とし�
   // 差異のある行は自動チェックされていない（勝手に確定させない）
   const conflictRow = page.locator('tr', { hasText: 'バウンダリ差異' }).first();
   await expect(conflictRow.locator('input[type="checkbox"]')).not.toBeChecked();
+
+  // 帳票に混ざる小計・合計行が検知され、明細と一緒には確定されない
+  await expect(main.getByText(/集計行（小計・合計）の可能性があります/).first()).toBeVisible();
+  await expect(main.getByText(/明細行と一緒に確定すると二重計上になります/).first()).toBeVisible();
+  const totalRow = page.locator('tr', { hasText: '集計行（小計・合計）の可能性' }).first();
+  await expect(totalRow.locator('input[type="checkbox"]')).not.toBeChecked();
+
+  // 前置きブロックの帳票名・出力条件がデータ行として並んでいない
+  await expect(main.getByText('在籍者集計表（部門別・雇用区分別）')).toHaveCount(0);
 });

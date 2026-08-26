@@ -1,6 +1,7 @@
 import { createRng, stableHash } from '@/lib/fixtures/ids';
 import { normalizeLabel } from '@/lib/imports/learning';
-import { parseFlexibleNumber } from '@/lib/imports/parsers';
+import { classifyColumns, pickValueCell } from '@/lib/imports/column-roles';
+import { parseFlexibleNumber } from '@/lib/imports/number';
 import { AI_SCHEMAS, PROMPT_VERSIONS, type AiFeature, type AiOutputOf } from './schemas';
 import { AiProviderError, type AiInvocation, type AiProvider, type AiResult } from './types';
 
@@ -244,6 +245,22 @@ function buildMockOutput<F extends AiFeature>(
         }>) ?? [];
       const learnedByLabel = new Map(learned.map((e) => [e.label, e]));
 
+      // 列の役割（コード / 日付 / 前年値 / 値）。ヘッダーが渡っているときだけ使える
+      const headers = (input.headers as string[] | undefined) ?? [];
+      const columnRoles =
+        headers.length > 0
+          ? classifyColumns(
+              headers,
+              rows.map((r) => r.raw ?? {}),
+            )
+          : null;
+      /** 値として採ってよい列（コード・日付・前年値・期間・単位を除いたもの） */
+      const valueHeaders = columnRoles
+        ? Object.entries(columnRoles)
+            .filter(([, role]) => role === 'value')
+            .map(([header]) => header)
+        : null;
+
       const mapped = rows.map((row, index) => {
         const cells = Object.values(row.raw ?? {});
         const joined = cells.join(' ');
@@ -259,11 +276,23 @@ function buildMockOutput<F extends AiFeature>(
           (input.defaultUnitCode as string | undefined) ??
           null;
 
-        // 期間・年度らしきセルを数値として拾わない（"2026年度" → 2026 の誤検出防止）
-        const numeric = cells
+        // 値の取り出しは列の役割で決める。行内を左から走査して最初の数値を拾うと、
+        // 部門コード "0110" が 110 になり、「前年同期」の列が当年値として入る。
+        const byColumn = columnRoles ? pickValueCell(row.raw ?? {}, columnRoles) : null;
+        // 値の候補が 1 列に定まらない表（男女別・月次など）では、
+        // **値の列だけ**を左から走査する。コード・日付・前年値の列は最初から見ない。
+        const fromValueColumns = valueHeaders
+          ? valueHeaders
+              .map((h) => parseFlexibleNumber((row.raw ?? {})[h] ?? ''))
+              .find((v): v is number => v !== null && v !== 0)
+          : undefined;
+        // 列の役割が分からないとき（ヘッダー未提供）だけ、従来どおり行全体を走査する。
+        // 期間・年度らしきセルは数値として拾わない（"2026年度" → 2026 の誤検出防止）
+        const scanned = cells
           .filter((v) => !/^(fy|cy)?\s*20\d{2}(年度?|[-/.].*)?$/i.test(v.normalize('NFKC').trim()))
           .map((v) => parseFlexibleNumber(v))
           .find((v): v is number => v !== null && v !== 0);
+        const numeric = byColumn ? byColumn.value : valueHeaders ? fromValueColumns : scanned;
         const detectedUnit =
           cells.find((v) => /^((t|kg)-?CO2e?|MWh|kWh|m3|m³|kL|kg|t|人|%|GJ)$/i.test(v.trim())) ??
           metric.unit;

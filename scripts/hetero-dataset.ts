@@ -97,13 +97,22 @@ function toWinAnsi(s: string): string {
  * WinAnsiEncoding + Helvetica なので Latin-1 の範囲（独仏のウムラウト・アクセント含む）を出せる。
  */
 export function buildSimplePdf(lines: string[]): Uint8Array {
+  // Latin-1 の外は WinAnsiEncoding では表現できない。
+  // 以前は黙って '?' に置換していたため、日本語の PDF が全文 "?" になっていることに
+  // 誰も気付けなかった。静かに壊すくらいなら生成時に落とす
+  // （サンプル生成器は開発時にしか動かないので、ここで気付ける方がよい）。
+  for (const line of lines) {
+    const bad = [...toWinAnsi(line)].filter((ch) => ch < ' ' || ch > 'ÿ');
+    if (bad.length > 0) {
+      throw new Error(
+        'buildSimplePdf は Latin-1 の範囲しか出力できません（Helvetica + WinAnsiEncoding）。' +
+          `扱えない文字: ${[...new Set(bad)].slice(0, 10).join('')} / 対象行: ${line.slice(0, 40)}`,
+      );
+    }
+  }
+
   const escape = (s: string) =>
-    toWinAnsi(s)
-      .replace(/\\/g, '\\\\')
-      .replace(/\(/g, '\\(')
-      .replace(/\)/g, '\\)')
-      // Latin-1 の範囲外は PDF に載せない（載せると閲覧側で化ける）
-      .replace(/[^\u0020-\u00FF]/g, '?');
+    toWinAnsi(s).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 
   const octal = (s: string) =>
     [...s]

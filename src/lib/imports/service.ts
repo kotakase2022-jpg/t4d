@@ -11,6 +11,7 @@ import {
 } from '@/lib/authorization/can';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { findBoundaryConflicts } from './boundary';
+import { classifyRowRoles, NOTE_ROW_WARNING, TOTAL_ROW_WARNING } from './row-role';
 import { recomputePeriodValidations } from '@/lib/services/validation-store';
 import { storeNewFile } from '@/lib/storage';
 import type { DbClient } from '@/lib/repositories/types';
@@ -199,6 +200,8 @@ export async function processIngestionJob(
 
   const allRows: IngestionRow[] = [];
   let warningRows = 0;
+  /** ファイルごとの前置きブロック（帳票名・出力条件）。集計範囲の宣言がここにしか無いことが多い */
+  const preambleByFileId = new Map<Uuid, string>();
 
   // 事前学習はジョブ単位で 1 回だけ構築する（ファイルごとに確定行を全走査しない）
   const learnedExamples = await buildLearnedExamples(db, ctx);
@@ -271,6 +274,7 @@ export async function processIngestionJob(
       }
 
       const table = parsed.table;
+      preambleByFileId.set(jobFile.id, [...table.preamble, ...table.trailer].join(' '));
       await db.update('ingestionJobFiles', jobFile.id, {
         parseStatus: 'parsed',
         parseMessage: table.warnings.length > 0 ? table.warnings.join(' / ') : null,
@@ -331,6 +335,10 @@ export async function processIngestionJob(
         await db.update('ingestionJobFiles', jobFile.id, { parseMessage: parseNotes.join(' / ') });
       }
 
+      // 行の種別（明細 / 小計・合計 / 注記）。集計行を明細と一緒に確定すると
+      // 台帳の合計が二重計上になるため、確定させずに人へ選ばせる
+      const rowRoles = classifyRowRoles(table.rows);
+
       const now = new Date().toISOString();
       table.rows.forEach((raw, index) => {
         const mapped = output.rows.find((r) => r.rowIndex === index);
@@ -341,7 +349,13 @@ export async function processIngestionJob(
             ? units.find((u) => u.id === job.unitId)
             : undefined;
 
-        const warnings = [...(mapped?.warnings ?? [])];
+        const rowRole = rowRoles[index] ?? 'detail';
+        // 集計行の警告は先頭へ置く（二重計上が最も重い誤りのため）
+        const warnings = [
+          ...(rowRole === 'total' ? [TOTAL_ROW_WARNING] : []),
+          ...(rowRole === 'note' ? [NOTE_ROW_WARNING] : []),
+          ...(mapped?.warnings ?? []),
+        ];
         if (!metric) warnings.push('指標を特定できませんでした。手動で選択してください。');
         if (!unit) warnings.push('組織・拠点を特定できませんでした。');
         if (mapped?.value === null || mapped?.value === undefined) {
@@ -406,6 +420,9 @@ export async function processIngestionJob(
                 .map(([key, value]) => `${key} ${value}`)
                 .join(' '),
               fileNameById.get(row.jobFileId) ?? '',
+              // 集計範囲の宣言（「集計対象: 正社員のみ」）は帳票の前置きブロックに
+              // 1 回だけ書かれ、明細行には出てこない。ファイル単位の文脈として全行へ効かせる
+              preambleByFileId.get(row.jobFileId) ?? '',
             ].join(' '),
           })),
       );

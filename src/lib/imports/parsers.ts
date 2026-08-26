@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { classifyRowRole } from './row-role';
+
 /**
  * ファイル解析（指示書 13 章）。
  *
@@ -16,6 +18,14 @@ export interface ParsedTable {
   sheetName: string | null;
   detectedEncoding: string | null;
   warnings: string[];
+  /**
+   * 表の前に付いていた行（帳票名・出力日時・抽出条件）。
+   * 「集計対象: 正社員のみ」のような**集計範囲の宣言**がここにしか無いことが多く、
+   * バウンダリ検知はこれを行のテキストへ足して判定する。
+   */
+  preamble: string[];
+  /** 表の後ろに付いていた行（※注記・以上・レコード件数） */
+  trailer: string[];
 }
 
 export interface ParsedPdf {
@@ -87,45 +97,10 @@ export function decodeText(buffer: Uint8Array): {
 // ----------------------------------------------------------------------
 
 /**
- * ロケール混在の数値表記を解釈する（機能追加要望 ①）。
- * 対応: "1,234.5"（日英）/ "1.234,5"・"1 234,5"（独仏）/ 全角数字 / % や単位の付随。
- * 解釈できなければ null（勝手に 0 にしない）。
+ * ロケール混在の数値表記の解釈は number.ts（純粋モジュール）に置き、ここから再輸出する。
+ * 列の役割判定やテストが server-only を跨がずに同じ実装を使えるようにするため。
  */
-export function parseFlexibleNumber(raw: string): number | null {
-  let v = raw.normalize('NFKC').trim();
-  if (v === '') return null;
-  v = v.replace(/[%％]/g, '').replace(/[△▲]/g, '-').trim();
-  // 数値以外の後置語（単位など）を落とす: "1,234.5 t-CO2e" → "1,234.5"
-  const m = v.match(/^[-+]?[\d.,\s]+/);
-  if (!m) return null;
-  v = m[0].replace(/\s/g, '');
-
-  const lastComma = v.lastIndexOf(',');
-  const lastDot = v.lastIndexOf('.');
-  if (lastComma >= 0 && lastDot >= 0) {
-    if (lastComma > lastDot) {
-      // 1.234,5 → ドイツ・フランス式（. = 桁区切り, , = 小数点）
-      v = v.replace(/\./g, '').replace(',', '.');
-    } else {
-      // 1,234.5 → 日英式
-      v = v.replace(/,/g, '');
-    }
-  } else if (lastDot >= 0 && /^\d{1,3}(\.\d{3})+$/.test(v)) {
-    // "2.845" はドイツ式なら 2845、日英式なら 2.845 で判別不能。
-    // 契約どおり「解釈できなければ null」を返し、要確認として人へ委ねる
-    // （誤って 1/1000 の値を高確信度で書き込む事故を防ぐ）。
-    return null;
-  } else if (lastComma >= 0) {
-    const frac = v.length - lastComma - 1;
-    // "1,5" のようにカンマ後が 1〜2 桁だけなら小数点、それ以外（"1,234"）は桁区切り
-    v =
-      frac > 0 && frac < 3 && v.indexOf(',') === lastComma
-        ? v.replace(',', '.')
-        : v.replace(/,/g, '');
-  }
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+export { parseFlexibleNumber } from './number';
 
 // ----------------------------------------------------------------------
 // CSV
@@ -201,23 +176,47 @@ function isBlankRow(cells: string[]): boolean {
 }
 
 /**
- * ヘッダー行を推定する。
- * 「空でないセルが最も多く、数値だけではない行」を先頭 5 行から選ぶ。
- */
-/**
  * ヘッダー行の推定。
  *
- * 現場のファイルは「報告書名・作成部署・作成日・注記・空行」のように
- * 前文が数行続いてから表が始まることが多い。候補の走査幅が狭いと
- * 前文の 1 行目をヘッダーと誤認し、表全体を取り逃す。
+ * 人事・給与システムの CSV は「帳票名・会社名・出力日時・抽出条件・空行」が
+ * 表の前に付く（奉行の[汎用データ作成]は「タイトル情報出力」が既定で有効）。
+ * 前置きの行数は抽出条件の数で毎回変わるため、読み飛ばし行数を固定にできない。
+ *
+ * そこで **本体と列数が揃っている行** を手掛かりにする。前置きの行は
+ * 「帳票名,,,,」のように実質 1 セルしか埋まっておらず、本体の列数と揃わない。
  * 数値が少なく、埋まっているセルが多い行ほどヘッダーらしいと評価する。
  */
 const HEADER_SEARCH_LIMIT = 15;
 
+/**
+ * 表の本体が持つ列数（最頻値）。
+ *
+ * 埋まっているセル数ではなく**セルの個数**で数える。ヘッダーの一部が空欄
+ * （備考列に列名が無い等）でも、区切り文字の数は本体と揃うため。
+ */
+function modalColumnCount(rows: string[][]): number {
+  const counts = new Map<number, number>();
+  for (const cells of rows) {
+    if (isBlankRow(cells)) continue;
+    if (cells.length <= 1) continue; // 帳票名やページ番号のような 1 セル行は数えない
+    counts.set(cells.length, (counts.get(cells.length) ?? 0) + 1);
+  }
+  let best = 0;
+  let bestCount = 0;
+  for (const [width, count] of counts) {
+    if (count > bestCount || (count === bestCount && width > best)) {
+      best = width;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 export function detectHeaderRow(rows: string[][]): number {
   let best = 0;
-  let bestScore = -1;
+  let bestScore = -Infinity;
   const limit = Math.min(HEADER_SEARCH_LIMIT, rows.length);
+  const width = modalColumnCount(rows);
   for (let i = 0; i < limit; i += 1) {
     const cells = rows[i] ?? [];
     if (isBlankRow(cells)) continue;
@@ -225,7 +224,10 @@ export function detectHeaderRow(rows: string[][]): number {
     const numeric = cells.filter(
       (c) => c.trim() !== '' && Number.isFinite(Number(c.replace(/,/g, ''))),
     ).length;
-    const score = filled - numeric * 2;
+    // 列数が本体と揃っていることを最重視する。前置きの「帳票名,,,,」は
+    // 埋まっているセルが 1 個なので、ここで大きく減点される
+    const widthBonus = width > 0 && cells.length === width ? 10 : 0;
+    const score = filled - numeric * 3 + widthBonus;
     // 同点なら先に見つかった（＝より上の）行を残す
     if (score > bestScore) {
       bestScore = score;
@@ -233,6 +235,95 @@ export function detectHeaderRow(rows: string[][]): number {
     }
   }
   return best;
+}
+
+/**
+ * ヘッダーセルから列名を作る。
+ *
+ * 同名の列があると `record[h] = ...` が後勝ちになり、**列がまるごと消える**。
+ * 「男性 / 女性」を「人数 / 人数」と出力する帳票は珍しくないので、連番を振って残す。
+ */
+function buildHeaderNames(headerCells: string[]): string[] {
+  const seen = new Map<string, number>();
+  return headerCells.map((h, i) => {
+    const base = h.trim() === '' ? `列${i + 1}` : h.trim();
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    return count === 1 ? base : `${base}_${count}`;
+  });
+}
+
+/**
+ * 行グリッドから表を組み立てる（CSV / Excel 共通）。
+ * ヘッダー前の行を preamble、注記・フッター行を trailer として分ける。
+ */
+function buildTable(
+  grid: string[][],
+  headerIndex: number,
+): Pick<ParsedTable, 'headers' | 'rows' | 'rowNumbers' | 'preamble' | 'trailer'> {
+  const headers = buildHeaderNames(grid[headerIndex] ?? []);
+
+  const preamble: string[] = [];
+  for (let i = 0; i < headerIndex; i += 1) {
+    const cells = grid[i] ?? [];
+    if (isBlankRow(cells)) continue;
+    preamble.push(
+      cells
+        .map((c) => c.trim())
+        .filter((c) => c !== '')
+        .join(' '),
+    );
+  }
+
+  interface Candidate {
+    record: Record<string, string>;
+    rowNumber: number;
+    text: string;
+    isNote: boolean;
+  }
+  const candidates: Candidate[] = [];
+  for (let i = headerIndex + 1; i < grid.length; i += 1) {
+    const cells = grid[i] ?? [];
+    if (isBlankRow(cells)) continue;
+    const record: Record<string, string> = {};
+    headers.forEach((h, index) => {
+      record[h] = (cells[index] ?? '').trim();
+    });
+    candidates.push({
+      record,
+      rowNumber: i + 1,
+      text: cells
+        .map((c) => c.trim())
+        .filter((c) => c !== '')
+        .join(' '),
+      isNote: classifyRowRole(record) === 'note',
+    });
+  }
+
+  // 注記・件数・ページ行を trailer へ移すのは**表の末尾に連続する分だけ**にする。
+  // 表の途中にある行（数値の入っていない小計行など）まで落とすと、
+  // 帳票にあった行が黙って消える。
+  let lastDataIndex = -1;
+  for (let i = candidates.length - 1; i >= 0; i -= 1) {
+    if (!candidates[i]?.isNote) {
+      lastDataIndex = i;
+      break;
+    }
+  }
+
+  const rows: Array<Record<string, string>> = [];
+  const rowNumbers: number[] = [];
+  const trailer: string[] = [];
+  candidates.forEach((candidate, index) => {
+    if (index > lastDataIndex && candidate.isNote) {
+      trailer.push(candidate.text);
+      return;
+    }
+    rows.push(candidate.record);
+    rowNumbers.push(candidate.rowNumber);
+  });
+
+  return { headers, rows, rowNumbers, preamble, trailer };
 }
 
 export function parseCsv(buffer: Uint8Array): ParsedTable {
@@ -248,31 +339,22 @@ export function parseCsv(buffer: Uint8Array): ParsedTable {
       sheetName: null,
       detectedEncoding: encoding,
       warnings: ['ファイルが空です。'],
+      preamble: [],
+      trailer: [],
     };
   }
 
   const headerIndex = detectHeaderRow(raw);
-  const headerCells = raw[headerIndex] ?? [];
-  const headers = headerCells.map((h, i) => (h.trim() === '' ? `列${i + 1}` : h.trim()));
-
-  const rows: Array<Record<string, string>> = [];
-  const rowNumbers: number[] = [];
-  for (let i = headerIndex + 1; i < raw.length; i += 1) {
-    const cells = raw[i] ?? [];
-    if (isBlankRow(cells)) continue;
-    const record: Record<string, string> = {};
-    headers.forEach((h, index) => {
-      record[h] = (cells[index] ?? '').trim();
-    });
-    rows.push(record);
-    rowNumbers.push(i + 1);
-  }
+  const table = buildTable(raw, headerIndex);
 
   if (headerIndex > 0) {
     warnings.push(`${headerIndex} 行目までをヘッダー前の説明行として読み飛ばしました。`);
   }
+  if (table.trailer.length > 0) {
+    warnings.push(`表の後ろの ${table.trailer.length} 行を注記・フッターとして扱いました。`);
+  }
 
-  return { headers, rows, rowNumbers, sheetName: null, detectedEncoding: encoding, warnings };
+  return { ...table, sheetName: null, detectedEncoding: encoding, warnings };
 }
 
 // ----------------------------------------------------------------------
@@ -299,6 +381,8 @@ export async function parseExcel(
       sheetName: null,
       detectedEncoding: null,
       warnings: ['シートが見つかりませんでした。'],
+      preamble: [],
+      trailer: [],
       availableSheets,
     };
   }
@@ -324,32 +408,26 @@ export async function parseExcel(
   });
 
   const headerIndex = detectHeaderRow(grid);
-  const headerCells = grid[headerIndex] ?? [];
-  const headers = headerCells.map((h, i) => (h.trim() === '' ? `列${i + 1}` : h.trim()));
+  const table = buildTable(grid, headerIndex);
 
-  const rows: Array<Record<string, string>> = [];
-  const rowNumbers: number[] = [];
-  for (let i = headerIndex + 1; i < grid.length; i += 1) {
-    const cells = grid[i] ?? [];
-    if (isBlankRow(cells)) continue;
-    const record: Record<string, string> = {};
-    headers.forEach((h, index) => {
-      record[h] = (cells[index] ?? '').trim();
-    });
-    rows.push(record);
-    rowNumbers.push(i + 1);
+  const warnings: string[] = [];
+  if (availableSheets.length > 1) {
+    warnings.push(
+      `シートが ${availableSheets.length} 件あります。「${sheet.name}」を解析しました。`,
+    );
+  }
+  if (headerIndex > 0) {
+    warnings.push(`${headerIndex} 行目までをヘッダー前の説明行として読み飛ばしました。`);
+  }
+  if (table.trailer.length > 0) {
+    warnings.push(`表の後ろの ${table.trailer.length} 行を注記・フッターとして扱いました。`);
   }
 
   return {
-    headers,
-    rows,
-    rowNumbers,
+    ...table,
     sheetName: sheet.name,
     detectedEncoding: null,
-    warnings:
-      availableSheets.length > 1
-        ? [`シートが ${availableSheets.length} 件あります。「${sheet.name}」を解析しました。`]
-        : [],
+    warnings,
     availableSheets,
   };
 }

@@ -299,9 +299,10 @@ test('本番: SSBJ の開示ドラフトを出力できる', async ({ page }) =>
   // 正式基準マスター（133 項目・転載許可・出所表記）が本番に載っていること。
   // 旧デプロイのままでもスモークが通ってしまった実績があるため、内容で判定する
   await expect(page.getByText('正式基準準拠（転載許可取得済み）')).toBeVisible();
-  await expect(page.getByText('開示項目（133）')).toBeVisible();
   await expect(page.getByText('出所：サステナビリティ基準委員会', { exact: false })).toBeVisible();
   await expect(page.locator('#t4d-main')).not.toContainText('架空の縮小マスター');
+  // 要求事項そのものは一覧画面に移した（対応状況画面は集計を出す）
+  await expect(page.getByText('全 133 要求事項', { exact: false })).toHaveCount(0);
 
   const link = page.getByRole('link', { name: /開示ドラフト（DOCX）/ });
   await expect(link, 'SSBJ の Export 導線が無い').toBeVisible();
@@ -408,4 +409,43 @@ test('本番: 人的資本 20 ファイルの同時取込でバウンダリ差�
 
   // 帳票名・出力条件の行がデータ行として並んでいない
   await expect(main.getByText('在籍者集計表（部門別・雇用区分別）')).toHaveCount(0);
+});
+
+test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細・対応計画・データ収集）', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '海野 みどり');
+  const main = page.locator('#t4d-main');
+
+  // ① 対応状況: 単一の総合点ではなく 3 つの整備度を出す
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj`);
+  await expect(main.getByText('開示対応度')).toBeVisible();
+  await expect(main.getByText('データ整備度')).toBeVisible();
+  await expect(main.getByText('業務プロセス・内部統制整備度')).toBeVisible();
+  await expect(main.getByText('領域別の対応状況')).toBeVisible();
+  await expect(main.getByText('優先して対応するギャップ')).toBeVisible();
+
+  // ② 要求事項一覧: 正式基準の 133 項目が並び、AI 判定と最終判定が別の列になっている
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/requirements`);
+  await expect(main.getByText('全 133 要求事項', { exact: false })).toBeVisible();
+  await expect(main.getByRole('columnheader', { name: '人工知能による判定' })).toBeVisible();
+  await expect(main.getByRole('columnheader', { name: '最終判定' })).toBeVisible();
+  expect(await page.locator('tbody tr').count()).toBe(133);
+
+  // ③ 詳細: 3 種類のギャップと優先順位の根拠
+  await page.locator('tbody tr a').first().click();
+  await page.waitForURL(/\/requirements\/[0-9a-f-]+/);
+  await expect(main.getByText('開示ギャップ')).toBeVisible();
+  await expect(main.getByText('データギャップ')).toBeVisible();
+  await expect(main.getByText('業務プロセス・内部統制ギャップ')).toBeVisible();
+  await expect(main.getByText('優先順位の評価')).toBeVisible();
+
+  // ④ 対応計画
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/plans`);
+  await expect(main.getByRole('columnheader', { name: '対応区分' })).toBeVisible();
+
+  // ⑤ データ収集
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/collection`);
+  await expect(main.getByRole('columnheader', { name: 'データ項目' })).toBeVisible();
 });

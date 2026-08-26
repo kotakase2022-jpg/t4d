@@ -400,4 +400,12 @@ test('本番: 人的資本 20 ファイルの同時取込でバウンダリ差�
   await expect(main.getByText(/バウンダリ差異（雇用範囲）/).first()).toBeVisible();
   await expect(main.getByText(/バウンダリ差異（管理職の定義）/).first()).toBeVisible();
   await expect(main.getByText(/集計範囲を揃えてから確定してください/).first()).toBeVisible();
+
+  // 帳票に混ざる小計・合計行が検知され、明細と一緒には確定されない（二重計上の防止）
+  await expect(main.getByText(/集計行（小計・合計）の可能性があります/).first()).toBeVisible();
+  const totalRow = page.locator('tr', { hasText: '集計行（小計・合計）の可能性' }).first();
+  await expect(totalRow.locator('input[type="checkbox"]')).not.toBeChecked();
+
+  // 帳票名・出力条件の行がデータ行として並んでいない
+  await expect(main.getByText('在籍者集計表（部門別・雇用区分別）')).toHaveCount(0);
 });

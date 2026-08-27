@@ -28,6 +28,7 @@ const ROW_STATUS_LABEL: Record<
   duplicate: { label: '重複', tone: 'warning' },
   rejected: { label: '除外', tone: 'neutral' },
   confirmed: { label: '確定済み', tone: 'brand' },
+  ignored: { label: '対象外', tone: 'neutral' },
 };
 
 export interface PreviewOption {
@@ -48,6 +49,12 @@ export function ImportPreviewTable({
   metrics: PreviewOption[];
   units: PreviewOption[];
 }) {
+  // 指標マスターと無関係と判断した行は、既定では表から畳んでおく。
+  // 警告を出さない代わりに「何行を外したか」は必ず見せ、開けば中身も確認できる。
+  // 黙って消すと、外した判断が誤っていたときに気づけない。
+  const ignored = rows.filter((row) => row.status === 'ignored');
+  const visible = rows.filter((row) => row.status !== 'ignored');
+
   return (
     <form action={confirmImportAction}>
       <input type="hidden" name="jobId" value={jobId} />
@@ -68,7 +75,7 @@ export function ImportPreviewTable({
             </TR>
           </THead>
           <TBody>
-            {rows.map((row) => {
+            {visible.map((row) => {
               const status = ROW_STATUS_LABEL[row.status] ?? ROW_STATUS_LABEL.pending;
               return (
                 <TR key={row.id}>
@@ -173,6 +180,42 @@ export function ImportPreviewTable({
           </TBody>
         </Table>
       </div>
+
+      {ignored.length > 0 && (
+        <details className="border-t border-line">
+          <summary className="cursor-pointer px-3 py-2 text-[12px] text-ink-muted">
+            指標マスターと関係が無いため、{ignored.length} 行を取り込み対象外にしました
+            <span className="ml-1 text-[11px]">（内容を確認する）</span>
+          </summary>
+          <div className="t4d-scroll-x border-t border-line">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>元データ</TH>
+                  <TH className="w-[120px]">場所</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {ignored.map((row) => (
+                  <TR key={row.id}>
+                    <TD className="max-w-[520px]">
+                      <div className="truncate text-[11px] text-ink-muted">
+                        {Object.entries(row.raw)
+                          .map(([k, v]) => `${k}: ${v}`)
+                          .join(' / ')}
+                      </div>
+                    </TD>
+                    <TD className="text-[11px] text-ink-muted">{row.sourceLocator}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+          <p className="px-3 py-2 text-[11px] text-ink-muted">
+            ここに取り込みたい行がある場合は、指標マスターへ該当の指標を登録してから取り込み直してください。
+          </p>
+        </details>
+      )}
 
       <div className="flex items-center justify-between gap-3 border-t border-line px-3 py-2">
         <p className="text-[11px] text-ink-muted">

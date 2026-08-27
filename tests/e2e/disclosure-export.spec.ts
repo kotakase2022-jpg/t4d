@@ -20,9 +20,10 @@ async function apiGet(page: import('@playwright/test').Page, path: string) {
 
 test('SSBJ の開示ドラフトを DOCX で出力できる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/disclosures/ssbj');
+  // 書き出しは開示ドラフトの画面にある（草案を作る場所と同じ）
+  await page.goto('/enterprise/disclosures/ssbj/draft');
 
-  const link = page.getByRole('link', { name: /開示ドラフト（DOCX）/ });
+  const link = page.getByRole('link', { name: /Word で書き出す/ });
   await expect(link, 'SSBJ の Export 導線が無い').toBeVisible();
 
   const href = (await link.getAttribute('href'))!;

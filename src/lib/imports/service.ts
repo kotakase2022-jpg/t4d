@@ -12,6 +12,13 @@ import {
 import { ValidationError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { findBoundaryConflicts } from './boundary';
+import {
+  buildMetricVocabulary,
+  IRRELEVANT_FILE_MESSAGE,
+  IRRELEVANT_FILE_RATIO,
+  irrelevantRowsNote,
+  isRelevantToMetrics,
+} from './relevance';
 import { classifyRowRoles, NOTE_ROW_WARNING, TOTAL_ROW_WARNING } from './row-role';
 import { recomputePeriodValidations } from '@/lib/services/validation-store';
 import { storeNewFile } from '@/lib/storage';
@@ -213,6 +220,10 @@ export async function processIngestionJob(
   let warningRows = 0;
   /** ファイルごとの前置きブロック（帳票名・出力条件）。集計範囲の宣言がここにしか無いことが多い */
   const preambleByFileId = new Map<Uuid, string>();
+  /** 指標マスターと無関係として静かに外した行数。件数だけはファイル単位で伝える */
+  const irrelevantByFileId = new Map<Uuid, number>();
+  /** 指標マスターから作る照合語彙。行ごとに作り直さない */
+  const metricVocabulary = buildMetricVocabulary(metrics);
 
   // 事前学習はジョブ単位で 1 回だけ構築する（ファイルごとに確定行を全走査しない）
   const learnedExamples = await buildLearnedExamples(db, ctx);
@@ -387,32 +398,51 @@ export async function processIngestionJob(
             : undefined;
 
         const rowRole = rowRoles[index] ?? 'detail';
+
+        // 指標マスターと語彙がまったく重ならない行（社員名簿・勘定科目・住所録など）は、
+        // 警告を出さずに対象外にする。1 行ずつ「指標を特定できませんでした」と言うと、
+        // 本当に確認が要る行がその山に埋もれるため。
+        // 集計行・注記行は、外す理由をすでに持っているのでここでは触らない。
+        const irrelevant =
+          !metric && rowRole === 'detail' && !isRelevantToMetrics(raw, metricVocabulary);
+
         // 集計行の警告は先頭へ置く（二重計上が最も重い誤りのため）
-        const warnings = [
-          ...(rowRole === 'total' ? [TOTAL_ROW_WARNING] : []),
-          ...(rowRole === 'note' ? [NOTE_ROW_WARNING] : []),
-          ...(mapped?.warnings ?? []),
-        ];
-        if (!metric) warnings.push('指標を特定できませんでした。手動で選択してください。');
-        if (!unit) warnings.push('組織・拠点を特定できませんでした。');
-        if (mapped?.value === null || mapped?.value === undefined) {
-          warnings.push('数値を検出できませんでした。');
-        }
-        if (metric && mapped?.unitOfMeasure && mapped.unitOfMeasure !== metric.unit) {
-          warnings.push(
-            `単位が指標定義（${metric.unit}）と異なります（検出: ${mapped.unitOfMeasure}）。`,
-          );
+        const warnings = irrelevant
+          ? []
+          : [
+              ...(rowRole === 'total' ? [TOTAL_ROW_WARNING] : []),
+              ...(rowRole === 'note' ? [NOTE_ROW_WARNING] : []),
+              ...(mapped?.warnings ?? []),
+            ];
+        if (!irrelevant) {
+          if (!metric) warnings.push('指標を特定できませんでした。手動で選択してください。');
+          if (!unit) warnings.push('組織・拠点を特定できませんでした。');
+          if (mapped?.value === null || mapped?.value === undefined) {
+            warnings.push('数値を検出できませんでした。');
+          }
+          if (metric && mapped?.unitOfMeasure && mapped.unitOfMeasure !== metric.unit) {
+            warnings.push(
+              `単位が指標定義（${metric.unit}）と異なります（検出: ${mapped.unitOfMeasure}）。`,
+            );
+          }
         }
 
-        const status: IngestionRow['status'] =
-          metric &&
-          unit &&
-          mapped?.value !== null &&
-          mapped?.value !== undefined &&
-          warnings.length === 0
+        // AI 側も「指標を特定できませんでした」を返すため、同じ文言が 2 回並んでいた。
+        // 警告が重なって見えると、別々の問題があるように読めてしまう
+        const uniqueWarnings = [...new Set(warnings)];
+
+        const status: IngestionRow['status'] = irrelevant
+          ? 'ignored'
+          : metric &&
+              unit &&
+              mapped?.value !== null &&
+              mapped?.value !== undefined &&
+              uniqueWarnings.length === 0
             ? 'mapped'
             : 'needs_review';
         if (status === 'needs_review') warningRows += 1;
+        if (status === 'ignored')
+          irrelevantByFileId.set(jobFile.id, (irrelevantByFileId.get(jobFile.id) ?? 0) + 1);
 
         allRows.push({
           id: fid('ingestion_row', `${jobFile.id}/${index}`),
@@ -427,7 +457,7 @@ export async function processIngestionJob(
           value: mapped?.value ?? null,
           unitOfMeasure: mapped?.unitOfMeasure ?? metric?.unit ?? null,
           confidence: mapped?.confidence ?? 0,
-          warnings,
+          warnings: uniqueWarnings,
           status,
           sourceLocator:
             mapped?.sourceLocator ??
@@ -438,6 +468,22 @@ export async function processIngestionJob(
           updatedAt: now,
         });
       });
+
+      // 静かに外すのは、無関係な行が少数混ざっている場合に限る。
+      // ほとんどの行が外れるなら、指標と関係のない資料を取り込んだか、
+      // こちらの判定が壊れているかのどちらかで、どちらも人へ伝えるべきこと。
+      const irrelevantCount = irrelevantByFileId.get(jobFile.id) ?? 0;
+      if (irrelevantCount > 0 && table.rows.length > 0) {
+        const ratio = irrelevantCount / table.rows.length;
+        const note =
+          ratio >= IRRELEVANT_FILE_RATIO
+            ? IRRELEVANT_FILE_MESSAGE
+            : irrelevantRowsNote(irrelevantCount);
+        const current = await db.findById('ingestionJobFiles', jobFile.id);
+        await db.update('ingestionJobFiles', jobFile.id, {
+          parseMessage: [current?.parseMessage, note].filter(Boolean).join(' / '),
+        });
+      }
     }
 
     // バウンダリ（集計範囲）の差異検出。
@@ -517,11 +563,16 @@ export async function processIngestionJob(
       finishedAt: new Date().toISOString(),
     });
 
+    // 静かに外した行数も監査ログへ残す。画面に警告を出さない以上、
+    // 「なぜこの行が台帳に無いのか」を後から追える先はここしかない
+    const ignoredRows = allRows.filter((r) => r.status === 'ignored').length;
     await recordAuditEvent(db, ctx, {
       eventType: 'data_updated',
       resourceType: 'ingestion_job',
       resourceId: jobId,
-      afterSummary: `解析完了: ${allRows.length} 行（要確認 ${needsReview} 行）`,
+      afterSummary:
+        `解析完了: ${allRows.length} 行（要確認 ${needsReview} 行` +
+        `${ignoredRows > 0 ? `／指標と無関係として対象外 ${ignoredRows} 行` : ''}）`,
     });
 
     return updated;

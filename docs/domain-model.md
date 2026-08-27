@@ -14,7 +14,12 @@ organizations (enterprise | assurance_firm | platform_admin)
  ├ organization_units（階層・連結範囲・持分）
  ├ reporting_periods
  ├ metric_definitions ─ metric_assignments
+ │   └ frameworks[]（ssbj / cdp / csrd。その指標を求めている開示基準）
+ ├ approval_routes ─ approval_route_stages（最大 5 階層の承認の道筋）
+ ├ ssbj_analysis_settings（①マテリアリティ・分析条件の設定）
+ ├ ssbj_disclosure_drafts（節ごとの開示ドラフトの草案）
  └ data_points ─ data_point_versions
+                ├ data_point_approval_steps（道筋の写し。承認・差し戻しの記録）
                 └ data_point_calculations / data_point_validation_results / evidence_links
 
 engagements（監査法人所有）

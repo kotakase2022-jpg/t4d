@@ -16,9 +16,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatJst, formatJstDate, formatNumber } from '@/lib/format/datetime';
+import {
+  canDecideStep,
+  loadApprovalProgress,
+  loadApprovalTimeline,
+} from '@/lib/services/approval-route';
 import { loadActiveValidations } from '@/lib/services/validation-store';
 import { listMentionCandidates } from '@/lib/services/comments';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -26,6 +32,7 @@ import { summarizeValidations } from '@/lib/validation/data-point-rules';
 import { loadEvidenceSuggestion } from '@/lib/services/ai-assist';
 import { loadAnomalyExplanation } from '@/lib/services/anomaly-explanation';
 import {
+  decideApprovalStepAction,
   explainAnomaliesAction,
   linkEvidenceAction,
   suggestEvidenceAction,
@@ -124,6 +131,17 @@ export default async function DataPointDetailPage({
       limit: 50,
     }),
   ]);
+
+  // 承認の道筋（最大 5 階層）と、いつ誰が承認・修正・差し戻したかの履歴
+  const [approvalProgress, timeline] = await Promise.all([
+    loadApprovalProgress(db, ctx, dataPoint.id),
+    loadApprovalTimeline(db, ctx, dataPoint.id),
+  ]);
+  const canDecideCurrent = Boolean(
+    approvalProgress.currentStep && canDecideStep(ctx, approvalProgress.currentStep),
+  );
+  /** 承認の道筋が進行中（＝一発承認は使えない） */
+  const routeActive = approvalProgress.totalCount > 0 && !approvalProgress.complete;
 
   const fileVersionIds = evidenceLinks.map((l) => l.fileVersionId);
   const fileVersions =
@@ -250,8 +268,20 @@ export default async function DataPointDetailPage({
                   </Button>
                 </form>
               )}
+            {/* 承認の道筋が定義されている組織では、この一発承認は使えない
+                （段階を飛ばすと「誰の承認で確定したのか」を示せない）。
+                押しても必ず失敗するボタンを置いたままにせず、下の承認フローへ誘導する */}
             {canApprove &&
-              (dataPoint.status === 'submitted' || dataPoint.status === 'in_review') && (
+              (dataPoint.status === 'submitted' || dataPoint.status === 'in_review') &&
+              (routeActive ? (
+                <Button size="sm" variant="outline" asChild>
+                  <Link href="#承認フロー">
+                    <Check aria-hidden="true" />
+                    承認フローへ（{approvalProgress.approvedCount}/{approvalProgress.totalCount}{' '}
+                    段階）
+                  </Link>
+                </Button>
+              ) : (
                 <form action={transitionDataPointAction}>
                   <input type="hidden" name="dataPointId" value={dataPoint.id} />
                   <input type="hidden" name="to" value="approved" />
@@ -260,7 +290,7 @@ export default async function DataPointDetailPage({
                     承認
                   </Button>
                 </form>
-              )}
+              ))}
           </>
         }
       />
@@ -595,6 +625,150 @@ export default async function DataPointDetailPage({
               </ul>
             </Card>
           )}
+
+          {/* 承認の道筋（最大 5 階層）。どこまで進んでいて、次が誰かを必ず出す */}
+          {approvalProgress.totalCount > 0 && (
+            <Card id="承認フロー">
+              <SectionTitle
+                title={`承認フロー（${approvalProgress.approvedCount} / ${approvalProgress.totalCount} 段階）`}
+                action={
+                  approvalProgress.round > 1 ? (
+                    <span className="text-[11px] text-ink-muted">
+                      {approvalProgress.round} 巡目（差し戻し後の再提出）
+                    </span>
+                  ) : undefined
+                }
+              />
+              <ol className="divide-y divide-line">
+                {approvalProgress.steps.map((step) => (
+                  <li key={step.id} className="flex items-start gap-2.5 px-3 py-2">
+                    <span
+                      className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                        step.status === 'approved'
+                          ? 'bg-success text-white'
+                          : step.status === 'returned'
+                            ? 'bg-danger text-white'
+                            : step.status === 'pending'
+                              ? 'bg-brand-600 text-white'
+                              : 'bg-surface-muted text-ink-muted'
+                      }`}
+                      aria-hidden="true"
+                    >
+                      {step.stageNo}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-1.5 text-[12px] font-medium text-ink">
+                        {step.stageName}
+                        {step.status === 'approved' && <Badge tone="success">承認済み</Badge>}
+                        {step.status === 'returned' && <Badge tone="danger">差し戻し</Badge>}
+                        {step.status === 'pending' && <Badge tone="warning">承認待ち</Badge>}
+                        {step.status === 'waiting' && <Badge tone="neutral">未着手</Badge>}
+                      </p>
+                      <p className="text-[11px] text-ink-muted">
+                        {step.department || '担当部署未設定'}
+                        {step.decidedAt && (
+                          <>
+                            {' ・ '}
+                            {authorNameById.get(step.decidedBy ?? '') ?? '—'}
+                            {' ・ '}
+                            {formatJst(step.decidedAt)}
+                          </>
+                        )}
+                      </p>
+                      {step.comment && (
+                        <p className="mt-0.5 text-[11px] text-ink">{step.comment}</p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              {approvalProgress.currentStep && (
+                <div className="border-t border-line px-3 py-2">
+                  {canDecideCurrent ? (
+                    <form action={decideApprovalStepAction} className="space-y-1.5">
+                      <input type="hidden" name="dataPointId" value={dataPoint.id} />
+                      <label className="block text-[11px] text-ink-muted">
+                        コメント（差し戻すときは理由が必須）
+                        <input
+                          type="text"
+                          name="comment"
+                          className="mt-0.5 h-7 w-full rounded-t4d border border-line px-2 text-[12px]"
+                        />
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <SubmitButton
+                          size="sm"
+                          name="decision"
+                          value="approved"
+                          pendingLabel="承認中…"
+                        >
+                          「{approvalProgress.currentStep.stageName}」を承認
+                        </SubmitButton>
+                        <SubmitButton
+                          size="sm"
+                          variant="outline"
+                          name="decision"
+                          value="returned"
+                          pendingLabel="差し戻し中…"
+                        >
+                          差し戻す
+                        </SubmitButton>
+                      </div>
+                    </form>
+                  ) : (
+                    <p className="text-[11px] text-ink-muted">
+                      次は「{approvalProgress.currentStep.stageName}」
+                      {approvalProgress.currentStep.department &&
+                        `（${approvalProgress.currentStep.department}）`}
+                      の承認待ちです。あなたはこの段階の承認者ではありません。
+                    </p>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* いつ・誰が・承認／修正／差し戻し したか。
+              段階と版は別の表に分かれているので、ここで 1 本の流れに混ぜる */}
+          <Card id="承認履歴">
+            <SectionTitle
+              title={`承認・修正の履歴（${timeline.length}）`}
+              action={<span className="text-[11px] text-ink-muted">新しいものが上</span>}
+            />
+            {timeline.length === 0 ? (
+              <EmptyState title="履歴はありません" />
+            ) : (
+              <ul className="divide-y divide-line">
+                {timeline.map((entry, index) => (
+                  <li key={`${entry.kind}-${entry.at}-${index}`} className="px-3 py-2">
+                    <p className="flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        tone={
+                          entry.kind === 'approved'
+                            ? 'success'
+                            : entry.kind === 'returned'
+                              ? 'danger'
+                              : 'neutral'
+                        }
+                      >
+                        {entry.kind === 'approved'
+                          ? '承認'
+                          : entry.kind === 'returned'
+                            ? '差し戻し'
+                            : '修正'}
+                      </Badge>
+                      {entry.stageLabel && (
+                        <span className="text-[11px] text-ink-muted">{entry.stageLabel}</span>
+                      )}
+                      <span className="text-[12px] font-medium text-ink">{entry.actorName}</span>
+                      <span className="text-[11px] text-ink-muted">{formatJst(entry.at)}</span>
+                    </p>
+                    <p className="mt-0.5 text-[12px] text-ink">{entry.detail}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
 
           <Card>
             <SectionTitle title="コメント・承認履歴" />

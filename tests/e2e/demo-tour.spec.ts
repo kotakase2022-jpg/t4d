@@ -12,7 +12,7 @@ import { DEMO_USERS, loginAs } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
-const TOTAL_STEPS = 12;
+const TOTAL_STEPS = 15;
 
 test('デモモードは SSBJ 対応の現在地から始まり、要求事項へ進む', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
@@ -36,11 +36,11 @@ test('デモモードは SSBJ 対応の現在地から始まり、要求事項�
   await expect(dialog).toContainText('単一の点数にまとめない');
   await expect(dialog).toContainText('手順');
 
-  // 3 番目で要求事項一覧へ
+  // 3 番目で「①マテリアリティ・分析条件の設定」へ
   await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements/);
+  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/settings$/);
   await expect(dialog).toContainText(`3 / ${TOTAL_STEPS}`);
-  await expect(dialog).toContainText('対象判定・重要性判断');
+  await expect(dialog).toContainText('マテリアリティ・分析条件の設定');
 
   // 戻る → SSBJ 対応状況へ戻る
   await dialog.getByRole('button', { name: '戻る' }).click();
@@ -55,15 +55,19 @@ test('ギャップ分析の画面へ直行し、人工知能が確定しない�
   const dialog = page.getByRole('dialog', { name: /デモモード/ });
   await expect(dialog).toBeVisible();
 
-  // 4 番目 = 最優先のギャップの詳細画面へ飛ぶ。
+  // 6 番目 = 最優先のギャップの詳細画面へ飛ぶ。
   // 遷移の完了を待たずに連打すると、前の遷移の途中で次が始まって取りこぼす
-  await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj$/);
-  await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements$/);
-  await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/);
-  await expect(dialog).toContainText(`4 / ${TOTAL_STEPS}`);
+  for (const expected of [
+    /\/enterprise\/disclosures\/ssbj$/,
+    /\/enterprise\/disclosures\/ssbj\/settings$/,
+    /\/enterprise\/organizations$/,
+    /\/enterprise\/disclosures\/ssbj\/requirements$/,
+    /\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/,
+  ]) {
+    await dialog.getByRole('button', { name: '次へ' }).click();
+    await page.waitForURL(expected);
+  }
+  await expect(dialog).toContainText(`6 / ${TOTAL_STEPS}`);
   await expect(dialog).toContainText('ギャップ分析');
 
   // 実際にギャップ分析の画面が出ている
@@ -71,9 +75,9 @@ test('ギャップ分析の画面へ直行し、人工知能が確定しない�
   await expect(main.getByText('開示ギャップ')).toBeVisible();
   await expect(main.getByText('データギャップ')).toBeVisible();
 
-  // 5 番目は同じ画面のまま「人工知能は確定しない」を案内する
+  // 7 番目は同じ画面のまま「人工知能は確定しない」を案内する
   await dialog.getByRole('button', { name: '次へ' }).click();
-  await expect(dialog).toContainText(`5 / ${TOTAL_STEPS}`);
+  await expect(dialog).toContainText(`7 / ${TOTAL_STEPS}`);
   await expect(dialog).toContainText('人工知能は確定しない');
   await expect(main.getByText('担当者による確認')).toBeVisible();
 });
@@ -92,22 +96,30 @@ test('対応計画・データ収集まで一巡し、「ツアーを終了」�
     await page.waitForURL(expected);
   };
   await advance(/\/enterprise\/disclosures\/ssbj$/);
+  // 手順 1: マテリアリティ・分析条件の設定 → 指標マスター
+  await advance(/\/enterprise\/disclosures\/ssbj\/settings$/);
+  await expect(dialog).toContainText('ここが決まらないと始まらない');
+  await advance(/\/enterprise\/organizations$/);
+  await expect(dialog).toContainText('基準が求める指標を取り込む');
+
   await advance(/\/enterprise\/disclosures\/ssbj\/requirements$/);
   await advance(/\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/);
-  // 5 番目は同じ画面のまま案内だけ切り替わる
+  // 7 番目は同じ画面のまま案内だけ切り替わる
   await dialog.getByRole('button', { name: '次へ' }).click();
-  await expect(dialog).toContainText(`5 / ${TOTAL_STEPS}`);
+  await expect(dialog).toContainText(`7 / ${TOTAL_STEPS}`);
   await advance(/\/enterprise\/disclosures\/ssbj\/plans/);
   await expect(dialog).toContainText('対応計画の作成');
 
-  // 7 番目 = データ収集
   await advance(/\/enterprise\/disclosures\/ssbj\/collection/);
   await expect(dialog).toContainText('ギャップから収集依頼までつながる');
 
   // 最後まで進む
   await advance(/\/enterprise\/imports/);
   await advance(/\/enterprise\/data/);
+  await expect(dialog).toContainText('最大 5 階層');
   await advance(/\/enterprise\/evidence/);
+  await advance(/\/enterprise\/disclosures\/ssbj\/draft/);
+  await expect(dialog).toContainText('判定とデータを文章にする');
   await advance(/\/enterprise\/disclosures\/cdp/);
   await advance(/\/enterprise\/workflows/);
   await expect(dialog).toContainText(`${TOTAL_STEPS} / ${TOTAL_STEPS}`);

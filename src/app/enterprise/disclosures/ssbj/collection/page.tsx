@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, ClipboardList, Upload } from 'lucide-react';
+import { ArrowLeft, CircleCheck, ClipboardList, Clock, RotateCcw, Upload } from 'lucide-react';
 import { DataPointStatusBadge } from '@/components/shared/badges';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatNumber } from '@/lib/format/datetime';
+import { loadApprovalProgressMap } from '@/lib/services/approval-route';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { loadDataCollection } from '@/lib/services/ssbj-gap';
 import type { DataPointStatus } from '@/types/domain';
@@ -24,6 +25,13 @@ export default async function SsbjCollectionPage({
   const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const rows = await loadDataCollection(shell.db, shell.ctx, shell.currentPeriod);
+
+  // 取り込んだデータが今どの承認段階にいるかを、1 件ずつ問い合わせずまとめて読む
+  const progressByDataPoint = await loadApprovalProgressMap(
+    shell.db,
+    shell.ctx,
+    rows.map((r) => r.dataPointId).filter((id): id is string => Boolean(id)),
+  );
 
   const submitted = rows.filter((r) => r.collectedStatus === 'approved').length;
   const rate = rows.length === 0 ? 0 : Math.round((submitted / rows.length) * 100);
@@ -131,6 +139,7 @@ export default async function SsbjCollectionPage({
                   <TH>提出期限</TH>
                   <TH align="right">収集済みの値</TH>
                   <TH>収集状況</TH>
+                  <TH>承認の進み具合</TH>
                   <TH>元の対応計画</TH>
                 </TR>
               </THead>
@@ -177,6 +186,52 @@ export default async function SsbjCollectionPage({
                       ) : (
                         <DataPointStatusBadge status={row.collectedStatus as DataPointStatus} />
                       )}
+                    </TD>
+                    <TD>
+                      {(() => {
+                        const progress = row.dataPointId
+                          ? progressByDataPoint.get(row.dataPointId)
+                          : undefined;
+                        if (!row.dataPointId || !progress || progress.totalCount === 0) {
+                          return <span className="text-[11px] text-ink-muted">—</span>;
+                        }
+                        return (
+                          <Link
+                            href={`/enterprise/data/${row.dataPointId}#承認履歴`}
+                            className="block space-y-0.5 rounded-t4d px-1 py-0.5 hover:bg-surface-muted"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              {/* 色だけで状態を表さない。段数を必ず数字で書く */}
+                              <span className="text-[12px] tabular-nums text-ink">
+                                {progress.approvedCount} / {progress.totalCount} 段階
+                              </span>
+                              {progress.returnedStep ? (
+                                <Badge tone="danger">
+                                  <RotateCcw className="size-3" aria-hidden="true" />
+                                  差し戻し
+                                </Badge>
+                              ) : progress.complete ? (
+                                <Badge tone="success">
+                                  <CircleCheck className="size-3" aria-hidden="true" />
+                                  承認完了
+                                </Badge>
+                              ) : (
+                                <Badge tone="warning">
+                                  <Clock className="size-3" aria-hidden="true" />
+                                  承認待ち
+                                </Badge>
+                              )}
+                            </span>
+                            <span className="block text-[11px] text-ink-muted">
+                              {progress.returnedStep
+                                ? `${progress.returnedStep.stageName} で差し戻し`
+                                : progress.currentStep
+                                  ? `次: ${progress.currentStep.stageName}（${progress.currentStep.department || '担当部署未設定'}）`
+                                  : 'すべての段階で承認済み'}
+                            </span>
+                          </Link>
+                        );
+                      })()}
                     </TD>
                     <TD className="max-w-[220px] text-[11px] text-ink-muted">{row.plan.title}</TD>
                   </TR>

@@ -132,9 +132,12 @@ test('⑥ SSBJ が対象判定 → 分析 → 確認 → 対応計画 → デー
   // 充足度が数値で可視化されている
   await expect(page.getByText('マテリアリティ充足度')).toBeVisible();
 
-  // マテリアリティ評価表があり、重要度と根拠が出ている
+  // マテリアリティ評価表があり、課題が並んでいる
   await expect(page.getByText('気候変動（GHG 排出）')).toBeVisible();
-  await expect(page.getByText('重要度：高').first()).toBeVisible();
+
+  // 評価は「①マテリアリティ・分析条件の設定」で行う（決める場所を 1 つに寄せた）
+  await page.goto('/enterprise/disclosures/ssbj/settings');
+  await expect(page.locator('#t4d-main')).toBeVisible();
 
   // 評価を更新できる（重要と評価するなら理由が要る）
   const row = page.locator('tr', { hasText: '水資源の利用' });

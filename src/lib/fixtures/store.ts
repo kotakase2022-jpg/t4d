@@ -39,6 +39,8 @@ import { contentHash, fid } from './ids';
 import type {
   Alert,
   Approval,
+  ApprovalRoute,
+  ApprovalRouteStage,
   AssuranceIssue,
   AssuranceProcedure,
   AssuranceSnapshot,
@@ -50,6 +52,7 @@ import type {
   ClientAccessGrant,
   Comment,
   DataPoint,
+  DataPointApprovalStep,
   DataPointCalculation,
   DataPointValidationResult,
   DataPointVersion,
@@ -95,6 +98,8 @@ import type {
   ReportingPeriod,
   ResponseEvidenceLink,
   SsbjActionPlan,
+  SsbjAnalysisSettings,
+  SsbjDisclosureDraft,
   SsbjActionStatus,
   SsbjActionType,
   SsbjAssessment,
@@ -142,6 +147,9 @@ export interface FixtureDb {
 
   tasks: WorkTask[];
   approvals: Approval[];
+  approvalRoutes: ApprovalRoute[];
+  approvalRouteStages: ApprovalRouteStage[];
+  dataPointApprovalSteps: DataPointApprovalStep[];
   comments: Comment[];
   notifications: Notification[];
   alerts: Alert[];
@@ -158,6 +166,8 @@ export interface FixtureDb {
   responseEvidenceLinks: ResponseEvidenceLink[];
   ssbjAssessments: SsbjAssessment[];
   ssbjActionPlans: SsbjActionPlan[];
+  ssbjAnalysisSettings: SsbjAnalysisSettings[];
+  ssbjDisclosureDrafts: SsbjDisclosureDraft[];
 
   ingestionJobs: IngestionJob[];
   ingestionJobFiles: IngestionJobFile[];
@@ -229,6 +239,9 @@ export function createFixtureDb(): FixtureDb {
     storageAccessEvents: [],
     tasks: [],
     approvals: [],
+    approvalRoutes: [],
+    approvalRouteStages: [],
+    dataPointApprovalSteps: [],
     comments: [],
     notifications: [],
     alerts: [],
@@ -244,6 +257,8 @@ export function createFixtureDb(): FixtureDb {
     responseEvidenceLinks: [],
     ssbjAssessments: [],
     ssbjActionPlans: [],
+    ssbjAnalysisSettings: [],
+    ssbjDisclosureDrafts: [],
     ingestionJobs: [],
     ingestionJobFiles: [],
     ingestionRows: [],
@@ -448,6 +463,7 @@ export function createFixtureDb(): FixtureDb {
         spec.numerator && spec.denominator ? `${spec.numerator} / ${spec.denominator} * 100` : null,
       requiresEvidence: spec.requiresEvidence,
       hqOnly: spec.hqOnly ?? false,
+      frameworks: spec.frameworks ?? [],
       materiality: spec.materiality,
       reportingFrequency: 'annual',
       responsibleDepartment:
@@ -477,6 +493,7 @@ export function createFixtureDb(): FixtureDb {
       formula: null,
       requiresEvidence: spec.requiresEvidence,
       hqOnly: spec.hqOnly ?? false,
+      frameworks: spec.frameworks ?? [],
       materiality: spec.materiality,
       reportingFrequency: 'annual',
       responsibleDepartment: null,
@@ -1610,8 +1627,118 @@ export function createFixtureDb(): FixtureDb {
   }
 
   // ------------------------------------------------------------------
+  // 承認の道筋（最大 5 階層）
+  //
+  // 非財務データは拠点の入力担当から役員まで、複数の部署を通って開示に載る。
+  // 実在の企業でよくある 5 段階を既定の道筋として置く。
+  // 段階ごとに「誰が承認できるか」を役割で決め、個人指定はしない
+  // （担当者が変わっても道筋を作り直さずに済む）。
+  // ------------------------------------------------------------------
+  const routeId = fid('approval_route', `${ORG_IDS.aomi}/標準承認ルート`);
+  db.approvalRoutes.push({
+    id: routeId,
+    organizationId: ORG_IDS.aomi,
+    name: '標準承認ルート',
+    description: '拠点の入力担当から役員までの 5 段階。開示に載せる非財務データはこの道筋を通す。',
+    isDefault: true,
+    ...audit(at(360), at(360), userId('enterprise-admin@demo.local')),
+  });
+
+  // 段階に割り当てる役割は enterprise.data.review を持つものに限る。
+  // 入力担当（site_contributor）は「提出」までが役割で、承認の段階には入らない
+  const routeStages: Array<[number, string, string, string]> = [
+    [1, '拠点責任者の確認', 'reviewer', '拠点管理部'],
+    [2, '本社主管部門の確認', 'sustainability_manager', 'サステナビリティ推進部'],
+    [3, '内部統制部門の確認', 'reviewer', '経理・内部統制部'],
+    [4, 'サステナビリティ推進部長の承認', 'enterprise_admin', 'サステナビリティ推進部'],
+    [5, '担当役員の承認', 'approver', '執行役員'],
+  ];
+  for (const [stageNo, name, approverRole, department] of routeStages) {
+    db.approvalRouteStages.push({
+      id: fid('approval_route_stage', `${routeId}/${stageNo}`),
+      organizationId: ORG_IDS.aomi,
+      routeId,
+      stageNo,
+      name,
+      approverRole,
+      approverUserId: null,
+      department,
+      createdAt: at(360),
+      updatedAt: at(360),
+      deletedAt: null,
+    });
+  }
+
+  // 進行中のデータに承認段階の写しを載せる。
+  // 「どこまで進んでいるか」が一目で分かる状態を、いくつか作っておく:
+  //   submitted → 1 段目で止まっている
+  //   in_review → 途中まで承認済み
+  //   returned  → 差し戻された（誰が・なぜ、が残る）
+  //   approved  → 5 段階すべて承認済み
+  for (const dp of db.dataPoints) {
+    if (dp.organizationId !== ORG_IDS.aomi) continue;
+    if (dp.reportingPeriodId !== PERIOD_IDS.fy2026) continue;
+    if (dp.status === 'not_started' || dp.status === 'draft') continue;
+
+    const approvedThrough =
+      dp.status === 'approved'
+        ? 5
+        : dp.status === 'in_review'
+          ? 2
+          : dp.status === 'returned'
+            ? 1
+            : 0;
+
+    for (const [stageNo, name, approverRole, department] of routeStages) {
+      const decided = stageNo <= approvedThrough;
+      // 差し戻しは 2 段目で起きたことにする（1 段目は通っている）
+      const returned = dp.status === 'returned' && stageNo === 2;
+      const pending = !decided && !returned && stageNo === approvedThrough + 1;
+
+      db.dataPointApprovalSteps.push({
+        id: fid('data_point_approval_step', `${dp.id}/1/${stageNo}`),
+        organizationId: ORG_IDS.aomi,
+        dataPointId: dp.id,
+        routeId,
+        stageNo,
+        stageName: name,
+        approverRole,
+        approverUserId: null,
+        department,
+        status: decided ? 'approved' : returned ? 'returned' : pending ? 'pending' : 'waiting',
+        decidedAt: decided || returned ? at(40 - stageNo * 2) : null,
+        decidedBy:
+          decided || returned
+            ? userId(
+                approverRole === 'approver'
+                  ? 'approver@demo.local'
+                  : approverRole === 'sustainability_manager'
+                    ? 'sustainability@demo.local'
+                    : approverRole === 'enterprise_admin'
+                      ? 'enterprise-admin@demo.local'
+                      : 'reviewer@demo.local',
+              )
+            : null,
+        comment: returned
+          ? '検針票の対象期間が報告対象期間とずれています。再確認してください。'
+          : '',
+        round: 1,
+        createdAt: at(45),
+        updatedAt: at(40 - stageNo * 2),
+      });
+    }
+  }
+
+  // ------------------------------------------------------------------
   // マテリアリティ評価（SSBJ 開示の起点）
-  // 当期は評価済み、前期は未評価にして「期ごとに見直す」運用を表す。
+  //
+  // 当期は**あえて未評価のまま**にしてある。SSBJ 対応の 8 ステップの入口である
+  // 「①マテリアリティ・分析条件の設定」を、完了済みの表示から始めてしまうと、
+  // この工程で何を決めるのかが体験できない。分析条件（ssbj_analysis_settings）も
+  // 同じ理由で作らない。どちらも画面から人が決める。
+  //
+  // 前期（FY2025）だけ評価済みにしておく。年度が変わったら決め直すこと、
+  // 前年の判断を引き継げること、の両方を示すため。
   // ------------------------------------------------------------------
   const materialitySeed: Array<
     [
@@ -1682,18 +1809,18 @@ export function createFixtureDb(): FixtureDb {
   ];
   for (const [topicKey, title, category, materiality, rationale, metricCodes] of materialitySeed) {
     db.materialityTopics.push({
-      id: fid('materiality_topic', `${ORG_IDS.aomi}/${PERIOD_IDS.fy2026}/${topicKey}`),
+      id: fid('materiality_topic', `${ORG_IDS.aomi}/${PERIOD_IDS.fy2025}/${topicKey}`),
       organizationId: ORG_IDS.aomi,
-      reportingPeriodId: PERIOD_IDS.fy2026,
+      reportingPeriodId: PERIOD_IDS.fy2025,
       topicKey,
       title,
       category,
       materiality,
       rationale,
       metricCodes,
-      assessedAt: at(210),
+      assessedAt: at(400),
       assessedBy: userId('sustainability@demo.local'),
-      ...audit(at(215), at(210), userId('sustainability@demo.local')),
+      ...audit(at(405), at(400), userId('sustainability@demo.local')),
     });
   }
 

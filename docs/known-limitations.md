@@ -60,7 +60,7 @@ Supabase Mode では DB を共有するため、これらの制約は無い。
 | `ai_feedback`                                                    | 作成と RLS だけあり、アプリからは読み書きしない。AI 出力の採否は `ai_runs`（status / reviewed_by / accepted_at / rejected_at）と `audit_events` に残るため、Phase 1 では二重に持たない |
 | `user_preferences`                                               | Phase 1 未使用。表示設定は URL とローカル状態で持つ                                                                                                                                    |
 | `aggregation_runs`                                               | Phase 1 未使用。集計はリクエストごとに計算する                                                                                                                                         |
-| `workflow_definitions` / `workflow_instances` / `workflow_steps` | Phase 1 未使用。承認段階は `data_points.status` で表す                                                                                                                                 |
+| `workflow_definitions` / `workflow_instances` / `workflow_steps` | Phase 1 未使用。データの承認は `data_points.status` と `data_point_approval_steps`（最大 5 階層）で表す                                                                                |
 | `ai_jobs`                                                        | Phase 1 未使用。AI は同期実行し `ai_runs` に残す                                                                                                                                       |
 | `ai_sources`                                                     | Phase 1 未使用。出典は `ai_runs.source_references` に持つ                                                                                                                              |
 | `workpaper_references`                                           | Phase 1 未使用。調書番号は `assurance_tests.workpaper_ref` に持つ                                                                                                                      |
@@ -110,6 +110,18 @@ CDP Portal 直接 API 提出 / CDP Portal 双方向 Sync / MSCI・FTSE 直接 AP
 - 適用前に必ず `pnpm test:rls` を通す（PGlite に対して全 migration を最初から適用するため、
   順序依存の破綻を検出できる）。
 - Seed は `pnpm seed:generate` で再生成する。手で編集しない。
+
+### 0026〜0030 のロールバック
+
+いずれも列追加・制約差し替え・テーブル追加のみで、既存データを壊さない。
+
+| Migration                     | 打ち消し方                                                                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `0026_metric_frameworks`      | `frameworks` 列と GIN 索引を無視する。`category` の CHECK は `climate_transition` を除いた式へ戻す（該当行があるなら先に別分類へ移す） |
+| `0027_ingestion_row_ignored`  | `status` の CHECK から `ignored` を外す。該当行は `needs_review` へ寄せる                                                              |
+| `0028_ssbj_analysis_settings` | テーブルを使わない。分析条件が未確定の扱いへ戻るだけで、他の工程は動く                                                                 |
+| `0029_approval_routes`        | 3 テーブルを使わない。承認は `data_points.status` の単段階へ戻る（履歴は残る）                                                         |
+| `0030_ssbj_disclosure_drafts` | テーブルを使わない。開示ドラフトは DOCX 書き出しだけへ戻る                                                                             |
 
 ## 7. データ保持・削除
 

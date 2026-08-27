@@ -3,7 +3,7 @@ import {
   CircleAlert,
   ClipboardList,
   Database,
-  Download,
+  FileText,
   FlaskConical,
   ListChecks,
   ScrollText,
@@ -19,7 +19,6 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
-import { can } from '@/lib/authorization/can';
 import {
   AREA_LABEL,
   COVERAGE_LABEL,
@@ -31,8 +30,8 @@ import { SSBJ_FRAMEWORK_INFO } from '@/lib/frameworks/ssbj-2026';
 import { CATEGORY_LABEL, loadMateriality, MATERIALITY_LABEL } from '@/lib/services/materiality';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { loadSsbjOverview } from '@/lib/services/ssbj-gap';
+import { loadSsbjSettings } from '@/lib/services/ssbj-settings';
 import type { MaterialityLevel } from '@/types/domain';
-import { saveMaterialityTopicAction } from '../../actions';
 
 export const metadata = { title: 'SSBJ 対応状況' };
 
@@ -86,11 +85,11 @@ export default async function SsbjPage({
 }) {
   const query = await searchParams;
   const shell = await loadEnterpriseShell();
-  const canWrite = can(shell.ctx, 'enterprise.disclosure.write');
 
-  const [overview, materiality] = await Promise.all([
+  const [overview, materiality, settings] = await Promise.all([
     loadSsbjOverview(shell.db, shell.ctx, shell.currentPeriod, SSBJ_FRAMEWORK_INFO.attribution),
     loadMateriality(shell.db, shell.ctx, shell.currentPeriod, shell.metrics),
+    loadSsbjSettings(shell.db, shell.ctx, shell.currentPeriod, shell.metrics),
   ]);
 
   if (!overview) {
@@ -112,10 +111,14 @@ export default async function SsbjPage({
 
   const steps: SsbjFlowStep[] = [
     {
-      title: '分析条件の設定',
-      description: '対象年度・対象基準・対象範囲を決めます。',
-      state: 'done',
-      detail: `${shell.currentPeriod.label} ／ ${overview.versionLabel}`,
+      // ここで決めることが後続すべての前提になる。決まっていないなら「完了」と書かない
+      title: 'マテリアリティ・分析条件の設定',
+      description: '適用する基準・報告の範囲・重要性のある課題を決めます。',
+      state: settings.confirmed ? 'done' : 'current',
+      detail: settings.confirmed
+        ? `確定済み ／ 重要性あり ${settings.materialTopicCount} 件`
+        : `未完了 ／ 残り ${settings.steps.filter((s) => !s.done).length} 項目`,
+      href: '/enterprise/disclosures/ssbj/settings',
     },
     {
       title: '資料の取り込み',
@@ -161,7 +164,8 @@ export default async function SsbjPage({
     },
     {
       title: 'データ収集・開示・内部統制',
-      description: '不足データを集め、開示文章を作り、証跡と承認を残します。',
+      description:
+        '不足データを最大 5 階層の承認を通して集め、開示ドラフトを作り、証跡と承認履歴を残します。',
       state: 'todo',
       href: '/enterprise/disclosures/ssbj/collection',
     },
@@ -209,14 +213,12 @@ export default async function SsbjPage({
                 要求事項一覧
               </Link>
             </Button>
+            {/* 書き出すだけでなく、草案を作るところから扱えるようにする */}
             <Button variant="outline" size="sm" asChild>
-              <a
-                href={`/api/exports/cdp?framework=ssbj&period=${shell.currentPeriod.id}&format=docx`}
-                download
-              >
-                <Download aria-hidden="true" />
-                開示ドラフト（DOCX）
-              </a>
+              <Link href="/enterprise/disclosures/ssbj/draft">
+                <FileText aria-hidden="true" />
+                開示ドラフト
+              </Link>
             </Button>
           </div>
         }
@@ -380,14 +382,19 @@ export default async function SsbjPage({
           </Card>
         </div>
 
-        {/* マテリアリティ評価（重要性判断の起点） */}
+        {/* マテリアリティ評価（重要性判断の起点）。
+            評価そのものは「①マテリアリティ・分析条件の設定」で行う。
+            ここでは結果だけを見せ、決める場所を 1 つに寄せる */}
         <Card className="overflow-hidden">
           <SectionTitle
             title="マテリアリティ評価"
             action={
-              <span className="text-[11px] text-ink-muted">
-                重要と評価したトピックの指標が、次の「データ収集」の対象になります
-              </span>
+              <Button variant="outline" size="xs" asChild>
+                <Link href="/enterprise/disclosures/ssbj/settings">
+                  <Target aria-hidden="true" />
+                  評価・分析条件を設定する
+                </Link>
+              </Button>
             }
           />
           <div className="flex items-center gap-3 border-b border-line px-3 py-2">
@@ -404,6 +411,11 @@ export default async function SsbjPage({
             <span className="text-[12px] text-ink-muted">
               重要と評価: {materiality.materialCount} トピック
             </span>
+            {settings.assessedTopicCount < settings.totalTopicCount && (
+              <Badge tone="warning">
+                未評価 {settings.totalTopicCount - settings.assessedTopicCount} 件
+              </Badge>
+            )}
           </div>
           <Table>
             <THead>
@@ -413,7 +425,6 @@ export default async function SsbjPage({
                 <TH>対象指標</TH>
                 <TH>評価</TH>
                 <TH>充足度</TH>
-                {canWrite && <TH>評価を登録</TH>}
               </TR>
             </THead>
             <TBody>
@@ -459,41 +470,6 @@ export default async function SsbjPage({
                       </span>
                     )}
                   </TD>
-                  {canWrite && (
-                    <TD>
-                      <form action={saveMaterialityTopicAction} className="flex items-center gap-1">
-                        <input type="hidden" name="topicKey" value={topic.topicKey} />
-                        <input
-                          type="hidden"
-                          name="reportingPeriodId"
-                          value={shell.currentPeriod.id}
-                        />
-                        <select
-                          name="materiality"
-                          defaultValue={topic.materiality}
-                          aria-label={`${topic.title} の重要度`}
-                          className="h-7 rounded-t4d border border-line bg-surface px-1.5 text-[12px]"
-                        >
-                          <option value="high">重要度：高</option>
-                          <option value="medium">重要度：中</option>
-                          <option value="low">重要度：低</option>
-                          <option value="not_material">重要ではない</option>
-                          <option value="not_assessed">未評価</option>
-                        </select>
-                        <input
-                          type="text"
-                          name="rationale"
-                          defaultValue={topic.rationale}
-                          placeholder="評価理由"
-                          aria-label={`${topic.title} の評価理由`}
-                          className="h-7 w-36 rounded-t4d border border-line px-2 text-[12px]"
-                        />
-                        <Button type="submit" size="xs" variant="outline">
-                          保存
-                        </Button>
-                      </form>
-                    </TD>
-                  )}
                 </TR>
               ))}
             </TBody>

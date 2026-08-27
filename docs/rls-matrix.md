@@ -1,8 +1,10 @@
 # RLS マトリクス
 
 `supabase/migrations/0012_rls_core.sql` / `0013_rls_assurance.sql`
-（＋ `0016_storage_bucket_read.sql` / `0017_rls_counterparty_organization.sql`）の要約です。
-**75 テーブルすべてで RLS を有効化**しており、`pnpm check:rls` が未設定を検出します。
+（＋ `0016_storage_bucket_read.sql` / `0017_rls_counterparty_organization.sql` /
+`0025_ssbj_gap_analysis.sql` / `0028_ssbj_analysis_settings.sql` / `0029_approval_routes.sql` /
+`0030_ssbj_disclosure_drafts.sql`）の要約です。
+**83 テーブルすべてで RLS を有効化**しており、`pnpm check:rls` が未設定を検出します。
 
 凡例
 
@@ -36,24 +38,28 @@
 
 ## 2. Organization / Master
 
-| テーブル                               | SELECT                       | 更新系             |
-| -------------------------------------- | ---------------------------- | ------------------ |
-| organization_units                     | own ＋ **監査法人（grant）** | perm:org.manage    |
-| reporting_periods                      | own ＋ **監査法人（grant）** | perm:period.manage |
-| metric_definitions                     | own ＋ **監査法人（grant）** | perm:metric.manage |
-| collection_campaigns / campaign_scopes | own                          | perm:period.manage |
-| metric_assignments                     | own                          | perm:period.manage |
-| emission_factors                       | own                          | perm:metric.manage |
+| テーブル                                | SELECT                       | 更新系                |
+| --------------------------------------- | ---------------------------- | --------------------- |
+| organization_units                      | own ＋ **監査法人（grant）** | perm:org.manage       |
+| reporting_periods                       | own ＋ **監査法人（grant）** | perm:period.manage    |
+| metric_definitions                      | own ＋ **監査法人（grant）** | perm:metric.manage    |
+| collection_campaigns / campaign_scopes  | own                          | perm:period.manage    |
+| metric_assignments                      | own                          | perm:period.manage    |
+| emission_factors                        | own                          | perm:metric.manage    |
+| approval_routes / approval_route_stages | own                          | perm:org.manage       |
+| ssbj_analysis_settings                  | own                          | perm:disclosure.write |
+| ssbj_disclosure_drafts                  | own                          | perm:disclosure.write |
 
 ## 3. Data（企業原本）
 
-| テーブル                      | SELECT                       | INSERT                          | UPDATE                                                                             | DELETE |
-| ----------------------------- | ---------------------------- | ------------------------------- | ---------------------------------------------------------------------------------- | ------ |
-| data_points                   | own ＋ **監査法人（grant）** | perm:data.write ＋ unit scope   | perm:{write,review,approve} ＋ unit scope。`approved` への遷移は perm:data.approve | —      |
-| data_point_versions           | own ＋ 監査法人（grant）     | perm:{write,review,approve}     | **—（追記専用＋トリガ）**                                                          | —      |
-| data_point_calculations       | own ＋ 監査法人（grant）     | perm:data.write                 | —                                                                                  | —      |
-| data_point_validation_results | own                          | perm:data.write                 | perm:data.write                                                                    | —      |
-| aggregation_rules / runs      | own                          | perm:metric.manage / data.write | 同左                                                                               | —      |
+| テーブル                      | SELECT                       | INSERT                          | UPDATE                                                                                                | DELETE |
+| ----------------------------- | ---------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------- | ------ |
+| data_points                   | own ＋ **監査法人（grant）** | perm:data.write ＋ unit scope   | perm:{write,review,approve} ＋ unit scope。`approved` への遷移は perm:data.approve                    | —      |
+| data_point_versions           | own ＋ 監査法人（grant）     | perm:{write,review,approve}     | **—（追記専用＋トリガ）**                                                                             | —      |
+| data_point_calculations       | own ＋ 監査法人（grant）     | perm:data.write                 | —                                                                                                     | —      |
+| data_point_validation_results | own                          | perm:data.write                 | perm:data.write                                                                                       | —      |
+| aggregation_rules / runs      | own                          | perm:metric.manage / data.write | 同左                                                                                                  | —      |
+| data_point_approval_steps     | own                          | perm:data.review                | perm:data.review。誰の段階かはアプリ層で判定する（役割・個人指定の組み合わせは SQL だけでは表せない） | —      |
 
 > **監査法人に UPDATE ポリシーが存在しない**ことが「Read-only by Default」の実装です。
 

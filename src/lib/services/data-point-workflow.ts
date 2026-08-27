@@ -16,6 +16,7 @@ import {
   notifyMentions,
   resolveMentions,
 } from '@/lib/services/comments';
+import { loadApprovalProgress, startApprovalRoute } from '@/lib/services/approval-route';
 import { recomputePeriodValidations } from '@/lib/services/validation-store';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
@@ -113,8 +114,10 @@ export async function transitionDataPoint(
     throw new AuthorizationError(`${dp.status} から ${input.to} への遷移は許可されていません。`);
   }
 
-  // 承認には Evidence 必須指標の Evidence が揃っている必要がある
   if (input.to === 'approved') {
+    // Evidence 不足を先に見る。承認の道筋より前に置くのは、
+    // 「根拠資料が無い」ほうが提出者が直せる具体的な指摘だから。
+    // 道筋の途中で足りないと分かっても、結局ここで止まる
     const metric = await db.findById('metrics', dp.metricId);
     if (metric?.requiresEvidence) {
       const links = await db.select('evidenceLinks', {
@@ -126,6 +129,18 @@ export async function transitionDataPoint(
           'この指標は Evidence が必須です。Evidence を紐付けてから承認してください。',
         );
       }
+    }
+
+    // 承認の道筋が定義されている組織では、段階を飛ばして承認できない。
+    // 「誰の承認で確定したのか」を監査法人へ示せなくなるため
+    const progress = await loadApprovalProgress(db, ctx, dp.id);
+    if (progress.totalCount > 0 && !progress.complete) {
+      const next = progress.currentStep;
+      throw new AuthorizationError(
+        next
+          ? `承認の道筋が残っています（${progress.approvedCount}/${progress.totalCount} 段階完了・次は「${next.stageName}」）。段階を順に承認してください。`
+          : '承認の道筋が差し戻されています。再提出してから承認してください。',
+      );
     }
   }
 
@@ -201,6 +216,11 @@ export async function transitionDataPoint(
     beforeSummary: `status=${dp.status}`,
     afterSummary: `status=${input.to}`,
   });
+
+  // 提出したら承認の道筋を開始する。差し戻し後の再提出なら次の巡が始まる
+  if (input.to === 'submitted') {
+    await startApprovalRoute(db, ctx, dp.id);
+  }
 
   // 承認後変更フラグや Evidence 不足の解消など、状態遷移で検証結果が変わりうる
   if (!input.skipRevalidate) await revalidatePeriodOf(db, ctx, updated);

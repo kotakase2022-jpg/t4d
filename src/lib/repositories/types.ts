@@ -14,6 +14,8 @@
 import type {
   Alert,
   Approval,
+  ApprovalRoute,
+  ApprovalRouteStage,
   AiRun,
   AssuranceIssue,
   AssuranceProcedure,
@@ -25,6 +27,7 @@ import type {
   ClientAccessGrant,
   Comment,
   DataPoint,
+  DataPointApprovalStep,
   DataPointCalculation,
   DataPointValidationResult,
   DataPointVersion,
@@ -70,6 +73,8 @@ import type {
   ReportingPeriod,
   ResponseEvidenceLink,
   SsbjActionPlan,
+  SsbjAnalysisSettings,
+  SsbjDisclosureDraft,
   SsbjAssessment,
   ReviewNote,
   Sample,
@@ -113,6 +118,9 @@ export interface TableMap {
 
   tasks: WorkTask;
   approvals: Approval;
+  approvalRoutes: ApprovalRoute;
+  approvalRouteStages: ApprovalRouteStage;
+  dataPointApprovalSteps: DataPointApprovalStep;
   comments: Comment;
   notifications: Notification;
   alerts: Alert;
@@ -129,6 +137,8 @@ export interface TableMap {
   responseEvidenceLinks: ResponseEvidenceLink;
   ssbjAssessments: SsbjAssessment;
   ssbjActionPlans: SsbjActionPlan;
+  ssbjAnalysisSettings: SsbjAnalysisSettings;
+  ssbjDisclosureDrafts: SsbjDisclosureDraft;
 
   ingestionJobs: IngestionJob;
   ingestionJobFiles: IngestionJobFile;

@@ -83,7 +83,7 @@ test('取込画面がドロップを受け付ける', async ({ page }) => {
 
 test('マテリアリティの理由未入力が、全画面エラーではなく画面内の指摘になる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/disclosures/ssbj');
+  await page.goto('/enterprise/disclosures/ssbj/settings');
 
   const row = page.locator('tr', { hasText: '水資源の利用' });
   await row.getByRole('combobox').selectOption('high');

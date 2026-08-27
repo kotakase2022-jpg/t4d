@@ -106,6 +106,37 @@ const INPUTS: Record<AiFeature, unknown> = {
     hasApprovalWorkflow: true,
     sources: [],
   },
+  ssbjDisclosureDraft: {
+    area: 'governance',
+    areaLabel: 'ガバナンス',
+    organizationName: '青海テクノロジー株式会社',
+    periodLabel: '2026年度',
+    requirements: [
+      {
+        code: '気候-10',
+        title: '監督に責任を負うガバナンス機関・個人の開示',
+        finalStatus: 'mostly_covered',
+        materiality: 'material',
+        reviewed: true,
+      },
+      {
+        code: '気候-12',
+        title: '経営者の役割の開示',
+        finalStatus: null,
+        materiality: 'not_assessed',
+        reviewed: false,
+      },
+    ],
+    metricValues: [{ label: 'Scope1 排出量', value: 7859.8, unit: 't-CO2e' }],
+    documents: [
+      {
+        name: '統合報告書2026',
+        page: '42 ページ',
+        excerpt: 'サステナビリティ委員会が気候関連の課題を審議し、取締役会へ報告しています。',
+      },
+    ],
+    sources: [],
+  },
   evidenceMapping: {
     fragments: [
       {

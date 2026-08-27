@@ -1083,6 +1083,183 @@ describe('11. 本 QA で新たにアプリへ露出したテーブルの越権',
     expect(rows.length).toBeGreaterThan(0);
   });
 
+  // --- 承認の道筋（最大 5 階層） ---
+
+  it('企業 B の管理者は企業 A の承認の道筋を取得できない', async () => {
+    const rows = await h.asUser(
+      ENT_B_ADMIN,
+      'select id from approval_routes where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('企業 A の管理者は自社の承認の道筋と段階を参照できる（false negative でないこと）', async () => {
+    const routes = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from approval_routes where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(routes.length).toBeGreaterThan(0);
+    const stages = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from approval_route_stages where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    // 5 階層の既定ルートが入っている
+    expect(stages.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('企業 B の管理者は企業 A の承認段階を書き換えられない', async () => {
+    const updated = await h.asUser(
+      ENT_B_ADMIN,
+      `update approval_route_stages set name = '乗っ取り'
+         where organization_id = $1 returning id`,
+      [ORG_IDS.aomi],
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it('企業 B の管理者は企業 A のデータの承認段階を取得できない', async () => {
+    const rows = await h.asUser(
+      ENT_B_ADMIN,
+      'select id from data_point_approval_steps where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('企業 B の管理者は企業 A のデータを承認できない', async () => {
+    const updated = await h.asUser(
+      ENT_B_ADMIN,
+      `update data_point_approval_steps set status = 'approved', decided_at = now()
+         where organization_id = $1 returning id`,
+      [ORG_IDS.aomi],
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it('企業 A の管理者は自社のデータの承認段階を参照できる（false negative でないこと）', async () => {
+    const rows = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from data_point_approval_steps where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it('承認段階は 6 階層以上を作れない', async () => {
+    const route = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from approval_routes where organization_id = $1 limit 1',
+      [ORG_IDS.aomi],
+    );
+    await expect(
+      h.asUser(
+        ENT_A_ADMIN,
+        `insert into approval_route_stages (organization_id, route_id, stage_no, name)
+         values ($1, $2, 6, '6 段目')`,
+        [ORG_IDS.aomi, (route[0] as { id: string }).id],
+      ),
+    ).rejects.toThrow();
+  });
+
+  // --- SSBJ 分析条件（①マテリアリティ・分析条件の設定） ---
+
+  it('企業 B の管理者は企業 A の SSBJ 分析条件を作成できない', async () => {
+    await expect(
+      h.asUser(
+        ENT_B_ADMIN,
+        `insert into ssbj_analysis_settings (organization_id, reporting_period_id)
+         values ($1, $2)`,
+        [ORG_IDS.aomi, PERIOD_IDS.fy2026],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('企業 A の管理者は自社の SSBJ 分析条件を作成・参照できる', async () => {
+    await h.asUser(
+      ENT_A_ADMIN,
+      `insert into ssbj_analysis_settings
+         (organization_id, reporting_period_id, value_chain_scope)
+       values ($1, $2, 'both')`,
+      [ORG_IDS.aomi, PERIOD_IDS.fy2026],
+    );
+    const rows = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from ssbj_analysis_settings where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it('企業 B の管理者は企業 A の SSBJ 分析条件を取得できない', async () => {
+    const rows = await h.asUser(
+      ENT_B_ADMIN,
+      'select id from ssbj_analysis_settings where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('企業 B の管理者は企業 A の SSBJ 分析条件を確定できない', async () => {
+    const updated = await h.asUser(
+      ENT_B_ADMIN,
+      `update ssbj_analysis_settings set confirmed_at = now()
+         where organization_id = $1 returning id`,
+      [ORG_IDS.aomi],
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  // --- SSBJ 開示ドラフトの草案 ---
+
+  it('企業 B の管理者は企業 A の開示ドラフトを作成できない', async () => {
+    await expect(
+      h.asUser(
+        ENT_B_ADMIN,
+        `insert into ssbj_disclosure_drafts (organization_id, reporting_period_id, area, body)
+         values ($1, $2, 'governance', '乗っ取り')`,
+        [ORG_IDS.aomi, PERIOD_IDS.fy2026],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('企業 A の管理者は自社の開示ドラフトを作成・参照できる', async () => {
+    await h.asUser(
+      ENT_A_ADMIN,
+      `insert into ssbj_disclosure_drafts (organization_id, reporting_period_id, area, body)
+       values ($1, $2, 'governance', '当社は…')`,
+      [ORG_IDS.aomi, PERIOD_IDS.fy2026],
+    );
+    const rows = await h.asUser(
+      ENT_A_ADMIN,
+      'select id from ssbj_disclosure_drafts where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it('企業 B の管理者は企業 A の開示ドラフトを取得できない', async () => {
+    const rows = await h.asUser(
+      ENT_B_ADMIN,
+      'select id from ssbj_disclosure_drafts where organization_id = $1',
+      [ORG_IDS.aomi],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('開示ドラフトの節は既知のものに限る', async () => {
+    await expect(
+      h.asUser(
+        ENT_A_ADMIN,
+        `insert into ssbj_disclosure_drafts (organization_id, reporting_period_id, area)
+         values ($1, $2, 'unknown_area')`,
+        [ORG_IDS.aomi, PERIOD_IDS.fy2026],
+      ),
+    ).rejects.toThrow();
+  });
+
   it('企業 A の管理者は自社の収集キャンペーンを作成できる（false negative でないこと）', async () => {
     await h.asUser(
       ENT_A_ADMIN,

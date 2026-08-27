@@ -14,6 +14,7 @@ import type {
   DataPoint,
   DisclosureItem,
   MetricDefinition,
+  MetricFrameworkKey,
   OrganizationUnit,
   PbcRequest,
   ReviewNote,
@@ -242,9 +243,48 @@ interface MetricSpec {
   maxValue?: number;
   /** 集計対象の Unit（HQ 限定のガバナンス指標など） */
   hqOnly?: boolean;
+  /** この指標を要求している開示基準。省略は自社独自の指標 */
+  frameworks?: MetricFrameworkKey[];
+  /**
+   * デモの実績値（Data Point）を生成するか。既定は生成しない。
+   *
+   * 基準から取り込んだ指標の大半は、まだ社内で値を集められていない。
+   * そこを架空の値で埋めてしまうと「データギャップが無い」状態になり、
+   * SSBJ 対応の主題であるギャップ分析が体験できなくなる。
+   * 値を持つのは、もともと収集していた 21 指標だけにする。
+   */
+  demoData?: boolean;
 }
 
-const METRIC_SPECS: MetricSpec[] = [
+/**
+ * もともと社内で収集していた 21 指標。これだけがデモの実績値（Data Point）を持つ。
+ * 基準から取り込んだ残りは、まだ社内で値が集まっていない＝データギャップとして現れる。
+ */
+const COLLECTED_METRIC_CODES = new Set([
+  'scope1',
+  'scope2',
+  'scope3_cat1',
+  'energy',
+  'water',
+  'waste',
+  'employees',
+  'managers_total',
+  'female_managers',
+  'female_manager_ratio',
+  'officers_total',
+  'female_officers',
+  'female_officer_ratio',
+  'directors_count',
+  'female_employees',
+  'new_hires',
+  'turnover_rate',
+  'avg_tenure',
+  'training_hours',
+  'ltifr',
+  'gender_pay_gap',
+]);
+
+const METRIC_SPECS_RAW: MetricSpec[] = [
   {
     code: 'scope1',
     name: 'Scope1 排出量',
@@ -548,7 +588,503 @@ const METRIC_SPECS: MetricSpec[] = [
     minValue: 0,
     maxValue: 200,
   },
+
+  // --------------------------------------------------------------------
+  // ここから下は SSBJ・CDP・CSRD の開示要求から取り込んだ指標。
+  // 出所は METRIC_FRAMEWORKS の対応表に条項番号つきで書いてある。
+  // まだ社内で値を集められていないため、デモの実績値は持たない。
+  // --------------------------------------------------------------------
+
+  // SSBJ 気候-53 / 気候-54: スコープ 2 はロケーション基準とマーケット基準を
+  // 区別して開示する。既存の scope2 はマーケット基準なので、対になる指標を足す。
+  {
+    code: 'scope2_location',
+    name: 'Scope2 排出量（ロケーション基準）',
+    description: '電力系統の平均排出係数で算定した間接排出。SSBJ 第2号 第53項が開示を求める',
+    category: 'ghg',
+    unit: 't-CO2e',
+    baseUnit: 't-CO2e',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    yoyWarningRatio: 0.3,
+    minValue: 0,
+  },
+
+  // SSBJ 気候-55: スコープ 3 はカテゴリー別に分解して開示する。
+  // GHG プロトコルの 15 カテゴリーすべてを指標として持たせ、
+  // どのカテゴリーが未算定なのかを一覧で見えるようにする。
+  ...(
+    [
+      ['scope3_cat2', '資本財'],
+      ['scope3_cat3', '燃料・エネルギー関連活動（Scope1・2 に含まれないもの）'],
+      ['scope3_cat4', '輸送・配送（上流）'],
+      ['scope3_cat5', '事業から出る廃棄物'],
+      ['scope3_cat6', '出張'],
+      ['scope3_cat7', '雇用者の通勤'],
+      ['scope3_cat8', 'リース資産（上流）'],
+      ['scope3_cat9', '輸送・配送（下流）'],
+      ['scope3_cat10', '販売した製品の加工'],
+      ['scope3_cat11', '販売した製品の使用'],
+      ['scope3_cat12', '販売した製品の廃棄'],
+      ['scope3_cat13', 'リース資産（下流）'],
+      ['scope3_cat14', 'フランチャイズ'],
+      ['scope3_cat15', '投資'],
+    ] as const
+  ).map(([code, label]): MetricSpec => ({
+    code,
+    name: `Scope3 Category ${code.replace('scope3_cat', '')}（${label}）`,
+    description: `バリュー・チェーンの間接排出。SSBJ 第2号 第55項がカテゴリー別の分解開示を求める`,
+    category: 'ghg',
+    unit: 't-CO2e',
+    baseUnit: 't-CO2e',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'medium',
+    yoyWarningRatio: 0.5,
+    minValue: 0,
+    hqOnly: true,
+  })),
+  {
+    code: 'scope3_total',
+    name: 'Scope3 排出量（合計）',
+    description: 'カテゴリー 1〜15 の絶対総量。SSBJ 第2号 第47項(3)が開示を求める',
+    category: 'ghg',
+    unit: 't-CO2e',
+    baseUnit: 't-CO2e',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    yoyWarningRatio: 0.4,
+    minValue: 0,
+    hqOnly: true,
+  },
+  {
+    code: 'ghg_intensity',
+    name: 'GHG 排出原単位（売上高あたり）',
+    description: 'Scope1＋2 排出量を売上高で除した原単位。CDP が推移の比較に用いる',
+    category: 'ghg',
+    unit: 't-CO2e/百万円',
+    baseUnit: 't-CO2e/百万円',
+    dataType: 'number',
+    aggregationMethod: 'ratio',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+    hqOnly: true,
+  },
+
+  // エネルギー（CDP C8 / CSRD ESRS E1-5）
+  {
+    code: 'energy_renewable',
+    name: '再生可能エネルギー消費量',
+    description: '自家発電・証書調達を含む再生可能エネルギー由来の消費量',
+    category: 'energy',
+    unit: 'MWh',
+    baseUnit: 'MWh',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'medium',
+    minValue: 0,
+  },
+  {
+    code: 'renewable_ratio',
+    name: '再生可能エネルギー比率',
+    description: 'エネルギー使用量に占める再生可能エネルギーの割合',
+    category: 'energy',
+    unit: '%',
+    baseUnit: '%',
+    dataType: 'ratio',
+    aggregationMethod: 'ratio',
+    requiresEvidence: false,
+    materiality: 'medium',
+    numerator: 'energy_renewable',
+    denominator: 'energy',
+    minValue: 0,
+    maxValue: 100,
+  },
+
+  // 水（CDP W1 / CSRD ESRS E3-4）
+  // 既存の water は「使用量」。CSRD は取水・排水・消費を区別して求める。
+  {
+    code: 'water_withdrawal',
+    name: '取水量',
+    description: '上水・工業用水・地下水・地表水からの取水量',
+    category: 'water',
+    unit: 'm3',
+    baseUnit: 'm3',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+  },
+  {
+    code: 'water_discharge',
+    name: '排水量',
+    description: '公共用水域・下水道への排水量',
+    category: 'water',
+    unit: 'm3',
+    baseUnit: 'm3',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: false,
+    materiality: 'low',
+    minValue: 0,
+  },
+  {
+    code: 'water_stress_withdrawal',
+    name: '水ストレス地域における取水量',
+    description: '高・極めて高い水ストレス地域に所在する拠点からの取水量。ESRS E3-4 が区別を求める',
+    category: 'water',
+    unit: 'm3',
+    baseUnit: 'm3',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+  },
+
+  // 廃棄物・資源循環（CDP / CSRD ESRS E5-5）
+  {
+    code: 'waste_hazardous',
+    name: '有害廃棄物量',
+    description: '特別管理産業廃棄物。ESRS E5-5 が非有害と区別した開示を求める',
+    category: 'waste',
+    unit: 't',
+    baseUnit: 't',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'medium',
+    minValue: 0,
+  },
+  {
+    code: 'waste_recycled',
+    name: 'リサイクル量',
+    description: '再資源化された廃棄物量',
+    category: 'waste',
+    unit: 't',
+    baseUnit: 't',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+  },
+  {
+    code: 'recycling_rate',
+    name: 'リサイクル率',
+    description: '廃棄物排出量に占める再資源化量の割合',
+    category: 'waste',
+    unit: '%',
+    baseUnit: '%',
+    dataType: 'ratio',
+    aggregationMethod: 'ratio',
+    requiresEvidence: false,
+    materiality: 'medium',
+    numerator: 'waste_recycled',
+    denominator: 'waste',
+    minValue: 0,
+    maxValue: 100,
+  },
+
+  // 気候関連の財務影響（SSBJ 第2号 第79項〜第84項の産業横断的指標等）
+  {
+    code: 'transition_risk_assets',
+    name: '移行リスクに脆弱な資産・事業活動の金額',
+    description: '気候関連の移行リスクに対して脆弱な資産の帳簿価額。SSBJ 第2号 第79項',
+    category: 'climate_transition',
+    unit: '百万円',
+    baseUnit: '百万円',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    minValue: 0,
+    hqOnly: true,
+  },
+  {
+    code: 'transition_risk_ratio',
+    name: '移行リスクに脆弱な資産の割合',
+    description: '総資産に占める移行リスクに脆弱な資産の割合。SSBJ 第2号 第79項',
+    category: 'climate_transition',
+    unit: '%',
+    baseUnit: '%',
+    dataType: 'ratio',
+    aggregationMethod: 'ratio',
+    requiresEvidence: false,
+    materiality: 'high',
+    minValue: 0,
+    maxValue: 100,
+    hqOnly: true,
+  },
+  {
+    code: 'physical_risk_assets',
+    name: '物理的リスクに脆弱な資産・事業活動の金額',
+    description: '急性・慢性の物理的リスクに対して脆弱な資産の帳簿価額。SSBJ 第2号 第80項',
+    category: 'climate_transition',
+    unit: '百万円',
+    baseUnit: '百万円',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    minValue: 0,
+    hqOnly: true,
+  },
+  {
+    code: 'physical_risk_ratio',
+    name: '物理的リスクに脆弱な資産の割合',
+    description: '総資産に占める物理的リスクに脆弱な資産の割合。SSBJ 第2号 第80項',
+    category: 'climate_transition',
+    unit: '%',
+    baseUnit: '%',
+    dataType: 'ratio',
+    aggregationMethod: 'ratio',
+    requiresEvidence: false,
+    materiality: 'high',
+    minValue: 0,
+    maxValue: 100,
+    hqOnly: true,
+  },
+  {
+    code: 'climate_opportunity_assets',
+    name: '気候関連の機会と整合した資産・事業活動の金額',
+    description: '低炭素製品・サービスなど気候関連の機会に整合した資産の金額。SSBJ 第2号 第81項',
+    category: 'climate_transition',
+    unit: '百万円',
+    baseUnit: '百万円',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'medium',
+    minValue: 0,
+    hqOnly: true,
+  },
+  {
+    code: 'climate_capex',
+    name: '気候関連のリスク及び機会への資本投下額',
+    description: '資本的支出・ファイナンス・投資の額。SSBJ 第2号 第82項',
+    category: 'climate_transition',
+    unit: '百万円',
+    baseUnit: '百万円',
+    dataType: 'number',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    minValue: 0,
+    hqOnly: true,
+  },
+  {
+    code: 'internal_carbon_price',
+    name: '内部炭素価格',
+    description: '意思決定に用いる 1 t-CO2e あたりの内部価格。SSBJ 第2号 第83項',
+    category: 'climate_transition',
+    unit: '円/t-CO2e',
+    baseUnit: '円/t-CO2e',
+    dataType: 'number',
+    aggregationMethod: 'latest',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+    hqOnly: true,
+  },
+  {
+    code: 'exec_comp_climate_ratio',
+    name: '役員報酬に占める気候関連評価項目の割合',
+    description: '報酬に組み込まれた気候関連の評価項目の割合。SSBJ 第2号 第84項',
+    category: 'climate_transition',
+    unit: '%',
+    baseUnit: '%',
+    dataType: 'ratio',
+    aggregationMethod: 'latest',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+    maxValue: 100,
+    hqOnly: true,
+  },
+
+  // 人的資本（CSRD ESRS S1）
+  {
+    code: 'collective_bargaining_ratio',
+    name: '労働協約の適用を受ける従業員の割合',
+    description: '団体交渉によって労働条件が定まる従業員の割合。ESRS S1-8',
+    category: 'human_capital',
+    unit: '%',
+    baseUnit: '%',
+    dataType: 'ratio',
+    aggregationMethod: 'weighted_average',
+    requiresEvidence: false,
+    materiality: 'low',
+    minValue: 0,
+    maxValue: 100,
+  },
+  {
+    code: 'work_related_injuries',
+    name: '労働災害件数',
+    description: '休業を伴う労働災害の件数。ESRS S1-14',
+    category: 'human_capital',
+    unit: '件',
+    baseUnit: '件',
+    dataType: 'integer',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    minValue: 0,
+  },
+  {
+    code: 'work_related_fatalities',
+    name: '労働災害による死亡者数',
+    description: '業務に起因する死亡者数。ESRS S1-14',
+    category: 'human_capital',
+    unit: '人',
+    baseUnit: '人',
+    dataType: 'integer',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    minValue: 0,
+  },
+  {
+    code: 'male_parental_leave_ratio',
+    name: '男性の育児休業取得率',
+    description: '配偶者が出産した男性従業員のうち育児休業を取得した者の割合',
+    category: 'human_capital',
+    unit: '%',
+    baseUnit: '%',
+    dataType: 'ratio',
+    aggregationMethod: 'weighted_average',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+    maxValue: 100,
+    hqOnly: true,
+  },
+
+  // ガバナンス（CSRD ESRS G1）
+  {
+    code: 'corruption_cases',
+    name: '腐敗・贈収賄の確定事案件数',
+    description: '報告期間中に確定した事案の件数。ESRS G1-4',
+    category: 'governance',
+    unit: '件',
+    baseUnit: '件',
+    dataType: 'integer',
+    aggregationMethod: 'sum',
+    requiresEvidence: true,
+    materiality: 'high',
+    minValue: 0,
+    hqOnly: true,
+  },
+  {
+    code: 'whistleblower_reports',
+    name: '内部通報の受付件数',
+    description: '内部通報制度で受け付けた件数。ESRS G1-1 の方針の運用実績',
+    category: 'governance',
+    unit: '件',
+    baseUnit: '件',
+    dataType: 'integer',
+    aggregationMethod: 'sum',
+    requiresEvidence: false,
+    materiality: 'medium',
+    minValue: 0,
+    hqOnly: true,
+  },
 ];
+
+/**
+ * 指標を要求している開示基準の対応表。
+ *
+ * 指標ごとに書き散らすのではなく 1 か所へ集めているのは、基準が改正されたときに
+ * ここだけを原文と突き合わせれば差分を確認できるようにするため。
+ * 括弧内は根拠の条項（SSBJ は src/lib/frameworks/ssbj-2026.ts の code に対応）。
+ */
+const METRIC_FRAMEWORKS: Record<string, MetricFrameworkKey[]> = {
+  // GHG は 3 基準すべてが求める（SSBJ 気候-47 / CDP C6 / ESRS E1-6）
+  scope1: ['ssbj', 'cdp', 'csrd'],
+  scope2: ['ssbj', 'cdp', 'csrd'],
+  scope2_location: ['ssbj', 'cdp'],
+  scope3_total: ['ssbj', 'cdp', 'csrd'],
+  scope3_cat1: ['ssbj', 'cdp', 'csrd'],
+  scope3_cat2: ['ssbj', 'cdp'],
+  scope3_cat3: ['ssbj', 'cdp'],
+  scope3_cat4: ['ssbj', 'cdp'],
+  scope3_cat5: ['ssbj', 'cdp'],
+  scope3_cat6: ['ssbj', 'cdp'],
+  scope3_cat7: ['ssbj', 'cdp'],
+  scope3_cat8: ['ssbj', 'cdp'],
+  scope3_cat9: ['ssbj', 'cdp'],
+  scope3_cat10: ['ssbj', 'cdp'],
+  scope3_cat11: ['ssbj', 'cdp'],
+  scope3_cat12: ['ssbj', 'cdp'],
+  scope3_cat13: ['ssbj', 'cdp'],
+  scope3_cat14: ['ssbj', 'cdp'],
+  scope3_cat15: ['ssbj', 'cdp'],
+  ghg_intensity: ['cdp'],
+
+  // エネルギー（CDP C8 / ESRS E1-5）
+  energy: ['cdp', 'csrd'],
+  energy_renewable: ['cdp', 'csrd'],
+  renewable_ratio: ['cdp', 'csrd'],
+
+  // 水（CDP W1 / ESRS E3-4）
+  water: ['cdp', 'csrd'],
+  water_withdrawal: ['cdp', 'csrd'],
+  water_discharge: ['cdp', 'csrd'],
+  water_stress_withdrawal: ['cdp', 'csrd'],
+
+  // 廃棄物・資源循環（CDP / ESRS E5-5）
+  waste: ['cdp', 'csrd'],
+  waste_hazardous: ['csrd'],
+  waste_recycled: ['csrd'],
+  recycling_rate: ['cdp', 'csrd'],
+
+  // 気候関連の財務影響（SSBJ 気候-79〜84）
+  transition_risk_assets: ['ssbj'],
+  transition_risk_ratio: ['ssbj'],
+  physical_risk_assets: ['ssbj'],
+  physical_risk_ratio: ['ssbj'],
+  climate_opportunity_assets: ['ssbj'],
+  climate_capex: ['ssbj'],
+  internal_carbon_price: ['ssbj'],
+  exec_comp_climate_ratio: ['ssbj'],
+
+  // 人的資本（ESRS S1。女性管理職比率は日本の有価証券報告書でも求められる）
+  employees: ['csrd'],
+  female_employees: ['csrd'],
+  female_manager_ratio: ['csrd'],
+  gender_pay_gap: ['csrd'],
+  training_hours: ['csrd'],
+  ltifr: ['csrd'],
+  collective_bargaining_ratio: ['csrd'],
+  work_related_injuries: ['csrd'],
+  work_related_fatalities: ['csrd'],
+  male_parental_leave_ratio: ['csrd'],
+
+  // ガバナンス（ESRS G1 / CDP C12）
+  female_officer_ratio: ['csrd'],
+  corruption_cases: ['csrd'],
+  whistleblower_reports: ['csrd'],
+};
+
+/**
+ * 出所（frameworks）と実績値の有無（demoData）を後から重ねる。
+ *
+ * 指標定義ごとに書くと、基準が改正されたときに 60 か所を追いかけることになる。
+ * 対応表を 1 つ見れば済むようにしておく。
+ */
+const METRIC_SPECS: MetricSpec[] = METRIC_SPECS_RAW.map((spec) => ({
+  ...spec,
+  frameworks: METRIC_FRAMEWORKS[spec.code] ?? [],
+  demoData: COLLECTED_METRIC_CODES.has(spec.code),
+}));
 
 export function metricId(orgCode: string, code: string): string {
   return fid('metric', `${orgCode}/${code}`);
@@ -834,6 +1370,9 @@ export function buildDataPointSeeds(): DataPointSeed[] {
       if (!unit.reports) continue;
       for (const metric of METRIC_SPECS) {
         if (metric.hqOnly && unit.code !== 'HQ') continue;
+        // 基準から取り込んだだけでまだ社内に値が無い指標は、実績値を作らない。
+        // 架空の値で埋めるとデータギャップが消え、SSBJ 対応の主題が体験できなくなる
+        if (!metric.demoData) continue;
 
         const base = FY2025_BASE[metric.code] ?? 0;
         const isRatioOrCount =

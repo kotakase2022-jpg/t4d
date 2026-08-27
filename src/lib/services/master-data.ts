@@ -161,6 +161,8 @@ export async function createMetricDefinition(
     formula: input.formula,
     requiresEvidence: input.requiresEvidence,
     hqOnly: input.hqOnly,
+    // 画面から手で作った指標は自社独自のもの。基準から取り込んだ指標と混ぜない
+    frameworks: [],
     materiality: input.materiality,
     reportingFrequency: input.reportingFrequency,
     responsibleDepartment: input.responsibleDepartment,

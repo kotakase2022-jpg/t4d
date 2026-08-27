@@ -129,17 +129,52 @@ test.describe('企業 Vertical Slice', () => {
     // 差戻し理由は承認履歴とコメントの両方に残るため first() で確認する
     await expect(page.getByText('検針票の対象期間を確認してください。').first()).toBeVisible();
 
-    // 再提出 → 承認者が承認
+    // 再提出 → 承認の道筋を 5 段階すべて通す
     await loginAs(page, DEMO_USERS.siteUser);
     await page.goto(targetPath);
     await page.getByRole('button', { name: '提出' }).click();
 
+    // 段階ごとに承認できる役割が違う。道筋の定義どおりの順で承認していく
+    const stageActors = [
+      DEMO_USERS.reviewer, // 1. 拠点責任者の確認
+      DEMO_USERS.sustainability, // 2. 本社主管部門の確認
+      DEMO_USERS.reviewer, // 3. 内部統制部門の確認
+      DEMO_USERS.enterpriseAdmin, // 4. サステナビリティ推進部長の承認
+      DEMO_USERS.approver, // 5. 担当役員の承認
+    ];
+    for (const actor of stageActors) {
+      await loginAs(page, actor);
+      await page.goto(targetPath);
+      const approveStage = page.getByRole('button', { name: /「.+」を承認/ });
+      await expect(approveStage, `${actor} がこの段階を承認できない`).toBeVisible();
+      await approveStage.click();
+      await page.waitForLoadState('networkidle');
+    }
+
+    // 5 段階すべてを通して初めて承認済みになる
+    await page.goto(targetPath);
+    await expect(page.getByText('承認済み').first()).toBeVisible();
+  });
+
+  test('承認の道筋がある間は、段階を飛ばして承認できない', async ({ page }) => {
+    // 欧州販売子会社 / Scope1 = 提出済みで 1 段目の承認待ち。
+    // Demo Mode の状態はテスト間で共有されるので、他のテストが触らないデータを使う
+    // （WEST/waste は承認フローのテストが 1 段目を進めてしまう）
+    const targetPath = `/enterprise/data/${dataPointId('EU', 'scope1', 'FY2026')}`;
+
     await loginAs(page, DEMO_USERS.approver);
     await page.goto(targetPath);
-    const approve = page.getByRole('button', { name: '承認', exact: true });
-    await expect(approve).toBeVisible();
-    await approve.click();
-    await expect(page.getByText('承認済み').first()).toBeVisible();
+
+    // 押しても必ず失敗する「承認」ボタンは置かず、承認フローへ誘導する
+    await expect(page.getByRole('button', { name: '承認', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /承認フローへ（\d+\/5 段階）/ })).toBeVisible();
+
+    // 本社サステナ担当は 1 段目（拠点責任者の確認）の承認者ではないので、
+    // 承認ボタンの代わりに「誰の番か」が出る
+    await loginAs(page, DEMO_USERS.sustainability);
+    await page.goto(targetPath);
+    await expect(page.getByRole('button', { name: /「.+」を承認/ })).toHaveCount(0);
+    await expect(page.getByText(/あなたはこの段階の承認者ではありません/)).toBeVisible();
   });
 
   test('拠点担当は承認ボタンを持たない（権限による UI 分岐）', async ({ page }) => {

@@ -155,6 +155,8 @@ test('本番: SSBJ のマテリアリティ登録が永続化される', async (
   await page.goto(`${BASE}/enterprise/disclosures/ssbj`);
   await expect(page.getByText('マテリアリティ充足度')).toBeVisible();
 
+  // 評価そのものは「①マテリアリティ・分析条件の設定」で行う（決める場所を 1 つに寄せた）
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/settings`);
   const reason = `本番スモーク ${Date.now().toString(36)}`;
   const row = page.locator('tr', { hasText: '労働安全衛生' });
   await row.getByRole('combobox').selectOption('high');
@@ -304,7 +306,9 @@ test('本番: SSBJ の開示ドラフトを出力できる', async ({ page }) =>
   // 要求事項そのものは一覧画面に移した（対応状況画面は集計を出す）
   await expect(page.getByText('全 133 要求事項', { exact: false })).toHaveCount(0);
 
-  const link = page.getByRole('link', { name: /開示ドラフト（DOCX）/ });
+  // 書き出しは開示ドラフトの画面にある（草案を作る場所と同じ）
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/draft`);
+  const link = page.getByRole('link', { name: /Word で書き出す/ });
   await expect(link, 'SSBJ の Export 導線が無い').toBeVisible();
 
   const href = (await link.getAttribute('href'))!;
@@ -573,5 +577,101 @@ test('本番: .txt は中身で振り分けて取り込む（表は行に、自�
 
   await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 120_000 });
   await expect(page.getByText(/資料として取り込みました/).first()).toBeVisible();
+  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+});
+
+test('本番: 指標マスターに開示基準の出所と充足状況が出る', async ({ page }) => {
+  await prodLogin(page, '青海 太郎');
+  await page.goto(`${BASE}/enterprise/organizations`);
+  const main = page.locator('#t4d-main');
+  await expect(main).toBeVisible();
+
+  await expect(main.getByText('開示基準からみた指標の充足状況')).toBeVisible();
+  await expect(main.getByText('SSBJ が求める指標')).toBeVisible();
+  await expect(main.getByText('CDP が求める指標')).toBeVisible();
+  await expect(main.getByText('CSRD が求める指標')).toBeVisible();
+
+  // SSBJ 第2号 第55項のスコープ 3 カテゴリー別指標が取り込まれている
+  await expect(main.locator('tr', { hasText: 'scope3_cat11' })).toHaveCount(1);
+  // 第79項の移行リスク資産（気候関連の財務影響）も入っている
+  await expect(main.locator('tr', { hasText: 'transition_risk_assets' })).toHaveCount(1);
+});
+
+test('本番: 指標と関係の無い行は警告を出さずに取り込み対象外になる', async ({ page }) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/imports`);
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  const marker = 7000 + (Date.now() % 900);
+  const csv = [
+    '拠点,項目,値,単位',
+    `本社,電力使用量,${marker},MWh`,
+    '作成者,山田 太郎,,',
+    '承認者,鈴木 花子,,',
+  ].join('\r\n');
+
+  await page.locator('input[type=file][name=files]').setInputFiles({
+    name: `prod-混在-${marker}.csv`,
+    mimeType: 'text/csv',
+    buffer: Buffer.from('\ufeff' + csv, 'utf8'),
+  });
+  await page.getByRole('button', { name: '取込を開始' }).click();
+  await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 120_000 });
+
+  await expect(page.getByText(/指標マスターと関係が無いため、2 行を取り込み対象外/)).toBeVisible();
+  await expect(page.getByText(String(marker)).first()).toBeVisible();
+});
+
+test('本番: マテリアリティ・分析条件の設定が未完了から始まる', async ({ page }) => {
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/settings`);
+  const main = page.locator('#t4d-main');
+  await expect(main).toBeVisible();
+
+  await expect(main.getByText('決めること（3 項目）')).toBeVisible();
+  await expect(main.getByText('適用する基準を決める')).toBeVisible();
+  await expect(main.getByText('報告の範囲を決める')).toBeVisible();
+  await expect(main.getByText('マテリアリティを評価する')).toBeVisible();
+  // ダミーで完了にしない。何かしら未完了が残っている
+  await expect(main.getByText('未完了')).not.toHaveCount(0);
+});
+
+test('本番: 最大 5 階層の承認フローと履歴が見られる', async ({ page }) => {
+  test.setTimeout(120_000);
+  await prodLogin(page, '海野 みどり');
+
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/collection`);
+  await expect(page.locator('#t4d-main')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '承認の進み具合' })).toBeVisible();
+
+  await page.goto(`${BASE}/enterprise/data`);
+  await page.locator('a[href^="/enterprise/data/"]').first().click();
+  await page.waitForURL(/\/enterprise\/data\/[0-9a-f-]+/);
+
+  await expect(page.getByText(/承認フロー（\d+ \/ 5 段階）/)).toBeVisible();
+  await expect(page.getByText('拠点責任者の確認')).toBeVisible();
+  await expect(page.getByText('担当役員の承認')).toBeVisible();
+  // いつ・誰が・承認／修正／差し戻し したかが 1 本の流れで見られる
+  await expect(page.getByText(/承認・修正の履歴/)).toBeVisible();
+});
+
+test('本番: 開示ドラフトを人工知能に書かせられる', async ({ page }) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '海野 みどり');
+
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/draft`);
+  const main = page.locator('#t4d-main');
+  await expect(main).toBeVisible();
+  await expect(main.getByText(/対応済み.*おおむね対応.*とした要求事項/)).toBeVisible();
+
+  await main.getByRole('button', { name: '人工知能に草案を作らせる' }).first().click();
+  await page.waitForURL(/generated=/, { timeout: 120_000 });
+
+  const body = page.locator('textarea[name="body"]').first();
+  await expect(body).toBeVisible();
+  expect((await body.inputValue()).length).toBeGreaterThan(20);
+  // 草案であることと、書けなかった箇所を必ず示す
+  await expect(page.getByText(/そのまま開示せず/).first()).toBeVisible();
   await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
 });

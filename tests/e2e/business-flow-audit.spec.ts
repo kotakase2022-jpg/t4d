@@ -71,16 +71,19 @@ test('承認フロー: 下書き → 提出 → 承認 → 承認済み一覧へ
   await page.goto(url);
   await expect(page.getByText(/提出済み|レビュー中/).first()).toBeVisible();
 
-  // 承認者が承認する
-  await loginAs(page, DEMO_USERS.approver);
+  // 承認は最大 5 階層の道筋を通る。段階ごとに承認できる役割が違うので、
+  // 1 段目（拠点責任者の確認 = reviewer）を承認して次へ進むことを確かめる
+  await loginAs(page, DEMO_USERS.reviewer);
   await page.goto(url);
-  const approve = page.getByRole('button', { name: '承認' }).first();
-  if ((await approve.count()) > 0) {
-    await approve.click();
-    await page.waitForLoadState('networkidle');
-    await page.goto(url);
-    await expect(page.getByText('承認済み').first()).toBeVisible();
-  }
+  const approveStage = page.getByRole('button', { name: /「.+」を承認/ });
+  await expect(approveStage).toBeVisible();
+  await approveStage.click();
+  await page.waitForLoadState('networkidle');
+
+  // リロードしても承認が残り、次の段階へ進んでいる
+  await page.goto(url);
+  await expect(page.getByText(/承認フロー（1 \/ 5 段階）/)).toBeVisible();
+  await expect(page.locator('#t4d-main').getByText('承認済み').first()).toBeVisible();
 });
 
 test('開示フロー: CDP の回答を保存 → 再訪しても残る', async ({ page }) => {

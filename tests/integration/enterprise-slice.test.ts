@@ -14,6 +14,7 @@ import {
   createIngestionJob,
   processIngestionJob,
 } from '@/lib/imports/service';
+import { decideApprovalStep, loadApprovalProgress } from '@/lib/services/approval-route';
 import { transitionDataPoint, updateDataPointValue } from '@/lib/services/data-point-workflow';
 import {
   generateDisclosureDraft,
@@ -289,8 +290,40 @@ describe('Submit → Review → Approve', () => {
     expect(approvals.some((a) => a.decision === 'returned')).toBe(true);
   });
 
-  it('承認者が承認すると承認証跡と監査ログが残る', async () => {
+  it('承認の道筋を通さずに一足飛びで承認はできない', async () => {
     await transitionDataPoint(db, siteUser(), { dataPointId: target, to: 'submitted' });
+    // 5 階層の道筋が定義されているので、段階を飛ばして確定させられない。
+    // 飛ばせると「誰の承認で確定したのか」を監査法人へ示せなくなる
+    await expect(
+      transitionDataPoint(db, approver(), { dataPointId: target, to: 'approved' }),
+    ).rejects.toThrow(/承認の道筋が残っています/);
+  });
+
+  it('5 階層すべてを承認すると承認証跡と監査ログが残る', async () => {
+    await transitionDataPoint(db, siteUser(), { dataPointId: target, to: 'submitted' });
+
+    // 道筋を 1 段ずつ承認していく。各段階を承認できる役割は道筋の定義で決まる
+    const actorFor: Record<string, () => AuthorizationContext> = {
+      reviewer,
+      sustainability_manager: manager,
+      enterprise_admin: () => ctxFor('enterprise-admin@demo.local', ['enterprise_admin']),
+      approver,
+    };
+    for (let stage = 1; stage <= 5; stage += 1) {
+      const progress = await loadApprovalProgress(db, approver(), target);
+      const step = progress.currentStep!;
+      expect(step.stageNo).toBe(stage);
+      await decideApprovalStep(db, actorFor[step.approverRole]!(), {
+        dataPointId: target,
+        decision: 'approved',
+        comment: '',
+      });
+    }
+
+    const done = await loadApprovalProgress(db, approver(), target);
+    expect(done.complete).toBe(true);
+    expect(done.approvedCount).toBe(5);
+
     await transitionDataPoint(db, approver(), { dataPointId: target, to: 'approved' });
 
     const dp = await db.findById('dataPoints', target);

@@ -2,10 +2,20 @@ import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { FlashMessage } from '@/components/shared/flash';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import {
+  AGGREGATION_METHOD_LABEL,
+  MATERIALITY_LABEL,
+  METRIC_CATEGORY_LABEL,
+  METRIC_DATA_TYPE_LABEL,
+  METRIC_FRAMEWORK_LABEL,
+  summarizeFrameworkCoverage,
+} from '@/lib/domain/metrics';
 import { formatJstDate } from '@/lib/format/datetime';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { METRIC_FRAMEWORK_KEYS } from '@/types/domain';
 import {
   AddMetricButton,
   AddUnitButton,
@@ -49,6 +59,21 @@ export default async function OrganizationsPage({
   const canManageOrg = can(shell.ctx, 'enterprise.org.manage');
   const canManageMetric = can(shell.ctx, 'enterprise.metric.manage');
   const canManagePeriod = can(shell.ctx, 'enterprise.period.manage');
+
+  // 基準ごとの指標充足状況。値が「入っている」の判定は当年度の Data Point の有無で行う
+  // （承認前でも、集める仕組みが動いていることは分かるため）
+  const currentDataPoints = await shell.db.select('dataPoints', {
+    where: {
+      organizationId: shell.ctx.workspace.organizationId,
+      reportingPeriodId: shell.currentPeriod.id,
+      deletedAt: { isNull: true },
+    },
+  });
+  const frameworkCoverage = summarizeFrameworkCoverage(
+    shell.metrics,
+    new Set(currentDataPoints.map((dp) => dp.metricId)),
+    METRIC_FRAMEWORK_KEYS,
+  );
 
   // 収集キャンペーン（ORG-P0-002）。作成済みのものと、そのスコープ件数を表示する。
   const campaigns = await shell.db.select('campaigns', {
@@ -264,6 +289,50 @@ export default async function OrganizationsPage({
           )}
         </Card>
 
+        {/* 指標の数だけでは足りているか分からない。基準ごとに、
+            求められている指標のうち何件に値があるかを先に見せる */}
+        <Card className="overflow-hidden">
+          <SectionTitle
+            title="開示基準からみた指標の充足状況"
+            action={
+              <span className="text-[11px] text-ink-muted">
+                {shell.currentPeriod.label}の実績値が入っている指標の割合
+              </span>
+            }
+          />
+          <ul className="grid grid-cols-3 gap-2 p-3">
+            {frameworkCoverage.map((coverage) => (
+              <li key={coverage.framework}>
+                <Card className="space-y-1.5 p-2.5">
+                  <p className="flex items-center justify-between text-[11px] text-ink-muted">
+                    <span>{coverage.label} が求める指標</span>
+                    <span className="tabular-nums text-ink">
+                      {coverage.collected} / {coverage.required} 件
+                    </span>
+                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <Progress
+                      value={coverage.rate}
+                      tone={
+                        coverage.rate >= 80 ? 'success' : coverage.rate >= 50 ? 'warning' : 'danger'
+                      }
+                      label={`${coverage.label} の指標充足率 ${coverage.rate}%`}
+                    />
+                    <span className="text-[13px] font-semibold tabular-nums text-ink">
+                      {coverage.rate}%
+                    </span>
+                  </div>
+                  {coverage.required - coverage.collected > 0 && (
+                    <p className="text-[11px] text-[#8a5d00]">
+                      値が無い指標 {coverage.required - coverage.collected} 件
+                    </p>
+                  )}
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
         <Card className="overflow-hidden">
           <SectionTitle
             title={`指標マスター（${shell.metrics.length}）`}
@@ -275,11 +344,12 @@ export default async function OrganizationsPage({
                 <TR>
                   <TH>コード</TH>
                   <TH>指標名</TH>
-                  <TH>カテゴリ</TH>
+                  <TH>求めている基準</TH>
+                  <TH>分類</TH>
                   <TH>単位</TH>
                   <TH>データ型</TH>
                   <TH>集計方法</TH>
-                  <TH>Evidence 必須</TH>
+                  <TH>根拠資料</TH>
                   <TH>重要度</TH>
                   <TH>前年変動許容</TH>
                   <TH>責任部署</TH>
@@ -291,12 +361,25 @@ export default async function OrganizationsPage({
                   <TR key={metric.id}>
                     <TD className="font-mono text-[11px]">{metric.code}</TD>
                     <TD>{metric.name}</TD>
-                    <TD>{metric.category}</TD>
+                    <TD>
+                      {metric.frameworks.length === 0 ? (
+                        <span className="text-[11px] text-ink-muted">自社独自</span>
+                      ) : (
+                        <span className="flex flex-wrap gap-1">
+                          {metric.frameworks.map((framework) => (
+                            <Badge key={framework} tone="brand">
+                              {METRIC_FRAMEWORK_LABEL[framework]}
+                            </Badge>
+                          ))}
+                        </span>
+                      )}
+                    </TD>
+                    <TD>{METRIC_CATEGORY_LABEL[metric.category]}</TD>
                     <TD>{metric.unit}</TD>
-                    <TD>{metric.dataType}</TD>
-                    <TD>{metric.aggregationMethod}</TD>
+                    <TD>{METRIC_DATA_TYPE_LABEL[metric.dataType]}</TD>
+                    <TD>{AGGREGATION_METHOD_LABEL[metric.aggregationMethod]}</TD>
                     <TD>{metric.requiresEvidence ? <Badge tone="brand">必須</Badge> : '—'}</TD>
-                    <TD>{metric.materiality}</TD>
+                    <TD>{MATERIALITY_LABEL[metric.materiality]}</TD>
                     <TD align="right">
                       {metric.yoyWarningRatio === null
                         ? '—'

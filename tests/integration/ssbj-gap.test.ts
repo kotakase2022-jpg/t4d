@@ -383,10 +383,17 @@ describe('対応計画とデータ収集への接続', () => {
       department: '物流部',
     });
 
-    // 指標マスターが作られ、担当・期限つきの割当が入る
-    const metric = fixture.metrics.find((m) => m.code === 'scope3_cat4');
-    expect(metric?.name).toContain('カテゴリー4');
+    // scope3_cat4 は SSBJ 第2号 第55項から指標マスターへ取り込み済みなので、
+    // 同じコードで作り直さず、既存の定義を使う（重複を作らない）
+    const matches = fixture.metrics.filter(
+      (m) => m.code === 'scope3_cat4' && m.organizationId === ORG_IDS.aomi,
+    );
+    expect(matches).toHaveLength(1);
+    const metric = matches[0];
+    expect(metric?.name).toContain('Category 4');
+    expect(metric?.frameworks).toContain('ssbj');
     expect(metric?.requiresEvidence).toBe(true);
+    // マスターに担当部署が無かったので、計画側で決めた部署が入る
     expect(metric?.responsibleDepartment).toBe('物流部');
 
     const assignment = fixture.metricAssignments.find(

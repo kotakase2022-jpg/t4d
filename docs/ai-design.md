@@ -29,21 +29,25 @@ Responses API の構造化出力・Zod スキーマ適合を検証）。
 > `openai` SDK は v7 系が必要です。v4 系は同梱の `node-fetch` v2 が現在の API の応答を読めず、
 > 全 Model・全 Endpoint で `ERR_STREAM_PREMATURE_CLOSE` になります（README「追加ライブラリと採用理由」）。
 
-## 2. Use Case（8 種）と構造化出力
+## 2. Use Case（12 種）と構造化出力
 
 すべて Zod スキーマで検証します（`src/lib/ai/schemas.ts`）。
 **Free Text をそのまま業務確定値へ入れません。**
 
-| feature                    | 用途                    | 主な出力                                                                                        |
-| -------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------- |
-| `importMapping`            | 取込行の項目マッピング  | rows[]（metricCode / unitCode / value / unitOfMeasure / confidence / warnings / sourceLocator） |
-| `anomalyExplanation`       | 異常値の原因候補        | findings[]（likelyCause / suggestedAction / severity）                                          |
-| `cdpQuestionMapping`       | 質問 ↔ 指標の対応候補   | mappings[]（itemCode / metricCode / rationale）                                                 |
-| `cdpDraftGeneration`       | 開示回答ドラフト        | draftText / draftNumeric / changeSummary / missingInformation                                   |
-| `evidenceMapping`          | Evidence 該当箇所の候補 | candidates[]（fileVersionId / page / excerpt）                                                  |
-| `inconsistencyCheck`       | 矛盾・陳腐化            | issues[]（kind / subject / detail / severity）                                                  |
-| `assuranceEvidenceSummary` | Evidence 要約（監査）   | summary / keyFigures / **pointsToVerify**                                                       |
-| `assuranceChangeSummary`   | Snapshot 後変更の要約   | changes[]（possibleImpact / suggestsRetest）                                                    |
+| feature                    | 用途                                  | 主な出力                                                                                        |
+| -------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `importMapping`            | 取込行の項目マッピング                | rows[]（metricCode / unitCode / value / unitOfMeasure / confidence / warnings / sourceLocator） |
+| `anomalyExplanation`       | 異常値の原因候補                      | findings[]（likelyCause / suggestedAction / severity）                                          |
+| `cdpQuestionMapping`       | 質問 ↔ 指標の対応候補                 | mappings[]（itemCode / metricCode / rationale）                                                 |
+| `cdpDraftGeneration`       | 開示回答ドラフト                      | draftText / draftNumeric / changeSummary / missingInformation                                   |
+| `ssbjGapAnalysis`          | SSBJ 要求事項と現在の開示の突き合わせ | 3 観点の判定 / missingInformation / recommendation / 根拠の出典・ページ・該当文章               |
+| `ssbjDisclosureDraft`      | SSBJ 開示ドラフトの草案               | body（節ごとの文章）/ coveredItemCodes / **gaps[]（書けなかった箇所と理由）**                   |
+| `insightDiscovery`         | 気づいていない洞察の発見              | insights[]（finding / implication / recommendedAction / impact）                                |
+| `copilotChat`              | 権限内情報に限定した対話支援          | answer / references / suggestedQuestions                                                        |
+| `evidenceMapping`          | Evidence 該当箇所の候補               | candidates[]（fileVersionId / page / excerpt）                                                  |
+| `inconsistencyCheck`       | 矛盾・陳腐化                          | issues[]（kind / subject / detail / severity）                                                  |
+| `assuranceEvidenceSummary` | Evidence 要約（監査）                 | summary / keyFigures / **pointsToVerify**                                                       |
+| `assuranceChangeSummary`   | Snapshot 後変更の要約                 | changes[]（possibleImpact / suggestsRetest）                                                    |
 
 全スキーマが `confidence`（0..1）/ `warnings` / `sources` を**必須**にしています。
 `tests/unit/ai-schema.test.ts` がこれを検査します。

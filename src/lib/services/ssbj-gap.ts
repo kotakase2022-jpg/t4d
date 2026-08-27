@@ -877,6 +877,8 @@ export async function createDataCollectionItem(
         formula: null,
         requiresEvidence: input.requiresEvidence,
         hqOnly: false,
+        // SSBJ の対応計画から作られた指標なので、出所は SSBJ
+        frameworks: ['ssbj'],
         materiality: 'high',
         reportingFrequency: 'annual',
         responsibleDepartment: input.department.trim() || null,
@@ -890,6 +892,24 @@ export async function createDataCollectionItem(
         updatedBy: ctx.userId,
       },
     ]);
+  } else {
+    // 指標マスターは SSBJ・CDP・CSRD の要求から作ってあるため、SSBJ の対応計画で
+    // 集めようとする指標は既に定義済みのことが多い。同じコードで作り直すと
+    // 重複してしまうので、既存の定義を使い、まだ埋まっていない運用項目だけ補う。
+    const current = existing[0]!;
+    const patch: Partial<typeof current> = {};
+    // 担当部署は、対応計画で人が明示的に指定したものを優先する。
+    // マスター側の値はカテゴリーからの初期値でしかなく、実際に誰が集めるかは
+    // 計画を立てた人のほうが分かっている（例: Scope3 の輸送は物流部）
+    const department = input.department.trim();
+    if (department !== '' && department !== current.responsibleDepartment) {
+      patch.responsibleDepartment = department;
+    }
+    // 根拠資料が要ると計画側で判断したなら、それを弱めない
+    if (input.requiresEvidence && !current.requiresEvidence) patch.requiresEvidence = true;
+    if (Object.keys(patch).length > 0) {
+      await db.update('metrics', metricId!, { ...patch, updatedAt: now, updatedBy: ctx.userId });
+    }
   }
 
   // 同じ指標 × 拠点 × 期間の割当が既にあれば作り直さない
@@ -951,6 +971,8 @@ export interface DataCollectionRow {
   /** 収集済みの値（承認済みのみ） */
   collectedValue: number | null;
   collectedStatus: string | null;
+  /** 台帳のデータ。承認の進み具合と履歴を辿る先。まだ入力が無ければ null */
+  dataPointId: string | null;
 }
 
 /** データ収集管理画面のための一覧 */
@@ -1000,6 +1022,7 @@ export async function loadDataCollection(
         daysLeft: assignment.dueDate ? daysUntilJst(assignment.dueDate, FIXTURE_TODAY) : null,
         collectedValue: dp?.value ?? null,
         collectedStatus: dp?.status ?? null,
+        dataPointId: dp?.id ?? null,
       });
     }
   }

@@ -116,6 +116,35 @@ export const ssbjGapAnalysisSchema = z.object({
 });
 export type SsbjGapAnalysisOutput = z.infer<typeof ssbjGapAnalysisSchema>;
 
+// 4.6 ssbjDisclosureDraft — SSBJ 開示ドラフトの草案生成
+//
+// 要求事項ごとの短い回答ではなく、開示書類に載せる節（ガバナンス・戦略・
+// リスク管理・指標及び目標）単位の文章を書かせる。SSBJ の開示は
+// 項目を並べた表ではなく地の文で書くため、節ごとに一貫した文章が要る。
+//
+// 生成されるのは**草案**であり、そのまま開示にはしない。
+// 人が読んで直し、確定する（CLAUDE.md §0.4）。
+export const ssbjDisclosureDraftSchema = z.object({
+  /** 節（governance / strategy / risk / metrics） */
+  area: z.enum(['governance', 'strategy', 'risk', 'metrics', 'other']),
+  /** 開示書類に載せる文章の草案 */
+  body: z.string(),
+  /** 草案が根拠にした要求事項のコード */
+  coveredItemCodes: z.array(z.string()),
+  /**
+   * 書けなかった箇所。データが無い・判定が未確認などで、
+   * 人が埋めないと開示にできない部分を明示する
+   */
+  gaps: z.array(
+    z.object({
+      itemCode: z.string(),
+      reason: z.string(),
+    }),
+  ),
+  ...base,
+});
+export type SsbjDisclosureDraftOutput = z.infer<typeof ssbjDisclosureDraftSchema>;
+
 // 5. evidenceMapping — Evidence 該当箇所の候補
 export const evidenceMappingSchema = z.object({
   candidates: z.array(
@@ -227,6 +256,7 @@ export const AI_SCHEMAS = {
   cdpQuestionMapping: cdpQuestionMappingSchema,
   cdpDraftGeneration: cdpDraftGenerationSchema,
   ssbjGapAnalysis: ssbjGapAnalysisSchema,
+  ssbjDisclosureDraft: ssbjDisclosureDraftSchema,
   evidenceMapping: evidenceMappingSchema,
   inconsistencyCheck: inconsistencyCheckSchema,
   insightDiscovery: insightDiscoverySchema,
@@ -245,6 +275,7 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   cdpQuestionMapping: 'cdp-question-mapping@2026-08-14.1',
   cdpDraftGeneration: 'cdp-draft-generation@2026-08-14.1',
   ssbjGapAnalysis: 'ssbj-gap-analysis@2026-08-26.1',
+  ssbjDisclosureDraft: 'ssbj-disclosure-draft@2026-08-27.1',
   evidenceMapping: 'evidence-mapping@2026-08-14.1',
   inconsistencyCheck: 'inconsistency-check@2026-08-17.1',
   insightDiscovery: 'insight-discovery@2026-08-17.1',

@@ -524,6 +524,99 @@ function buildMockOutput<F extends AiFeature>(
       };
     }
 
+    case 'ssbjDisclosureDraft': {
+      const area = String(input.area ?? 'other') as
+        'governance' | 'strategy' | 'risk' | 'metrics' | 'other';
+      const areaLabel = String(input.areaLabel ?? '');
+      const organizationName = String(input.organizationName ?? '当社');
+      const periodLabel = String(input.periodLabel ?? '当年度');
+      const requirements =
+        (input.requirements as Array<{
+          code: string;
+          title: string;
+          finalStatus: string | null;
+          materiality: string;
+          reviewed: boolean;
+        }>) ?? [];
+      const metricValues =
+        (input.metricValues as Array<{ label: string; value: number; unit: string }>) ?? [];
+      const documents =
+        (input.documents as Array<{ name: string; page: string; excerpt: string }>) ?? [];
+      const sources = (input.sources as never[]) ?? [];
+
+      // 草案に書けるのは、担当者が確認して「対応済み／おおむね対応」とした要求事項だけ。
+      // 未確認や未対応を書けることにすると、根拠の無い文章が開示に載る
+      const writable = requirements.filter(
+        (r) => r.reviewed && (r.finalStatus === 'covered' || r.finalStatus === 'mostly_covered'),
+      );
+      const gaps = requirements
+        .filter((r) => !writable.includes(r))
+        .map((r) => ({
+          itemCode: r.code,
+          reason: !r.reviewed
+            ? '担当者の確認が済んでいないため、草案に含めていません。'
+            : r.finalStatus === 'not_covered'
+              ? '現在の開示資料に該当する記述が無いため、書ける材料がありません。'
+              : r.materiality === 'not_assessed'
+                ? '重要性の判断が済んでいないため、記載の要否が決まりません。'
+                : '対応が一部にとどまるため、そのまま開示できる水準に達していません。',
+        }));
+
+      const numbers =
+        metricValues.length > 0
+          ? metricValues
+              .slice(0, 6)
+              .map((m) => `${m.label} ${m.value.toLocaleString('ja-JP')} ${m.unit}`)
+              .join('、')
+          : null;
+      const cited = documents.length > 0 ? documents[Math.floor(rng() * documents.length)]! : null;
+
+      const opening: Record<typeof area, string> = {
+        governance: `${organizationName}は、サステナビリティ関連のリスク及び機会を監督する体制として、取締役会がその監督責任を負い、業務執行における管理を執行役員が担っています。`,
+        strategy: `${organizationName}は、サステナビリティ関連のリスク及び機会が事業モデル及びバリュー・チェーンに及ぼす影響を評価しています。`,
+        risk: `${organizationName}は、サステナビリティ関連のリスクを識別・評価・優先順位付けし、監視するプロセスを整備しています。`,
+        metrics: `${organizationName}は、サステナビリティ関連のリスク及び機会の管理状況を測る指標及び目標を設定しています。`,
+        other: `${organizationName}は、${areaLabel}に関する情報を以下のとおり開示します。`,
+      };
+
+      const bodyParts = [
+        opening[area],
+        writable.length > 0
+          ? `${periodLabel}においては、${writable
+              .slice(0, 5)
+              .map((r) => r.title)
+              .join('、')}について開示しています。`
+          : `${periodLabel}時点で、この節に記載できる確認済みの事項はありません。`,
+        numbers ? `主要な指標は次のとおりです。${numbers}。` : null,
+        cited ? `記載内容の根拠は${cited.name}（${cited.page}）に基づいています。` : null,
+        gaps.length > 0
+          ? `なお、${gaps.length} 件の要求事項については記載を保留しています（詳細は下の「書けなかった箇所」を参照）。`
+          : null,
+      ].filter((v): v is string => Boolean(v));
+
+      return {
+        area,
+        body: bodyParts.join('\n\n'),
+        coveredItemCodes: writable.map((r) => r.code),
+        gaps,
+        // 書ける材料が少ないほど確信度を下げる
+        confidence:
+          requirements.length === 0
+            ? 0.2
+            : Math.min(0.85, 0.3 + (writable.length / requirements.length) * 0.5 + rng() * 0.05),
+        warnings: [
+          'これは草案です。そのまま開示せず、担当者が内容を確認し、必要な修正を加えてから確定してください。',
+          ...(gaps.length > 0
+            ? [`${gaps.length} 件の要求事項は根拠が足りず、草案に含めていません。`]
+            : []),
+          ...(metricValues.length === 0
+            ? ['承認済みの数値が無いため、定量的な記述を含めていません。']
+            : []),
+        ],
+        sources,
+      };
+    }
+
     case 'evidenceMapping': {
       const fragments =
         (input.fragments as Array<{

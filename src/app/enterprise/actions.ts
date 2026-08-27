@@ -19,6 +19,10 @@ import {
   saveSsbjScope,
   updateActionPlan,
 } from '@/lib/services/ssbj-gap';
+import { confirmSsbjSettings, saveSsbjSettings } from '@/lib/services/ssbj-settings';
+import { decideApprovalStep } from '@/lib/services/approval-route';
+import { confirmSsbjDraft, generateSsbjDraft, saveSsbjDraftBody } from '@/lib/services/ssbj-draft';
+import type { SsbjArea } from '@/lib/domain/ssbj';
 import { MAX_FILES_PER_IMPORT, type ImportPreviewPayload } from './imports/preview-types';
 import { sha256Hex } from '@/lib/storage';
 import {
@@ -64,6 +68,7 @@ import type {
   PeriodStatus,
   ResponseStatus,
   RoleKey,
+  SsbjValueChainScope,
   Uuid,
 } from '@/types/domain';
 
@@ -247,6 +252,40 @@ export async function transitionDataPointAction(formData: FormData): Promise<voi
   revalidatePath('/enterprise/data');
   revalidatePath(`/enterprise/data/${String(formData.get('dataPointId') ?? '')}`);
   revalidatePath('/enterprise/dashboard');
+}
+
+/**
+ * 承認の道筋の 1 段階を決める（最大 5 階層）。
+ *
+ * 最後の段階まで承認されたら、その場でデータを承認済みにする。
+ * 段階をすべて通したのに別途もう一度承認操作が要るのは、
+ * 使う側から見て二度手間でしかない。
+ */
+export async function decideApprovalStepAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const dataPointId = String(formData.get('dataPointId') ?? '');
+  const decision = formData.get('decision') === 'returned' ? 'returned' : 'approved';
+  const comment = String(formData.get('comment') ?? '');
+
+  await withUserFacingError(`/enterprise/data/${dataPointId}`, async () => {
+    const result = await decideApprovalStep(db, ctx, { dataPointId, decision, comment });
+    if (result.completed) {
+      await transitionDataPoint(db, ctx, {
+        dataPointId,
+        to: 'approved',
+        comment: comment || null,
+      });
+    } else if (decision === 'returned') {
+      // 差し戻したら、提出者が直せる状態へ戻す
+      await transitionDataPoint(db, ctx, { dataPointId, to: 'returned', comment });
+    }
+  });
+
+  revalidatePath('/enterprise/data');
+  revalidatePath(`/enterprise/data/${dataPointId}`);
+  revalidatePath('/enterprise/dashboard');
+  revalidatePath('/enterprise/disclosures/ssbj/collection');
 }
 
 /** 一括操作の結果。画面へ返して件数と失敗理由を見せる */
@@ -1096,10 +1135,102 @@ export async function saveMaterialityTopicAction(formData: FormData): Promise<vo
 /** SSBJ の各画面を再検証する（詳細を更新したら一覧と全体状況にも効かせる） */
 function revalidateSsbj(itemId: string | null): void {
   revalidatePath('/enterprise/disclosures/ssbj');
+  revalidatePath('/enterprise/disclosures/ssbj/settings');
   revalidatePath('/enterprise/disclosures/ssbj/requirements');
   revalidatePath('/enterprise/disclosures/ssbj/plans');
   revalidatePath('/enterprise/disclosures/ssbj/collection');
   if (itemId) revalidatePath(`/enterprise/disclosures/ssbj/requirements/${itemId}`);
+}
+
+/** 手順 1: マテリアリティ・分析条件の設定（保存） */
+export async function saveSsbjSettingsAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const back = '/enterprise/disclosures/ssbj/settings';
+  await withUserFacingError(back, async () => {
+    await saveSsbjSettings(db, ctx, {
+      reportingPeriodId: String(formData.get('reportingPeriodId') ?? ''),
+      applyGeneral: formData.get('applyGeneral') === 'on',
+      applyClimate: formData.get('applyClimate') === 'on',
+      applyPractical: formData.get('applyPractical') === 'on',
+      firstTimeAdoption: formData.get('firstTimeAdoption') === 'on',
+      consolidationScope:
+        formData.get('consolidationScope') === 'custom' ? 'custom' : 'same_as_financial',
+      consolidationNote: String(formData.get('consolidationNote') ?? ''),
+      // 未指定は空配列＝全社。個別に選んだときだけ絞り込む
+      includedUnitIds: formData.getAll('includedUnitIds').map((v) => String(v)),
+      valueChainScope: String(
+        formData.get('valueChainScope') ?? 'not_decided',
+      ) as SsbjValueChainScope,
+      valueChainNote: String(formData.get('valueChainNote') ?? ''),
+    });
+  });
+  revalidateSsbj(null);
+  redirect(`${back}?saved=1`);
+}
+
+/** 開示ドラフト: 人工知能に節の草案を書かせる */
+export async function generateSsbjDraftAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const shell = await loadEnterpriseShell();
+  const back = '/enterprise/disclosures/ssbj/draft';
+  const area = String(formData.get('area') ?? 'governance') as SsbjArea;
+
+  await withUserFacingError(back, async () => {
+    await generateSsbjDraft(db, ctx, shell.currentPeriod, area);
+  });
+  revalidatePath(back);
+  redirect(`${back}?generated=${area}`);
+}
+
+/** 開示ドラフト: 草案の本文を人が直す */
+export async function saveSsbjDraftAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const back = '/enterprise/disclosures/ssbj/draft';
+
+  await withUserFacingError(back, async () => {
+    await saveSsbjDraftBody(
+      db,
+      ctx,
+      String(formData.get('draftId') ?? ''),
+      String(formData.get('body') ?? ''),
+    );
+  });
+  revalidatePath(back);
+  redirect(`${back}?saved=1`);
+}
+
+/** 開示ドラフト: 草案を確定する（人の操作でのみ確定する） */
+export async function confirmSsbjDraftAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const back = '/enterprise/disclosures/ssbj/draft';
+
+  await withUserFacingError(back, async () => {
+    await confirmSsbjDraft(db, ctx, String(formData.get('draftId') ?? ''));
+  });
+  revalidatePath(back);
+  redirect(`${back}?confirmed=1`);
+}
+
+/** 手順 1: 分析条件の確定（人の操作でのみ確定する） */
+export async function confirmSsbjSettingsAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const shell = await loadEnterpriseShell();
+  const back = '/enterprise/disclosures/ssbj/settings';
+  await withUserFacingError(back, async () => {
+    await confirmSsbjSettings(
+      db,
+      ctx,
+      String(formData.get('reportingPeriodId') ?? ''),
+      shell.metrics,
+    );
+  });
+  revalidateSsbj(null);
+  redirect('/enterprise/disclosures/ssbj?confirmed=1');
 }
 
 /** 手順 3: 対象判定・重要性判断 */

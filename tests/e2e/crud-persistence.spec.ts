@@ -109,7 +109,7 @@ test('Data Point: 値の編集がDBへ反映され、リロード後も保持さ
 
 test('マテリアリティ: 重要と評価するなら理由が必須（サーバー側で拒否）', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
-  await page.goto('/enterprise/disclosures/ssbj');
+  await page.goto('/enterprise/disclosures/ssbj/settings');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   const row = page.locator('tr', { hasText: 'サプライチェーン管理' });
@@ -119,15 +119,15 @@ test('マテリアリティ: 重要と評価するなら理由が必須（サー
   await page.waitForLoadState('networkidle');
 
   // エラーになり、空白だけの理由は保存されない
-  await page.goto('/enterprise/disclosures/ssbj');
+  await page.goto('/enterprise/disclosures/ssbj/settings');
   const after = page.locator('tr', { hasText: 'サプライチェーン管理' });
   const rationale = await after.textContent();
-  expect(rationale, '空白のみの理由が保存されてしまった').toContain('購入部品の調達先');
+  expect(rationale, '空白のみの理由が保存されてしまった').toContain('未評価');
 });
 
 test('マテリアリティ: 評価の変更が永続化される', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
-  await page.goto('/enterprise/disclosures/ssbj');
+  await page.goto('/enterprise/disclosures/ssbj/settings');
 
   const reason = `監査検証 ${Date.now().toString(36)}`;
   const row = page.locator('tr', { hasText: '資源循環・廃棄物' });

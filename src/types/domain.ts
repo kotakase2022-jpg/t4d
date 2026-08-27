@@ -308,8 +308,14 @@ export const METRIC_CATEGORIES = [
   'waste',
   'human_capital',
   'governance',
+  /** 移行リスク資産・資本投下・内部炭素価格など、SSBJ 第2号 第79〜84項の財務寄りの指標 */
+  'climate_transition',
 ] as const;
 export type MetricCategory = (typeof METRIC_CATEGORIES)[number];
+
+/** 指標を要求している開示基準。指標マスターの出所を示す */
+export const METRIC_FRAMEWORK_KEYS = ['ssbj', 'cdp', 'csrd'] as const;
+export type MetricFrameworkKey = (typeof METRIC_FRAMEWORK_KEYS)[number];
 
 export interface MetricDefinition extends AuditColumns, SoftDeletable {
   id: Uuid;
@@ -330,6 +336,11 @@ export interface MetricDefinition extends AuditColumns, SoftDeletable {
   requiresEvidence: boolean;
   /** 本社（連結全体）でのみ収集する指標。拠点別のテンプレート・割り当てから除外する。 */
   hqOnly: boolean;
+  /**
+   * この指標を要求している開示基準。空配列は自社独自の指標。
+   * 「基準が求めているのに社内に指標が無い」を機械的に検知するための出所。
+   */
+  frameworks: MetricFrameworkKey[];
   materiality: 'high' | 'medium' | 'low';
   reportingFrequency: 'annual' | 'quarterly' | 'monthly';
   responsibleDepartment: string | null;
@@ -660,6 +671,76 @@ export interface Approval {
   decidedAt: IsoDateTime;
 }
 
+// ----------------------------------------------------------------------
+// 承認の道筋（最大 5 階層）
+// ----------------------------------------------------------------------
+
+/** 承認段階は最大 5 階層。これ以上は業務上現実的でなく、検証も発散する */
+export const MAX_APPROVAL_STAGES = 5;
+
+export const APPROVAL_STEP_STATUSES = [
+  /** 前の段階が終わっていない */
+  'waiting',
+  /** この段階の承認待ち */
+  'pending',
+  'approved',
+  'returned',
+] as const;
+export type ApprovalStepStatus = (typeof APPROVAL_STEP_STATUSES)[number];
+
+/** 承認の道筋のテンプレート */
+export interface ApprovalRoute extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  name: string;
+  description: string;
+  /** 指定が無いデータに使う道筋。組織にひとつだけ true */
+  isDefault: boolean;
+}
+
+/** 道筋の 1 段階 */
+export interface ApprovalRouteStage extends SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  routeId: Uuid;
+  /** 1 から 5 */
+  stageNo: number;
+  name: string;
+  /** この段階を承認できる役割。空なら承認権限を持つ誰でも */
+  approverRole: string;
+  /** 承認者を個人まで指定する場合。null なら役割で判定する */
+  approverUserId: Uuid | null;
+  department: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+/**
+ * データごとの承認段階。道筋の写しで、いつ誰が承認・差し戻したかを段階ごとに残す。
+ *
+ * 差し戻し後に出し直すと round が増え、前の巡の記録はそのまま残る
+ * （何度差し戻されたかが後から辿れる）。
+ */
+export interface DataPointApprovalStep {
+  id: Uuid;
+  organizationId: Uuid;
+  dataPointId: Uuid;
+  routeId: Uuid | null;
+  stageNo: number;
+  stageName: string;
+  approverRole: string;
+  approverUserId: Uuid | null;
+  department: string;
+  status: ApprovalStepStatus;
+  decidedAt: IsoDateTime | null;
+  decidedBy: Uuid | null;
+  comment: string;
+  /** 何回目の申請か */
+  round: number;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
 export interface Comment extends AuditColumns {
   id: Uuid;
   organizationId: Uuid;
@@ -977,6 +1058,84 @@ export interface SsbjAssessment extends AuditColumns {
   recheckReason: string;
 }
 
+/** 連結範囲の考え方 */
+export const SSBJ_CONSOLIDATION_SCOPES = ['same_as_financial', 'custom'] as const;
+export type SsbjConsolidationScope = (typeof SSBJ_CONSOLIDATION_SCOPES)[number];
+
+/** バリューチェーンをどこまで報告に含めるか */
+export const SSBJ_VALUE_CHAIN_SCOPES = [
+  'not_decided',
+  'upstream',
+  'downstream',
+  'both',
+  'none',
+] as const;
+export type SsbjValueChainScope = (typeof SSBJ_VALUE_CHAIN_SCOPES)[number];
+
+/**
+ * SSBJ 対応の分析条件。組織 × 報告期間で 1 件。
+ *
+ * 8 ステップの入口である①で決めるもの。ここが確定しないと、
+ * どの要求事項を評価対象にするのか自体が定まらない。
+ * confirmedAt は人の操作でのみ入る（AI は確定しない）。
+ */
+export interface SsbjAnalysisSettings extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+
+  /** 適用する基準 */
+  applyGeneral: boolean;
+  applyClimate: boolean;
+  applyPractical: boolean;
+  /** 初年度適用（経過措置を使うか） */
+  firstTimeAdoption: boolean;
+
+  /** 報告の範囲 */
+  consolidationScope: SsbjConsolidationScope;
+  consolidationNote: string;
+  /** 報告対象に含める組織・拠点。空配列は全社（未指定） */
+  includedUnitIds: Uuid[];
+  valueChainScope: SsbjValueChainScope;
+  valueChainNote: string;
+
+  /** 確定日時。null は未完了 */
+  confirmedAt: IsoDateTime | null;
+  confirmedBy: Uuid | null;
+}
+
+/**
+ * SSBJ 開示ドラフトの節ごとの草案。
+ *
+ * AI が書いた文章（aiBody）と、人が直した文章（body）を分けて持つ。
+ * 分けておかないと「どこを人が直したのか」が分からなくなり、
+ * AI の出力をそのまま開示したのかどうかを後から説明できない。
+ */
+export interface SsbjDisclosureDraft extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  /** 開示書類の節。src/lib/domain/ssbj.ts の SsbjArea と対応する */
+  area: 'governance' | 'strategy' | 'risk' | 'metrics' | 'other';
+
+  /** 開示に載せる文章（人が直したもの） */
+  body: string;
+  /** AI が草案を書いた時点の本文 */
+  aiBody: string;
+  coveredItemCodes: string[];
+  /** 書けなかった箇所 */
+  gaps: Array<{ itemCode: string; reason: string }>;
+
+  aiRunId: Uuid | null;
+  aiConfidence: number | null;
+  aiWarnings: string[];
+  aiGeneratedAt: IsoDateTime | null;
+
+  /** 人が確定した日時。null は未確定。AI では入らない */
+  confirmedAt: IsoDateTime | null;
+  confirmedBy: Uuid | null;
+}
+
 /** 対応区分。ギャップに対して何をするか */
 export const SSBJ_ACTION_TYPES = [
   'data_collection',
@@ -1070,6 +1229,11 @@ export const INGESTION_ROW_STATUSES = [
   'duplicate',
   'rejected',
   'confirmed',
+  /**
+   * 指標マスターと無関係と判断して自動で対象外にした行。警告は出さない。
+   * needs_review（人が直せば取り込める）でも rejected（人が外すと決めた）でもない。
+   */
+  'ignored',
 ] as const;
 export type IngestionRowStatus = (typeof INGESTION_ROW_STATUSES)[number];
 
@@ -1103,6 +1267,7 @@ export const AI_FEATURE_TYPES = [
   'cdpQuestionMapping',
   'cdpDraftGeneration',
   'ssbjGapAnalysis',
+  'ssbjDisclosureDraft',
   'evidenceMapping',
   'inconsistencyCheck',
   'insightDiscovery',

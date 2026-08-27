@@ -36,6 +36,9 @@ export const SQL_TABLE_NAMES: Record<TableName, string> = {
 
   tasks: 'tasks',
   approvals: 'approvals',
+  approvalRoutes: 'approval_routes',
+  approvalRouteStages: 'approval_route_stages',
+  dataPointApprovalSteps: 'data_point_approval_steps',
   comments: 'comments',
   notifications: 'notifications',
   alerts: 'alerts',
@@ -52,6 +55,8 @@ export const SQL_TABLE_NAMES: Record<TableName, string> = {
   responseEvidenceLinks: 'response_evidence_links',
   ssbjAssessments: 'ssbj_assessments',
   ssbjActionPlans: 'ssbj_action_plans',
+  ssbjAnalysisSettings: 'ssbj_analysis_settings',
+  ssbjDisclosureDrafts: 'ssbj_disclosure_drafts',
 
   ingestionJobs: 'ingestion_jobs',
   ingestionJobFiles: 'ingestion_job_files',

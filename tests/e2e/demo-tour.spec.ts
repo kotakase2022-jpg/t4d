@@ -55,10 +55,13 @@ test('ギャップ分析の画面へ直行し、人工知能が確定しない�
   const dialog = page.getByRole('dialog', { name: /デモモード/ });
   await expect(dialog).toBeVisible();
 
-  // 4 番目 = 最優先のギャップの詳細画面へ飛ぶ
-  for (let i = 0; i < 3; i += 1) {
-    await dialog.getByRole('button', { name: '次へ' }).click();
-  }
+  // 4 番目 = 最優先のギャップの詳細画面へ飛ぶ。
+  // 遷移の完了を待たずに連打すると、前の遷移の途中で次が始まって取りこぼす
+  await dialog.getByRole('button', { name: '次へ' }).click();
+  await page.waitForURL(/\/enterprise\/disclosures\/ssbj$/);
+  await dialog.getByRole('button', { name: '次へ' }).click();
+  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements$/);
+  await dialog.getByRole('button', { name: '次へ' }).click();
   await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/);
   await expect(dialog).toContainText(`4 / ${TOTAL_STEPS}`);
   await expect(dialog).toContainText('ギャップ分析');
@@ -83,23 +86,30 @@ test('対応計画・データ収集まで一巡し、「ツアーを終了」�
   const dialog = page.getByRole('dialog', { name: /デモモード/ });
   await expect(dialog).toBeVisible();
 
-  // 6 番目 = 対応計画
-  for (let i = 0; i < 5; i += 1) {
+  // 6 番目 = 対応計画。各ステップの遷移を待ってから次へ進む
+  const advance = async (expected: RegExp) => {
     await dialog.getByRole('button', { name: '次へ' }).click();
-  }
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/plans/);
+    await page.waitForURL(expected);
+  };
+  await advance(/\/enterprise\/disclosures\/ssbj$/);
+  await advance(/\/enterprise\/disclosures\/ssbj\/requirements$/);
+  await advance(/\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/);
+  // 5 番目は同じ画面のまま案内だけ切り替わる
+  await dialog.getByRole('button', { name: '次へ' }).click();
+  await expect(dialog).toContainText(`5 / ${TOTAL_STEPS}`);
+  await advance(/\/enterprise\/disclosures\/ssbj\/plans/);
   await expect(dialog).toContainText('対応計画の作成');
 
   // 7 番目 = データ収集
-  await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/collection/);
+  await advance(/\/enterprise\/disclosures\/ssbj\/collection/);
   await expect(dialog).toContainText('ギャップから収集依頼までつながる');
 
   // 最後まで進む
-  for (let i = 7; i < TOTAL_STEPS; i += 1) {
-    await dialog.getByRole('button', { name: '次へ' }).click();
-  }
-  await page.waitForURL(/\/enterprise\/workflows/);
+  await advance(/\/enterprise\/imports/);
+  await advance(/\/enterprise\/data/);
+  await advance(/\/enterprise\/evidence/);
+  await advance(/\/enterprise\/disclosures\/cdp/);
+  await advance(/\/enterprise\/workflows/);
   await expect(dialog).toContainText(`${TOTAL_STEPS} / ${TOTAL_STEPS}`);
 
   await dialog.getByRole('button', { name: 'ツアーを終了' }).click();

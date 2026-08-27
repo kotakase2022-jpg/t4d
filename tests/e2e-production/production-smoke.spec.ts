@@ -449,3 +449,35 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   await page.goto(`${BASE}/enterprise/disclosures/ssbj/collection`);
   await expect(main.getByRole('columnheader', { name: 'データ項目' })).toBeVisible();
 });
+
+test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ page }) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '海野 みどり');
+
+  // ホームの起点が SSBJ になっている
+  await page.goto(`${BASE}/enterprise/dashboard`);
+  const main = page.locator('#t4d-main');
+  await expect(main.getByText('SSBJ 対応度')).toBeVisible();
+  await expect(main.getByText('SSBJ 未対応')).toBeVisible();
+
+  // デモモードを開始すると SSBJ 対応の現在地から始まる
+  await page.getByRole('button', { name: 'デモモード' }).click();
+  const dialog = page.getByRole('dialog', { name: /デモモード/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('1 / 12');
+  await expect(dialog).toContainText('SSBJ 対応の現在地');
+
+  // 4 番目で最優先ギャップの詳細へ直行する。
+  // 遷移の完了を待たずに連打すると、前の遷移の途中で次が始まって取りこぼす
+  await dialog.getByRole('button', { name: '次へ' }).click();
+  await page.waitForURL(/\/enterprise\/disclosures\/ssbj$/);
+  await dialog.getByRole('button', { name: '次へ' }).click();
+  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements$/);
+  await dialog.getByRole('button', { name: '次へ' }).click();
+  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/);
+  await expect(main.getByText('開示ギャップ')).toBeVisible();
+  await expect(dialog).toContainText('手順 4');
+
+  await dialog.getByRole('button', { name: 'デモモードを終了' }).click();
+  await expect(page.getByRole('dialog', { name: /デモモード/ })).toHaveCount(0);
+});

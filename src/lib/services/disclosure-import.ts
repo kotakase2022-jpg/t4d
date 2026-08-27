@@ -1,4 +1,5 @@
 import 'server-only';
+import { ValidationError } from '@/lib/errors/user-facing';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
@@ -36,7 +37,7 @@ export interface ImportPreviewRow extends ExtractedAnswer {
 
 export interface ImportPreview {
   fileName: string;
-  parsedAs: 'table' | 'pdf' | 'docx';
+  parsedAs: 'table' | 'pdf' | 'text' | 'docx';
   rows: ImportPreviewRow[];
   warnings: string[];
 }
@@ -185,6 +186,22 @@ export async function buildImportPreview(
         p.text.split(/\r?\n/).map((text) => ({ text, locator: `p.${p.page}` })),
       );
       const r = extractFromLines(lines);
+      answers = r.answers;
+      warnings.push(...r.warnings);
+      break;
+    }
+    case 'text': {
+      // 表になっていない .txt。1 行ずつ「質問コード + 回答」として読む
+      parsedAs = 'text';
+      if (parsed.text.status !== 'parsed') {
+        throw new ValidationError(parsed.text.message ?? 'ファイルの中身が空でした。');
+      }
+      // 出典は行番号で示す。テキストにページは無く、原本を追える手掛かりはこれだけ
+      const r = extractFromLines(
+        parsed.text.pages.flatMap((p) =>
+          p.text.split(/\r?\n/).map((text, i) => ({ text, locator: `${i + 1}行目` })),
+        ),
+      );
       answers = r.answers;
       warnings.push(...r.warnings);
       break;

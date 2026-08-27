@@ -515,7 +515,7 @@ test('本番: 取り込めないファイルはエラー画面に落とさず、
 
   const dataTransfer = await page.evaluateHandle(() => {
     const dt = new DataTransfer();
-    dt.items.add(new File(['メモ'], '議事録.txt', { type: 'text/plain' }));
+    dt.items.add(new File(['PNG'], '写真.png', { type: 'image/png' }));
     return dt;
   });
   const zone = page.locator('label[for="import-files"]');
@@ -523,7 +523,55 @@ test('本番: 取り込めないファイルはエラー画面に落とさず、
   await zone.dispatchEvent('drop', { dataTransfer });
 
   // 「データを取得できませんでした」ではなく、どのファイルがなぜ駄目かを画面で伝える
-  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('議事録.txt');
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('写真.png');
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('拡張子');
+  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+});
+
+test('本番: .txt は中身で振り分けて取り込む（表は行に、自由記述は資料に）', async ({ page }) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '海野 みどり');
+  const zone = page.locator('label[for="import-files"]');
+
+  // 1. タブ区切りの .txt は表として読み、値が行になる
+  await page.goto(`${BASE}/enterprise/imports`);
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  const marker = 8000 + (Date.now() % 900);
+  const tabbed = await page.evaluateHandle((value) => {
+    const dt = new DataTransfer();
+    const txt = ['拠点\t項目\t値\t単位\t期間', `本社\t電力使用量\t${value}\tMWh\tFY2026`].join(
+      '\r\n',
+    );
+    dt.items.add(new File(['﻿' + txt], `prod-tab-${value}.txt`, { type: 'text/plain' }));
+    return dt;
+  }, marker);
+  await zone.dispatchEvent('dragover', { dataTransfer: tabbed });
+  await zone.dispatchEvent('drop', { dataTransfer: tabbed });
+
+  await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 120_000 });
+  await expect(page.getByText(String(marker)).first()).toBeVisible();
+
+  // 2. 自由記述の .txt はエラーにせず、資料として取り込む
+  await page.goto(`${BASE}/enterprise/imports`);
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  const prose = await page.evaluateHandle(() => {
+    const dt = new DataTransfer();
+    const txt = [
+      'サステナビリティ委員会 議事録',
+      '気候関連リスクの評価方法について審議した。',
+      '取締役会への報告は四半期ごととする。',
+    ].join('\n');
+    dt.items.add(new File([txt], 'prod-議事録.txt', { type: 'text/plain' }));
+    return dt;
+  });
+  await page
+    .locator('label[for="import-files"]')
+    .dispatchEvent('dragover', { dataTransfer: prose });
+  await page.locator('label[for="import-files"]').dispatchEvent('drop', { dataTransfer: prose });
+
+  await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 120_000 });
+  await expect(page.getByText(/資料として取り込みました/).first()).toBeVisible();
   await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
 });

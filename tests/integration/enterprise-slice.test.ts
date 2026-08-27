@@ -85,10 +85,10 @@ describe('Import → Preview → Confirm', () => {
         idempotencyKey: 'test-job-rejected',
         files: [
           { name: '実績.csv', type: 'text/csv', bytes: new TextEncoder().encode(CSV) },
-          { name: '議事録.txt', type: 'text/plain', bytes: new TextEncoder().encode('メモ') },
+          { name: '写真.png', type: 'image/png', bytes: new TextEncoder().encode('PNG') },
         ],
       }),
-    ).rejects.toThrow('議事録.txt');
+    ).rejects.toThrow('写真.png');
 
     // 途中まで保存された失敗ジョブを残さない
     expect(fixture.ingestionJobs.length).toBe(before);

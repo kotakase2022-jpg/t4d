@@ -89,6 +89,61 @@ describe('プレビュー生成', () => {
     expect(preview.warnings.join(' ')).toContain('特定できませんでした');
   });
 
+  it('表になっていない .txt は、1 行ずつ読んで行番号を出典にする', async () => {
+    const txt = [
+      'CDP 2025 回答控え（社内メモ）',
+      '',
+      'C0.1 当社は精密電子部品の設計・製造を行っています。',
+      'C1.1 はい',
+    ].join('\n');
+
+    const preview = await buildImportPreview(db, manager(), {
+      frameworkKey: 'cdp',
+      targetPeriodId: PERIOD_IDS.fy2025,
+      fileName: 'CDP2025_回答控え.txt',
+      mimeType: 'text/plain',
+      bytes: new TextEncoder().encode(txt),
+    });
+
+    // PDF として読んだと偽らない
+    expect(preview.parsedAs).toBe('text');
+
+    const byCode = new Map(preview.rows.map((r) => [r.itemCode, r]));
+    expect(byCode.get('C0.1')?.status).toBe('matched');
+    // 3 行目（1 始まり）。原本を追える唯一の手掛かりなのでページ番号では代用しない
+    expect(byCode.get('C0.1')?.locator).toBe('3行目');
+    expect(byCode.get('C1.1')?.locator).toBe('4行目');
+  });
+
+  it('中身が空の .txt は取り込ませない', async () => {
+    await expect(
+      buildImportPreview(db, manager(), {
+        frameworkKey: 'cdp',
+        targetPeriodId: PERIOD_IDS.fy2025,
+        fileName: '空.txt',
+        mimeType: 'text/plain',
+        bytes: new TextEncoder().encode('   \n\n'),
+      }),
+    ).rejects.toThrow(/空/);
+  });
+
+  it('タブ区切りの .txt は表として読む', async () => {
+    const txt = ['質問コード\t回答', 'C0.1\t当社は精密電子部品の設計・製造を行っています。'].join(
+      '\r\n',
+    );
+
+    const preview = await buildImportPreview(db, manager(), {
+      frameworkKey: 'cdp',
+      targetPeriodId: PERIOD_IDS.fy2025,
+      fileName: 'CDP2025_回答.txt',
+      mimeType: 'text/plain',
+      bytes: new TextEncoder().encode(txt),
+    });
+
+    expect(preview.parsedAs).toBe('table');
+    expect(preview.rows[0]?.itemCode).toBe('C0.1');
+  });
+
   it('許可されない拡張子は拒否する', async () => {
     await expect(
       buildImportPreview(db, manager(), {

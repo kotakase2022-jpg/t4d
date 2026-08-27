@@ -79,17 +79,23 @@ export default async function EvidenceViewerPage({
   const stored = await readOwnedFileBytes(db, ctx, current.id);
   const isImage = stored ? stored.mimeType.startsWith('image/') : false;
   const isPdf = stored ? stored.mimeType === 'application/pdf' : false;
-  const isTable = stored
-    ? /\.(csv|tsv|xlsx|xlsm)$/i.test(file.originalName) ||
+  // .txt は表のことも自由記述のこともあり、拡張子だけでは決まらない。
+  // 解析させてみて、表として読めたかどうかで表示を切り替える。
+  const isParseable = stored
+    ? /\.(csv|tsv|txt|xlsx|xlsm)$/i.test(file.originalName) ||
       stored.mimeType.includes('csv') ||
+      stored.mimeType.startsWith('text/') ||
       stored.mimeType.includes('spreadsheet')
     : false;
 
   let tableData: { headers: string[]; rows: Array<Record<string, string>> } | null = null;
-  if (stored && isTable) {
+  let textData: string | null = null;
+  if (stored && isParseable) {
     const parsed = await parseUploadedFile(file.originalName, stored.mimeType, stored.bytes);
     if (parsed.kind === 'table') {
       tableData = { headers: parsed.table.headers, rows: parsed.table.rows.slice(0, 50) };
+    } else if (parsed.kind === 'text') {
+      textData = parsed.text.pages[0]?.text ?? null;
     }
   }
 
@@ -234,6 +240,15 @@ export default async function EvidenceViewerPage({
                   </p>
                 )}
               </div>
+            ) : textData ? (
+              <DocumentPreview
+                text={textData}
+                title={file.originalName}
+                page={1}
+                totalPages={1}
+                highlight={[...highlightCells]}
+                linked={links.length > 0}
+              />
             ) : (
               <EmptyState
                 title="この形式は画面内表示に対応していません"

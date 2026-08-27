@@ -27,6 +27,7 @@ const STATUS_LABEL: Record<
 const PARSED_AS_LABEL: Record<ImportPreview['parsedAs'], string> = {
   table: 'Excel / CSV',
   pdf: 'PDF',
+  text: 'テキスト',
   docx: 'Word',
 };
 
@@ -114,7 +115,7 @@ export default async function DisclosureImportPage({
                     type="file"
                     name="file"
                     required
-                    accept=".csv,.tsv,.xlsx,.xlsm,.pdf,.docx"
+                    accept=".csv,.tsv,.txt,.xlsx,.xlsm,.pdf,.docx"
                     className="mt-0.5"
                   />
                 </label>

@@ -93,15 +93,15 @@ export function UploadForm({
           クリックしてファイルを選択（複数可）／ ここへドロップ
         </span>
         <span className="text-[11px] text-ink-muted">
-          ドロップするとそのまま解析が始まります ／ 対応形式: .csv / .tsv / .xlsx / .xlsm / .pdf /
-          .docx ／ 1 ファイル 25MB まで ／ 一度に 50 ファイルまで
+          ドロップするとそのまま解析が始まります ／ 対応形式: .csv / .tsv / .txt / .xlsx / .xlsm /
+          .pdf / .docx ／ 1 ファイル 25MB まで ／ 一度に 50 ファイルまで
         </span>
         <input
           id="import-files"
           type="file"
           name="files"
           multiple
-          accept=".csv,.tsv,.xlsx,.xlsm,.pdf,.docx,text/csv,text/tab-separated-values,application/pdf"
+          accept=".csv,.tsv,.txt,.xlsx,.xlsm,.pdf,.docx,text/csv,text/plain,text/tab-separated-values,application/pdf"
           className="sr-only"
           onChange={(event) => showSelection(event.currentTarget.files)}
         />

@@ -273,6 +273,32 @@ export async function processIngestionJob(
         continue;
       }
 
+      if (parsed.kind === 'text') {
+        // 表になっていないテキスト（議事録・規程など）は行にしない。
+        // 資料の断片として残し、根拠資料の紐付けと SSBJ のギャップ分析で参照できるようにする
+        await db.update('ingestionJobFiles', jobFile.id, {
+          parseStatus: parsed.text.status === 'parsed' ? 'parsed' : 'failed',
+          parseMessage: parsed.text.message,
+          detectedEncoding: parsed.text.detectedEncoding,
+        });
+        if (parsed.text.pages.length > 0) {
+          await db.insert(
+            'fragments',
+            parsed.text.pages.map((p) => ({
+              id: fid('fragment', `${version.id}/p${p.page}`),
+              fileVersionId: version.id,
+              organizationId: job.organizationId,
+              page: p.page,
+              kind: 'text' as const,
+              text: p.text.slice(0, 4000),
+              locator: `p.${p.page}`,
+              createdAt: new Date().toISOString(),
+            })),
+          );
+        }
+        continue;
+      }
+
       if (parsed.kind === 'docx') {
         // Word は非財務データの取込（表形式）には使わない。
         // 過去回答 Import（CDP-P0-003）専用なので、ここでは対象外として明示する。

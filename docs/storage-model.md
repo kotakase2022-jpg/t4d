@@ -39,9 +39,14 @@ exports/{organization_id_or_firm_id}/{uuid}/data.{ext}
 | 検証       | 内容                                                                |
 | ---------- | ------------------------------------------------------------------- |
 | ファイル名 | ディレクトリ成分を除去し、危険文字を `_` へ置換、200 文字で切り詰め |
-| 拡張子     | `.csv` `.tsv` `.xlsx` `.xlsm` `.pdf` のみ                           |
-| MIME       | CSV / Excel / PDF / `application/octet-stream` のみ                 |
+| 拡張子     | `.csv` `.tsv` `.txt` `.xlsx` `.xlsm` `.pdf` `.docx` のみ            |
+| MIME       | CSV / Excel / PDF / Word / `application/octet-stream` のみ          |
 | サイズ     | 25MB 以下、0 バイト不可                                             |
+
+`.txt` だけは中身で扱いが変わります。タブ区切りなどで列数が揃っていれば
+表として行に取り込み、議事録や規程のような自由記述であれば行にせず、
+資料の断片（`fragments`）として保存します（判定は `looksTabular()`）。
+自由記述を無理に表として読むと、1 列だけの意味の無い行が台帳に並ぶためです。
 
 `tests/unit/parsers-and-schema.test.ts` が `../../etc/passwd.csv` や
 `C:\Users\secret\data.csv` を無害化することを検証しています。

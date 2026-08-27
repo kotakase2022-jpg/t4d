@@ -34,9 +34,22 @@ export interface ParsedPdf {
   pages: Array<{ page: number; text: string }>;
 }
 
+/**
+ * 表ではないテキスト資料（議事録・規程など）。
+ * 行としては取り込まず、資料の断片として残して検索・根拠付けに使う。
+ */
+export interface ParsedTextDocument {
+  status: 'parsed' | 'empty';
+  message: string | null;
+  /** ページに相当する塊。.txt は 1 件 */
+  pages: Array<{ page: number; text: string }>;
+  detectedEncoding: string | null;
+}
+
 export type ParseResult =
   | { kind: 'table'; table: ParsedTable }
   | { kind: 'pdf'; pdf: ParsedPdf }
+  | { kind: 'text'; text: ParsedTextDocument }
   | { kind: 'docx'; docx: ParsedDocx }
   | { kind: 'unsupported'; message: string };
 
@@ -479,6 +492,64 @@ const EXCEL_MIME = [
   'application/vnd.ms-excel',
 ];
 
+/**
+ * テキストが「表」かどうかを判定する。
+ *
+ * .txt は中身が 2 通りある。システムがタブ区切りで書き出した表と、
+ * 議事録・規程のような自由記述。後者を表として読むと、1 列だけの
+ * 意味の無い行が大量に並んで台帳を汚す。
+ *
+ * 区切り文字で割ったときの列数が、複数行にわたって揃っているかで見分ける。
+ */
+export function looksTabular(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== '')
+    .slice(0, 20);
+  // 1 行だけでは表とは言えない（見出しだけの可能性がある）
+  if (lines.length < 2) return false;
+
+  const sep = detectDelimiter(lines.join('\n'));
+  const counts = lines.map((line) => parseCsvText(line, sep)[0]?.length ?? 1);
+
+  // 最頻の列数を求める
+  const tally = new Map<number, number>();
+  for (const count of counts) tally.set(count, (tally.get(count) ?? 0) + 1);
+  let modal = 1;
+  let modalCount = 0;
+  for (const [width, n] of tally) {
+    if (n > modalCount) {
+      modal = width;
+      modalCount = n;
+    }
+  }
+
+  // 2 列以上あり、6 割以上の行がその列数で揃っていれば表とみなす
+  return modal >= 2 && modalCount / counts.length >= 0.6;
+}
+
+/** テキスト資料として読む（行にはしない） */
+function parseTextDocument(buffer: Uint8Array): ParsedTextDocument {
+  const { text, encoding } = decodeText(buffer);
+  const body = text.replace(/^\u{FEFF}/u, '').trim();
+  if (body === '') {
+    return {
+      status: 'empty',
+      message: '中身が空でした。',
+      pages: [],
+      detectedEncoding: encoding,
+    };
+  }
+  return {
+    status: 'parsed',
+    message:
+      '表形式ではないため、数値の行としてではなく資料として取り込みました。根拠資料の紐付けと SSBJ のギャップ分析で参照できます。',
+    pages: [{ page: 1, text: body }],
+    detectedEncoding: encoding,
+  };
+}
+
 export async function parseUploadedFile(
   fileName: string,
   mimeType: string,
@@ -486,6 +557,14 @@ export async function parseUploadedFile(
   preferredSheet?: string,
 ): Promise<ParseResult> {
   const lower = fileName.toLowerCase();
+
+  // .txt は中身を見てから振り分ける（表なら行として、自由記述なら資料として）
+  if (lower.endsWith('.txt')) {
+    const { text } = decodeText(buffer);
+    return looksTabular(text.replace(/^\u{FEFF}/u, ''))
+      ? { kind: 'table', table: parseCsv(buffer) }
+      : { kind: 'text', text: parseTextDocument(buffer) };
+  }
 
   if (lower.endsWith('.csv') || lower.endsWith('.tsv') || CSV_MIME.includes(mimeType)) {
     return { kind: 'table', table: parseCsv(buffer) };
@@ -501,7 +580,7 @@ export async function parseUploadedFile(
   }
   return {
     kind: 'unsupported',
-    message: `未対応の形式です（${mimeType || '不明'}）。CSV / Excel / PDF / Word をアップロードしてください。`,
+    message: `未対応の形式です（${mimeType || '不明'}）。CSV / TSV / TXT / Excel / PDF / Word をアップロードしてください。`,
   };
 }
 
@@ -511,7 +590,7 @@ export async function parseUploadedFile(
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-const ALLOWED_EXTENSIONS = ['.csv', '.tsv', '.xlsx', '.xlsm', '.pdf', '.docx'];
+const ALLOWED_EXTENSIONS = ['.csv', '.tsv', '.txt', '.xlsx', '.xlsm', '.pdf', '.docx'];
 
 export interface UploadValidation {
   ok: boolean;

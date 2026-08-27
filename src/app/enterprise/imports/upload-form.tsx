@@ -33,6 +33,9 @@ export function UploadForm({
     uploadFilesAction,
     null,
   );
+  const formRef = React.useRef<HTMLFormElement>(null);
+  /** 選んだ／落としたファイルの名前。受け付けたことを画面に出すために持つ */
+  const [selected, setSelected] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     if (!state?.ok) return;
@@ -40,8 +43,23 @@ export function UploadForm({
     router.push(`/enterprise/imports/${state.preview.jobId}?created=1`);
   }, [state, router]);
 
+  const showSelection = (files: FileList | null) => {
+    setSelected(files ? Array.from(files).map((f) => f.name) : []);
+  };
+
+  /**
+   * ドロップは「これを今すぐ取り込む」という操作なので、そのまま解析を始める。
+   * ボタンを押さないと何も起きない作りだと、落としても無反応に見える。
+   * クリックで選んだ場合は「取込を開始」を押す従来どおりの流れを残す
+   * （対象組織を選び直してから始めたいことがあるため）。
+   */
+  const startAfterDrop = (files: FileList) => {
+    showSelection(files);
+    formRef.current?.requestSubmit();
+  };
+
   return (
-    <form action={formAction} className="space-y-3 p-3">
+    <form ref={formRef} action={formAction} className="space-y-3 p-3">
       <input type="hidden" name="reportingPeriodId" value={reportingPeriodId} />
 
       <div className="flex items-end gap-3">
@@ -67,6 +85,7 @@ export function UploadForm({
 
       <FileDropZone
         inputId="import-files"
+        onFilesDropped={startAfterDrop}
         className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-t4d-lg border-2 border-dashed border-line bg-surface-muted px-4 py-8 text-center transition-colors hover:border-brand-400 hover:bg-brand-50"
       >
         <FileUp className="size-6 text-brand-600" aria-hidden="true" />
@@ -74,8 +93,8 @@ export function UploadForm({
           クリックしてファイルを選択（複数可）／ ここへドロップ
         </span>
         <span className="text-[11px] text-ink-muted">
-          対応形式: .csv / .tsv / .xlsx / .xlsm / .pdf / .docx ／ 1 ファイル 25MB まで ／ 一度に 50
-          ファイルまで
+          ドロップするとそのまま解析が始まります ／ 対応形式: .csv / .tsv / .xlsx / .xlsm / .pdf /
+          .docx ／ 1 ファイル 25MB まで ／ 一度に 50 ファイルまで
         </span>
         <input
           id="import-files"
@@ -84,8 +103,28 @@ export function UploadForm({
           multiple
           accept=".csv,.tsv,.xlsx,.xlsm,.pdf,.docx,text/csv,text/tab-separated-values,application/pdf"
           className="sr-only"
+          onChange={(event) => showSelection(event.currentTarget.files)}
         />
       </FileDropZone>
+
+      {/* 受け付けたことを必ず画面に出す（無反応に見えるのを防ぐ） */}
+      {selected.length > 0 && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-t4d border border-line bg-surface-muted px-3 py-2"
+        >
+          <p className="text-[12px] font-medium text-ink">
+            {selected.length} 件のファイルを受け付けました
+          </p>
+          <ul className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-muted">
+            {selected.slice(0, 12).map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+            {selected.length > 12 && <li>ほか {selected.length - 12} 件</li>}
+          </ul>
+        </div>
+      )}
 
       {state && !state.ok && (
         <p

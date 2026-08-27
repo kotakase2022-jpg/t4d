@@ -6,24 +6,33 @@ import { cn } from '@/lib/utils';
 /**
  * ファイルのドロップ受け口。
  *
- * 画面が「ここへドロップしてください」と案内していたのに、
- * 実際にはドラッグ&ドロップを受け付けていなかった。案内と挙動を合わせる。
- *
  * 落とされたファイルは、中にある `<input type="file">` へそのまま移す。
  * こうするとフォームの送信経路（Server Action）は今までと同じで済み、
  * クリックで選ぶ人の動きも変わらない。
+ *
+ * ドロップしたのに画面が何も変わらないと、受け付けられたのか分からない。
+ * 呼び出し側が「受け取った」ことを画面に出せるよう `onFilesDropped` を渡す。
  */
 export function FileDropZone({
   inputId,
   className,
   children,
+  onFilesDropped,
 }: {
   /** 受け取り先の file input の id */
   inputId: string;
   className?: string;
   children: React.ReactNode;
+  /** ドロップされたファイルを input へ移したあとに呼ばれる */
+  onFilesDropped?: (files: FileList) => void;
 }) {
   const [dragging, setDragging] = React.useState(false);
+  /**
+   * dragenter / dragleave は**子要素をまたぐたびに発火する**。
+   * 単純に dragleave で false にすると、枠の中を動かしただけで強調が消える。
+   * 出入りの回数を数えて、本当に外へ出たときだけ解除する。
+   */
+  const depth = React.useRef(0);
 
   const assign = (files: FileList) => {
     const input = document.getElementById(inputId) as HTMLInputElement | null;
@@ -34,18 +43,28 @@ export function FileDropZone({
     input.files = transfer.files;
     // 選択状態の表示（件数など）を更新させる
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    onFilesDropped?.(input.files);
   };
 
   return (
     <label
       htmlFor={inputId}
-      onDragOver={(event) => {
+      onDragEnter={(event) => {
         event.preventDefault();
+        depth.current += 1;
         setDragging(true);
       }}
-      onDragLeave={() => setDragging(false)}
+      onDragOver={(event) => {
+        // これを止めないとブラウザがファイルを開こうとしてドロップを受け付けない
+        event.preventDefault();
+      }}
+      onDragLeave={() => {
+        depth.current = Math.max(0, depth.current - 1);
+        if (depth.current === 0) setDragging(false);
+      }}
       onDrop={(event) => {
         event.preventDefault();
+        depth.current = 0;
         setDragging(false);
         assign(event.dataTransfer.files);
       }}

@@ -78,11 +78,11 @@ export const ENTERPRISE_NAV: NavItem[] = [
   },
   {
     label: '開示対応',
-    href: '/enterprise/disclosures/cdp',
+    // 開示対応の起点は SSBJ。CDP・CSRD は SSBJ で整えたデータの展開先という位置づけ
+    href: '/enterprise/disclosures/ssbj',
     icon: FileStack,
     keywords: ['disclosure', '開示'],
     children: [
-      { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
       {
         label: 'SSBJ 対応状況',
         href: '/enterprise/disclosures/ssbj',
@@ -107,6 +107,7 @@ export const ENTERPRISE_NAV: NavItem[] = [
         icon: Database,
         keywords: ['SSBJ', 'データ収集', '不足データ'],
       },
+      { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
       { label: 'CSRD', href: '/enterprise/disclosures/csrd', icon: FileSpreadsheet },
       { label: 'MSCI', href: '/enterprise/disclosures/msci', icon: FileSpreadsheet },
       { label: 'FTSE', href: '/enterprise/disclosures/ftse', icon: FileSpreadsheet },

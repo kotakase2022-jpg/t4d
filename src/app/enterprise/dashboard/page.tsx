@@ -11,6 +11,7 @@ import { FIXTURE_TODAY } from '@/lib/config';
 import { daysUntilJst, formatJst, formatJstDate } from '@/lib/format/datetime';
 import { loadEnterpriseDashboard } from '@/lib/services/enterprise-data';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { loadSsbjHeadline } from '@/lib/services/ssbj-gap';
 
 export const metadata = { title: 'ホーム' };
 
@@ -24,6 +25,9 @@ export default async function EnterpriseDashboardPage() {
     shell.units,
     shell.metrics,
   );
+
+  // SSBJ 対応の現在地（読み取り専用。ホームを開いただけで評価行は作らない）
+  const ssbj = await loadSsbjHeadline(shell.db, shell.ctx, shell.currentPeriod);
 
   const base = '/enterprise/data';
 
@@ -43,7 +47,7 @@ export default async function EnterpriseDashboardPage() {
       <div className="space-y-3 p-4">
         {/* KPI: クリックで必ず対象一覧へ Filter 付き遷移する（指示書 15.1） */}
         <section aria-label="主要指標">
-          <ul className="grid grid-cols-7 gap-2">
+          <ul className="grid grid-cols-9 gap-2">
             <li>
               <KpiCard
                 label="期限超過"
@@ -97,6 +101,39 @@ export default async function EnterpriseDashboardPage() {
                 suffix="%"
                 tone={data.approvalRate >= 80 ? 'success' : 'brand'}
                 href={`${base}?status=approved`}
+              />
+            </li>
+            <li>
+              {/* SSBJ 対応が当社の開示対応の起点。開示・データ・業務プロセスの
+                  3 つの整備度のうち、最も遅れているものを見出しに出す */}
+              <KpiCard
+                label="SSBJ 対応度"
+                value={
+                  ssbj === null ? 0 : Math.min(ssbj.disclosureRate, ssbj.dataRate, ssbj.processRate)
+                }
+                suffix="%"
+                tone={
+                  ssbj !== null &&
+                  Math.min(ssbj.disclosureRate, ssbj.dataRate, ssbj.processRate) >= 60
+                    ? 'success'
+                    : 'warning'
+                }
+                hint={
+                  ssbj === null
+                    ? 'SSBJ の評価がまだありません'
+                    : `開示 ${ssbj.disclosureRate}% ／ データ ${ssbj.dataRate}% ／ 業務プロセス ${ssbj.processRate}%（最も遅れている観点を表示）`
+                }
+                href="/enterprise/disclosures/ssbj"
+              />
+            </li>
+            <li>
+              <KpiCard
+                label="SSBJ 未対応"
+                value={ssbj?.openCount ?? 0}
+                suffix="件"
+                tone={(ssbj?.openCount ?? 0) > 0 ? 'danger' : 'success'}
+                hint="未対応・未確認の要求事項。優先度の高いものから着手します"
+                href="/enterprise/disclosures/ssbj/requirements?coverage=not_covered&coverage=unconfirmed"
               />
             </li>
             <li>

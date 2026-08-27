@@ -249,6 +249,47 @@ const EMPTY_PLAN_COUNTS: Record<SsbjActionStatus, number> = {
   done: 0,
 };
 
+/**
+ * 全体状況の見出し数値だけを読む（評価行を作らない）。
+ *
+ * ホーム画面から呼ぶため読み取り専用にしてある。画面を開いただけで
+ * 評価行が作られると、「誰が作ったのか」が説明できなくなる。
+ */
+export async function loadSsbjHeadline(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  period: ReportingPeriod,
+): Promise<{
+  disclosureRate: number;
+  dataRate: number;
+  processRate: number;
+  /** 未対応・未確認の要求事項の件数 */
+  openCount: number;
+  total: number;
+} | null> {
+  const assessments = await db.select('ssbjAssessments', {
+    where: { organizationId: ctx.workspace.organizationId, reportingPeriodId: period.id },
+  });
+  if (assessments.length === 0) return null;
+
+  // 対象外・重要性なしは整備度の分母から外す（対応する必要が無いため）
+  const inScope = assessments.filter(
+    (a) => a.applicability === 'applicable' && a.materiality !== 'not_material',
+  );
+  const openCount = inScope.filter((a) => {
+    const combined = combineCoverage(a.disclosureStatus, a.dataStatus, a.processStatus);
+    return combined === 'not_covered' || combined === 'unconfirmed';
+  }).length;
+
+  return {
+    disclosureRate: coverageRate(inScope.map((a) => a.disclosureStatus)),
+    dataRate: coverageRate(inScope.map((a) => a.dataStatus)),
+    processRate: coverageRate(inScope.map((a) => a.processStatus)),
+    openCount,
+    total: assessments.length,
+  };
+}
+
 export async function loadSsbjOverview(
   db: DbClient,
   ctx: AuthorizationContext,

@@ -506,3 +506,24 @@ test('本番: ファイルをドロップするとそのまま取込が始まる
   await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 120_000 });
   await expect(page.getByText(String(marker)).first()).toBeVisible();
 });
+
+test('本番: 取り込めないファイルはエラー画面に落とさず、理由を名指しする', async ({ page }) => {
+  test.setTimeout(120_000);
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/imports`);
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  const dataTransfer = await page.evaluateHandle(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['メモ'], '議事録.txt', { type: 'text/plain' }));
+    return dt;
+  });
+  const zone = page.locator('label[for="import-files"]');
+  await zone.dispatchEvent('dragover', { dataTransfer });
+  await zone.dispatchEvent('drop', { dataTransfer });
+
+  // 「データを取得できませんでした」ではなく、どのファイルがなぜ駄目かを画面で伝える
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('議事録.txt');
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('拡張子');
+  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+});

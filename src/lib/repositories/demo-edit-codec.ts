@@ -164,6 +164,16 @@ const PERSISTED_TABLES = new Set<TableName>([
   // AI の実行結果。?run=<id> で読み直す画面が多く、
   // 持ち回さないと「実行したのに何も出ない」になる。
   'aiRuns',
+  // SSBJ の設定と開示ドラフト。どちらも「操作した直後に結果を見せる」画面なので、
+  // 持ち回さないと本番 Demo Mode で操作が消えたように見える（本番スモークで再現した）。
+  //
+  // ssbjAssessments は**入れない**。要求事項 133 件の評価行を初回表示で一括作成するため、
+  // Cookie の容量を使い切って他の操作（コメント・値編集）を押し出してしまう。
+  'ssbjAnalysisSettings',
+  'ssbjDisclosureDrafts',
+  // 承認の道筋。段階を承認した結果が消えると、進み具合が巻き戻って見える。
+  // 1 回の提出で作るのは 5 行なので容量に収まる
+  'dataPointApprovalSteps',
 ]);
 
 export function isPersistedTable(table: TableName): boolean {

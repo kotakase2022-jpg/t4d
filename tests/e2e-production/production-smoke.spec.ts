@@ -468,17 +468,21 @@ test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ 
   await page.getByRole('button', { name: 'デモモード' }).click();
   const dialog = page.getByRole('dialog', { name: /デモモード/ });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('1 / 12');
+  await expect(dialog).toContainText('1 / 15');
   await expect(dialog).toContainText('SSBJ 対応の現在地');
 
-  // 4 番目で最優先ギャップの詳細へ直行する。
+  // 6 番目で最優先ギャップの詳細へ直行する。
   // 遷移の完了を待たずに連打すると、前の遷移の途中で次が始まって取りこぼす
-  await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj$/);
-  await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements$/);
-  await dialog.getByRole('button', { name: '次へ' }).click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/);
+  for (const expected of [
+    /\/enterprise\/disclosures\/ssbj$/,
+    /\/enterprise\/disclosures\/ssbj\/settings$/,
+    /\/enterprise\/organizations$/,
+    /\/enterprise\/disclosures\/ssbj\/requirements$/,
+    /\/enterprise\/disclosures\/ssbj\/requirements\/[0-9a-f-]+/,
+  ]) {
+    await dialog.getByRole('button', { name: '次へ' }).click();
+    await page.waitForURL(expected);
+  }
   await expect(main.getByText('開示ギャップ')).toBeVisible();
   await expect(dialog).toContainText('手順 4');
 
@@ -650,8 +654,10 @@ test('本番: 最大 5 階層の承認フローと履歴が見られる', async 
   await page.waitForURL(/\/enterprise\/data\/[0-9a-f-]+/);
 
   await expect(page.getByText(/承認フロー（\d+ \/ 5 段階）/)).toBeVisible();
-  await expect(page.getByText('拠点責任者の確認')).toBeVisible();
-  await expect(page.getByText('担当役員の承認')).toBeVisible();
+  // 段名は本文・案内文・履歴にも出るので、承認フローの中だけを見る
+  const flow = page.locator('#承認フロー');
+  await expect(flow.getByText('拠点責任者の確認').first()).toBeVisible();
+  await expect(flow.getByText('担当役員の承認').first()).toBeVisible();
   // いつ・誰が・承認／修正／差し戻し したかが 1 本の流れで見られる
   await expect(page.getByText(/承認・修正の履歴/)).toBeVisible();
 });

@@ -9,6 +9,7 @@ import {
   can,
   NotFoundError,
 } from '@/lib/authorization/can';
+import { ValidationError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { findBoundaryConflicts } from './boundary';
 import { classifyRowRoles, NOTE_ROW_WARNING, TOTAL_ROW_WARNING } from './row-role';
@@ -67,7 +68,7 @@ export async function createIngestionJob(
 ): Promise<IngestionJob> {
   assertCan(ctx, 'enterprise.import.run');
   if (input.unitId) assertUnitInScope(ctx, input.unitId);
-  if (input.files.length === 0) throw new Error('ファイルが選択されていません。');
+  if (input.files.length === 0) throw new ValidationError('ファイルが選択されていません。');
 
   const organizationId = ctx.workspace.organizationId;
 
@@ -84,6 +85,23 @@ export async function createIngestionJob(
   });
   const found = existing[0];
   if (found) return found;
+
+  // 受け付けられないファイルは**ジョブを作る前に**すべて洗い出す。
+  // 1 件目で throw していたため、
+  //   - どのファイルが駄目なのか利用者に伝わらない
+  //   - 先に処理したファイルだけ保存され、失敗したジョブが残る
+  //   - 利用者向けの例外ではなかったので画面が「データを取得できませんでした」になる
+  // という 3 つの問題が同時に起きていた。
+  const rejected = input.files
+    .map((file) => ({ file, result: validateUpload(file.name, file.type, file.bytes.byteLength) }))
+    .filter((entry) => !entry.result.ok);
+  if (rejected.length > 0) {
+    throw new ValidationError(
+      `次のファイルは取り込めません。取り除いてからもう一度お試しください。 ${rejected
+        .map((entry) => `${entry.file.name}（${entry.result.message ?? '理由不明'}）`)
+        .join(' / ')}`,
+    );
+  }
 
   const now = new Date().toISOString();
   const jobId = fid('ingestion_job', `${organizationId}/${input.idempotencyKey}`);
@@ -114,16 +132,9 @@ export async function createIngestionJob(
 
   const jobFiles: IngestionJobFile[] = [];
   for (const file of input.files) {
+    // 上で全件を検証済みなので、ここは必ず ok になる
     const validation = validateUpload(file.name, file.type, file.bytes.byteLength);
-    if (!validation.ok) {
-      await db.update('ingestionJobs', jobId, {
-        status: 'failed',
-        errorCode: 'UPLOAD_REJECTED',
-        errorMessage: validation.message ?? 'アップロードが拒否されました。',
-        finishedAt: new Date().toISOString(),
-      });
-      throw new Error(validation.message ?? 'アップロードが拒否されました。');
-    }
+    if (!validation.ok) continue;
 
     const stored = await storeNewFile(db, ctx, {
       bucket: 'enterprise-originals-private',

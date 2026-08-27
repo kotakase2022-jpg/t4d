@@ -98,6 +98,10 @@ test('アップロード: 許可されない拡張子は受け付けない', asy
   await page.getByRole('button', { name: '取込を開始' }).click();
   await page.waitForLoadState('networkidle');
 
-  // 500 の白画面にはならず、拒否されるか「未対応」として扱われる
+  // 拒否の理由を画面の中で伝える。
+  // 以前は「Internal Server Error」の文字列だけを見ていたため、
+  // 日本語のエラー画面（データを取得できませんでした）に落ちても検知できなかった。
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('malicious.exe');
+  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
   await expect(page.locator('body')).not.toHaveText(/Internal Server Error/);
 });

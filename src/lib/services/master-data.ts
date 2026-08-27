@@ -36,13 +36,13 @@ import {
 
 function oneOf<T extends readonly string[]>(values: T, raw: string, label: string): T[number] {
   if ((values as readonly string[]).includes(raw)) return raw as T[number];
-  throw new Error(`${label}の値が不正です: ${raw}`);
+  throw new ValidationError(`${label}の値が不正です: ${raw}`);
 }
 
 function requireText(raw: string, label: string, max = 200): string {
   const value = raw.trim();
-  if (!value) throw new Error(`${label}を入力してください。`);
-  if (value.length > max) throw new Error(`${label}は${max}文字以内で入力してください。`);
+  if (!value) throw new ValidationError(`${label}を入力してください。`);
+  if (value.length > max) throw new ValidationError(`${label}は${max}文字以内で入力してください。`);
   return value;
 }
 
@@ -50,7 +50,7 @@ function optionalNumber(raw: string): number | null {
   const value = raw.trim();
   if (value === '') return null;
   const n = Number(value);
-  if (!Number.isFinite(n)) throw new Error('数値の形式が不正です。');
+  if (!Number.isFinite(n)) throw new ValidationError('数値の形式が不正です。');
   return n;
 }
 
@@ -141,7 +141,7 @@ export async function createMetricDefinition(
     limit: 1,
   });
   if (existing.length > 0) {
-    throw new Error(`指標コード「${input.code}」は既に存在します。`);
+    throw new ValidationError(`指標コード「${input.code}」は既に存在します。`);
   }
 
   const now = new Date().toISOString();
@@ -258,7 +258,7 @@ export interface OrganizationUnitInput {
 export function parseOrganizationUnitInput(get: (key: string) => string): OrganizationUnitInput {
   const ownership = optionalNumber(get('ownershipPercent')) ?? 100;
   if (ownership < 0 || ownership > 100) {
-    throw new Error('持分は 0〜100 の範囲で入力してください。');
+    throw new ValidationError('持分は 0〜100 の範囲で入力してください。');
   }
   const consolidationMethod = oneOf(CONSOLIDATION_METHODS, get('consolidationMethod'), '連結方法');
   return {
@@ -292,7 +292,7 @@ export async function createOrganizationUnit(
     limit: 1,
   });
   if (existing.length > 0) {
-    throw new Error(`組織コード「${input.code}」は既に存在します。`);
+    throw new ValidationError(`組織コード「${input.code}」は既に存在します。`);
   }
 
   const siblings = await db.select('units', { where: { organizationId } });
@@ -338,7 +338,7 @@ export async function updateOrganizationUnit(
   const unit = await loadOwnedUnit(db, ctx, unitId);
 
   // 自分自身を親にできない（循環防止の最小限）
-  if (input.parentId === unit.id) throw new Error('自分自身を親組織にはできません。');
+  if (input.parentId === unit.id) throw new ValidationError('自分自身を親組織にはできません。');
   if (input.parentId) await loadOwnedUnit(db, ctx, input.parentId);
 
   const now = new Date().toISOString();
@@ -400,9 +400,10 @@ export async function createCollectionCampaign(
   const organizationId = ctx.workspace.organizationId;
 
   const name = requireText(input.name, 'キャンペーン名');
-  if (!input.dueDate) throw new Error('提出期限を入力してください。');
-  if (input.unitIds.length === 0) throw new Error('対象組織を 1 つ以上選んでください。');
-  if (input.metricIds.length === 0) throw new Error('対象指標を 1 つ以上選んでください。');
+  if (!input.dueDate) throw new ValidationError('提出期限を入力してください。');
+  if (input.unitIds.length === 0) throw new ValidationError('対象組織を 1 つ以上選んでください。');
+  if (input.metricIds.length === 0)
+    throw new ValidationError('対象指標を 1 つ以上選んでください。');
 
   // 対象期間・組織・指標がすべて自組織のものであることを確認する
   const period = await db.findById('periods', input.reportingPeriodId);

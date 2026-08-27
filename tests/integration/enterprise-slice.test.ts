@@ -74,6 +74,27 @@ beforeEach(() => {
 });
 
 describe('Import → Preview → Confirm', () => {
+  it('取り込めないファイルは、ジョブを作らずに理由を名指しで返す', async () => {
+    const ctx = siteUser();
+    const before = fixture.ingestionJobs.length;
+
+    await expect(
+      createIngestionJob(db, ctx, {
+        reportingPeriodId: PERIOD_IDS.fy2026,
+        unitId: UNIT_IDS.east,
+        idempotencyKey: 'test-job-rejected',
+        files: [
+          { name: '実績.csv', type: 'text/csv', bytes: new TextEncoder().encode(CSV) },
+          { name: '議事録.txt', type: 'text/plain', bytes: new TextEncoder().encode('メモ') },
+        ],
+      }),
+    ).rejects.toThrow('議事録.txt');
+
+    // 途中まで保存された失敗ジョブを残さない
+    expect(fixture.ingestionJobs.length).toBe(before);
+    expect(fixture.ingestionJobFiles.some((f) => f.originalName === '実績.csv')).toBe(false);
+  });
+
   it('CSV を取り込み、AI が指標を推定し、要確認行を検出する', async () => {
     const ctx = siteUser();
 

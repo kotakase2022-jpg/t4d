@@ -89,3 +89,44 @@ test('クリックで選んだ場合も、選択したファイル名が画面�
 
   await expect(page.getByText(`picked-${marker}.csv`)).toBeVisible();
 });
+
+test('取り込めないファイルをドロップしたら、理由とファイル名を画面に出す', async ({ page }) => {
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.goto('/enterprise/imports');
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  await dropFiles(page, [
+    { name: '議事録.txt', type: 'text/plain', content: '取り込めない形式のファイル' },
+  ]);
+
+  // エラー画面へ飛ばさず、フォームの中で理由を伝える
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('議事録.txt');
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('拡張子');
+  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  // 取込画面に留まる（プレビューへ進まない）
+  await expect(page).toHaveURL(/\/enterprise\/imports$/);
+});
+
+test('取り込めるファイルと取り込めないファイルが混ざっていたら、どれが駄目かを名指しする', async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.goto('/enterprise/imports');
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  await dropFiles(page, [
+    {
+      name: '実績.csv',
+      type: 'text/csv',
+      content: '拠点,項目,値,単位,期間\r\n本社,電力使用量,10,MWh,FY2026',
+    },
+    { name: '写真.png', type: 'image/png', content: 'PNG' },
+  ]);
+
+  const alert = page.locator('#t4d-main').getByRole('alert');
+  await expect(alert).toContainText('写真.png');
+  await expect(alert, '取り込めるファイルまで拒否されたように書かない').not.toContainText(
+    '実績.csv',
+  );
+  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+});

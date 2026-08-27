@@ -481,3 +481,28 @@ test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ 
   await dialog.getByRole('button', { name: 'デモモードを終了' }).click();
   await expect(page.getByRole('dialog', { name: /デモモード/ })).toHaveCount(0);
 });
+
+test('本番: ファイルをドロップするとそのまま取込が始まる', async ({ page }) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/imports`);
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  const marker = 5000 + (Date.now() % 3000);
+  const dataTransfer = await page.evaluateHandle((value) => {
+    const dt = new DataTransfer();
+    const csv = ['拠点,項目,値,単位,期間', `本社,電力使用量,${value},MWh,FY2026`].join('\r\n');
+    dt.items.add(new File(['\ufeff' + csv], `prod-drop-${value}.csv`, { type: 'text/csv' }));
+    return dt;
+  }, marker);
+
+  const zone = page.locator('label[for="import-files"]');
+  await zone.dispatchEvent('dragover', { dataTransfer });
+  await zone.dispatchEvent('drop', { dataTransfer });
+
+  // 受け付けたことが画面に出る
+  await expect(page.getByText(`prod-drop-${marker}.csv`).first()).toBeVisible();
+  // ボタンを押さなくても解析が始まり、プレビューへ進む
+  await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 120_000 });
+  await expect(page.getByText(String(marker)).first()).toBeVisible();
+});

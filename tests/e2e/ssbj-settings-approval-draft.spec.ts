@@ -110,7 +110,10 @@ test('③ マテリアリティ・分析条件の設定を、未完了から確�
   const confirm = page.getByRole('button', { name: 'この内容で確定する' });
   await expect(confirm).toBeEnabled();
   await confirm.click();
-  await page.waitForURL(/\/enterprise\/disclosures\/ssbj/, { timeout: 30_000 });
+  // 遷移先まで正確に待つ。`/enterprise/disclosures/ssbj` だけの正規表現では、
+  // いま居る `/ssbj/settings` にその場で一致してしまい待たずに次へ進む。
+  // すると直後の goto が確定の POST を打ち切り、確定していないのに先へ進んでしまう。
+  await page.waitForURL(/\/enterprise\/disclosures\/ssbj\?confirmed=1/, { timeout: 30_000 });
 
   // 入口の表示が「確定済み」に変わる
   await page.goto('/enterprise/disclosures/ssbj/settings');

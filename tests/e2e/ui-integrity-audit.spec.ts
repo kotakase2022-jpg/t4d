@@ -23,6 +23,11 @@ const PATHS = [
   '/enterprise/ghg',
   '/enterprise/disclosures/cdp',
   '/enterprise/disclosures/ssbj',
+  // 列を足した画面・新設した画面は、横スクロールが出やすいので必ず含める
+  '/enterprise/disclosures/ssbj/settings',
+  '/enterprise/disclosures/ssbj/collection',
+  '/enterprise/disclosures/ssbj/draft',
+  '/enterprise/organizations',
   '/enterprise/evidence',
   '/enterprise/settings',
   '/enterprise/ai',

@@ -3,6 +3,7 @@ import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { ORG_IDS, PERIOD_IDS, UNIT_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { loadMateriality, saveMaterialityTopic } from '@/lib/services/materiality';
+import { loadSsbjHeadline, loadSsbjRequirementViews } from '@/lib/services/ssbj-gap';
 import {
   confirmSsbjSettings,
   includedSectionPrefixes,
@@ -269,6 +270,75 @@ describe('確定', () => {
 describe('適用する基準と評価対象の節', () => {
   it('未設定のうちは一般・気候を既定とする', () => {
     expect(includedSectionPrefixes(null)).toEqual(['一般', '気候']);
+  });
+
+  it('適用しない基準の要求事項は、実際に一覧から外れる', async () => {
+    // 設定前は全 133 件が対象
+    const before = await loadSsbjRequirementViews(db, manager(), period());
+    expect(before!.views.length).toBe(133);
+    expect(before!.views.some((v) => v.item.section.startsWith('一般'))).toBe(true);
+    expect(before!.views.some((v) => v.item.section.startsWith('気候'))).toBe(true);
+
+    // 気候関連開示基準だけを適用する
+    await saveSsbjSettings(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      applyGeneral: false,
+      applyClimate: true,
+      applyPractical: false,
+      firstTimeAdoption: false,
+      consolidationScope: 'same_as_financial',
+      consolidationNote: '',
+      includedUnitIds: [],
+      valueChainScope: 'both',
+      valueChainNote: '',
+    });
+
+    const after = await loadSsbjRequirementViews(db, manager(), period());
+    expect(after!.views.length).toBeLessThan(before!.views.length);
+    // 「一般：〜」の要求事項は消え、「気候：〜」だけが残る
+    expect(after!.views.some((v) => v.item.section.startsWith('一般'))).toBe(false);
+    expect(after!.views.every((v) => v.item.section.startsWith('気候'))).toBe(true);
+  });
+
+  it('実務対応基準を足すと、その節の要求事項が現れる', async () => {
+    await saveSsbjSettings(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      applyGeneral: false,
+      applyClimate: false,
+      applyPractical: true,
+      firstTimeAdoption: false,
+      consolidationScope: 'same_as_financial',
+      consolidationNote: '',
+      includedUnitIds: [],
+      valueChainScope: 'both',
+      valueChainNote: '',
+    });
+
+    const views = (await loadSsbjRequirementViews(db, manager(), period()))!.views;
+    expect(views.length).toBeGreaterThan(0);
+    expect(views.every((v) => v.item.section.startsWith('実務対応'))).toBe(true);
+  });
+
+  it('ホームの見出し数値も、一覧と同じ件数で数える', async () => {
+    // 先に評価行を全件作ってから基準を絞る（後から外した場合の食い違いを見る）
+    await loadSsbjRequirementViews(db, manager(), period());
+
+    await saveSsbjSettings(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      applyGeneral: false,
+      applyClimate: true,
+      applyPractical: false,
+      firstTimeAdoption: false,
+      consolidationScope: 'same_as_financial',
+      consolidationNote: '',
+      includedUnitIds: [],
+      valueChainScope: 'both',
+      valueChainNote: '',
+    });
+
+    const views = (await loadSsbjRequirementViews(db, manager(), period()))!.views;
+    const headline = await loadSsbjHeadline(db, manager(), period());
+    expect(headline!.total).toBe(views.length);
   });
 
   it('適用しない基準の節は評価対象から外れる', async () => {

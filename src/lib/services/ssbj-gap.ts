@@ -97,12 +97,41 @@ export interface SsbjOverview {
   planCounts: Record<SsbjActionStatus, number>;
 }
 
+/**
+ * 「①マテリアリティ・分析条件の設定」で選んだ基準から、評価対象の節を決める。
+ *
+ * 設定画面は「適用しない基準の要求事項は、以降の評価対象から外れます」と書いている。
+ * ここで実際に外さないと、設定しても何も変わらない画面になる。
+ * 要求事項マスターの section は「一般：〜」「気候：〜」「実務対応第1号：〜」で始まる。
+ *
+ * 未設定のうちは絞り込まない（決める前から要求事項が消えると、何を決めるのかが分からない）。
+ */
+async function sectionPrefixesFor(
+  db: DbClient,
+  organizationId: Uuid,
+  reportingPeriodId: Uuid,
+): Promise<string[] | null> {
+  const rows = await db.select('ssbjAnalysisSettings', {
+    where: { organizationId, reportingPeriodId },
+    limit: 1,
+  });
+  const settings = rows[0];
+  if (!settings) return null;
+
+  const prefixes: string[] = [];
+  if (settings.applyGeneral) prefixes.push('一般');
+  if (settings.applyClimate) prefixes.push('気候');
+  if (settings.applyPractical) prefixes.push('実務対応');
+  // 1 つも選ばれていない状態は保存できないが、万一そうなっても全件を隠さない
+  return prefixes.length > 0 ? prefixes : null;
+}
+
 /** SSBJ の要求事項マスター（disclosure_items）を取得する */
 async function loadSsbjItems(
   db: DbClient,
   organizationId: Uuid,
+  reportingPeriodId: Uuid,
 ): Promise<{ items: DisclosureItem[]; versionLabel: string; isFixture: boolean } | null> {
-  void organizationId;
   const frameworks = await db.select('frameworks', { where: { key: 'ssbj' }, limit: 1 });
   const framework = frameworks[0];
   if (!framework) return null;
@@ -112,10 +141,16 @@ async function loadSsbjItems(
   });
   const current = versions.find((v) => v.status === 'published') ?? versions[0];
   if (!current) return null;
-  const items = await db.select('disclosureItems', {
+  const all = await db.select('disclosureItems', {
     where: { frameworkVersionId: current.id },
     orderBy: { column: 'sortOrder' },
   });
+
+  const prefixes = await sectionPrefixesFor(db, organizationId, reportingPeriodId);
+  const items = prefixes
+    ? all.filter((item) => prefixes.some((prefix) => item.section.startsWith(prefix)))
+    : all;
+
   return { items, versionLabel: current.label, isFixture: current.isFixture };
 }
 
@@ -222,7 +257,7 @@ export async function loadSsbjRequirementViews(
   ctx: AuthorizationContext,
   period: ReportingPeriod,
 ): Promise<{ views: SsbjRequirementView[]; versionLabel: string; isFixture: boolean } | null> {
-  const master = await loadSsbjItems(db, ctx.workspace.organizationId);
+  const master = await loadSsbjItems(db, ctx.workspace.organizationId, period.id);
   if (!master) return null;
 
   const assessments = await ensureAssessments(db, ctx, period, master.items);
@@ -267,9 +302,17 @@ export async function loadSsbjHeadline(
   openCount: number;
   total: number;
 } | null> {
-  const assessments = await db.select('ssbjAssessments', {
+  const all = await db.select('ssbjAssessments', {
     where: { organizationId: ctx.workspace.organizationId, reportingPeriodId: period.id },
   });
+  if (all.length === 0) return null;
+
+  // 適用しないと決めた基準の要求事項は数えない。
+  // ここで揃えておかないと、ホームの件数と要求事項一覧の件数が食い違う
+  // （後から基準を外すと、作成済みの評価行が残るため）。
+  const master = await loadSsbjItems(db, ctx.workspace.organizationId, period.id);
+  const applicableItemIds = master ? new Set(master.items.map((i) => i.id)) : null;
+  const assessments = applicableItemIds ? all.filter((a) => applicableItemIds.has(a.itemId)) : all;
   if (assessments.length === 0) return null;
 
   // 対象外・重要性なしは整備度の分母から外す（対応する必要が無いため）
@@ -1053,7 +1096,7 @@ export async function carryOverSsbjAssessments(
   assertCan(ctx, 'enterprise.disclosure.write');
   const organizationId = ctx.workspace.organizationId;
 
-  const master = await loadSsbjItems(db, organizationId);
+  const master = await loadSsbjItems(db, organizationId, period.id);
   if (!master) return { copied: 0, recheck: 0 };
 
   const previous = await db.select('ssbjAssessments', {

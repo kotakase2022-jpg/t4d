@@ -5,6 +5,7 @@ import { Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
+import { visibleRowWarnings } from '@/lib/imports/hidden-warnings';
 import { confirmImportAction } from '../actions';
 import type { ImportPreviewRow } from './preview-types';
 
@@ -77,6 +78,8 @@ export function ImportPreviewTable({
           <TBody>
             {visible.map((row) => {
               const status = ROW_STATUS_LABEL[row.status] ?? ROW_STATUS_LABEL.pending;
+              // 出さないと決めた警告は表示の直前で落とす。保存済みの行にも効かせるため
+              const warnings = visibleRowWarnings(row.warnings);
               return (
                 <TR key={row.id}>
                   <TD>
@@ -164,9 +167,9 @@ export function ImportPreviewTable({
                   </TD>
                   <TD>
                     <Badge tone={status?.tone ?? 'neutral'}>{status?.label}</Badge>
-                    {row.warnings.length > 0 && (
+                    {warnings.length > 0 && (
                       <ul className="mt-0.5 space-y-0.5">
-                        {row.warnings.map((w, i) => (
+                        {warnings.map((w, i) => (
                           <li key={i} className="text-[11px] text-[#8a5d00]">
                             ⚠ {w}
                           </li>

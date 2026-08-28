@@ -72,10 +72,13 @@ test.describe('企業 Vertical Slice', () => {
     await expect(page.getByText('east-plant-fy2026.csv')).toBeVisible();
     await expect(page.getByRole('heading', { name: /取込プレビュー/ })).toBeVisible();
 
-    // AI が指標を特定できなかった行に警告が出ている
+    // AI が指標を特定できなかった行の警告は出さない。
+    // 指標マスターに当たらない行はいくらでも混ざるため、同じ文言で画面が埋まり、
+    // 単位違い・合計行（二重計上）の警告が埋もれていた。
+    // 指標欄が「（未選択）」で残り、状態も「要確認」のままなので、操作は変わらない。
     await expect(
-      page.getByText('指標を特定できませんでした。手動で選択してください。').first(),
-    ).toBeVisible();
+      page.getByText('指標を特定できませんでした。手動で選択してください。'),
+    ).toHaveCount(0);
 
     // 4. プレビュー修正: 未判定の行は取り込まない、指標が特定できた行は取り込む
     // （ファイル解析結果テーブルと区別するため、確定フォーム内の行に限定する）

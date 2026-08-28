@@ -1765,3 +1765,29 @@ Playwright は自前のサーバーを立てず、**別のアプリ**へテス�
 途中で止めたときは orphan の `pnpm test:e2e` / `next start` を必ず落とす。
 2 つの run が重なると chromium worker が `code=3221225794` で落ち、以降が
 全部 "did not run" になって原因が見えなくなる。
+
+#### 検証と本番反映
+
+ローカル 7 コマンドすべて通過。
+
+| コマンド                                   | 結果                                    |
+| ------------------------------------------ | --------------------------------------- |
+| `pnpm lint` / `format:check` / `typecheck` | 通過                                    |
+| `pnpm test`                                | 49 ファイル / 558 件 通過               |
+| `pnpm check:rls` / `pnpm test:rls`         | 83 テーブル・191 ポリシー / 101 件 通過 |
+| `pnpm test:e2e`                            | 251 件 通過（`E2E_PORT=3212`）          |
+| `pnpm build`                               | 通過                                    |
+
+本番（Demo Mode）へ反映済み。
+
+- Deploy: `t4d-oky424d67-kotakase2022-jpgs-projects.vercel.app`
+- Alias: https://terrast-t4d.vercel.app を上記へ張り替え（`vercel alias set`）
+- `pnpm test:e2e:prod` 28 件 通過
+
+本番スモークに、指標が当たらない行（`圧縮空気（購入分）, 18.4, GJ`）を 1 行足した。
+「行は残る／アラートは出ない／指標欄は未選択のまま」の 3 つを本番の画面で確かめる。
+指標が当たる行しか投入していなかったため、今回の変更が本番へ届いたかを
+確かめられない状態だった。
+
+未解決・次作業は無し。アラートを出し直すときは
+`src/lib/imports/hidden-warnings.ts` の `HIDDEN_ROW_WARNINGS` から外す。

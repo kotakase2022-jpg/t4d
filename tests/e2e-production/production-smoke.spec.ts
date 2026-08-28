@@ -133,7 +133,13 @@ test('本番: 取込フロー（ファイル投入 → AI 仕分け → プレ�
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   const marker = 1000 + (Date.now() % 8000);
-  const csv = ['拠点,項目,値,単位,期間', `本社,電力使用量,${marker},MWh,FY2026`].join('\r\n');
+  // 2 行目は指標マスターに無い項目。単位があるので取り込み対象からは外れず、
+  // 「指標が特定できなかった行」としてプレビューに残る（下でアラートの非表示を見る）
+  const csv = [
+    '拠点,項目,値,単位,期間',
+    `本社,電力使用量,${marker},MWh,FY2026`,
+    '本社,圧縮空気（購入分）,18.4,GJ,FY2026',
+  ].join('\r\n');
   await page.locator('input[type=file][name=files]').setInputFiles({
     name: `prod-smoke-${marker}.csv`,
     mimeType: 'text/csv',
@@ -148,6 +154,13 @@ test('本番: 取込フロー（ファイル投入 → AI 仕分け → プレ�
   const metricSelect = page.locator('select[name^="metricId:"]').first();
   await expect(metricSelect).toBeVisible();
   expect(await metricSelect.inputValue()).not.toBe('');
+
+  // 指標が特定できなかった行は残るが、アラートは出さない（発注者の指示で非表示）。
+  // 指標欄が未選択・状態が要確認のままなので、人が指標を選ぶ導線は残っている
+  await expect(page.getByText('圧縮空気（購入分）').first()).toBeVisible();
+  await expect(page.locator('#t4d-main').getByText('指標を特定できませんでした')).toHaveCount(0);
+  const unmatched = page.locator('select[name^="metricId:"]').last();
+  expect(await unmatched.inputValue()).toBe('');
 });
 
 test('本番: SSBJ のマテリアリティ登録が永続化される', async ({ page }) => {

@@ -99,7 +99,7 @@ export default async function SsbjDraftPage({
         {overview.areas.map((view) => {
           const draft = view.draft;
           return (
-            <Card key={view.area} className="overflow-hidden">
+            <Card key={view.area} id={`draft-${view.area}`} className="overflow-hidden">
               <SectionTitle
                 title={view.areaLabel}
                 action={

@@ -141,7 +141,7 @@ test('⑥ SSBJ が対象判定 → 分析 → 確認 → 対応計画 → デー
 
   // 自由記述 → 区分の提示 → 選択 → 評価（理由必須）まで通す
   const name = `水資源の利用 ${Date.now().toString(36)}`;
-  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  await page.getByLabel('マテリアリティ名（必須）').fill(name);
   await expect(page.getByText(/一致した語/).first()).toBeVisible();
   await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
   const row = page.locator('li', { hasText: name });

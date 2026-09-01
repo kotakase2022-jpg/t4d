@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
+import { suggestMaterialityCategory } from '@/lib/domain/materiality-suggest';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
 import { ValidationError } from '@/lib/errors/user-facing';
 import type { DbClient } from '@/lib/repositories/types';
@@ -76,9 +77,12 @@ export interface MaterialityTopicView {
   id: Uuid;
   topicKey: string;
   title: string;
+  description: string;
   category: MaterialityCategory;
   materiality: MaterialityLevel;
   rationale: string;
+  risks: string;
+  opportunities: string;
   metricCodes: string[];
   /** 項目（対象指標）の表示名。マスターに無いコードは含めない */
   metricNames: string[];
@@ -134,9 +138,12 @@ export async function loadMateriality(
       id: row.id,
       topicKey: row.topicKey,
       title: row.title,
+      description: row.description,
       category: row.category,
       materiality: row.materiality,
       rationale: row.rationale,
+      risks: row.risks,
+      opportunities: row.opportunities,
       metricCodes: row.metricCodes,
       metricNames: targets.map((m) => m.name),
       collectedMetricCount: collected.length,
@@ -196,6 +203,15 @@ function validateCategory(raw: string): MaterialityCategory {
   return raw as MaterialityCategory;
 }
 
+/** 任意の自由記述（内容・リスク・機会）。長さだけ見る */
+function validateFreeText(raw: string, label: string, maxLength: number): string {
+  const text = raw.trim();
+  if (text.length > maxLength) {
+    throw new ValidationError(`${label}は ${maxLength} 文字以内で入力してください。`);
+  }
+  return text;
+}
+
 /** 指標コードは指標マスターに実在するものだけ受け付ける（画面偽装への備え） */
 function validateMetricCodes(raw: string[], metrics: MetricDefinition[]): string[] {
   const known = new Set(metrics.map((m) => m.code));
@@ -204,8 +220,10 @@ function validateMetricCodes(raw: string[], metrics: MetricDefinition[]): string
 
 export interface AddTopicInput {
   reportingPeriodId: Uuid;
-  /** 自由記述のマテリアリティ名 */
+  /** マテリアリティ名（必須） */
   title: string;
+  /** 課題の内容の簡潔な説明（任意）。区分の提示にも使う */
+  description: string;
   /** 提示から利用者が選んだ区分 */
   category: string;
   /** 提示に基づく項目（対象指標）。マスターに無いコードは捨てる */
@@ -228,6 +246,7 @@ export async function addMaterialityTopic(
   }
 
   const title = validateTitle(input.title);
+  const description = validateFreeText(input.description, '内容の説明', 500);
   const category = validateCategory(input.category);
   const metricCodes = validateMetricCodes(input.metricCodes, metrics);
 
@@ -253,9 +272,12 @@ export async function addMaterialityTopic(
     reportingPeriodId: input.reportingPeriodId,
     topicKey: crypto.randomUUID().slice(0, 8),
     title,
+    description,
     category,
     materiality: 'not_assessed',
     rationale: '',
+    risks: '',
+    opportunities: '',
     metricCodes,
     assessedAt: null,
     assessedBy: null,
@@ -278,6 +300,7 @@ export async function addMaterialityTopic(
 export interface UpdateTopicInput {
   topicId: Uuid;
   title: string;
+  description: string;
   category: string;
 }
 
@@ -291,6 +314,7 @@ export async function updateMaterialityTopic(
   const topic = await findOwnedTopic(db, ctx, input.topicId);
 
   const title = validateTitle(input.title);
+  const description = validateFreeText(input.description, '内容の説明', 500);
   const category = validateCategory(input.category);
 
   const siblings = await db.select('materialityTopics', {
@@ -307,6 +331,7 @@ export async function updateMaterialityTopic(
   const now = new Date().toISOString();
   const updated = await db.update('materialityTopics', topic.id, {
     title,
+    description,
     category,
     updatedAt: now,
     updatedBy: ctx.userId,
@@ -345,6 +370,66 @@ export async function deleteMaterialityTopic(
     beforeSummary: `${topic.title}（${MATERIALITY_LABEL[topic.materiality]}）`,
     afterSummary: `マテリアリティを削除: ${topic.title}`,
   });
+}
+
+export interface SaveRiskOpportunityInput {
+  topicId: Uuid;
+  /** この課題がもたらすリスク（自由記述） */
+  risks: string;
+  /** この課題がもたらす機会（自由記述） */
+  opportunities: string;
+}
+
+/**
+ * 課題のリスク・機会を記入する（SSBJ 一般-12(1)・一般-14 の識別）。
+ *
+ * SSBJ の戦略開示は、識別したリスク及び機会の**それぞれについて**
+ * 影響や財務的影響を書くことを求める（一般-13）。ここで書いた内容は
+ * 開示ドラフト（戦略の節）の材料になる。
+ *
+ * 記述に指標マスターの語が含まれていれば、項目（対象指標）を自動で
+ * **追加**する（減らさない）。リスク・機会の登録が要求事項・データ項目への
+ * マッピングを育てる、という流れにするため。
+ */
+export async function saveTopicRiskOpportunity(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  metrics: MetricDefinition[],
+  input: SaveRiskOpportunityInput,
+): Promise<MaterialityTopic> {
+  assertCan(ctx, 'enterprise.disclosure.write');
+  const topic = await findOwnedTopic(db, ctx, input.topicId);
+
+  const risks = validateFreeText(input.risks, 'リスク', 2000);
+  const opportunities = validateFreeText(input.opportunities, '機会', 2000);
+
+  // リスク・機会の記述から、同じ区分の指標候補を拾って項目へ足す。
+  // 勝手に外すことはしない（外すのは編集での人の判断）
+  const suggestion = suggestMaterialityCategory(topic.title, risks, opportunities);
+  const sameCategory = suggestion.candidates.find((c) => c.category === topic.category);
+  const merged = validateMetricCodes(
+    [...topic.metricCodes, ...(sameCategory?.metricCodes ?? [])],
+    metrics,
+  );
+  const addedCount = merged.length - topic.metricCodes.length;
+
+  const now = new Date().toISOString();
+  const updated = await db.update('materialityTopics', topic.id, {
+    risks,
+    opportunities,
+    metricCodes: merged,
+    updatedAt: now,
+    updatedBy: ctx.userId,
+  });
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_updated',
+    resourceType: 'materiality_topic',
+    resourceId: topic.id,
+    afterSummary:
+      `リスク・機会を記入: ${topic.title}` +
+      (addedCount > 0 ? `（項目を ${addedCount} 件自動追加）` : ''),
+  });
+  return updated;
 }
 
 export interface AssessTopicInput {

@@ -7,6 +7,7 @@ import {
   assessMaterialityTopic,
   deleteMaterialityTopic,
   loadMateriality,
+  saveTopicRiskOpportunity,
   updateMaterialityTopic,
 } from '@/lib/services/materiality';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
@@ -48,6 +49,7 @@ async function addTopic(title = '気候変動に伴う炭素価格の上昇') {
   return addMaterialityTopic(db, manager(), metrics(), {
     reportingPeriodId: PERIOD_IDS.fy2026,
     title,
+    description: '',
     category: 'environment',
     metricCodes: ['scope1', 'scope2'],
   });
@@ -77,6 +79,7 @@ describe('追加（自由記述 → 区分 → 項目）', () => {
         addMaterialityTopic(db, manager(), metrics(), {
           reportingPeriodId: PERIOD_IDS.fy2026,
           title,
+          description: '',
           category: 'environment',
           metricCodes: [],
         }),
@@ -98,6 +101,7 @@ describe('追加（自由記述 → 区分 → 項目）', () => {
       addMaterialityTopic(db, manager(), metrics(), {
         reportingPeriodId: PERIOD_IDS.fy2026,
         title: 'テスト課題',
+        description: '',
         category: 'invalid' as never,
         metricCodes: [],
       }),
@@ -108,6 +112,7 @@ describe('追加（自由記述 → 区分 → 項目）', () => {
     const topic = await addMaterialityTopic(db, manager(), metrics(), {
       reportingPeriodId: PERIOD_IDS.fy2026,
       title: 'テスト課題',
+      description: '',
       category: 'environment',
       metricCodes: ['scope1', 'no_such_metric', 'scope1'],
     });
@@ -119,6 +124,7 @@ describe('追加（自由記述 → 区分 → 項目）', () => {
       addMaterialityTopic(db, manager(), metrics(), {
         reportingPeriodId: PERIOD_IDS.sotenFy2026,
         title: '越権テスト',
+        description: '',
         category: 'environment',
         metricCodes: [],
       }),
@@ -130,6 +136,7 @@ describe('追加（自由記述 → 区分 → 項目）', () => {
       addMaterialityTopic(db, siteUser(), metrics(), {
         reportingPeriodId: PERIOD_IDS.fy2026,
         title: '権限テスト',
+        description: '',
         category: 'environment',
         metricCodes: [],
       }),
@@ -149,6 +156,7 @@ describe('編集', () => {
     const updated = await updateMaterialityTopic(db, manager(), {
       topicId: topic.id,
       title: '炭素価格・排出規制への対応',
+      description: '排出規制と炭素価格の動向を踏まえた対応。',
       category: 'environment',
     });
     expect(updated.title).toBe('炭素価格・排出規制への対応');
@@ -163,6 +171,7 @@ describe('編集', () => {
       updateMaterialityTopic(db, manager(), {
         topicId: b.id,
         title: '課題A',
+        description: '',
         category: 'environment',
       }),
     ).rejects.toThrow(/既に登録されています/);
@@ -173,6 +182,7 @@ describe('編集', () => {
       updateMaterialityTopic(db, manager(), {
         topicId: '00000000-0000-4000-8000-000000000000',
         title: 'x',
+        description: '',
         category: 'environment',
       }),
     ).rejects.toThrow(/見つかりません/);
@@ -284,5 +294,97 @@ describe('前年度との分離', () => {
 
     const current = await loadMateriality(db, manager(), period(), metrics());
     expect(current.topics).toHaveLength(0);
+  });
+});
+
+describe('内容の説明（②）', () => {
+  it('内容つきで登録・編集でき、一覧に出る', async () => {
+    const topic = await addMaterialityTopic(db, manager(), metrics(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      title: 'サプライヤーとの協働',
+      description: '調達先の労働環境が悪化すると部品供給が止まる。',
+      category: 'social',
+      metricCodes: [],
+    });
+    expect(topic.description).toContain('労働環境');
+
+    const { topics } = await loadMateriality(db, manager(), period(), metrics());
+    expect(topics[0]?.description).toContain('労働環境');
+  });
+
+  it('501 文字以上の内容は弾く', async () => {
+    await expect(
+      addMaterialityTopic(db, manager(), metrics(), {
+        reportingPeriodId: PERIOD_IDS.fy2026,
+        title: '内容が長すぎる課題',
+        description: 'あ'.repeat(501),
+        category: 'environment',
+        metricCodes: [],
+      }),
+    ).rejects.toThrow(/500 文字以内/);
+  });
+});
+
+describe('リスク・機会（③ SSBJ 一般-12(1)・一般-14 の識別）', () => {
+  it('リスク・機会を記入でき、記述から項目（対象指標）が自動で増える', async () => {
+    // scope1/scope2 だけ紐づいた状態から始める
+    const topic = await addTopic();
+    expect(topic.metricCodes).toEqual(['scope1', 'scope2']);
+
+    const saved = await saveTopicRiskOpportunity(db, manager(), metrics(), {
+      topicId: topic.id,
+      risks: '炭素価格の上昇と、エネルギー調達コストの増加。',
+      opportunities: '再生可能エネルギーへの転換による競争力強化。',
+    });
+    expect(saved.risks).toContain('炭素価格');
+    expect(saved.opportunities).toContain('再生可能');
+    // 「エネルギー」「再生可能」の語から環境の指標が自動追加される（既存は消えない）
+    expect(saved.metricCodes).toContain('scope1');
+    expect(saved.metricCodes).toContain('scope2');
+    expect(saved.metricCodes).toContain('energy');
+    expect(saved.metricCodes).toContain('energy_renewable');
+  });
+
+  it('区分の違う語からは項目を足さない（別区分の指標を混ぜない）', async () => {
+    const topic = await addTopic(); // environment（名前に「気候」「炭素価格」を含む）
+    const saved = await saveTopicRiskOpportunity(db, manager(), metrics(), {
+      topicId: topic.id,
+      risks: '熟練技術者の離職が進む。', // 社会の語のみ
+      opportunities: '',
+    });
+    // 社会の指標（turnover_rate 等）は environment の課題へは足さない。
+    // 名前の「炭素価格」由来で環境の指標が増えるのは仕様（名前も判断材料）
+    expect(saved.metricCodes).not.toContain('turnover_rate');
+    expect(saved.metricCodes).not.toContain('avg_tenure');
+    const environmentCodes = new Set(
+      metrics()
+        .filter((m) => ['ghg', 'energy', 'water', 'waste'].includes(m.category))
+        .map((m) => m.code),
+    );
+    for (const code of saved.metricCodes) {
+      expect(environmentCodes.has(code), `${code} は環境の指標ではない`).toBe(true);
+    }
+  });
+
+  it('2001 文字以上のリスクは弾く', async () => {
+    const topic = await addTopic();
+    await expect(
+      saveTopicRiskOpportunity(db, manager(), metrics(), {
+        topicId: topic.id,
+        risks: 'あ'.repeat(2001),
+        opportunities: '',
+      }),
+    ).rejects.toThrow(/2000 文字以内/);
+  });
+
+  it('書き込み権限が無い利用者は記入できない', async () => {
+    const topic = await addTopic();
+    await expect(
+      saveTopicRiskOpportunity(db, siteUser(), metrics(), {
+        topicId: topic.id,
+        risks: 'x',
+        opportunities: '',
+      }),
+    ).rejects.toThrow();
   });
 });

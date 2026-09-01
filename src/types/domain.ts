@@ -871,9 +871,15 @@ export interface MaterialityTopic extends AuditColumns, SoftDeletable {
   reportingPeriodId: Uuid;
   topicKey: string;
   title: string;
+  /** 課題の内容の簡潔な説明。区分の提示（名前と内容を合わせて判断）にも使う */
+  description: string;
   category: MaterialityCategory;
   materiality: MaterialityLevel;
   rationale: string;
+  /** この課題がもたらすリスク（SSBJ 一般-12(1)・一般-14 の識別。戦略開示の材料） */
+  risks: string;
+  /** この課題がもたらす機会（同上） */
+  opportunities: string;
   metricCodes: string[];
   assessedAt: IsoDateTime | null;
   assessedBy: Uuid | null;

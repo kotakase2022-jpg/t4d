@@ -1151,6 +1151,7 @@ export async function addMaterialityTopicAction(
     await addMaterialityTopic(db, ctx, shell.metrics, {
       reportingPeriodId: String(formData.get('reportingPeriodId') ?? ''),
       title: String(formData.get('title') ?? ''),
+      description: String(formData.get('description') ?? ''),
       category: String(formData.get('category') ?? ''),
       metricCodes: formData.getAll('metricCodes').map(String),
     });
@@ -1169,6 +1170,7 @@ export async function updateMaterialityTopicAction(
     await updateMaterialityTopic(db, ctx, {
       topicId: String(formData.get('topicId') ?? ''),
       title: String(formData.get('title') ?? ''),
+      description: String(formData.get('description') ?? ''),
       category: String(formData.get('category') ?? ''),
     });
   });
@@ -1184,6 +1186,24 @@ export async function deleteMaterialityTopicAction(
   const { deleteMaterialityTopic } = await import('@/lib/services/materiality');
   return runMaterialityAction(async () => {
     await deleteMaterialityTopic(db, ctx, String(formData.get('topicId') ?? ''));
+  });
+}
+
+/** 課題のリスク・機会の記入（SSBJ 一般-12(1)・一般-14 の識別。戦略開示の材料） */
+export async function saveMaterialityRiskOppAction(
+  _prev: MaterialityActionState,
+  formData: FormData,
+): Promise<MaterialityActionState> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const shell = await loadEnterpriseShell();
+  const { saveTopicRiskOpportunity } = await import('@/lib/services/materiality');
+  return runMaterialityAction(async () => {
+    await saveTopicRiskOpportunity(db, ctx, shell.metrics, {
+      topicId: String(formData.get('topicId') ?? ''),
+      risks: String(formData.get('risks') ?? ''),
+      opportunities: String(formData.get('opportunities') ?? ''),
+    });
   });
 }
 

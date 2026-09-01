@@ -14,6 +14,7 @@ import {
   addMaterialityTopicAction,
   assessMaterialityTopicAction,
   deleteMaterialityTopicAction,
+  saveMaterialityRiskOppAction,
   updateMaterialityTopicAction,
   type MaterialityActionState,
 } from '../../../actions';
@@ -34,9 +35,12 @@ import {
 export interface TopicRowData {
   id: string;
   title: string;
+  description: string;
   category: MaterialityCategory;
   materiality: MaterialityLevel;
   rationale: string;
+  risks: string;
+  opportunities: string;
   metricNames: string[];
 }
 
@@ -92,10 +96,15 @@ const PRESET_TITLES = [
 function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
   const [state, formAction] = React.useActionState(addMaterialityTopicAction, null);
   const [title, setTitle] = React.useState('');
+  const [description, setDescription] = React.useState('');
   /** 利用者が明示的に選んだ区分。null のあいだは最有力候補に追随する */
   const [chosen, setChosen] = React.useState<MaterialityCategory | null>(null);
 
-  const suggestion = React.useMemo(() => suggestMaterialityCategory(title), [title]);
+  // 名前と内容を合わせて区分を判断する（名前だけでは判断できない課題があるため）
+  const suggestion = React.useMemo(
+    () => suggestMaterialityCategory(title, description),
+    [title, description],
+  );
   const selectedCategory = chosen ?? suggestion.top;
   const selected: CategorySuggestion | null =
     suggestion.candidates.find((c) => c.category === selectedCategory) ?? null;
@@ -104,6 +113,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
   React.useEffect(() => {
     if (state?.ok) {
       setTitle('');
+      setDescription('');
       setChosen(null);
     }
   }, [state]);
@@ -114,7 +124,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
 
       <div>
         <label className="block text-[12px] font-medium text-ink" htmlFor="materiality-title">
-          マテリアリティ名（自由記述）
+          マテリアリティ名（必須）
         </label>
         <input
           id="materiality-title"
@@ -129,9 +139,6 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
           placeholder="例: 気候変動に伴う炭素価格の上昇、熟練技術者の確保"
           className="mt-0.5 h-8 w-full rounded-t4d border border-line px-2 text-[13px]"
         />
-        <p className="mt-0.5 text-[11px] text-ink-muted">
-          自社の言葉で入力してください。入力すると、当てはまりそうな区分を提示します。
-        </p>
         <span className="mt-1 flex flex-wrap gap-1">
           {PRESET_TITLES.map((preset) => (
             <button
@@ -147,6 +154,27 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
             </button>
           ))}
         </span>
+      </div>
+
+      <div>
+        <label className="block text-[12px] font-medium text-ink" htmlFor="materiality-description">
+          マテリアリティの内容を簡潔に説明してください（任意）
+        </label>
+        <textarea
+          id="materiality-description"
+          name="description"
+          value={description}
+          onChange={(e) => {
+            setDescription(e.target.value);
+            setChosen(null);
+          }}
+          rows={2}
+          placeholder="例: 調達先の労働環境が悪化すると、部品供給の停止と評判低下につながる"
+          className="mt-0.5 w-full rounded-t4d border border-line px-2 py-1 text-[12px] leading-relaxed"
+        />
+        <p className="mt-0.5 text-[11px] text-ink-muted">
+          名前と内容を合わせて判断し、当てはまりそうな区分を提示します。選ぶのはあなたです。
+        </p>
       </div>
 
       {title.trim() !== '' && (
@@ -238,6 +266,7 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
   const [assessState, assessAction] = React.useActionState(assessMaterialityTopicAction, null);
   const [editState, editAction] = React.useActionState(updateMaterialityTopicAction, null);
   const [deleteState, deleteAction] = React.useActionState(deleteMaterialityTopicAction, null);
+  const [riskOppState, riskOppAction] = React.useActionState(saveMaterialityRiskOppAction, null);
   const [editing, setEditing] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
 
@@ -256,10 +285,13 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
             <Badge tone="neutral">{CATEGORY_LABEL[topic.category]}</Badge>
             <Badge tone={LEVEL_TONE[topic.materiality]}>{LEVEL_LABEL[topic.materiality]}</Badge>
           </p>
+          {topic.description && <p className="mt-0.5 text-[11px] text-ink">{topic.description}</p>}
           <p className="mt-0.5 text-[11px] text-ink-muted">
             項目: {topic.metricNames.length > 0 ? topic.metricNames.join('・') : '対象指標は未設定'}
           </p>
-          {topic.rationale && <p className="mt-0.5 text-[11px] text-ink">{topic.rationale}</p>}
+          {topic.rationale && (
+            <p className="mt-0.5 text-[11px] text-ink-muted">評価理由: {topic.rationale}</p>
+          )}
         </div>
 
         <span className="flex shrink-0 items-center gap-1">
@@ -334,6 +366,15 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
               <option value="governance">ガバナンス</option>
             </select>
           </label>
+          <label className="w-full text-[11px] text-ink-muted">
+            マテリアリティの内容（任意）
+            <textarea
+              name="description"
+              defaultValue={topic.description}
+              rows={2}
+              className="mt-0.5 block w-full rounded-t4d border border-line px-2 py-1 text-[12px] leading-relaxed"
+            />
+          </label>
           <SubmitButton size="xs" pendingLabel="保存中…">
             変更を保存
           </SubmitButton>
@@ -346,6 +387,51 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
           </span>
         </form>
       )}
+
+      {/* リスク・機会（SSBJ 一般-12(1)・一般-14 の識別）。
+          SSBJ の戦略開示は、識別したリスク及び機会のそれぞれについて
+          影響・財務的影響を書くことを求める（一般-13）。ここに書いた内容は
+          開示ドラフト（戦略の節）の材料になる */}
+      <form
+        action={riskOppAction}
+        className="rounded-t4d border border-line bg-surface-muted px-2 py-1.5"
+      >
+        <input type="hidden" name="topicId" value={topic.id} />
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[11px] text-ink-muted">
+            リスク（この課題が事業へもたらすリスク）
+            <textarea
+              name="risks"
+              defaultValue={topic.risks}
+              rows={2}
+              placeholder="例: 炭素価格の上昇により製造原価が増加する"
+              aria-label={`${topic.title} のリスク`}
+              className="mt-0.5 block w-full rounded-t4d border border-line bg-surface px-2 py-1 text-[12px] leading-relaxed"
+            />
+          </label>
+          <label className="text-[11px] text-ink-muted">
+            機会（この課題が事業へもたらす機会）
+            <textarea
+              name="opportunities"
+              defaultValue={topic.opportunities}
+              rows={2}
+              placeholder="例: 低炭素製品の需要拡大により受注が増える"
+              aria-label={`${topic.title} の機会`}
+              className="mt-0.5 block w-full rounded-t4d border border-line bg-surface px-2 py-1 text-[12px] leading-relaxed"
+            />
+          </label>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <SubmitButton size="xs" variant="outline" pendingLabel="保存中…">
+            リスク・機会を保存
+          </SubmitButton>
+          <span className="text-[11px] text-ink-muted">
+            SSBJ はリスク及び機会のそれぞれについて開示を求めます（一般-13）。
+            記述は開示ドラフト（戦略）の材料になり、関連する項目（対象指標）も自動で追加されます。
+          </span>
+        </div>
+        <InlineError state={riskOppState} />
+      </form>
 
       {/* 評価。理由は必須（重要とした根拠も、重要でないとした根拠も監査で問われる） */}
       <form action={assessAction} className="flex flex-wrap items-end gap-2">
@@ -428,11 +514,22 @@ export function MaterialityManager({
                 <Badge tone="neutral">{CATEGORY_LABEL[topic.category]}</Badge>
                 <Badge tone={LEVEL_TONE[topic.materiality]}>{LEVEL_LABEL[topic.materiality]}</Badge>
               </p>
+              {topic.description && (
+                <p className="mt-0.5 text-[11px] text-ink">{topic.description}</p>
+              )}
               <p className="mt-0.5 text-[11px] text-ink-muted">
                 項目:{' '}
                 {topic.metricNames.length > 0 ? topic.metricNames.join('・') : '対象指標は未設定'}
               </p>
-              {topic.rationale && <p className="mt-0.5 text-[11px] text-ink">{topic.rationale}</p>}
+              {topic.risks && (
+                <p className="mt-0.5 text-[11px] text-ink-muted">リスク: {topic.risks}</p>
+              )}
+              {topic.opportunities && (
+                <p className="mt-0.5 text-[11px] text-ink-muted">機会: {topic.opportunities}</p>
+              )}
+              {topic.rationale && (
+                <p className="mt-0.5 text-[11px] text-ink-muted">評価理由: {topic.rationale}</p>
+              )}
             </li>
           ))}
         </ul>

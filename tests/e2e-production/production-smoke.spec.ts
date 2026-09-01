@@ -172,13 +172,27 @@ test('本番: SSBJ のマテリアリティ登録が永続化される', async (
   await page.goto(`${BASE}/enterprise/disclosures/ssbj/settings`);
   const marker = Date.now().toString(36);
   const name = `本番スモーク 労働安全衛生 ${marker}`;
-  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  await page.getByLabel('マテリアリティ名（必須）').fill(name);
+  // 内容の説明も判断材料になる（②）
+  await page
+    .getByLabel('マテリアリティの内容を簡潔に説明してください（任意）')
+    .fill('製造拠点の休業災害を減らし、操業を安定させる');
   // 「安全」の語から社会が提示される
   await expect(page.getByText(/一致した語/).first()).toBeVisible();
   await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
   const row = page.locator('li', { hasText: name });
   await expect(row).toBeVisible();
   await expect(row.getByText('社会')).toBeVisible();
+
+  // リスク・機会を記入できる（③ SSBJ 一般-12(1)・一般-14 の識別）
+  await row.getByRole('textbox', { name: /のリスク/ }).fill(`休業災害による操業停止 ${marker}`);
+  await row.getByRole('textbox', { name: /の機会/ }).fill(`安全性を訴求した採用力の向上 ${marker}`);
+  await row.getByRole('button', { name: 'リスク・機会を保存' }).click();
+  await page.waitForLoadState('networkidle');
+  await page.reload();
+  await expect(
+    page.locator('li', { hasText: name }).getByRole('textbox', { name: /のリスク/ }),
+  ).toHaveValue(`休業災害による操業停止 ${marker}`);
 
   // 評価（理由必須）→ リロード後も残る
   const reason = `本番スモーク理由 ${marker}`;
@@ -669,7 +683,7 @@ test('本番: マテリアリティ・分析条件の設定が未完了から始
   await expect(main.getByText('報告の範囲を決める')).toBeVisible();
   await expect(main.getByText('マテリアリティを特定・評価する')).toBeVisible();
   // 自由記述の入力欄がある（固定一覧ではない）
-  await expect(main.getByLabel('マテリアリティ名（自由記述）')).toBeVisible();
+  await expect(main.getByLabel('マテリアリティ名（必須）')).toBeVisible();
   // ダミーで完了にしない。何かしら未完了が残っている
   await expect(main.getByText('未完了')).not.toHaveCount(0);
 });

@@ -295,9 +295,12 @@ export default async function SsbjSettingsPage({
             topics={materiality.topics.map((topic) => ({
               id: topic.id,
               title: topic.title,
+              description: topic.description,
               category: topic.category,
               materiality: topic.materiality,
               rationale: topic.rationale,
+              risks: topic.risks,
+              opportunities: topic.opportunities,
               metricNames: topic.metricNames,
             }))}
           />

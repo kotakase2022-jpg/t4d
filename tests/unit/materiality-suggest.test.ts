@@ -86,3 +86,30 @@ describe('区分の提示', () => {
     expect(s.candidates[0]?.matched.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('名前と内容を合わせた判断', () => {
+  it('名前だけでは判断できなくても、内容の説明から区分を提示できる', () => {
+    // 名前は一般語のみ
+    expect(suggestMaterialityCategory('サプライヤーとの協働').top).toBe('social');
+    const withDescription = suggestMaterialityCategory(
+      '新しい取り組み',
+      '調達先の労働環境が悪化すると部品供給が止まる',
+    );
+    expect(withDescription.top).toBe('social');
+    expect(withDescription.candidates[0]?.matched.length).toBeGreaterThan(0);
+  });
+
+  it('リスク・機会の記述も判断材料にできる（可変長引数）', () => {
+    const s = suggestMaterialityCategory(
+      '事業構造の転換',
+      '',
+      '炭素価格の上昇で製造原価が増える',
+      '低炭素製品の需要が拡大する',
+    );
+    expect(s.top).toBe('environment');
+  });
+
+  it('内容が空でも名前だけで従来どおり動く', () => {
+    expect(suggestMaterialityCategory('労働安全衛生', '').top).toBe('social');
+  });
+});

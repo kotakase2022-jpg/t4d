@@ -125,6 +125,21 @@ export async function generateSsbjDraft(
     );
   }
 
+  // マテリアリティ（重要性ありと評価した課題）のリスク・機会。
+  // SSBJ の戦略開示は「識別したリスク及び機会」の説明から始まる（一般-12(1)・一般-14）ので、
+  // 利用者が課題ごとに書いたリスク・機会を草案の材料として渡す
+  const materialityRows = await db.select('materialityTopics', {
+    where: { organizationId, reportingPeriodId: period.id, deletedAt: { isNull: true } },
+  });
+  const materialTopics = materialityRows
+    .filter((t) => t.materiality === 'high' || t.materiality === 'medium')
+    .map((t) => ({
+      title: t.title,
+      description: t.description,
+      risks: t.risks,
+      opportunities: t.opportunities,
+    }));
+
   // 承認済みの数値だけを根拠にする（未承認値を開示文へ書かせない）
   const [approved, metrics, units] = await Promise.all([
     db.select('dataPoints', {
@@ -203,6 +218,7 @@ export async function generateSsbjDraft(
         })),
         metricValues,
         documents,
+        materialTopics,
         sources,
       },
     },

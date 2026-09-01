@@ -88,7 +88,7 @@ test('マテリアリティの理由未入力が、入力欄のそばの指摘�
 
   // 課題は利用者が自由記述で登録する。まず追加してから理由未入力を試す
   const name = `理由未入力の検証 ${Date.now().toString(36)}`;
-  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  await page.getByLabel('マテリアリティ名（必須）').fill(name);
   // 一致する語が無い名前なので、区分は利用者が選ぶ（提示は候補どまり）
   await page.getByRole('radio', { name: '区分: 社会' }).check();
   await page.getByRole('button', { name: 'マテリアリティを追加' }).click();

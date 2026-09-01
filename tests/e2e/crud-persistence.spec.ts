@@ -109,7 +109,7 @@ test('Data Point: 値の編集がDBへ反映され、リロード後も保持さ
 
 /** 自由記述でマテリアリティを追加する（区分の提示から 1 つ選ぶ） */
 async function addMaterialityViaUi(page: import('@playwright/test').Page, name: string) {
-  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  await page.getByLabel('マテリアリティ名（必須）').fill(name);
   // 入力すると区分の候補が提示される。一致する語が無い名前では
   // 最有力が出ないので、利用者として「環境」を明示的に選ぶ
   await expect(page.getByText('区分を選ぶ').first()).toBeVisible();
@@ -129,7 +129,7 @@ test('マテリアリティ: 追加 → 評価 → 編集 → 削除が永続化
 
   // Create: 自由記述で追加。気候の語から「環境」が提示される
   const name = `気候変動と炭素価格 ${Date.now().toString(36)}`;
-  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  await page.getByLabel('マテリアリティ名（必須）').fill(name);
   await expect(page.getByText(/一致した語/).first()).toBeVisible();
   await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
   const row = page.locator('li', { hasText: name });
@@ -216,4 +216,60 @@ test('コメント: 投稿が永続化され、リロード後も残る', async 
 
   await page.goto(url);
   await expect(page.getByText(body)).toBeVisible();
+});
+
+test('マテリアリティ: 内容の説明から区分が提示され、リスク・機会が戦略の草案へ流れる', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.goto('/enterprise/disclosures/ssbj/settings');
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  // ② 名前だけでは判断できない課題でも、内容の説明から区分が提示される
+  const marker = Date.now().toString(36);
+  const name = `協働体制の見直し ${marker}`;
+  await page.getByLabel('マテリアリティ名（必須）').fill(name);
+  await page
+    .getByLabel('マテリアリティの内容を簡潔に説明してください（任意）')
+    .fill('調達先の労働環境が悪化すると、部品供給の停止と評判低下につながる');
+  // 内容の「調達」「労働環境」から社会が最有力候補になる
+  await expect(page.getByRole('radio', { name: '区分: 社会' })).toBeChecked();
+  await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
+  const row = page.locator('li', { hasText: name });
+  await expect(row).toBeVisible();
+  await expect(row.getByText('社会')).toBeVisible();
+  // 内容もリロード後に残る
+  await page.reload();
+  await expect(page.locator('li', { hasText: name }).getByText(/調達先の労働環境/)).toBeVisible();
+
+  // ③ リスク・機会を記入 → リロード後も残る
+  const risk = `サプライヤーの操業停止リスク ${marker}`;
+  const opp = `調達網の多様化による安定供給 ${marker}`;
+  const target = page.locator('li', { hasText: name });
+  await target.getByRole('textbox', { name: /のリスク/ }).fill(risk);
+  await target.getByRole('textbox', { name: /の機会/ }).fill(opp);
+  await target.getByRole('button', { name: 'リスク・機会を保存' }).click();
+  await page.waitForLoadState('networkidle');
+  await page.reload();
+  const after = page.locator('li', { hasText: name });
+  await expect(after.getByRole('textbox', { name: /のリスク/ })).toHaveValue(risk);
+  await expect(after.getByRole('textbox', { name: /の機会/ })).toHaveValue(opp);
+
+  // 重要性ありと評価すると、戦略の草案の材料になる
+  await after.getByRole('combobox', { name: /の重要度/ }).selectOption('high');
+  await after.getByRole('textbox', { name: /の評価理由/ }).fill('供給網の集中度が高いため。');
+  await after.getByRole('button', { name: '評価を保存' }).click();
+  await page.waitForLoadState('networkidle');
+
+  // 開示ドラフト（戦略）を生成すると、書いたリスク・機会が織り込まれる
+  await page.goto('/enterprise/disclosures/ssbj/draft');
+  const strategyCard = page.locator('#draft-strategy');
+  await strategyCard.getByRole('button', { name: /人工知能に草案を作らせる|作り直す/ }).click();
+  await page.waitForURL(/generated=strategy/, { timeout: 90_000 });
+
+  const text = await page.locator('#draft-strategy textarea[name="body"]').inputValue();
+  expect(text).toContain('識別したサステナビリティ関連のリスク及び機会');
+  expect(text).toContain(risk);
+  expect(text).toContain(opp);
 });

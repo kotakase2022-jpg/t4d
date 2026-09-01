@@ -91,7 +91,7 @@ test('③ マテリアリティ・分析条件の設定を、未完了から確�
 
   // ③ マテリアリティは自由記述で登録し、区分の提示から選ぶ
   for (const name of ['気候変動に伴う炭素価格の上昇', '熟練技術者の確保と定着']) {
-    await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+    await page.getByLabel('マテリアリティ名（必須）').fill(name);
     // 区分の候補が根拠（一致した語）つきで提示される
     await expect(page.getByText(/一致した語/).first()).toBeVisible();
     await page.getByRole('button', { name: 'マテリアリティを追加' }).click();

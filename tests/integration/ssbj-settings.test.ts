@@ -61,6 +61,7 @@ async function assessAllTopics() {
     const topic = await addMaterialityTopic(db, manager(), metrics(), {
       reportingPeriodId: PERIOD_IDS.fy2026,
       title: name,
+      description: '',
       category: name.includes('気候') ? 'environment' : 'social',
       metricCodes: [],
     });

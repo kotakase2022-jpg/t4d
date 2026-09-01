@@ -9,6 +9,11 @@ import {
   saveSsbjDraftBody,
 } from '@/lib/services/ssbj-draft';
 import {
+  addMaterialityTopic,
+  assessMaterialityTopic,
+  saveTopicRiskOpportunity,
+} from '@/lib/services/materiality';
+import {
   loadSsbjRequirementViews,
   runSsbjGapAnalysis,
   saveSsbjReview,
@@ -47,6 +52,7 @@ const manager = () => ctxFor('sustainability@demo.local', ['sustainability_manag
 const siteUser = () => ctxFor('site-user@demo.local', ['site_contributor']);
 
 const period = () => fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!;
+const metricsOf = () => fixture.metrics.filter((m) => m.organizationId === ORG_IDS.aomi);
 
 /** ガバナンスの節の要求事項を、確認済み・対応済みの状態にする */
 async function reviewGovernanceRequirements(limit = 3): Promise<string[]> {
@@ -236,5 +242,63 @@ describe('決定論', () => {
     // 同じ状態から作り直しても同じ本文になる
     const second = await generateSsbjDraft(db, manager(), period(), 'governance');
     expect(second.aiBody).toBe(firstBody);
+  });
+});
+
+describe('マテリアリティのリスク・機会と戦略の草案（SSBJ 一般-12・14）', () => {
+  it('重要性ありの課題のリスク・機会が、戦略の草案の起点になる', async () => {
+    // 課題を登録し、リスク・機会を書き、重要性ありと評価する
+    const topic = await addMaterialityTopic(db, manager(), metricsOf(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      title: '気候変動に伴う炭素価格の上昇',
+      description: '',
+      category: 'environment',
+      metricCodes: ['scope1'],
+    });
+    await saveTopicRiskOpportunity(db, manager(), metricsOf(), {
+      topicId: topic.id,
+      risks: '炭素価格の上昇により製造原価が増加する。',
+      opportunities: '低炭素製品の需要拡大により受注が増える。',
+    });
+    await assessMaterialityTopic(db, manager(), {
+      topicId: topic.id,
+      materiality: 'high',
+      rationale: '規制影響を直接受けるため。',
+    });
+
+    // 戦略の節の草案に、識別したリスク及び機会が織り込まれる
+    const draft = await generateSsbjDraft(db, manager(), period(), 'strategy');
+    expect(draft.aiBody).toContain('識別したサステナビリティ関連のリスク及び機会');
+    expect(draft.aiBody).toContain('炭素価格の上昇により製造原価が増加する');
+    expect(draft.aiBody).toContain('低炭素製品の需要拡大により受注が増える');
+  });
+
+  it('リスク・機会が未記入なら、戦略の草案は記入を促す警告を出す', async () => {
+    const draft = await generateSsbjDraft(db, manager(), period(), 'strategy');
+    expect(draft.aiWarnings.join(' ')).toContain('リスク・機会が記入されていません');
+    expect(draft.aiWarnings.join(' ')).toContain('一般-12');
+  });
+
+  it('重要性なしの課題のリスク・機会は草案に混ぜない', async () => {
+    const topic = await addMaterialityTopic(db, manager(), metricsOf(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      title: '重要でない課題',
+      description: '',
+      category: 'environment',
+      metricCodes: [],
+    });
+    await saveTopicRiskOpportunity(db, manager(), metricsOf(), {
+      topicId: topic.id,
+      risks: '混ざってはいけないリスクの記述。',
+      opportunities: '',
+    });
+    await assessMaterialityTopic(db, manager(), {
+      topicId: topic.id,
+      materiality: 'not_material',
+      rationale: '影響が限定的なため。',
+    });
+
+    const draft = await generateSsbjDraft(db, manager(), period(), 'strategy');
+    expect(draft.aiBody).not.toContain('混ざってはいけないリスクの記述');
   });
 });

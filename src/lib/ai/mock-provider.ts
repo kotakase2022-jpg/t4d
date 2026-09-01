@@ -542,6 +542,13 @@ function buildMockOutput<F extends AiFeature>(
         (input.metricValues as Array<{ label: string; value: number; unit: string }>) ?? [];
       const documents =
         (input.documents as Array<{ name: string; page: string; excerpt: string }>) ?? [];
+      const materialTopics =
+        (input.materialTopics as Array<{
+          title: string;
+          description: string;
+          risks: string;
+          opportunities: string;
+        }>) ?? [];
       const sources = (input.sources as never[]) ?? [];
 
       // 草案に書けるのは、担当者が確認して「対応済み／おおむね対応」とした要求事項だけ。
@@ -579,8 +586,30 @@ function buildMockOutput<F extends AiFeature>(
         other: `${organizationName}は、${areaLabel}に関する情報を以下のとおり開示します。`,
       };
 
+      // 戦略の節は「識別したサステナビリティ関連のリスク及び機会」の説明から始める
+      // （SSBJ 一般-12(1)・一般-14）。マテリアリティに書かれたリスク・機会を材料にする
+      const riskOppLines =
+        area === 'strategy'
+          ? materialTopics
+              .filter((t) => t.risks !== '' || t.opportunities !== '')
+              .slice(0, 5)
+              .map((t) =>
+                [
+                  `【${t.title}】`,
+                  t.description !== '' ? t.description : null,
+                  t.risks !== '' ? `リスク: ${t.risks}` : null,
+                  t.opportunities !== '' ? `機会: ${t.opportunities}` : null,
+                ]
+                  .filter((v) => v !== null)
+                  .join(' '),
+              )
+          : [];
+
       const bodyParts = [
         opening[area],
+        riskOppLines.length > 0
+          ? `当社が識別したサステナビリティ関連のリスク及び機会は次のとおりです。\n${riskOppLines.join('\n')}`
+          : null,
         writable.length > 0
           ? `${periodLabel}においては、${writable
               .slice(0, 5)
@@ -611,6 +640,11 @@ function buildMockOutput<F extends AiFeature>(
             : []),
           ...(metricValues.length === 0
             ? ['承認済みの数値が無いため、定量的な記述を含めていません。']
+            : []),
+          ...(area === 'strategy' && riskOppLines.length === 0
+            ? [
+                'マテリアリティにリスク・機会が記入されていません。SSBJ の戦略開示は識別したリスク及び機会の説明を求めるため（一般-12・14）、先に「①マテリアリティ・分析条件の設定」で記入することを推奨します。',
+              ]
             : []),
         ],
         sources,

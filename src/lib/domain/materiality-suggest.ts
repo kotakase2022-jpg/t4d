@@ -144,11 +144,18 @@ const KEYWORD_RULES: KeywordRule[] = [
 /**
  * 自由記述からマテリアリティの区分候補を作る。
  *
+ * 名前だけでなく、内容の説明・リスク・機会の記述も**合わせて**判断する。
+ * 「サプライヤーとの協働」のように名前からは判断できない課題でも、
+ * 内容に「調達先の労働環境」とあれば社会の候補を出せる。
+ *
  * 一致した語が多い区分ほど上に出す。どの語にも一致しない区分も候補として
  * 返す——機械の提示が外れていても、利用者が正しい区分を選べるようにするため。
  */
-export function suggestMaterialityCategory(name: string): MaterialitySuggestion {
-  const text = name.normalize('NFKC').trim();
+export function suggestMaterialityCategory(
+  name: string,
+  ...additionalTexts: string[]
+): MaterialitySuggestion {
+  const text = [name, ...additionalTexts].join(' ').normalize('NFKC').trim();
 
   const perCategory = new Map<
     MaterialityCategory,

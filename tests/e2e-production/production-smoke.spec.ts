@@ -667,7 +667,9 @@ test('本番: マテリアリティ・分析条件の設定が未完了から始
   await expect(main.getByText('決めること（3 項目）')).toBeVisible();
   await expect(main.getByText('適用する基準を決める')).toBeVisible();
   await expect(main.getByText('報告の範囲を決める')).toBeVisible();
-  await expect(main.getByText('マテリアリティを評価する')).toBeVisible();
+  await expect(main.getByText('マテリアリティを特定・評価する')).toBeVisible();
+  // 自由記述の入力欄がある（固定一覧ではない）
+  await expect(main.getByLabel('マテリアリティ名（自由記述）')).toBeVisible();
   // ダミーで完了にしない。何かしら未完了が残っている
   await expect(main.getByText('未完了')).not.toHaveCount(0);
 });

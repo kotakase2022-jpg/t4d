@@ -81,17 +81,27 @@ test('取込画面がドロップを受け付ける', async ({ page }) => {
   expect(fileCount, 'ドロップしたファイルが input へ移っていない').toBe(1);
 });
 
-test('マテリアリティの理由未入力が、全画面エラーではなく画面内の指摘になる', async ({ page }) => {
+test('マテリアリティの理由未入力が、入力欄のそばの指摘になる', async ({ page }) => {
+  test.setTimeout(120_000);
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
   await page.goto('/enterprise/disclosures/ssbj/settings');
 
-  const row = page.locator('tr', { hasText: '水資源の利用' });
-  await row.getByRole('combobox').selectOption('high');
-  await row.getByRole('textbox').fill('');
-  await row.getByRole('button', { name: '保存' }).click();
+  // 課題は利用者が自由記述で登録する。まず追加してから理由未入力を試す
+  const name = `理由未入力の検証 ${Date.now().toString(36)}`;
+  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  // 一致する語が無い名前なので、区分は利用者が選ぶ（提示は候補どまり）
+  await page.getByRole('radio', { name: '区分: 社会' }).check();
+  await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
+  const row = page.locator('li', { hasText: name });
+  await expect(row).toBeVisible();
 
-  await page.waitForURL(/error=/);
-  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('理由を入力');
+  await row.getByRole('combobox', { name: /の重要度/ }).selectOption('high');
+  await row.getByRole('textbox', { name: /の評価理由/ }).fill('');
+  await row.getByRole('button', { name: '評価を保存' }).click();
+
+  // 誤りの指摘は操作した行の中に出る。画面トップへ飛ばさない（?error= を使わない）
+  await expect(row.getByRole('alert')).toContainText('評価理由を入力してください');
+  expect(page.url()).not.toContain('error=');
   // 全画面のエラー境界には落ちていない
   await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
 });

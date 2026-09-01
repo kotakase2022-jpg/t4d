@@ -1818,6 +1818,7 @@ export function createFixtureDb(): FixtureDb {
       materiality,
       rationale,
       metricCodes,
+      deletedAt: null,
       assessedAt: at(400),
       assessedBy: userId('sustainability@demo.local'),
       ...audit(at(405), at(400), userId('sustainability@demo.local')),

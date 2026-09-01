@@ -161,11 +161,14 @@ export async function loadSsbjSettings(
     },
     {
       key: 'materiality',
-      title: 'マテリアリティを評価する',
+      title: 'マテリアリティを特定・評価する',
       description:
-        'どのサステナビリティ課題に重要性があるかを判断します。重要性なしとした課題は、要求事項の評価でも重要性なしの根拠になります。',
+        '自社の重要課題を自由記述で登録し、区分を選び、重要性を判断します。重要性なしとした課題は、要求事項の評価でも重要性なしの根拠になります。',
       done: materialityDone,
-      todo: `${materiality.topics.length - assessed.length} 件の課題が未評価です。すべての課題に重要性の判断と理由を入れてください。`,
+      todo:
+        materiality.topics.length === 0
+          ? 'マテリアリティがまだ登録されていません。自社の重要課題を自由記述で入力してください。'
+          : `${materiality.topics.length - assessed.length} 件の課題が未評価です。すべての課題に重要性の判断と理由（必須）を入れてください。`,
       summary: `${materiality.topics.length} 件中 ${assessed.length} 件を評価済み（重要性あり ${material.length} 件）`,
     },
   ];

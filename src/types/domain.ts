@@ -865,7 +865,7 @@ export type MaterialityCategory = (typeof MATERIALITY_CATEGORIES)[number];
  * マテリアリティ評価（SSBJ 開示の起点）。
  * 組織 × 報告期間 × トピックで一意。対象指標は code で保持する。
  */
-export interface MaterialityTopic extends AuditColumns {
+export interface MaterialityTopic extends AuditColumns, SoftDeletable {
   id: Uuid;
   organizationId: Uuid;
   reportingPeriodId: Uuid;

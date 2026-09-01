@@ -1,36 +1,23 @@
 import Link from 'next/link';
-import { ArrowLeft, Check, CircleCheck, CircleDashed, Target } from 'lucide-react';
+import { ArrowLeft, Check, CircleCheck, CircleDashed } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatJst } from '@/lib/format/datetime';
-import { CATEGORY_LABEL, loadMateriality, MATERIALITY_LABEL } from '@/lib/services/materiality';
+import { loadMateriality } from '@/lib/services/materiality';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import {
   loadSsbjSettings,
   SSBJ_CONSOLIDATION_OPTIONS,
   SSBJ_VALUE_CHAIN_OPTIONS,
 } from '@/lib/services/ssbj-settings';
-import type { MaterialityLevel } from '@/types/domain';
-import {
-  confirmSsbjSettingsAction,
-  saveMaterialityTopicAction,
-  saveSsbjSettingsAction,
-} from '../../../actions';
+import { confirmSsbjSettingsAction, saveSsbjSettingsAction } from '../../../actions';
+import { MaterialityManager } from './materiality-manager';
 
 export const metadata = { title: 'SSBJ マテリアリティ・分析条件の設定' };
-
-const LEVEL_TONE: Record<MaterialityLevel, 'brand' | 'success' | 'warning' | 'neutral'> = {
-  high: 'brand',
-  medium: 'warning',
-  low: 'neutral',
-  not_material: 'neutral',
-  not_assessed: 'warning',
-};
 
 export default async function SsbjSettingsPage({
   searchParams,
@@ -291,7 +278,8 @@ export default async function SsbjSettingsPage({
           </form>
         </Card>
 
-        {/* ③: マテリアリティ */}
+        {/* ③: マテリアリティ。
+            自由記述 → 区分の提示 → 選択、で課題を登録し、追加・編集・削除もここで行う */}
         <Card className="overflow-hidden">
           <SectionTitle
             title={`マテリアリティ評価（${view.assessedTopicCount} / ${view.totalTopicCount} 件を評価済み）`}
@@ -301,74 +289,18 @@ export default async function SsbjSettingsPage({
               </span>
             }
           />
-          <Table>
-            <THead>
-              <TR>
-                <TH>区分</TH>
-                <TH>課題</TH>
-                <TH>対象指標</TH>
-                <TH>評価</TH>
-                {view.canEdit && <TH>評価を登録</TH>}
-              </TR>
-            </THead>
-            <TBody>
-              {materiality.topics.map((topic) => (
-                <TR key={topic.topicKey}>
-                  <TD>{CATEGORY_LABEL[topic.category]}</TD>
-                  <TD className="font-medium text-ink">
-                    <div className="flex items-center gap-1.5">
-                      <Target className="size-3.5 text-ink-muted" aria-hidden="true" />
-                      {topic.title}
-                    </div>
-                    {topic.rationale && (
-                      <p className="mt-0.5 text-[11px] text-ink-muted">{topic.rationale}</p>
-                    )}
-                  </TD>
-                  <TD className="text-[11px] text-ink-muted">{topic.totalMetricCount} 件</TD>
-                  <TD>
-                    <Badge tone={LEVEL_TONE[topic.materiality]}>
-                      {MATERIALITY_LABEL[topic.materiality]}
-                    </Badge>
-                  </TD>
-                  {view.canEdit && (
-                    <TD>
-                      <form action={saveMaterialityTopicAction} className="flex items-center gap-1">
-                        <input type="hidden" name="topicKey" value={topic.topicKey} />
-                        <input
-                          type="hidden"
-                          name="reportingPeriodId"
-                          value={shell.currentPeriod.id}
-                        />
-                        <select
-                          name="materiality"
-                          defaultValue={topic.materiality}
-                          aria-label={`${topic.title} の重要度`}
-                          className="h-7 rounded-t4d border border-line bg-surface px-1.5 text-[12px]"
-                        >
-                          <option value="high">重要度：高</option>
-                          <option value="medium">重要度：中</option>
-                          <option value="low">重要度：低</option>
-                          <option value="not_material">重要ではない</option>
-                          <option value="not_assessed">未評価</option>
-                        </select>
-                        <input
-                          type="text"
-                          name="rationale"
-                          defaultValue={topic.rationale}
-                          placeholder="評価理由"
-                          aria-label={`${topic.title} の評価理由`}
-                          className="h-7 w-36 rounded-t4d border border-line px-2 text-[12px]"
-                        />
-                        <Button type="submit" size="xs" variant="outline">
-                          保存
-                        </Button>
-                      </form>
-                    </TD>
-                  )}
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+          <MaterialityManager
+            reportingPeriodId={shell.currentPeriod.id}
+            canEdit={view.canEdit}
+            topics={materiality.topics.map((topic) => ({
+              id: topic.id,
+              title: topic.title,
+              category: topic.category,
+              materiality: topic.materiality,
+              rationale: topic.rationale,
+              metricNames: topic.metricNames,
+            }))}
+          />
         </Card>
       </div>
     </>

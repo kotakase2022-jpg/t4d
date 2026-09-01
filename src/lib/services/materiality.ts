@@ -2,7 +2,6 @@ import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
-import { fid } from '@/lib/fixtures/ids';
 import { ValidationError } from '@/lib/errors/user-facing';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
@@ -19,66 +18,29 @@ import type {
  * マテリアリティ評価（SSBJ 開示の起点）。
  *
  * SSBJ は「自社にとって重要なリスク・機会」を特定したうえで開示する。
- * 開示項目の一覧から入るのではなく、
- *   マテリアリティの登録 → 対象データの収集 → 充足度の確認 → 不足項目の対応
- * という順に進むため、その 1 段目と 3 段目をここで扱う。
+ * 課題は固定の一覧から選ぶのではなく、**利用者が自社の言葉で自由記述し**、
+ * 当てはまりそうな区分の提示を受けて選ぶ。
+ *   マテリアリティ名の入力 → 区分の選択 → 項目（対象指標）→ 評価と理由
+ * の順に決まり、課題そのものを追加・編集・削除できる。
+ *
+ * 削除は論理削除。評価の記録は監査で問われるため、行を物理的に消さない。
  */
 
-/** 初期表示する標準トピック（登録されていない期間ではこれを候補として出す）。 */
-export const DEFAULT_TOPICS: Array<{
-  topicKey: string;
-  title: string;
-  category: MaterialityCategory;
-  metricCodes: string[];
-}> = [
-  {
-    topicKey: 'climate_ghg',
-    title: '気候変動（GHG 排出）',
-    category: 'environment',
-    metricCodes: ['scope1', 'scope2', 'scope3_cat1', 'energy'],
-  },
-  {
-    topicKey: 'water',
-    title: '水資源の利用',
-    category: 'environment',
-    metricCodes: ['water'],
-  },
-  {
-    topicKey: 'circular',
-    title: '資源循環・廃棄物',
-    category: 'environment',
-    metricCodes: ['waste'],
-  },
-  {
-    topicKey: 'human_capital',
-    title: '人的資本（人材の育成・多様性）',
-    category: 'social',
-    metricCodes: [
-      'employees',
-      'female_employees',
-      'female_manager_ratio',
-      'training_hours',
-      'avg_tenure',
-    ],
-  },
-  {
-    topicKey: 'safety',
-    title: '労働安全衛生',
-    category: 'social',
-    metricCodes: ['ltifr'],
-  },
-  {
-    topicKey: 'supply_chain',
-    title: 'サプライチェーン管理',
-    category: 'social',
-    metricCodes: ['scope3_cat1'],
-  },
-  {
-    topicKey: 'governance',
-    title: 'コーポレートガバナンス',
-    category: 'governance',
-    metricCodes: ['officers_total', 'female_officers', 'directors_count'],
-  },
+/**
+ * 追加フォームに例として出す課題の候補。
+ *
+ * 以前はこの一覧が「固定の課題」としてそのまま画面に並んでいたが、
+ * いまは**入力の下書き**でしかない。クリックすると名前が入力欄へ入り、
+ * 区分の提示 → 選択という通常の流れに乗る。
+ */
+export const PRESET_TOPICS: Array<{ title: string }> = [
+  { title: '気候変動（GHG 排出）' },
+  { title: '水資源の利用' },
+  { title: '資源循環・廃棄物' },
+  { title: '人的資本（人材の育成・多様性）' },
+  { title: '労働安全衛生' },
+  { title: 'サプライチェーン管理' },
+  { title: 'コーポレートガバナンス' },
 ];
 
 export const MATERIALITY_LABEL: Record<MaterialityLevel, string> = {
@@ -100,13 +62,26 @@ export function isMaterial(level: MaterialityLevel): boolean {
   return level === 'high' || level === 'medium';
 }
 
+const MATERIALITY_LEVELS = new Set<MaterialityLevel>([
+  'high',
+  'medium',
+  'low',
+  'not_material',
+  'not_assessed',
+]);
+const CATEGORIES = new Set<MaterialityCategory>(['environment', 'social', 'governance']);
+
 export interface MaterialityTopicView {
+  /** materiality_topics.id。追加・編集・削除・評価はこの ID で行う */
+  id: Uuid;
   topicKey: string;
   title: string;
   category: MaterialityCategory;
   materiality: MaterialityLevel;
   rationale: string;
   metricCodes: string[];
+  /** 項目（対象指標）の表示名。マスターに無いコードは含めない */
+  metricNames: string[];
   /** 対象指標のうち、当期に承認済みの値がある数 */
   collectedMetricCount: number;
   /** 対象指標の総数 */
@@ -115,14 +90,12 @@ export interface MaterialityTopicView {
   coverage: number | null;
   /** まだ承認済みの値が無い指標名 */
   missingMetricNames: string[];
-  /** 保存済みか（未保存なら候補として表示） */
-  saved: boolean;
 }
 
 export interface MaterialityOverview {
   period: ReportingPeriod;
   topics: MaterialityTopicView[];
-  /** 登録済み（保存済み）トピックがあるか */
+  /** 登録済みトピックがあるか */
   registered: boolean;
   /** マテリアルなトピック数 */
   materialCount: number;
@@ -140,9 +113,9 @@ export async function loadMateriality(
   const organizationId = ctx.workspace.organizationId;
 
   const saved = await db.select('materialityTopics', {
-    where: { organizationId, reportingPeriodId: period.id },
+    where: { organizationId, reportingPeriodId: period.id, deletedAt: { isNull: true } },
+    orderBy: { column: 'createdAt', dir: 'asc' },
   });
-  const savedByKey = new Map(saved.map((t) => [t.topicKey, t]));
 
   // 当期に承認済みの値がある指標（＝収集できている指標）
   const approved = await db.select('dataPoints', {
@@ -151,31 +124,29 @@ export async function loadMateriality(
   const collectedMetricIds = new Set(approved.map((dp) => dp.metricId));
   const metricByCode = new Map(metrics.map((m) => [m.code, m]));
 
-  const topics: MaterialityTopicView[] = DEFAULT_TOPICS.map((base) => {
-    const row = savedByKey.get(base.topicKey);
-    const metricCodes = row?.metricCodes.length ? row.metricCodes : base.metricCodes;
-    const targets = metricCodes
+  const topics: MaterialityTopicView[] = saved.map((row) => {
+    const targets = row.metricCodes
       .map((code) => metricByCode.get(code))
       .filter((m): m is MetricDefinition => Boolean(m));
     const collected = targets.filter((m) => collectedMetricIds.has(m.id));
-    const level = row?.materiality ?? 'not_assessed';
 
     return {
-      topicKey: base.topicKey,
-      title: row?.title ?? base.title,
-      category: row?.category ?? base.category,
-      materiality: level,
-      rationale: row?.rationale ?? '',
-      metricCodes,
+      id: row.id,
+      topicKey: row.topicKey,
+      title: row.title,
+      category: row.category,
+      materiality: row.materiality,
+      rationale: row.rationale,
+      metricCodes: row.metricCodes,
+      metricNames: targets.map((m) => m.name),
       collectedMetricCount: collected.length,
       totalMetricCount: targets.length,
-      coverage: isMaterial(level)
+      coverage: isMaterial(row.materiality)
         ? targets.length === 0
           ? 0
           : Math.round((collected.length / targets.length) * 100)
         : null,
       missingMetricNames: targets.filter((m) => !collectedMetricIds.has(m.id)).map((m) => m.name),
-      saved: Boolean(row),
     };
   });
 
@@ -194,69 +165,101 @@ export async function loadMateriality(
   };
 }
 
-/** マテリアリティ評価の登録・更新（1 トピック）。 */
-export async function saveMaterialityTopic(
+/** 自組織・生存中のトピックを引く（他社の ID を差し込まれても存在ごと秘匿する） */
+async function findOwnedTopic(
   db: DbClient,
   ctx: AuthorizationContext,
-  input: {
-    reportingPeriodId: Uuid;
-    topicKey: string;
-    materiality: MaterialityLevel;
-    rationale: string;
-  },
+  topicId: Uuid,
+): Promise<MaterialityTopic> {
+  const topic = await db.findById('materialityTopics', topicId);
+  if (!topic || topic.organizationId !== ctx.workspace.organizationId || topic.deletedAt) {
+    throw new NotFoundError('マテリアリティの課題が見つかりません。');
+  }
+  return topic;
+}
+
+function validateTitle(raw: string): string {
+  // NFKC 正規化はしない。全角括弧・全角英数を勝手に半角へ書き換えると、
+  // 利用者が入力したとおりの名前で表示されなくなる（正規化は提示の照合側だけで使う）
+  const title = raw.trim();
+  if (title === '') throw new ValidationError('マテリアリティ名を入力してください。');
+  if (title.length > 100) {
+    throw new ValidationError('マテリアリティ名は 100 文字以内で入力してください。');
+  }
+  return title;
+}
+
+function validateCategory(raw: string): MaterialityCategory {
+  if (!CATEGORIES.has(raw as MaterialityCategory)) {
+    throw new ValidationError('区分を選んでください。');
+  }
+  return raw as MaterialityCategory;
+}
+
+/** 指標コードは指標マスターに実在するものだけ受け付ける（画面偽装への備え） */
+function validateMetricCodes(raw: string[], metrics: MetricDefinition[]): string[] {
+  const known = new Set(metrics.map((m) => m.code));
+  return [...new Set(raw.map((c) => c.trim()).filter((c) => c !== '' && known.has(c)))];
+}
+
+export interface AddTopicInput {
+  reportingPeriodId: Uuid;
+  /** 自由記述のマテリアリティ名 */
+  title: string;
+  /** 提示から利用者が選んだ区分 */
+  category: string;
+  /** 提示に基づく項目（対象指標）。マスターに無いコードは捨てる */
+  metricCodes: string[];
+}
+
+/** マテリアリティの課題を追加する。追加時点では未評価（評価は別の操作）。 */
+export async function addMaterialityTopic(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  metrics: MetricDefinition[],
+  input: AddTopicInput,
 ): Promise<MaterialityTopic> {
   assertCan(ctx, 'enterprise.disclosure.write');
-
-  const base = DEFAULT_TOPICS.find((t) => t.topicKey === input.topicKey);
-  if (!base) throw new NotFoundError('トピックが見つかりません。');
-
-  const rationale = input.rationale.trim();
-  if (rationale.length > 1000) {
-    throw new Error('評価理由は 1000 文字以内で入力してください。');
-  }
-  // 重要と判断したものは、なぜ重要なのかを残す（後から監査で問われる）
-  if (isMaterial(input.materiality) && !rationale) {
-    throw new ValidationError('重要と評価する場合は、その理由を入力してください。');
-  }
-
   const organizationId = ctx.workspace.organizationId;
-  const now = new Date().toISOString();
 
-  const existing = await db.select('materialityTopics', {
-    where: { organizationId, reportingPeriodId: input.reportingPeriodId, topicKey: input.topicKey },
-    limit: 1,
-  });
-
-  if (existing[0]) {
-    await db.update('materialityTopics', existing[0].id, {
-      materiality: input.materiality,
-      rationale,
-      assessedAt: now,
-      assessedBy: ctx.userId,
-      updatedAt: now,
-      updatedBy: ctx.userId,
-    });
-    await recordAuditEvent(db, ctx, {
-      eventType: 'data_updated',
-      resourceType: 'materiality_topic',
-      resourceId: existing[0].id,
-      afterSummary: `マテリアリティを更新: ${base.title} → ${MATERIALITY_LABEL[input.materiality]}`,
-    });
-    return { ...existing[0], materiality: input.materiality, rationale };
+  const period = await db.findById('periods', input.reportingPeriodId);
+  if (!period || period.organizationId !== organizationId) {
+    throw new NotFoundError('報告期間が見つかりません。');
   }
 
+  const title = validateTitle(input.title);
+  const category = validateCategory(input.category);
+  const metricCodes = validateMetricCodes(input.metricCodes, metrics);
+
+  // 同じ名前の課題を二重登録させない（生きている行の中で）
+  const existing = await db.select('materialityTopics', {
+    where: {
+      organizationId,
+      reportingPeriodId: input.reportingPeriodId,
+      deletedAt: { isNull: true },
+    },
+  });
+  if (existing.some((t) => t.title === title)) {
+    throw new ValidationError(`「${title}」は既に登録されています。`);
+  }
+
+  const now = new Date().toISOString();
   const topic: MaterialityTopic = {
-    id: fid('materiality_topic', `${organizationId}/${input.reportingPeriodId}/${input.topicKey}`),
+    // 決定論 ID（fid）は使わない。時刻を種に混ぜても同一ミリ秒の
+    // 「削除 → 同名で再追加」で衝突する。課題はデモの固定 Fixture ではなく
+    // 利用者が作る行なので、毎回必ず別になる乱数 ID でよい
+    id: crypto.randomUUID(),
     organizationId,
     reportingPeriodId: input.reportingPeriodId,
-    topicKey: base.topicKey,
-    title: base.title,
-    category: base.category,
-    materiality: input.materiality,
-    rationale,
-    metricCodes: base.metricCodes,
-    assessedAt: now,
-    assessedBy: ctx.userId,
+    topicKey: crypto.randomUUID().slice(0, 8),
+    title,
+    category,
+    materiality: 'not_assessed',
+    rationale: '',
+    metricCodes,
+    assessedAt: null,
+    assessedBy: null,
+    deletedAt: null,
     createdAt: now,
     updatedAt: now,
     createdBy: ctx.userId,
@@ -267,7 +270,131 @@ export async function saveMaterialityTopic(
     eventType: 'data_created',
     resourceType: 'materiality_topic',
     resourceId: topic.id,
-    afterSummary: `マテリアリティを登録: ${base.title} → ${MATERIALITY_LABEL[input.materiality]}`,
+    afterSummary: `マテリアリティを追加: ${title}（${CATEGORY_LABEL[category]}）`,
   });
   return topic;
+}
+
+export interface UpdateTopicInput {
+  topicId: Uuid;
+  title: string;
+  category: string;
+}
+
+/** 課題の名前・区分を編集する。評価は変えない（評価は別の操作）。 */
+export async function updateMaterialityTopic(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: UpdateTopicInput,
+): Promise<MaterialityTopic> {
+  assertCan(ctx, 'enterprise.disclosure.write');
+  const topic = await findOwnedTopic(db, ctx, input.topicId);
+
+  const title = validateTitle(input.title);
+  const category = validateCategory(input.category);
+
+  const siblings = await db.select('materialityTopics', {
+    where: {
+      organizationId: topic.organizationId,
+      reportingPeriodId: topic.reportingPeriodId,
+      deletedAt: { isNull: true },
+    },
+  });
+  if (siblings.some((t) => t.id !== topic.id && t.title === title)) {
+    throw new ValidationError(`「${title}」は既に登録されています。`);
+  }
+
+  const now = new Date().toISOString();
+  const updated = await db.update('materialityTopics', topic.id, {
+    title,
+    category,
+    updatedAt: now,
+    updatedBy: ctx.userId,
+  });
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_updated',
+    resourceType: 'materiality_topic',
+    resourceId: topic.id,
+    beforeSummary: `${topic.title}（${CATEGORY_LABEL[topic.category]}）`,
+    afterSummary: `マテリアリティを編集: ${title}（${CATEGORY_LABEL[category]}）`,
+  });
+  return updated;
+}
+
+/** 課題を削除する（論理削除。評価の記録は行として残す）。 */
+export async function deleteMaterialityTopic(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  topicId: Uuid,
+): Promise<void> {
+  assertCan(ctx, 'enterprise.disclosure.write');
+  const topic = await findOwnedTopic(db, ctx, topicId);
+
+  const now = new Date().toISOString();
+  await db.update('materialityTopics', topic.id, {
+    deletedAt: now,
+    updatedAt: now,
+    updatedBy: ctx.userId,
+  });
+  // 監査イベントの種別に削除専用は無い（追記専用ログ側の制約）。
+  // 論理削除は行の状態変更として data_updated で残し、内容で削除と分かるようにする
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_updated',
+    resourceType: 'materiality_topic',
+    resourceId: topic.id,
+    beforeSummary: `${topic.title}（${MATERIALITY_LABEL[topic.materiality]}）`,
+    afterSummary: `マテリアリティを削除: ${topic.title}`,
+  });
+}
+
+export interface AssessTopicInput {
+  topicId: Uuid;
+  materiality: string;
+  rationale: string;
+}
+
+/**
+ * 課題に評価と理由を付ける。
+ *
+ * 理由は**評価を付けるとき必須**。重要とした根拠も、重要でないとした根拠も、
+ * 後から監査で問われる。未評価へ戻すときだけ理由なしを許す。
+ */
+export async function assessMaterialityTopic(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: AssessTopicInput,
+): Promise<MaterialityTopic> {
+  assertCan(ctx, 'enterprise.disclosure.write');
+  const topic = await findOwnedTopic(db, ctx, input.topicId);
+
+  if (!MATERIALITY_LEVELS.has(input.materiality as MaterialityLevel)) {
+    throw new ValidationError('評価の値が不正です。');
+  }
+  const materiality = input.materiality as MaterialityLevel;
+
+  const rationale = input.rationale.trim();
+  if (rationale.length > 1000) {
+    throw new ValidationError('評価理由は 1000 文字以内で入力してください。');
+  }
+  if (materiality !== 'not_assessed' && rationale === '') {
+    throw new ValidationError('評価理由を入力してください（必須）。');
+  }
+
+  const now = new Date().toISOString();
+  const updated = await db.update('materialityTopics', topic.id, {
+    materiality,
+    rationale,
+    assessedAt: materiality === 'not_assessed' ? null : now,
+    assessedBy: materiality === 'not_assessed' ? null : ctx.userId,
+    updatedAt: now,
+    updatedBy: ctx.userId,
+  });
+  await recordAuditEvent(db, ctx, {
+    eventType: topic.assessedAt ? 'data_updated' : 'data_created',
+    resourceType: 'materiality_topic',
+    resourceId: topic.id,
+    beforeSummary: `${topic.title} → ${MATERIALITY_LABEL[topic.materiality]}`,
+    afterSummary: `マテリアリティを評価: ${topic.title} → ${MATERIALITY_LABEL[materiality]}`,
+  });
+  return updated;
 }

@@ -64,7 +64,6 @@ import type {
   GrantSubjectType,
   DataPointStatus,
   FrameworkKey,
-  MaterialityLevel,
   PeriodStatus,
   ResponseStatus,
   RoleKey,
@@ -1113,18 +1112,95 @@ export async function issueResetLinkAction(formData: FormData): Promise<void> {
  * マテリアリティ評価の登録・更新（SSBJ 開示の起点）。
  * 重要と評価する場合は理由を必須にしている（後から根拠を問われるため）。
  */
-export async function saveMaterialityTopicAction(formData: FormData): Promise<void> {
+/**
+ * マテリアリティ操作の結果。
+ *
+ * 入力の誤り（理由未入力など）は ?error= のリダイレクトで画面トップに出すのではなく、
+ * この戻り値で**操作したフォームのすぐそば**に出す。どの行のどの入力が悪いのかを、
+ * 手を動かした場所で伝えるため。
+ */
+export type MaterialityActionState = { ok: true } | { ok: false; message: string } | null;
+
+function revalidateMateriality(): void {
+  revalidatePath('/enterprise/disclosures/ssbj');
+  revalidatePath('/enterprise/disclosures/ssbj/settings');
+}
+
+/** 例外を「フォームのそばに出す文言」へ変換する共通処理 */
+async function runMaterialityAction(run: () => Promise<void>): Promise<MaterialityActionState> {
+  try {
+    await run();
+    revalidateMateriality();
+    return { ok: true };
+  } catch (error) {
+    if (isUserFacingError(error)) return { ok: false, message: error.message };
+    throw error;
+  }
+}
+
+/** 課題の追加（自由記述 → 区分の選択を経て登録） */
+export async function addMaterialityTopicAction(
+  _prev: MaterialityActionState,
+  formData: FormData,
+): Promise<MaterialityActionState> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  const { saveMaterialityTopic } = await import('@/lib/services/materiality');
-  await withUserFacingError('/enterprise/disclosures/ssbj', async () => {
-    await saveMaterialityTopic(db, ctx, {
+  const shell = await loadEnterpriseShell();
+  const { addMaterialityTopic } = await import('@/lib/services/materiality');
+  return runMaterialityAction(async () => {
+    await addMaterialityTopic(db, ctx, shell.metrics, {
       reportingPeriodId: String(formData.get('reportingPeriodId') ?? ''),
-      topicKey: String(formData.get('topicKey') ?? ''),
-      materiality: String(formData.get('materiality') ?? 'not_assessed') as MaterialityLevel,
+      title: String(formData.get('title') ?? ''),
+      category: String(formData.get('category') ?? ''),
+      metricCodes: formData.getAll('metricCodes').map(String),
+    });
+  });
+}
+
+/** 課題の編集（名前・区分） */
+export async function updateMaterialityTopicAction(
+  _prev: MaterialityActionState,
+  formData: FormData,
+): Promise<MaterialityActionState> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const { updateMaterialityTopic } = await import('@/lib/services/materiality');
+  return runMaterialityAction(async () => {
+    await updateMaterialityTopic(db, ctx, {
+      topicId: String(formData.get('topicId') ?? ''),
+      title: String(formData.get('title') ?? ''),
+      category: String(formData.get('category') ?? ''),
+    });
+  });
+}
+
+/** 課題の削除（論理削除） */
+export async function deleteMaterialityTopicAction(
+  _prev: MaterialityActionState,
+  formData: FormData,
+): Promise<MaterialityActionState> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const { deleteMaterialityTopic } = await import('@/lib/services/materiality');
+  return runMaterialityAction(async () => {
+    await deleteMaterialityTopic(db, ctx, String(formData.get('topicId') ?? ''));
+  });
+}
+
+/** 課題の評価（評価理由は必須） */
+export async function assessMaterialityTopicAction(
+  _prev: MaterialityActionState,
+  formData: FormData,
+): Promise<MaterialityActionState> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const { assessMaterialityTopic } = await import('@/lib/services/materiality');
+  return runMaterialityAction(async () => {
+    await assessMaterialityTopic(db, ctx, {
+      topicId: String(formData.get('topicId') ?? ''),
+      materiality: String(formData.get('materiality') ?? 'not_assessed'),
       rationale: String(formData.get('rationale') ?? ''),
     });
-    revalidatePath('/enterprise/disclosures/ssbj');
   });
 }
 

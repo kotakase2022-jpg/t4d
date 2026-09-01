@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { ORG_IDS, PERIOD_IDS, UNIT_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
-import { loadMateriality, saveMaterialityTopic } from '@/lib/services/materiality';
+import {
+  addMaterialityTopic,
+  assessMaterialityTopic,
+  loadMateriality,
+} from '@/lib/services/materiality';
 import { loadSsbjHeadline, loadSsbjRequirementViews } from '@/lib/services/ssbj-gap';
 import {
   confirmSsbjSettings,
@@ -46,16 +50,30 @@ const viewer = () => ctxFor('site-user@demo.local', ['site_contributor']);
 const period = () => fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!;
 const metrics = () => fixture.metrics.filter((m) => m.organizationId === ORG_IDS.aomi);
 
-/** 全トピックを評価済みにする（③を満たすため） */
+/**
+ * 課題を登録して評価済みにする（③を満たすため）。
+ * 課題は固定一覧ではなく利用者が自由記述で登録する仕様になったので、
+ * まず追加してから評価する。
+ */
 async function assessAllTopics() {
-  const { topics } = await loadMateriality(db, manager(), period(), metrics());
-  for (const topic of topics) {
-    await saveMaterialityTopic(db, manager(), {
+  const names = ['気候変動に伴う炭素価格の上昇', '熟練技術者の確保と定着'];
+  for (const name of names) {
+    const topic = await addMaterialityTopic(db, manager(), metrics(), {
       reportingPeriodId: PERIOD_IDS.fy2026,
-      topicKey: topic.topicKey,
+      title: name,
+      category: name.includes('気候') ? 'environment' : 'social',
+      metricCodes: [],
+    });
+    await assessMaterialityTopic(db, manager(), {
+      topicId: topic.id,
       materiality: 'medium',
       rationale: '当年度の事業内容を踏まえて評価した。',
     });
+  }
+  // 登録した全課題が評価済みになっていること（途中で増えていれば検知する）
+  const { topics } = await loadMateriality(db, manager(), period(), metrics());
+  if (topics.some((t) => t.materiality === 'not_assessed')) {
+    throw new Error('未評価の課題が残っている');
   }
 }
 
@@ -91,9 +109,10 @@ describe('初期状態', () => {
   });
 
   it('当年度のマテリアリティは未評価から始まる', async () => {
+    // 課題は固定一覧ではなく利用者が登録する。当年度は 0 件・未評価から始まる
     const view = await loadSsbjSettings(db, manager(), period(), metrics());
     expect(view.assessedTopicCount).toBe(0);
-    expect(view.totalTopicCount).toBeGreaterThan(0);
+    expect(view.totalTopicCount).toBe(0);
     expect(view.materialTopicCount).toBe(0);
   });
 

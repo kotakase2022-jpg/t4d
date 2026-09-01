@@ -132,18 +132,31 @@ test('⑥ SSBJ が対象判定 → 分析 → 確認 → 対応計画 → デー
   // 充足度が数値で可視化されている
   await expect(page.getByText('マテリアリティ充足度')).toBeVisible();
 
-  // マテリアリティ評価表があり、課題が並んでいる
-  await expect(page.getByText('気候変動（GHG 排出）')).toBeVisible();
+  // 課題は固定一覧ではなく、利用者が「①マテリアリティ・分析条件の設定」で登録する
+  // （未登録なら登録への導線、登録済みなら一覧。Demo Mode はテスト間で状態を
+  //   共有するため、ここではどちらの状態かを決め打ちしない）
 
-  // 評価は「①マテリアリティ・分析条件の設定」で行う（決める場所を 1 つに寄せた）
   await page.goto('/enterprise/disclosures/ssbj/settings');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  // 評価を更新できる（重要と評価するなら理由が要る）
-  const row = page.locator('tr', { hasText: '水資源の利用' });
-  await row.getByRole('combobox').selectOption('high');
-  await row.getByRole('textbox').fill('取水量の多い拠点を新設したため重要度を引き上げ');
-  await row.getByRole('button', { name: '保存' }).click();
+  // 自由記述 → 区分の提示 → 選択 → 評価（理由必須）まで通す
+  const name = `水資源の利用 ${Date.now().toString(36)}`;
+  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  await expect(page.getByText(/一致した語/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
+  const row = page.locator('li', { hasText: name });
+  await expect(row).toBeVisible();
+  await expect(row.getByText('環境')).toBeVisible();
+
+  await row.getByRole('combobox', { name: /の重要度/ }).selectOption('high');
+  await row
+    .getByRole('textbox', { name: /の評価理由/ })
+    .fill('取水量の多い拠点を新設したため重要度を引き上げ');
+  await row.getByRole('button', { name: '評価を保存' }).click();
   await page.waitForLoadState('networkidle');
   await expect(page.getByText('取水量の多い拠点を新設したため重要度を引き上げ')).toBeVisible();
+
+  // 全体状況の一覧にも「マテリアリティ名 → 区分 → 項目」で反映される
+  await page.goto('/enterprise/disclosures/ssbj');
+  await expect(page.getByText(name)).toBeVisible();
 });

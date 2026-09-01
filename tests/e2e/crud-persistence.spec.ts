@@ -107,41 +107,97 @@ test('Data Point: 値の編集がDBへ反映され、リロード後も保持さ
   await expect(page.getByText(reason).first()).toBeVisible();
 });
 
-test('マテリアリティ: 重要と評価するなら理由が必須（サーバー側で拒否）', async ({ page }) => {
+/** 自由記述でマテリアリティを追加する（区分の提示から 1 つ選ぶ） */
+async function addMaterialityViaUi(page: import('@playwright/test').Page, name: string) {
+  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  // 入力すると区分の候補が提示される。一致する語が無い名前では
+  // 最有力が出ないので、利用者として「環境」を明示的に選ぶ
+  await expect(page.getByText('区分を選ぶ').first()).toBeVisible();
+  await page.getByRole('radio', { name: '区分: 環境' }).check();
+  await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
+  await expect(
+    page.locator('li', { hasText: name }).first(),
+    `追加した「${name}」が一覧に出ない`,
+  ).toBeVisible();
+}
+
+test('マテリアリティ: 追加 → 評価 → 編集 → 削除が永続化される（CRUD）', async ({ page }) => {
+  test.setTimeout(120_000);
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/disclosures/ssbj/settings');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  const row = page.locator('tr', { hasText: 'サプライチェーン管理' });
-  await row.getByRole('combobox').selectOption('high');
-  await row.getByRole('textbox').fill('   '); // 空白のみ
-  await row.getByRole('button', { name: '保存' }).click();
-  await page.waitForLoadState('networkidle');
+  // Create: 自由記述で追加。気候の語から「環境」が提示される
+  const name = `気候変動と炭素価格 ${Date.now().toString(36)}`;
+  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  await expect(page.getByText(/一致した語/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
+  const row = page.locator('li', { hasText: name });
+  await expect(row).toBeVisible();
+  await expect(row.getByText('環境')).toBeVisible();
 
-  // エラーになり、空白だけの理由は保存されない
-  await page.goto('/enterprise/disclosures/ssbj/settings');
-  const after = page.locator('tr', { hasText: 'サプライチェーン管理' });
-  const rationale = await after.textContent();
-  expect(rationale, '空白のみの理由が保存されてしまった').toContain('未評価');
-});
+  // Read: リロードしても残る
+  await page.reload();
+  await expect(page.locator('li', { hasText: name })).toBeVisible();
 
-test('マテリアリティ: 評価の変更が永続化される', async ({ page }) => {
-  await loginAs(page, DEMO_USERS.sustainability);
-  await page.goto('/enterprise/disclosures/ssbj/settings');
-
+  // Update(評価): 理由つきで評価し、リロード後も保持される
   const reason = `監査検証 ${Date.now().toString(36)}`;
-  const row = page.locator('tr', { hasText: '資源循環・廃棄物' });
-  await row.getByRole('combobox').selectOption('high');
-  await row.getByRole('textbox').fill(reason);
-  await row.getByRole('button', { name: '保存' }).click();
+  const assessRow = page.locator('li', { hasText: name });
+  await assessRow.getByRole('combobox', { name: /の重要度/ }).selectOption('high');
+  await assessRow.getByRole('textbox', { name: /の評価理由/ }).fill(reason);
+  await assessRow.getByRole('button', { name: '評価を保存' }).click();
   await page.waitForLoadState('networkidle');
-
   await page.reload();
   await expect(page.getByText(reason)).toBeVisible();
-  // バッジ（評価結果）で確認する。select の option にも同じ文言があるため first を取る
-  await expect(
-    page.locator('tr', { hasText: '資源循環・廃棄物' }).getByText('重要度：高').first(),
-  ).toBeVisible();
+  await expect(page.locator('li', { hasText: name }).getByText('重要度：高').first()).toBeVisible();
+
+  // Update(編集): 名前を変えられる
+  const renamed = `${name}（改訂）`;
+  await page
+    .locator('li', { hasText: name })
+    .getByRole('button', { name: /を編集/ })
+    .click();
+  const editForm = page.locator('li', { hasText: name }).locator('form', {
+    has: page.getByRole('button', { name: '変更を保存' }),
+  });
+  await editForm.locator('input[name="title"]').fill(renamed);
+  await editForm.getByRole('button', { name: '変更を保存' }).click();
+  await expect(page.locator('li', { hasText: renamed })).toBeVisible();
+
+  // Delete: 確認を挟んで削除し、リロード後も消えたまま
+  const target = page.locator('li', { hasText: renamed });
+  await target.getByRole('button', { name: /を削除/ }).click();
+  await expect(target.getByText('削除しますか？')).toBeVisible();
+  await target.getByRole('button', { name: '削除する' }).click();
+  await expect(page.locator('li', { hasText: renamed })).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('li', { hasText: renamed })).toHaveCount(0);
+});
+
+test('マテリアリティ: 評価理由は必須で、誤りは入力欄のそばに出る', async ({ page }) => {
+  test.setTimeout(120_000);
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.goto('/enterprise/disclosures/ssbj/settings');
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  const name = `理由必須の検証 ${Date.now().toString(36)}`;
+  await addMaterialityViaUi(page, name);
+
+  // 必須の明示がある
+  const row = page.locator('li', { hasText: name });
+  await expect(row.getByText('（必須）')).toBeVisible();
+
+  // 理由なしで保存 → 誤りの指摘が**その行の中**に出る（画面トップではない）
+  await row.getByRole('combobox', { name: /の重要度/ }).selectOption('high');
+  await row.getByRole('textbox', { name: /の評価理由/ }).fill('   ');
+  await row.getByRole('button', { name: '評価を保存' }).click();
+  await expect(row.getByRole('alert')).toContainText('評価理由を入力してください');
+  // 画面トップのフラッシュには出ていない（?error= リダイレクトを使っていない）
+  expect(page.url()).not.toContain('error=');
+
+  // 保存されていない（リロードすると未評価のまま）
+  await page.reload();
+  await expect(page.locator('li', { hasText: name }).getByText('未評価').first()).toBeVisible();
 });
 
 test('コメント: 投稿が永続化され、リロード後も残る', async ({ page }) => {

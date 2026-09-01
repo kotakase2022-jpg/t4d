@@ -7,3 +7,4 @@ public
 test-results
 playwright-report
 *.min.js
+local-evidence

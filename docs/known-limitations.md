@@ -111,17 +111,18 @@ CDP Portal 直接 API 提出 / CDP Portal 双方向 Sync / MSCI・FTSE 直接 AP
   順序依存の破綻を検出できる）。
 - Seed は `pnpm seed:generate` で再生成する。手で編集しない。
 
-### 0026〜0030 のロールバック
+### 0026〜0031 のロールバック
 
 いずれも列追加・制約差し替え・テーブル追加のみで、既存データを壊さない。
 
-| Migration                     | 打ち消し方                                                                                                                             |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `0026_metric_frameworks`      | `frameworks` 列と GIN 索引を無視する。`category` の CHECK は `climate_transition` を除いた式へ戻す（該当行があるなら先に別分類へ移す） |
-| `0027_ingestion_row_ignored`  | `status` の CHECK から `ignored` を外す。該当行は `needs_review` へ寄せる                                                              |
-| `0028_ssbj_analysis_settings` | テーブルを使わない。分析条件が未確定の扱いへ戻るだけで、他の工程は動く                                                                 |
-| `0029_approval_routes`        | 3 テーブルを使わない。承認は `data_points.status` の単段階へ戻る（履歴は残る）                                                         |
-| `0030_ssbj_disclosure_drafts` | テーブルを使わない。開示ドラフトは DOCX 書き出しだけへ戻る                                                                             |
+| Migration                              | 打ち消し方                                                                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `0026_metric_frameworks`               | `frameworks` 列と GIN 索引を無視する。`category` の CHECK は `climate_transition` を除いた式へ戻す（該当行があるなら先に別分類へ移す） |
+| `0027_ingestion_row_ignored`           | `status` の CHECK から `ignored` を外す。該当行は `needs_review` へ寄せる                                                              |
+| `0028_ssbj_analysis_settings`          | テーブルを使わない。分析条件が未確定の扱いへ戻るだけで、他の工程は動く                                                                 |
+| `0029_approval_routes`                 | 3 テーブルを使わない。承認は `data_points.status` の単段階へ戻る（履歴は残る）                                                         |
+| `0030_ssbj_disclosure_drafts`          | テーブルを使わない。開示ドラフトは DOCX 書き出しだけへ戻る                                                                             |
+| `0031_materiality_topics_user_managed` | `deleted_at` を無視し、部分一意インデックスを元の一意制約へ戻す（削除済み行があるなら先に整理する）                                    |
 
 ## 7. データ保持・削除
 

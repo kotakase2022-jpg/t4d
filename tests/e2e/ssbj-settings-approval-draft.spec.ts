@@ -89,19 +89,29 @@ test('③ マテリアリティ・分析条件の設定を、未完了から確�
   await page.waitForLoadState('networkidle');
   await expect(page.getByText('適用する基準を決める')).toBeVisible();
 
-  // ③ マテリアリティをすべて評価する。
-  //
-  // 「未評価の行」で絞り込むことはできない。select の <option> にも「未評価」が
-  // あるため、評価済みの行にも一致してしまう。行番号で順に埋める。
-  const rowsOf = () => page.locator('#t4d-main tr').filter({ has: page.getByRole('combobox') });
-  const topicCount = await rowsOf().count();
-  expect(topicCount).toBeGreaterThan(0);
+  // ③ マテリアリティは自由記述で登録し、区分の提示から選ぶ
+  for (const name of ['気候変動に伴う炭素価格の上昇', '熟練技術者の確保と定着']) {
+    await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+    // 区分の候補が根拠（一致した語）つきで提示される
+    await expect(page.getByText(/一致した語/).first()).toBeVisible();
+    await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
+    await expect(page.locator('li', { hasText: name })).toBeVisible();
+  }
 
-  for (let i = 0; i < topicCount; i += 1) {
-    const row = rowsOf().nth(i); // 保存のたびに再描画されるので毎回引き直す
-    await row.getByRole('combobox').selectOption('medium');
-    await row.getByRole('textbox').fill('当年度の事業内容を踏まえて評価しました。');
-    await row.getByRole('button', { name: '保存' }).click();
+  // 確定には**すべての課題が評価済み**であることが要る。
+  // Demo Mode はテスト間で状態を共有するため、他のテストが残した
+  // 未評価の課題も含めて、一覧の未評価を全部評価する
+  const rows = page.locator('#t4d-main li').filter({ has: page.getByRole('combobox') });
+  const rowCount = await rows.count();
+  for (let i = 0; i < rowCount; i += 1) {
+    const row = rows.nth(i);
+    const select = row.getByRole('combobox', { name: /の重要度/ });
+    if ((await select.inputValue()) !== 'not_assessed') continue;
+    await select.selectOption('medium');
+    await row
+      .getByRole('textbox', { name: /の評価理由/ })
+      .fill('当年度の事業内容を踏まえて評価しました。');
+    await row.getByRole('button', { name: '評価を保存' }).click();
     await page.waitForLoadState('networkidle');
   }
 

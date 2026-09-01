@@ -417,63 +417,80 @@ export default async function SsbjPage({
               </Badge>
             )}
           </div>
-          <Table>
-            <THead>
-              <TR>
-                <TH>区分</TH>
-                <TH>トピック</TH>
-                <TH>対象指標</TH>
-                <TH>評価</TH>
-                <TH>充足度</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {materiality.topics.map((topic) => (
-                <TR key={topic.topicKey}>
-                  <TD>{CATEGORY_LABEL[topic.category]}</TD>
-                  <TD className="font-medium text-ink">
-                    <div className="flex items-center gap-1.5">
-                      <Target className="size-3.5 text-ink-muted" aria-hidden="true" />
-                      {topic.title}
-                    </div>
-                    {topic.rationale && (
-                      <p className="mt-0.5 text-[11px] text-ink-muted">{topic.rationale}</p>
-                    )}
-                  </TD>
-                  <TD className="text-[11px] text-ink-muted">
-                    {topic.totalMetricCount} 件
-                    {topic.missingMetricNames.length > 0 && (
-                      <span className="ml-1 text-[#8a5d00]">
-                        （未収集: {topic.missingMetricNames.join('・')}）
-                      </span>
-                    )}
-                  </TD>
-                  <TD>
-                    <Badge tone={LEVEL_TONE[topic.materiality]}>
-                      {MATERIALITY_LABEL[topic.materiality]}
-                    </Badge>
-                  </TD>
-                  <TD>
-                    {topic.coverage === null ? (
-                      <span className="text-ink-muted">—</span>
-                    ) : (
-                      <span className="flex items-center gap-1.5">
-                        <Progress
-                          value={topic.coverage}
-                          tone={rateTone(topic.coverage)}
-                          className="w-16"
-                          label={`${topic.title} の充足度 ${topic.coverage}%`}
-                        />
-                        <span className="text-[12px] tabular-nums">
-                          {topic.coverage}%（{topic.collectedMetricCount}/{topic.totalMetricCount}）
-                        </span>
-                      </span>
-                    )}
-                  </TD>
+          {materiality.topics.length === 0 ? (
+            <EmptyState
+              title="マテリアリティが未登録です"
+              description="「①マテリアリティ・分析条件の設定」で、自社の重要課題を自由記述で登録してください。"
+              action={
+                <Button size="sm" asChild>
+                  <Link href="/enterprise/disclosures/ssbj/settings">
+                    <Target aria-hidden="true" />
+                    登録しに行く
+                  </Link>
+                </Button>
+              }
+            />
+          ) : (
+            <Table>
+              <THead>
+                <TR>
+                  {/* マテリアリティ名 → 区分 → 項目 の階層で見せる */}
+                  <TH>マテリアリティ</TH>
+                  <TH>区分</TH>
+                  <TH>項目（対象指標）</TH>
+                  <TH>評価</TH>
+                  <TH>充足度</TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
+              </THead>
+              <TBody>
+                {materiality.topics.map((topic) => (
+                  <TR key={topic.id}>
+                    <TD className="font-medium text-ink">
+                      <div className="flex items-center gap-1.5">
+                        <Target className="size-3.5 text-ink-muted" aria-hidden="true" />
+                        {topic.title}
+                      </div>
+                      {topic.rationale && (
+                        <p className="mt-0.5 text-[11px] text-ink-muted">{topic.rationale}</p>
+                      )}
+                    </TD>
+                    <TD>{CATEGORY_LABEL[topic.category]}</TD>
+                    <TD className="text-[11px] text-ink-muted">
+                      {topic.totalMetricCount} 件
+                      {topic.missingMetricNames.length > 0 && (
+                        <span className="ml-1 text-[#8a5d00]">
+                          （未収集: {topic.missingMetricNames.join('・')}）
+                        </span>
+                      )}
+                    </TD>
+                    <TD>
+                      <Badge tone={LEVEL_TONE[topic.materiality]}>
+                        {MATERIALITY_LABEL[topic.materiality]}
+                      </Badge>
+                    </TD>
+                    <TD>
+                      {topic.coverage === null ? (
+                        <span className="text-ink-muted">—</span>
+                      ) : (
+                        <span className="flex items-center gap-1.5">
+                          <Progress
+                            value={topic.coverage}
+                            tone={rateTone(topic.coverage)}
+                            className="w-16"
+                            label={`${topic.title} の充足度 ${topic.coverage}%`}
+                          />
+                          <span className="text-[12px] tabular-nums">
+                            {topic.coverage}%（{topic.collectedMetricCount}/{topic.totalMetricCount}
+                            ）
+                          </span>
+                        </span>
+                      )}
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          )}
         </Card>
 
         <div className="flex items-center gap-2">

@@ -23,6 +23,8 @@ export default tseslint.config(
       'playwright-report/**',
       'next-env.d.ts',
       'supabase/**',
+      // git 管理外のローカル作業フォルダ（.gitignore と対）。lint の対象にしない
+      'local-evidence/**',
       '*.config.mjs',
     ],
   },

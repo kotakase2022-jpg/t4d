@@ -168,17 +168,35 @@ test('本番: SSBJ のマテリアリティ登録が永続化される', async (
   await page.goto(`${BASE}/enterprise/disclosures/ssbj`);
   await expect(page.getByText('マテリアリティ充足度')).toBeVisible();
 
-  // 評価そのものは「①マテリアリティ・分析条件の設定」で行う（決める場所を 1 つに寄せた）
+  // 課題は「①マテリアリティ・分析条件の設定」で自由記述から登録する
   await page.goto(`${BASE}/enterprise/disclosures/ssbj/settings`);
-  const reason = `本番スモーク ${Date.now().toString(36)}`;
-  const row = page.locator('tr', { hasText: '労働安全衛生' });
-  await row.getByRole('combobox').selectOption('high');
-  await row.getByRole('textbox').fill(reason);
-  await row.getByRole('button', { name: '保存' }).click();
+  const marker = Date.now().toString(36);
+  const name = `本番スモーク 労働安全衛生 ${marker}`;
+  await page.getByLabel('マテリアリティ名（自由記述）').fill(name);
+  // 「安全」の語から社会が提示される
+  await expect(page.getByText(/一致した語/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'マテリアリティを追加' }).click();
+  const row = page.locator('li', { hasText: name });
+  await expect(row).toBeVisible();
+  await expect(row.getByText('社会')).toBeVisible();
+
+  // 評価（理由必須）→ リロード後も残る
+  const reason = `本番スモーク理由 ${marker}`;
+  await row.getByRole('combobox', { name: /の重要度/ }).selectOption('high');
+  await row.getByRole('textbox', { name: /の評価理由/ }).fill(reason);
+  await row.getByRole('button', { name: '評価を保存' }).click();
   await page.waitForLoadState('networkidle');
 
   await page.reload();
   await expect(page.getByText(reason)).toBeVisible();
+
+  // 片付け: 追加した課題を削除し、削除も永続化されることを確認する
+  const added = page.locator('li', { hasText: name });
+  await added.getByRole('button', { name: /を削除/ }).click();
+  await added.getByRole('button', { name: '削除する' }).click();
+  await expect(page.locator('li', { hasText: name })).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('li', { hasText: name })).toHaveCount(0);
 });
 
 test('本番: 権限制御（未ログイン・他テナント）が効いている', async ({ page }) => {

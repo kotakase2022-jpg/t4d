@@ -1905,4 +1905,6 @@ e2e は six-features / ssbj-gap / new-features-audit / demo-tour /
 Fixture は大半が分析済みのため、一括分析のテストは 8 件を未分析へ
 戻してから確かめる。
 
-**未解決**: なし（本番反映まで完了していれば）。
+**結果**: 全ゲート通過（unit+integration 603 / RLS 101 / E2E 257 /
+本番スモーク 28）。047cf8d を deploy → terrast-t4d.vercel.app へ
+エイリアス済み。未解決なし。

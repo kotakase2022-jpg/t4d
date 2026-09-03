@@ -127,32 +127,14 @@ export default async function SsbjPage({
       href: '/enterprise/imports',
     },
     {
-      title: '対象判定・重要性判断',
-      description: 'どの要求事項が自社に適用され、重要性があるかを判断します。',
-      state: counts.notApplicable + counts.notMaterial > 0 ? 'done' : 'current',
-      detail: `対象外 ${counts.notApplicable} 件／重要性なし ${counts.notMaterial} 件`,
+      // 旧・工程③〜⑥（対象判定／AI 分析／担当者確認／優先順位付け）は 1 画面に統合した。
+      // 4 工程が同じ要求事項一覧を別々の入口から見るだけだったため、行き来が無駄だった
+      title: '要求事項の評価（対象判定〜優先順位付け）',
+      description:
+        '対象判定・重要性判断、人工知能によるギャップ分析、担当者による確認、優先順位付けを 1 画面で進めます。',
+      state: counts.awaitingReview > 0 || remaining > 0 ? 'current' : 'done',
+      detail: `対象外 ${counts.notApplicable} 件／確認待ち ${counts.awaitingReview} 件／優先度「高」${overview.topPriorities.filter((v) => v.priority.priority === 'high').length} 件`,
       href: '/enterprise/disclosures/ssbj/requirements',
-    },
-    {
-      title: '人工知能によるギャップ分析',
-      description: '現在の開示内容と要求事項を比較し、対応状況を判定します。',
-      state: 'done',
-      detail: `${counts.total - counts.notApplicable} 件を判定`,
-      href: '/enterprise/disclosures/ssbj/requirements',
-    },
-    {
-      title: '担当者による確認',
-      description: '人工知能の判定を確認し、承認または修正して最終判定にします。',
-      state: counts.awaitingReview > 0 ? 'current' : 'done',
-      detail: `確認待ち ${counts.awaitingReview} 件`,
-      href: '/enterprise/disclosures/ssbj/requirements?coverage=unconfirmed',
-    },
-    {
-      title: 'ギャップの優先順位付け',
-      description: '重要性・期限・データの有無から、着手する順番を決めます。',
-      state: remaining > 0 ? 'current' : 'done',
-      detail: `優先度「高」${overview.topPriorities.filter((v) => v.priority.priority === 'high').length} 件`,
-      href: '/enterprise/disclosures/ssbj/requirements?priority=high',
     },
     {
       title: '対応計画の作成',
@@ -210,7 +192,7 @@ export default async function SsbjPage({
             <Button size="sm" asChild>
               <Link href="/enterprise/disclosures/ssbj/requirements">
                 <ListChecks aria-hidden="true" />
-                要求事項一覧
+                要求事項の評価
               </Link>
             </Button>
             {/* 書き出すだけでなく、草案を作るところから扱えるようにする */}

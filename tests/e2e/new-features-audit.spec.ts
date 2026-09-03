@@ -180,6 +180,43 @@ test('③ 設定: 死んだ導線が無く、保存が再読込後も残る', as
   expect(problems).toEqual([]);
 });
 
+test('③ 設定: 報告対象が階層表示され、有価証券報告書から自動選択できる', async ({ page }) => {
+  test.setTimeout(120_000);
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.goto('/enterprise/disclosures/ssbj/settings');
+  await expect(page.locator('#t4d-main')).toBeVisible();
+
+  // ② 資本・国内外・サプライヤーの階層で選択肢が出る
+  for (const group of ['本社・直轄拠点', '100% 子会社（連結）', '持分法適用会社', 'サプライヤー']) {
+    await expect(page.getByText(group).first()).toBeVisible();
+  }
+  // 国内外のバッジと持分比率（他テストが追加した持分法の拠点も並ぶので first で取る）
+  await expect(page.getByText('海外').first()).toBeVisible();
+  await expect(page.getByText(/持分 35\s*%/).first()).toBeVisible();
+
+  // ① 有価証券報告書から報告対象を自動選択する
+  await page.getByRole('button', { name: '最新の有価証券報告書を取り込む' }).click();
+  await page.waitForURL(/flash=secReport/, { timeout: 30_000 });
+  const flash = page.getByRole('status');
+  await expect(flash).toContainText('有価証券報告書');
+  await expect(flash).toContainText('自動選択しました');
+  // 持分法適用会社は見つけても自動選択しない
+  await expect(flash).toContainText('持分法適用のため自動選択していません');
+
+  // 本文に載っている連結対象がチェックされ、持分法適用会社は外れたまま
+  // （チェックボックスのアクセシブル名は「本社 国内」のように所在バッジを含む）
+  await expect(page.getByLabel(/^本社/)).toBeChecked();
+  await expect(page.getByLabel('東日本工場')).toBeChecked();
+  await expect(page.getByLabel('西日本工場')).toBeChecked();
+  await expect(page.getByLabel('欧州販売子会社')).toBeChecked();
+  await expect(page.getByLabel('青海マテリアル合弁会社')).not.toBeChecked();
+
+  // 再読込しても選択が残る（設定として保存されている）
+  await page.reload();
+  await expect(page.getByLabel('東日本工場')).toBeChecked();
+  await expect(page.getByLabel('青海マテリアル合弁会社')).not.toBeChecked();
+});
+
 test('③ 設定: 異常値を弾き、全画面エラーにしない', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/disclosures/ssbj/settings');

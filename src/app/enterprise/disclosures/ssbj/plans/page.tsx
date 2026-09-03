@@ -120,7 +120,7 @@ export default async function SsbjPlansPage({
               description="要求事項の詳細画面から「対応計画に追加」で作成してください。"
               action={
                 <Button size="sm" asChild>
-                  <Link href="/enterprise/disclosures/ssbj/requirements">要求事項一覧へ</Link>
+                  <Link href="/enterprise/disclosures/ssbj/requirements">要求事項の評価へ</Link>
                 </Button>
               }
             />

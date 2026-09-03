@@ -663,11 +663,13 @@ insert into files (id, organization_id, bucket, original_name, mime_type, confid
   ('d73715fc-e514-4976-90ce-7e059ef3d3bf', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '人事データ_FY2025.csv', 'text/csv', 'confidential', 'bf9d8c72-8ff3-4e71-a2e7-334d8b47f4a5', '人事データ', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', 'skipped', null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('40079a23-e07c-4f04-b18b-b20f54a9800f', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '購買明細_FY2025.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'confidential', '32ceadd4-8d76-47e7-8108-ad257a99bc61', '購買台帳', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', 'skipped', null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('9822c35d-22cf-4238-8cd1-7132aa6d0685', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '燃料使用記録_FY2025.pdf', 'application/pdf', 'confidential', '02767050-2cb8-44b1-a918-10365ee6e1a3', '計測記録', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', 'skipped', null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('58196cc9-b2c0-4b70-a63c-1ec8c56c9ca7', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '有価証券報告書_FY2025.pdf', 'application/pdf', 'confidential', 'fe1d7062-d3cc-4d23-acf6-51d63bc96211', '有価証券報告書', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', 'skipped', null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('fa4c0910-f53c-4981-bed2-fe8ed75a267d', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '電力請求書_FY2026.pdf', 'application/pdf', 'confidential', '3b1b094a-214a-45d8-91e5-5cd4f5a3c2cd', '請求書', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('8e0bc819-fcff-4e24-95cc-6045c846ccfd', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '廃棄物マニフェスト_FY2026.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'confidential', 'b9401c6c-1387-40f5-8956-6c668d8dad47', 'マニフェスト', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('d73714fc-e514-47c3-be17-51beaf2a935d', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '人事データ_FY2026.csv', 'text/csv', 'confidential', '2be36c7a-c8f3-452e-87f9-c7b7e9d85819', '人事データ', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('40079d23-e07c-441d-a60f-71bc7a9e18bd', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '購買明細_FY2026.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'confidential', '1a60b5bd-1e2e-4450-a02c-ab25dcb68bdd', '購買台帳', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
-  ('9822c65d-22cf-4751-8712-5e5ad92e9651', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '燃料使用記録_FY2026.pdf', 'application/pdf', 'confidential', '6ebc5058-65b8-4b6e-9f28-a1c326ce856d', '計測記録', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49');
+  ('9822c65d-22cf-4751-8712-5e5ad92e9651', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '燃料使用記録_FY2026.pdf', 'application/pdf', 'confidential', '6ebc5058-65b8-4b6e-9f28-a1c326ce856d', '計測記録', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('58196fc9-b2c0-4089-bb85-76f9b11fdf95', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '有価証券報告書_FY2026.pdf', 'application/pdf', 'confidential', 'b967584a-28e4-47bc-8048-3bcec65116c5', '有価証券報告書', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49');
 
 insert into file_versions (id, file_id, organization_id, version_no, storage_key, size_bytes, sha256, created_at, created_by) values
   ('bebc8164-a2a7-46cf-a7c9-1381486ff075', 'fa4c0610-f53c-4468-ad38-c0063bd37aeb', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/bebc8164-a2a7-46cf-a7c9-1381486ff075/power-invoice.bin', 129503, 'c5ebbb604a118e29c43f35063bc8c0a6', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
@@ -675,11 +677,13 @@ insert into file_versions (id, file_id, organization_id, version_no, storage_key
   ('bf9d8c72-8ff3-4e71-a2e7-334d8b47f4a5', 'd73715fc-e514-4976-90ce-7e059ef3d3bf', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/bf9d8c72-8ff3-4e71-a2e7-334d8b47f4a5/hr-data.bin', 125117, '77a53d364f1a5a937000ecdbbb0056ca', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('32ceadd4-8d76-47e7-8108-ad257a99bc61', '40079a23-e07c-4f04-b18b-b20f54a9800f', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/32ceadd4-8d76-47e7-8108-ad257a99bc61/purchase-ledger.bin', 130965, '4fc48dba25f098b91fb06f905078d776', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('02767050-2cb8-44b1-a918-10365ee6e1a3', '9822c35d-22cf-4238-8cd1-7132aa6d0685', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/02767050-2cb8-44b1-a918-10365ee6e1a3/fuel-log.bin', 125848, '1866076e61d556b7d90314ffdca2d6be', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('fe1d7062-d3cc-4d23-acf6-51d63bc96211', '58196cc9-b2c0-4b70-a63c-1ec8c56c9ca7', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/fe1d7062-d3cc-4d23-acf6-51d63bc96211/securities-report.bin', 132427, '9ce44a49e2f5e4b5092460fb5aac03ee', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('3b1b094a-214a-45d8-91e5-5cd4f5a3c2cd', 'fa4c0910-f53c-4981-bed2-fe8ed75a267d', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/3b1b094a-214a-45d8-91e5-5cd4f5a3c2cd/power-invoice.bin', 129503, '9476910f6be69134b0a59e76e7b79b8a', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('b9401c6c-1387-40f5-8956-6c668d8dad47', '8e0bc819-fcff-4e24-95cc-6045c846ccfd', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/b9401c6c-1387-40f5-8956-6c668d8dad47/waste-manifest.bin', 130234, '3e63b86651ad5d37e819bc20920c51da', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('2be36c7a-c8f3-452e-87f9-c7b7e9d85819', 'd73714fc-e514-47c3-be17-51beaf2a935d', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/2be36c7a-c8f3-452e-87f9-c7b7e9d85819/hr-data.bin', 125117, 'dfc5d7a994631c72bbbc662c73ef11da', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('1a60b5bd-1e2e-4450-a02c-ab25dcb68bdd', '40079d23-e07c-441d-a60f-71bc7a9e18bd', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/1a60b5bd-1e2e-4450-a02c-ab25dcb68bdd/purchase-ledger.bin', 130965, '2954ea62b3a7fb04abc9c62153695bb6', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
-  ('6ebc5058-65b8-4b6e-9f28-a1c326ce856d', '9822c65d-22cf-4751-8712-5e5ad92e9651', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/6ebc5058-65b8-4b6e-9f28-a1c326ce856d/fuel-log.bin', 125848, '6289f93c666047762831d71ec5d54564', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49');
+  ('6ebc5058-65b8-4b6e-9f28-a1c326ce856d', '9822c65d-22cf-4751-8712-5e5ad92e9651', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/6ebc5058-65b8-4b6e-9f28-a1c326ce856d/fuel-log.bin', 125848, '6289f93c666047762831d71ec5d54564', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('b967584a-28e4-47bc-8048-3bcec65116c5', '58196fc9-b2c0-4089-bb85-76f9b11fdf95', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/b967584a-28e4-47bc-8048-3bcec65116c5/securities-report.bin', 132427, '980f59ed3e01f0b03caa0a47372d436e', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49');
 
 insert into extracted_fragments (id, file_version_id, organization_id, page, kind, text, locator, created_at) values
   ('53b7120d-0820-49f7-9e5b-6ef645d86e3d', 'bebc8164-a2a7-46cf-a7c9-1381486ff075', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '電気ご使用量のお知らせ（電力需給契約に基づく請求書）
@@ -849,6 +853,21 @@ Scope1 排出量（燃料由来）: 1267.2 t-CO2e
 2026-12-19    社用車 108      ガソリン       2,296     設備管理課
 2026-04-21    ボイラー1号      A重油         2,433     設備管理課
 ※ 全 248 件のうち先頭 10 件を表示（架空データ）', 'p.3', '2025-10-18T03:00:00.000Z'),
+  ('acff377b-2993-4d4b-9f68-d3845bd8fb55', 'fe1d7062-d3cc-4d23-acf6-51d63bc96211', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '有価証券報告書（2025年3月期）
+提出者: 青海テクノロジー株式会社 ／ 関東財務局長宛
+第一部 企業情報 ／ 第1 企業の概況
+4 関係会社の状況
+欧州販売子会社（オランダ・アムステルダム） 議決権比率 100% 連結子会社 電子部品の販売
+青海マテリアル合弁会社（日本・千葉） 議決権比率 35% 持分法適用関連会社 素材の製造
+（注）連結財務諸表の作成において、連結子会社 1 社を連結の範囲に含め、関連会社 1 社に持分法を適用しています。
+※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。', 'p.1', '2025-10-18T03:00:00.000Z'),
+  ('acff387b-2993-4efe-bb49-df583a7d2a0b', 'fe1d7062-d3cc-4d23-acf6-51d63bc96211', '65f36d85-8a52-4668-8451-adcea4448565', 2, 'text', '有価証券報告書（2025年3月期）
+第一部 企業情報 ／ 第3 設備の状況
+2 主要な設備の状況（提出会社）
+本社（東京都港区） 統括業務・研究開発 従業員 180 名
+東日本工場（茨城県） 精密電子部品の製造 従業員 210 名
+西日本工場（岡山県） 精密電子部品の製造 従業員 90 名
+※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。', 'p.2', '2025-10-18T03:00:00.000Z'),
   ('94139a14-05d0-4440-9fbf-2f6f352e5263', '3b1b094a-214a-45d8-91e5-5cd4f5a3c2cd', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '電気ご使用量のお知らせ（電力需給契約に基づく請求書）
 発行: 中央電力株式会社 法人営業部
 請求番号: DENKI-FY2026-004128 ／ 発行日: 2027-04-10
@@ -1015,7 +1034,22 @@ Scope1 排出量（燃料由来）: 1191.0 t-CO2e
 2026-11-17    発電機A      A重油         2,159     設備管理課
 2026-12-19    社用車 108      ガソリン       2,296     設備管理課
 2026-04-21    ボイラー1号      A重油         2,433     設備管理課
-※ 全 248 件のうち先頭 10 件を表示（架空データ）', 'p.3', '2026-06-15T03:00:00.000Z');
+※ 全 248 件のうち先頭 10 件を表示（架空データ）', 'p.3', '2026-06-15T03:00:00.000Z'),
+  ('4219df84-9b44-4cf4-a180-e04021370b3f', 'b967584a-28e4-47bc-8048-3bcec65116c5', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '有価証券報告書（2026年3月期）
+提出者: 青海テクノロジー株式会社 ／ 関東財務局長宛
+第一部 企業情報 ／ 第1 企業の概況
+4 関係会社の状況
+欧州販売子会社（オランダ・アムステルダム） 議決権比率 100% 連結子会社 電子部品の販売
+青海マテリアル合弁会社（日本・千葉） 議決権比率 35% 持分法適用関連会社 素材の製造
+（注）連結財務諸表の作成において、連結子会社 1 社を連結の範囲に含め、関連会社 1 社に持分法を適用しています。
+※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。', 'p.1', '2026-06-15T03:00:00.000Z'),
+  ('4219e284-9b44-420d-a11c-32d9f525a595', 'b967584a-28e4-47bc-8048-3bcec65116c5', '65f36d85-8a52-4668-8451-adcea4448565', 2, 'text', '有価証券報告書（2026年3月期）
+第一部 企業情報 ／ 第3 設備の状況
+2 主要な設備の状況（提出会社）
+本社（東京都港区） 統括業務・研究開発 従業員 180 名
+東日本工場（茨城県） 精密電子部品の製造 従業員 210 名
+西日本工場（岡山県） 精密電子部品の製造 従業員 90 名
+※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。', 'p.2', '2026-06-15T03:00:00.000Z');
 
 insert into evidence_links (id, organization_id, file_version_id, target_type, target_id, page, cell_ref, fragment_id, source_url, coverage_period_start, coverage_period_end, obtained_at, note, created_at, updated_at, created_by, updated_by) values
   ('1f940c79-6397-4f73-be53-88ad43f39845', '65f36d85-8a52-4668-8451-adcea4448565', '02767050-2cb8-44b1-a918-10365ee6e1a3', 'data_point', '19482763-444a-4b9d-9397-90c24a2cf86b', 2, 'Sheet1!C12', '2884fa20-1c1b-4eb1-a009-07a4b5f24ecd', null, '2025-04-01', '2026-03-31', '2026-04-15', null, '2025-10-23T03:00:00.000Z', '2025-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),

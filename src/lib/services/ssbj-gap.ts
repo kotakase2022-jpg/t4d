@@ -4,6 +4,7 @@ import { runAi } from '@/lib/ai';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
 import { FIXTURE_TODAY } from '@/lib/config';
+import { suggestMaterialityCategory } from '@/lib/domain/materiality-suggest';
 import {
   areaOfSection,
   combineCoverage,
@@ -19,6 +20,8 @@ import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
   DisclosureItem,
+  MaterialityCategory,
+  MaterialityLevel,
   MetricDefinition,
   ReportingPeriod,
   SsbjActionPlan,
@@ -60,6 +63,12 @@ export interface SsbjRequirementView {
   priority: PriorityResult;
   /** この要求事項に紐づく対応計画 */
   plans: SsbjActionPlan[];
+  /** 人工知能の分析で既存資料に該当箇所が見つかったか（取込資料との紐づけ） */
+  hasDocumentLink: boolean;
+  /** 要求する指標に当期の値があるか（データとの紐づけ） */
+  hasDataLink: boolean;
+  /** 人工知能の分析を実行済みか */
+  analyzed: boolean;
 }
 
 export interface SsbjAreaSummary {
@@ -242,6 +251,9 @@ function buildView(
       daysToDeadline,
     }),
     plans: plans.filter((p) => p.assessmentId === assessment.id),
+    hasDocumentLink: assessment.sourceDocument !== null,
+    hasDataLink: false,
+    analyzed: assessment.aiEvaluatedAt !== null,
   };
 }
 
@@ -267,14 +279,232 @@ export async function loadSsbjRequirementViews(
   const byItem = new Map(assessments.map((a) => [a.itemId, a]));
   const days = deadlineDays(period);
 
+  // 要求事項が求める指標に、当期の値が実際にあるか（データとの紐づけ）。
+  // 要求事項 → 指標の対応は disclosure_mappings が持つ。
+  // 「資料の取込・データ収集でこの項目を埋められるか」を一覧で見せるために持つ
+  const [mappings, dataPoints] = await Promise.all([
+    db.select('disclosureMappings', {
+      where: { organizationId: ctx.workspace.organizationId },
+    }),
+    db.select('dataPoints', {
+      where: {
+        organizationId: ctx.workspace.organizationId,
+        reportingPeriodId: period.id,
+        deletedAt: { isNull: true },
+      },
+    }),
+  ]);
+  const metricIdsWithValue = new Set(
+    dataPoints.filter((dp) => dp.value !== null).map((dp) => dp.metricId),
+  );
+  const itemIdsWithData = new Set(
+    mappings.filter((m) => metricIdsWithValue.has(m.metricId)).map((m) => m.itemId),
+  );
+
   const views = master.items
     .map((item) => {
       const assessment = byItem.get(item.id);
-      return assessment ? buildView(item, assessment, plans, days) : null;
+      if (!assessment) return null;
+      const view = buildView(item, assessment, plans, days);
+      view.hasDataLink = itemIdsWithData.has(item.id);
+      return view;
     })
     .filter((v): v is SsbjRequirementView => v !== null);
 
   return { views, versionLabel: master.versionLabel, isFixture: master.isFixture };
+}
+
+// ----------------------------------------------------------------------
+// 対象の整理（マッピング）
+// ----------------------------------------------------------------------
+
+/** マテリアリティ 1 件と SSBJ 基準の対応（マッピング表の 1 行） */
+export interface SsbjMappingRow {
+  title: string;
+  category: MaterialityCategory;
+  materiality: MaterialityLevel;
+  /** 気候関連開示基準の対象になりやすい課題か */
+  climate: boolean;
+  /** 項目（対象指標）の数 */
+  metricCount: number;
+  /** 対象指標を通じて紐づく要求事項の数 */
+  linkedItemCount: number;
+}
+
+export interface SsbjScopeMapping {
+  /** 適用している基準（設定が無ければ既定: 一般・気候） */
+  applied: { general: boolean; climate: boolean; practical: boolean };
+  /** 設定を保存済みか（未設定なら既定の全件表示であることを画面で伝える） */
+  configured: boolean;
+  /** 件数の流れ: マスター全件 → 基準で絞り込み → 対象外・重要性なしを除く */
+  counts: {
+    masterTotal: number;
+    afterStandards: number;
+    notApplicable: number;
+    notMaterial: number;
+    inScope: number;
+  };
+  /** マテリアリティ × 基準のマッピング表 */
+  rows: SsbjMappingRow[];
+  /** 取込資料・データとの紐づけ集計（対象の要求事項のみ） */
+  linkage: {
+    document: number;
+    data: number;
+    /** 分析済みだが資料にもデータにも紐づかない */
+    none: number;
+    unanalyzed: number;
+  };
+}
+
+/**
+ * 「必要な要求項目のみが正しく表示されているか」を確かめるための整理。
+ *
+ * 前の 2 工程（①分析条件の設定・②資料の取込）の内容から、
+ *  - どの基準を適用し、その結果 133 項目が何件に絞り込まれたか
+ *  - 登録したマテリアリティが、どの基準・どの要求事項へ紐づくか
+ *  - 対象の要求事項のうち、取込資料・データで裏づけられるものはどれか
+ * を 1 か所で返す。判定は保存済みデータと規則だけで行い、ここで AI は使わない
+ * （画面は「なぜこの件数なのか」を検算できる必要がある）。
+ */
+export async function loadSsbjScopeMapping(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  period: ReportingPeriod,
+  views: SsbjRequirementView[],
+): Promise<SsbjScopeMapping> {
+  const organizationId = ctx.workspace.organizationId;
+
+  const [settingsRows, topics, allItemsCount, mappings, metrics] = await Promise.all([
+    db.select('ssbjAnalysisSettings', {
+      where: { organizationId, reportingPeriodId: period.id },
+      limit: 1,
+    }),
+    db.select('materialityTopics', {
+      where: { organizationId, reportingPeriodId: period.id, deletedAt: { isNull: true } },
+      orderBy: { column: 'createdAt', dir: 'asc' },
+    }),
+    (async () => {
+      const frameworks = await db.select('frameworks', { where: { key: 'ssbj' }, limit: 1 });
+      if (!frameworks[0]) return 0;
+      const versions = await db.select('frameworkVersions', {
+        where: { frameworkId: frameworks[0].id },
+        orderBy: { column: 'year', dir: 'desc' },
+      });
+      const current = versions.find((v) => v.status === 'published') ?? versions[0];
+      if (!current) return 0;
+      return (await db.select('disclosureItems', { where: { frameworkVersionId: current.id } }))
+        .length;
+    })(),
+    db.select('disclosureMappings', { where: { organizationId } }),
+    db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),
+  ]);
+
+  const settings = settingsRows[0] ?? null;
+  const applied = settings
+    ? {
+        general: settings.applyGeneral,
+        climate: settings.applyClimate,
+        practical: settings.applyPractical,
+      }
+    : { general: true, climate: true, practical: false };
+
+  const metricIdByCode = new Map(metrics.map((m) => [m.code, m.id]));
+  // 指標 → その指標を求める要求事項（disclosure_mappings 経由）
+  const itemIdsByMetricId = new Map<Uuid, Set<Uuid>>();
+  for (const mapping of mappings) {
+    const set = itemIdsByMetricId.get(mapping.metricId) ?? new Set<Uuid>();
+    set.add(mapping.itemId);
+    itemIdsByMetricId.set(mapping.metricId, set);
+  }
+  const shownItemIds = new Set(views.map((v) => v.item.id));
+
+  const rows: SsbjMappingRow[] = topics.map((topic) => {
+    // 気候の課題かどうかは、名前・内容・リスク・機会を合わせた提示器の判定で見る
+    // （登録時と同じ規則なので、画面の説明と食い違わない）
+    const suggestion = suggestMaterialityCategory(
+      topic.title,
+      topic.description,
+      topic.risks,
+      topic.opportunities,
+    );
+    const climate =
+      suggestion.candidates.find((c) => c.category === topic.category)?.climate ?? false;
+
+    const linkedItemIds = new Set<Uuid>();
+    for (const code of topic.metricCodes) {
+      const metricId = metricIdByCode.get(code);
+      if (!metricId) continue;
+      for (const itemId of itemIdsByMetricId.get(metricId) ?? []) {
+        if (shownItemIds.has(itemId)) linkedItemIds.add(itemId);
+      }
+    }
+
+    return {
+      title: topic.title,
+      category: topic.category,
+      materiality: topic.materiality,
+      climate,
+      metricCount: topic.metricCodes.length,
+      linkedItemCount: linkedItemIds.size,
+    };
+  });
+
+  const applicable = views.filter((v) => v.assessment.applicability === 'applicable');
+  const notApplicable = views.length - applicable.length;
+  const notMaterial = applicable.filter((v) => v.assessment.materiality === 'not_material').length;
+
+  const linkage = { document: 0, data: 0, none: 0, unanalyzed: 0 };
+  for (const view of applicable) {
+    if (view.hasDocumentLink) linkage.document += 1;
+    if (view.hasDataLink) linkage.data += 1;
+    if (!view.analyzed) linkage.unanalyzed += 1;
+    else if (!view.hasDocumentLink && !view.hasDataLink) linkage.none += 1;
+  }
+
+  return {
+    applied,
+    configured: settings !== null,
+    counts: {
+      masterTotal: allItemsCount,
+      afterStandards: views.length,
+      notApplicable,
+      notMaterial,
+      inScope: applicable.length - notMaterial,
+    },
+    rows,
+    linkage,
+  };
+}
+
+/**
+ * 未分析の要求事項をまとめて人工知能で分析する。
+ *
+ * 1 件ずつ詳細画面から実行する運用だと 133 項目は現実的に終わらない。
+ * 優先度の高い順に、1 回の操作で最大 `limit` 件だけ実行する
+ * （全件を一括にしないのは、実 AI 接続時の実行コストと時間を抑えるため）。
+ * 判定はこれまでどおり候補どまりで、最終判定は担当者の確認で入る。
+ */
+export async function runSsbjGapAnalysisBulk(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  period: ReportingPeriod,
+  limit = 20,
+): Promise<{ analyzed: number; remaining: number }> {
+  assertCan(ctx, 'enterprise.ai.run');
+
+  const loaded = await loadSsbjRequirementViews(db, ctx, period);
+  if (!loaded) throw new NotFoundError('SSBJ の要求事項マスターが見つかりません。');
+
+  const pending = loaded.views
+    .filter((v) => v.assessment.applicability === 'applicable' && !v.analyzed)
+    .sort((a, b) => b.priority.score - a.priority.score);
+
+  const targets = pending.slice(0, limit);
+  for (const view of targets) {
+    await runSsbjGapAnalysis(db, ctx, view.assessment.id);
+  }
+
+  return { analyzed: targets.length, remaining: pending.length - targets.length };
 }
 
 const EMPTY_PLAN_COUNTS: Record<SsbjActionStatus, number> = {
@@ -432,6 +662,8 @@ export interface SsbjRequirementFilters {
   materiality?: string[];
   priority?: string[];
   department?: string[];
+  /** 取込資料・データとの紐づけ（document / data / unanalyzed / none） */
+  linkage?: string[];
   search?: string;
 }
 
@@ -449,6 +681,14 @@ export function filterRequirements(
       return false;
     }
     if (has(filters.priority) && !filters.priority!.includes(v.priority.priority)) return false;
+    if (has(filters.linkage)) {
+      const states: string[] = [];
+      if (v.hasDocumentLink) states.push('document');
+      if (v.hasDataLink) states.push('data');
+      if (!v.analyzed) states.push('unanalyzed');
+      else if (!v.hasDocumentLink && !v.hasDataLink) states.push('none');
+      if (!filters.linkage!.some((l) => states.includes(l))) return false;
+    }
     if (has(filters.department) && !filters.department!.includes(v.assessment.ownerDepartment)) {
       return false;
     }

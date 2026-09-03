@@ -45,9 +45,8 @@ test.describe('SSBJ 対応状況（全体状況）', () => {
     await expect(main.getByText('優先して対応するギャップ')).toBeVisible();
     await expect(main.getByText('初年度対応を優先する項目')).toBeVisible();
 
-    // 8 段階の基本フロー
-    await expect(main.getByText('人工知能によるギャップ分析')).toBeVisible();
-    await expect(main.getByText('担当者による確認')).toBeVisible();
+    // 5 段階の基本フロー（旧・工程③〜⑥は「要求事項の評価」1 画面に統合）
+    await expect(main.getByText('要求事項の評価（対象判定〜優先順位付け）')).toBeVisible();
     await expect(main.getByText('データ収集・開示・内部統制')).toBeVisible();
   });
 
@@ -62,24 +61,26 @@ test.describe('SSBJ 対応状況（全体状況）', () => {
   });
 });
 
-test.describe('SSBJ 要求事項一覧', () => {
+test.describe('SSBJ 要求事項の評価（統合画面）', () => {
   test('一覧が出て、絞り込みが効く', async ({ page }) => {
     await loginAs(page, DEMO_USERS.sustainability);
     await page.goto('/enterprise/disclosures/ssbj/requirements');
     const main = page.locator('#t4d-main');
 
     // 表の見出しが日本語で、AI 判定と最終判定が別の列になっている
+    // （マッピング表の「紐づく要求事項」列と部分一致しないよう厳密一致で取る）
     for (const header of [
       '要求事項',
       '領域',
       '適用区分',
       '重要性',
       '人工知能による判定',
+      '紐づけ',
       '最終判定',
       '優先度',
       '担当部署',
     ]) {
-      await expect(main.getByRole('columnheader', { name: header })).toBeVisible();
+      await expect(main.getByRole('columnheader', { name: header, exact: true })).toBeVisible();
     }
 
     const allRows = await page.locator('tbody tr').count();
@@ -90,6 +91,80 @@ test.describe('SSBJ 要求事項一覧', () => {
     const filtered = await page.locator('tbody tr').count();
     expect(filtered).toBeGreaterThan(0);
     expect(filtered).toBeLessThan(allRows);
+  });
+
+  test('旧・工程③〜⑥が 4 つの工程チップとして 1 画面に並ぶ', async ({ page }) => {
+    await loginAs(page, DEMO_USERS.sustainability);
+    await page.goto('/enterprise/disclosures/ssbj/requirements');
+    const main = page.locator('#t4d-main');
+
+    for (const stage of [
+      '対象判定・重要性判断',
+      '人工知能によるギャップ分析',
+      '担当者による確認',
+      'ギャップの優先順位付け',
+    ]) {
+      await expect(main.getByText(stage)).toBeVisible();
+    }
+
+    // チップを選ぶと、その工程の残作業で一覧が絞り込まれる
+    await main.getByRole('link', { name: /担当者による確認/ }).click();
+    await expect(page).toHaveURL(/coverage=unconfirmed/);
+  });
+
+  test('マッピング表で「必要な要求項目だけが表示されているか」を検算できる', async ({ page }) => {
+    await loginAs(page, DEMO_USERS.sustainability);
+    await page.goto('/enterprise/disclosures/ssbj/requirements');
+    const main = page.locator('#t4d-main');
+
+    await expect(main.getByText('SSBJ 要求事項とのマッピング')).toBeVisible();
+    // 件数の流れ: マスター全件 → 適用基準 → 対象外・重要性なし除外 → 評価対象
+    await expect(main.getByText(/正式基準マスター\s*133\s*項目/)).toBeVisible();
+    await expect(main.getByText(/適用基準で/)).toBeVisible();
+    await expect(main.getByText(/評価対象/).first()).toBeVisible();
+    // 適用中の基準
+    await expect(main.getByText(/一般開示基準 適用/)).toBeVisible();
+
+    // マテリアリティ × 基準の表（登録済みなら行、未登録なら登録への導線）
+    const matrixVisible = await main
+      .getByRole('columnheader', { name: '気候関連開示基準' })
+      .isVisible()
+      .catch(() => false);
+    if (!matrixVisible) {
+      await expect(main.getByText('マテリアリティが未登録です')).toBeVisible();
+    }
+  });
+
+  test('取込資料・データとの紐づけが 4 分類で出て、選ぶと絞り込まれる', async ({ page }) => {
+    await loginAs(page, DEMO_USERS.sustainability);
+    await page.goto('/enterprise/disclosures/ssbj/requirements');
+    const main = page.locator('#t4d-main');
+
+    await expect(main.getByText('取込資料・データとの紐づけ')).toBeVisible();
+    for (const label of ['資料と紐づけ済み', 'データあり', '未分析', '紐づけできず']) {
+      await expect(main.getByText(label, { exact: true }).first()).toBeVisible();
+    }
+
+    await main.getByRole('link', { name: /資料と紐づけ済み/ }).click();
+    await expect(page).toHaveURL(/linkage=document/);
+    // 絞り込み結果はすべて「資料」の紐づけを持つ
+    const rows = await page.locator('tbody tr').count();
+    expect(rows).toBeGreaterThan(0);
+  });
+
+  test('未分析をまとめて分析でき、判定は候補のままになる', async ({ page }) => {
+    await loginAs(page, DEMO_USERS.sustainability);
+    await page.goto('/enterprise/disclosures/ssbj/requirements');
+    const main = page.locator('#t4d-main');
+
+    // 未分析が残っていればボタンが出る（他テストの実行順により消化済みのこともある）
+    const bulk = main.getByRole('button', { name: /未分析をまとめて分析/ });
+    if (!(await bulk.isVisible().catch(() => false))) return;
+
+    await bulk.click();
+    await page.waitForLoadState('networkidle');
+    await expect(main.getByText(/件を人工知能で分析しました/)).toBeVisible();
+    await expect(main.getByText(/最終判定を入れてください/)).toBeVisible();
   });
 });
 

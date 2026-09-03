@@ -15,6 +15,25 @@ const MESSAGES: Record<string, (params: URLSearchParams) => string> = {
     const count = params.get('count');
     return count ? `前年度から ${count} 件を複製しました。` : '前年度から複製しました。';
   },
+  bulkAnalyzed: (params) => {
+    const analyzed = params.get('analyzed') ?? '0';
+    const remaining = params.get('remaining') ?? '0';
+    return (
+      `${analyzed} 件を人工知能で分析しました。判定は候補です。担当者の確認で最終判定を入れてください。` +
+      (remaining !== '0' ? ` 未分析が残り ${remaining} 件あります（もう一度実行できます）。` : '')
+    );
+  },
+  secReport: (params) => {
+    const file = params.get('file') ?? '有価証券報告書';
+    const checked = params.get('checked') ?? '';
+    const equity = params.get('equity');
+    return (
+      `「${file}」を読み込み、報告対象へ ${checked} を自動選択しました。` +
+      (equity
+        ? ` ${equity} は本文にありますが持分法適用のため自動選択していません（含める場合は手動でチェックしてください）。`
+        : '')
+    );
+  },
 };
 
 export function FlashMessage({

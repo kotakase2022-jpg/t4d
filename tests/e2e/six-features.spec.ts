@@ -123,9 +123,8 @@ test('⑥ SSBJ が対象判定 → 分析 → 確認 → 対応計画 → デー
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   // 基本フローが「ギャップを見つけて終わり」ではないことを画面上で示す
-  await expect(page.getByText('対象判定・重要性判断')).toBeVisible();
-  await expect(page.getByText('人工知能によるギャップ分析')).toBeVisible();
-  await expect(page.getByText('担当者による確認')).toBeVisible();
+  // （旧・工程③〜⑥は「要求事項の評価」1 画面に統合された）
+  await expect(page.getByText('要求事項の評価（対象判定〜優先順位付け）')).toBeVisible();
   await expect(page.getByText('対応計画の作成')).toBeVisible();
   await expect(page.getByText('データ収集・開示・内部統制')).toBeVisible();
 

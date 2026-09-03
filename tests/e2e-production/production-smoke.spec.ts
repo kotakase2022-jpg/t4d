@@ -475,12 +475,18 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   await expect(main.getByText('領域別の対応状況')).toBeVisible();
   await expect(main.getByText('優先して対応するギャップ')).toBeVisible();
 
-  // ② 要求事項一覧: 正式基準の 133 項目が並び、AI 判定と最終判定が別の列になっている
+  // ② 要求事項の評価: 旧・工程③〜⑥の統合画面。
+  //    マッピング表で 133 項目の検算ができ、AI 判定と最終判定が別の列になっている
   await page.goto(`${BASE}/enterprise/disclosures/ssbj/requirements`);
-  await expect(main.getByText('全 133 要求事項', { exact: false })).toBeVisible();
+  await expect(main.getByText('対象判定・重要性判断')).toBeVisible();
+  await expect(main.getByText('人工知能によるギャップ分析')).toBeVisible();
+  await expect(main.getByText('SSBJ 要求事項とのマッピング')).toBeVisible();
+  await expect(main.getByText(/正式基準マスター\s*133\s*項目/)).toBeVisible();
+  await expect(main.getByText('取込資料・データとの紐づけ')).toBeVisible();
   await expect(main.getByRole('columnheader', { name: '人工知能による判定' })).toBeVisible();
+  await expect(main.getByRole('columnheader', { name: '紐づけ' })).toBeVisible();
   await expect(main.getByRole('columnheader', { name: '最終判定' })).toBeVisible();
-  expect(await page.locator('tbody tr').count()).toBe(133);
+  expect(await page.locator('tbody tr').count()).toBeGreaterThan(100);
 
   // ③ 詳細: 3 種類のギャップと優先順位の根拠
   await page.locator('tbody tr a').first().click();
@@ -529,7 +535,8 @@ test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ 
     await page.waitForURL(expected);
   }
   await expect(main.getByText('開示ギャップ')).toBeVisible();
-  await expect(dialog).toContainText('手順 4');
+  // 旧・手順 4（AI ギャップ分析）は統合され「手順 3: 要求事項の評価」の一部になった
+  await expect(dialog).toContainText('手順 3');
 
   await dialog.getByRole('button', { name: 'デモモードを終了' }).click();
   await expect(page.getByRole('dialog', { name: /デモモード/ })).toHaveCount(0);

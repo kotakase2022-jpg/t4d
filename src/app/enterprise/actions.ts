@@ -15,6 +15,7 @@ import {
   createActionPlan,
   createDataCollectionItem,
   runSsbjGapAnalysis,
+  runSsbjGapAnalysisBulk,
   saveSsbjReview,
   saveSsbjScope,
   updateActionPlan,
@@ -1311,6 +1312,31 @@ export async function confirmSsbjDraftAction(formData: FormData): Promise<void> 
   redirect(`${back}?confirmed=1`);
 }
 
+/** 手順 1: 有価証券報告書から報告対象の組織・拠点を自動選択する */
+export async function applySecuritiesReportAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const back = '/enterprise/disclosures/ssbj/settings';
+  let flashQuery = '';
+  await withUserFacingError(back, async () => {
+    const { applySecuritiesReportScope } = await import('@/lib/services/securities-report');
+    const result = await applySecuritiesReportScope(
+      db,
+      ctx,
+      String(formData.get('reportingPeriodId') ?? ''),
+    );
+    const params = new URLSearchParams({
+      flash: 'secReport',
+      file: result.fileName,
+      checked: result.checked.join('、'),
+    });
+    if (result.equityMentioned.length > 0) params.set('equity', result.equityMentioned.join('、'));
+    flashQuery = params.toString();
+  });
+  revalidateSsbj(null);
+  redirect(`/enterprise/disclosures/ssbj/settings?${flashQuery}`);
+}
+
 /** 手順 1: 分析条件の確定（人の操作でのみ確定する） */
 export async function confirmSsbjSettingsAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
@@ -1358,6 +1384,20 @@ export async function runSsbjGapAnalysisAction(formData: FormData): Promise<void
     await runSsbjGapAnalysis(db, ctx, String(formData.get('assessmentId') ?? ''));
   });
   revalidateSsbj(itemId);
+}
+
+/** 要求事項の評価: 未分析の要求事項をまとめて人工知能で分析する */
+export async function runSsbjGapAnalysisBulkAction(): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const shell = await loadEnterpriseShell();
+  const back = '/enterprise/disclosures/ssbj/requirements';
+  let result = { analyzed: 0, remaining: 0 };
+  await withUserFacingError(back, async () => {
+    result = await runSsbjGapAnalysisBulk(db, ctx, shell.currentPeriod);
+  });
+  revalidateSsbj(null);
+  redirect(`${back}?flash=bulkAnalyzed&analyzed=${result.analyzed}&remaining=${result.remaining}`);
 }
 
 /** 手順 5: 担当者による確認（ここで最終判定が入る） */

@@ -566,6 +566,13 @@ export function createFixtureDb(): FixtureDb {
       docType: '計測記録',
       pages: 3,
     },
+    {
+      key: 'securities-report',
+      name: '有価証券報告書_{P}.pdf',
+      mime: 'application/pdf',
+      docType: '有価証券報告書',
+      pages: 2,
+    },
   ];
 
   const fileVersionByKey = new Map<string, string>();

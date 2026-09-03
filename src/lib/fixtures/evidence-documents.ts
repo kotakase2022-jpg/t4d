@@ -244,6 +244,48 @@ function hrData(periodCode: string): EvidenceDocumentLine[] {
   ];
 }
 
+/**
+ * 有価証券報告書（抜粋）。
+ *
+ * SSBJ の報告範囲は連結財務諸表と同一が基本なので、
+ * 「関係会社の状況」「設備の状況」に載る組織名から報告対象の候補を拾える。
+ * 拠点名は組織マスター（AOMI_UNITS）の名称と一致させてある——
+ * 一致しない名前を書くと、取り込んでも自動チェックが働かない。
+ */
+function securitiesReport(periodCode: string, page: number): EvidenceDocumentLine[] {
+  const fy = periodCode === 'FY2026' ? '2026年3月期' : '2025年3月期';
+  if (page === 1) {
+    return [
+      { kind: 'title', text: `有価証券報告書（${fy}）` },
+      { kind: 'meta', text: '提出者: 青海テクノロジー株式会社 ／ 関東財務局長宛' },
+      { kind: 'meta', text: '第一部 企業情報 ／ 第1 企業の概況' },
+      { kind: 'header', text: '4 関係会社の状況' },
+      {
+        kind: 'row',
+        text: '欧州販売子会社（オランダ・アムステルダム） 議決権比率 100% 連結子会社 電子部品の販売',
+      },
+      {
+        kind: 'row',
+        text: '青海マテリアル合弁会社（日本・千葉） 議決権比率 35% 持分法適用関連会社 素材の製造',
+      },
+      {
+        kind: 'note',
+        text: '（注）連結財務諸表の作成において、連結子会社 1 社を連結の範囲に含め、関連会社 1 社に持分法を適用しています。',
+      },
+      { kind: 'note', text: '※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。' },
+    ];
+  }
+  return [
+    { kind: 'title', text: `有価証券報告書（${fy}）` },
+    { kind: 'meta', text: '第一部 企業情報 ／ 第3 設備の状況' },
+    { kind: 'header', text: '2 主要な設備の状況（提出会社）' },
+    { kind: 'row', text: '本社（東京都港区） 統括業務・研究開発 従業員 180 名' },
+    { kind: 'row', text: '東日本工場（茨城県） 精密電子部品の製造 従業員 210 名' },
+    { kind: 'row', text: '西日本工場（岡山県） 精密電子部品の製造 従業員 90 名' },
+    { kind: 'note', text: '※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。' },
+  ];
+}
+
 /** ファイル種別・期間・ページから紙面を組み立てる */
 export function buildEvidenceDocument(
   fileKey: string,
@@ -261,6 +303,8 @@ export function buildEvidenceDocument(
       return purchaseLedger(periodCode);
     case 'hr-data':
       return hrData(periodCode);
+    case 'securities-report':
+      return securitiesReport(periodCode, page);
     default:
       return [
         { kind: 'title', text: '添付資料' },

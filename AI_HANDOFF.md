@@ -1858,3 +1858,51 @@ Playwright は自前のサーバーを立てず、**別のアプリ**へテス�
 発注者のプロセス ④〜⑦ は既存機能が担う: ④=課題の項目（対象指標）と
 対応計画→データ収集項目、⑤=要求事項の対象判定・重要性判断、
 ⑥=充足度・未収集表示とギャップ分析、⑦=データ収集画面の不足項目。
+
+### 2026-09-03 有報からの範囲自動選択・階層化・マッピング表・評価画面の統合
+
+発注者からの 4 点（①有価証券報告書から報告対象を自動チェック
+②報告対象の階層構造化 ③マッピング表で対象の検算＋資料/データ紐づけ可否
+④工程③〜⑥の 1 画面統合）に対応した。
+
+**① 有報からの自動選択。** `src/lib/services/securities-report.ts` の
+`applySecuritiesReportScope`。取込済みの最新の有報（ファイル名か書類種別で
+判定）の本文から組織マスターの拠点名を探し、見つかった連結対象へ自動で
+チェックを入れて `ssbjAnalysisSettings.includedUnitIds` へ保存する。
+規則ベース（名称の完全包含）。**持分法適用会社は見つけても自動チェック
+しない**（連結範囲の外。含めるかは人が決める。Flash にその旨を明示）。
+範囲が変わるので確定（confirmedAt）は外す。Fixture の有報は
+`evidence-documents.ts` の `securitiesReport`（関係会社の状況＋設備の状況）。
+**組織マスターの名称と本文の表記が一致しないと見つからない**（コメント済み）。
+
+**② 階層化。** settings ページ内 `UnitScopeSelector`。
+本社・直轄拠点／100% 子会社（連結）／持分法適用会社（注記つき）／
+サプライヤー（バリューチェーン候補の注記）の 4 群、国内→海外順＋所在バッジ、
+持分法は持分 % を併記。チェックボックスのアクセシブル名は
+「本社 国内」のようにバッジを含む（E2E は `getByLabel(/^本社/)` で取る）。
+
+**③ マッピング表。** `loadSsbjScopeMapping`（ssbj-gap.ts）が
+「なぜこの件数なのか」を検算できる形で返す:
+件数の流れ（マスター 133 → 適用基準 → 対象外・重要性なし除外 → 評価対象）、
+マテリアリティ × 基準の表（一般＝全課題、気候＝提示器の `climate` 判定。
+登録時と同じ規則なので画面の説明と食い違わない）、指標→
+`disclosureMappings` 経由で紐づく要求事項数。紐づけは
+`SsbjRequirementView` の `hasDocumentLink`（AI 分析の出典）／
+`hasDataLink`（disclosure_mappings × 当期の値あり dataPoints）／`analyzed`。
+`filterRequirements` に `linkage`（document/data/unanalyzed/none）を追加。
+
+**④ 1 画面統合。** requirements ページを「SSBJ 要求事項の評価」へ改題し、
+工程チップ 4 つ（残件数はリンク先の絞り込みと同じ関数で数える＝ズレない）、
+マッピング表・紐づけ集計カード、`runSsbjGapAnalysisBulk`（優先度順・
+最大 20 件。AI が最終判定を入れない原則は不変）の一括実行ボタンを載せた。
+全体状況の 8 段階フローは 5 段階へ（旧③〜⑥を統合）。demo-tour の
+手順番号も 1〜5 へ振り直した。
+
+**テスト**: `tests/integration/securities-report.test.ts`（新規 5 件）、
+ssbj-gap.test.ts へマッピング・紐づけ・一括分析の 5 件追加、
+e2e は six-features / ssbj-gap / new-features-audit / demo-tour /
+本番スモークの旧工程名参照を統合後の文言へ更新。
+Fixture は大半が分析済みのため、一括分析のテストは 8 件を未分析へ
+戻してから確かめる。
+
+**未解決**: なし（本番反映まで完了していれば）。

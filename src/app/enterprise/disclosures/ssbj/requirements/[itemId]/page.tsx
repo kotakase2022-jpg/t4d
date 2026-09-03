@@ -120,7 +120,7 @@ export default async function SsbjRequirementDetailPage({
           { label: '企業ワークスペース' },
           { label: '開示対応' },
           { label: 'SSBJ', href: '/enterprise/disclosures/ssbj' },
-          { label: '要求事項一覧', href: '/enterprise/disclosures/ssbj/requirements' },
+          { label: '要求事項の評価', href: '/enterprise/disclosures/ssbj/requirements' },
           { label: item.code },
         ]}
         actions={

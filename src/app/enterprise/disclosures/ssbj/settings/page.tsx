@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, Check, CircleCheck, CircleDashed } from 'lucide-react';
+import { ArrowLeft, Check, CircleCheck, CircleDashed, FileSearch } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -14,10 +14,105 @@ import {
   SSBJ_CONSOLIDATION_OPTIONS,
   SSBJ_VALUE_CHAIN_OPTIONS,
 } from '@/lib/services/ssbj-settings';
-import { confirmSsbjSettingsAction, saveSsbjSettingsAction } from '../../../actions';
+import {
+  applySecuritiesReportAction,
+  confirmSsbjSettingsAction,
+  saveSsbjSettingsAction,
+} from '../../../actions';
 import { MaterialityManager } from './materiality-manager';
 
 export const metadata = { title: 'SSBJ マテリアリティ・分析条件の設定' };
+
+interface UnitOption {
+  id: string;
+  name: string;
+  unitType: string;
+  countryCode: string;
+  consolidationMethod: string;
+  ownershipPercent: number;
+}
+
+/**
+ * 報告対象の組織・拠点を、資本関係 → 国内外 → サプライヤー の階層で選ぶ。
+ *
+ * 平らな一覧だと「どこまでが連結範囲か」が読めない。SSBJ の報告範囲の
+ * 判断軸（資本関係・所在地・バリューチェーン）に沿って束ねる。
+ */
+function UnitScopeSelector({
+  units,
+  includedUnitIds,
+  disabled,
+}: {
+  units: UnitOption[];
+  includedUnitIds: string[];
+  disabled: boolean;
+}) {
+  const groups: Array<{ title: string; note?: string; members: UnitOption[] }> = [
+    {
+      title: '本社・直轄拠点',
+      members: units.filter((u) => u.unitType === 'headquarters' || u.unitType === 'site'),
+    },
+    {
+      title: '100% 子会社（連結）',
+      members: units.filter(
+        (u) =>
+          u.unitType === 'subsidiary' &&
+          (u.consolidationMethod === 'full' || u.consolidationMethod === 'proportionate'),
+      ),
+    },
+    {
+      title: '持分法適用会社',
+      note: '連結範囲の外。含めるかどうかは自社の方針で決めます',
+      members: units.filter((u) => u.consolidationMethod === 'equity'),
+    },
+    {
+      title: 'サプライヤー',
+      note: '「バリューチェーンの扱い」で上流を含める場合の候補です',
+      members: units.filter((u) => u.unitType === 'supplier'),
+    },
+  ];
+
+  return (
+    <div className="space-y-2">
+      {groups
+        .filter((group) => group.members.length > 0)
+        .map((group) => (
+          <div key={group.title} className="rounded-t4d border border-line px-2.5 py-2">
+            <p className="flex items-center gap-2 text-[12px] font-medium text-ink">
+              {group.title}
+              {group.note && (
+                <span className="font-normal text-[11px] text-ink-muted">（{group.note}）</span>
+              )}
+            </p>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              {/* 国内 → 海外の順に並べ、所在をバッジで併記する */}
+              {[...group.members]
+                .sort((a, b) => Number(a.countryCode !== 'JP') - Number(b.countryCode !== 'JP'))
+                .map((unit) => (
+                  <label key={unit.id} className="flex items-center gap-1.5 text-[12px] text-ink">
+                    <input
+                      type="checkbox"
+                      name="includedUnitIds"
+                      value={unit.id}
+                      defaultChecked={includedUnitIds.includes(unit.id)}
+                      disabled={disabled}
+                      className="size-3.5 accent-[#0b57a4]"
+                    />
+                    {unit.name}
+                    <Badge tone="neutral">{unit.countryCode === 'JP' ? '国内' : '海外'}</Badge>
+                    {unit.consolidationMethod === 'equity' && (
+                      <span className="text-[11px] text-ink-muted">
+                        持分 {unit.ownershipPercent}%
+                      </span>
+                    )}
+                  </label>
+                ))}
+            </div>
+          </div>
+        ))}
+    </div>
+  );
+}
 
 export default async function SsbjSettingsPage({
   searchParams,
@@ -212,28 +307,47 @@ export default async function SsbjSettingsPage({
                 disabled={!view.canEdit}
                 className="h-7 w-full rounded-t4d border border-line px-2 text-[12px]"
               />
+              {view.canEdit && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {/* 同じフォーム内から別のアクションで送信する（formAction）。
+                      有価証券報告書の「関係会社の状況」「設備の状況」から
+                      下の「報告対象に含める組織・拠点」へ自動チェックを入れる */}
+                  <SubmitButton
+                    size="sm"
+                    variant="outline"
+                    icon={<FileSearch aria-hidden="true" />}
+                    formAction={applySecuritiesReportAction}
+                    pendingLabel="読み込み中…"
+                  >
+                    最新の有価証券報告書を取り込む
+                  </SubmitButton>
+                  <span className="text-[11px] text-ink-muted">
+                    取り込み済みの有価証券報告書を読み、連結範囲の拠点へ自動でチェックを入れます。
+                  </span>
+                </div>
+              )}
             </fieldset>
 
             <fieldset className="space-y-1.5">
               <legend className="text-[12px] font-medium text-ink">
                 報告対象に含める組織・拠点
               </legend>
-              <p className="text-[11px] text-ink-muted">何も選ばなければ全社を対象とします。</p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {units.map((unit) => (
-                  <label key={unit.id} className="flex items-center gap-1.5 text-[12px] text-ink">
-                    <input
-                      type="checkbox"
-                      name="includedUnitIds"
-                      value={unit.id}
-                      defaultChecked={settings?.includedUnitIds.includes(unit.id) ?? false}
-                      disabled={!view.canEdit}
-                      className="size-3.5 accent-[#0b57a4]"
-                    />
-                    {unit.name}
-                  </label>
-                ))}
-              </div>
+              <p className="text-[11px] text-ink-muted">
+                何も選ばなければ全社を対象とします。SSBJ の報告範囲は連結財務諸表と
+                同一が基本なので、有価証券報告書から自動で選ぶこともできます。
+              </p>
+              <UnitScopeSelector
+                units={units.map((unit) => ({
+                  id: unit.id,
+                  name: unit.name,
+                  unitType: unit.unitType,
+                  countryCode: unit.countryCode,
+                  consolidationMethod: unit.consolidationMethod,
+                  ownershipPercent: unit.ownershipPercent,
+                }))}
+                includedUnitIds={settings?.includedUnitIds ?? []}
+                disabled={!view.canEdit}
+              />
             </fieldset>
 
             <fieldset className="space-y-1.5">

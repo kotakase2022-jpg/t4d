@@ -20,6 +20,8 @@ export interface CategorySuggestion {
   matched: string[];
   /** この区分を選んだ場合に、項目（対象指標）として提案する指標コード */
   metricCodes: string[];
+  /** 気候関連開示基準（テーマ別基準第2号）の対象になりやすい課題か */
+  climate: boolean;
   /** どの SSBJ 基準に関わりやすいか（画面の補足表示用） */
   ssbjHint: string;
 }
@@ -188,6 +190,7 @@ export function suggestMaterialityCategory(
       label: CATEGORY_LABELS[category],
       matched: entry.matched,
       metricCodes: entry.metricCodes,
+      climate: entry.climate,
       ssbjHint: entry.climate
         ? '気候関連開示基準（テーマ別基準第2号）の開示対象になりやすい課題です。'
         : '一般開示基準（テーマ別基準第1号）に基づいて開示要否を検討する課題です。',

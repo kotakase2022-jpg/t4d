@@ -12,7 +12,9 @@ import {
   loadSsbjOverview,
   loadSsbjRequirementDetail,
   loadSsbjRequirementViews,
+  loadSsbjScopeMapping,
   runSsbjGapAnalysis,
+  runSsbjGapAnalysisBulk,
   saveSsbjReview,
   saveSsbjScope,
 } from '@/lib/services/ssbj-gap';
@@ -127,6 +129,145 @@ describe('要求事項一覧の絞り込み', () => {
     const hit = filterRequirements(loaded.views, { search: '気候-47' });
     expect(hit.length).toBe(3);
     expect(hit.every((v) => v.item.code.startsWith('気候-47'))).toBe(true);
+  });
+});
+
+describe('要求事項とのマッピング（対象の検算）', () => {
+  /** FY2026 のマテリアリティは意図的に未登録なので、テスト用の課題を登録する */
+  function pushTopic(
+    topicKey: string,
+    title: string,
+    category: 'environment' | 'social' | 'governance',
+    metricCodes: string[],
+  ): void {
+    const now = new Date().toISOString();
+    fixture.materialityTopics.push({
+      id: `test-topic-${topicKey}`,
+      organizationId: ORG_IDS.aomi,
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      topicKey,
+      title,
+      description: '',
+      category,
+      materiality: 'high',
+      rationale: 'テスト用',
+      risks: '',
+      opportunities: '',
+      metricCodes,
+      deletedAt: null,
+      assessedAt: now,
+      assessedBy: userId('sustainability@demo.local'),
+      createdAt: now,
+      updatedAt: now,
+      createdBy: userId('sustainability@demo.local'),
+      updatedBy: userId('sustainability@demo.local'),
+    });
+  }
+
+  it('件数の流れが一覧と一致する（マスター → 適用基準 → 対象外・重要性なし除外）', async () => {
+    const loaded = (await loadSsbjRequirementViews(db, manager(), period))!;
+    const mapping = await loadSsbjScopeMapping(db, manager(), period, loaded.views);
+
+    expect(mapping.counts.masterTotal).toBe(133);
+    expect(mapping.counts.afterStandards).toBe(loaded.views.length);
+    expect(mapping.counts.inScope).toBe(
+      mapping.counts.afterStandards - mapping.counts.notApplicable - mapping.counts.notMaterial,
+    );
+    // 設定が未保存なら既定（一般・気候）のまま。画面はそのことを明示する
+    expect(mapping.configured).toBe(false);
+    expect(mapping.applied).toEqual({ general: true, climate: true, practical: false });
+  });
+
+  it('気候の課題だけが気候関連開示基準の対象になり、指標経由で要求事項に紐づく', async () => {
+    pushTopic('climate', '気候変動への対応', 'environment', ['scope1', 'scope2']);
+    pushTopic('people', '人材の確保・育成', 'social', ['training_hours']);
+
+    const loaded = (await loadSsbjRequirementViews(db, manager(), period))!;
+    const mapping = await loadSsbjScopeMapping(db, manager(), period, loaded.views);
+
+    const climateRow = mapping.rows.find((r) => r.title === '気候変動への対応')!;
+    expect(climateRow.climate).toBe(true);
+    expect(climateRow.metricCount).toBe(2);
+    // scope1/scope2 は SSBJ 第2号の要求事項から disclosure_mappings で紐づいている
+    expect(climateRow.linkedItemCount).toBeGreaterThan(0);
+
+    const peopleRow = mapping.rows.find((r) => r.title === '人材の確保・育成')!;
+    expect(peopleRow.climate).toBe(false);
+  });
+
+  it('取込資料・データとの紐づけを集計し、一覧の絞り込みと数が一致する', async () => {
+    const loaded = (await loadSsbjRequirementViews(db, manager(), period))!;
+    const mapping = await loadSsbjScopeMapping(db, manager(), period, loaded.views);
+
+    const applicableOnly = (views: typeof loaded.views) =>
+      views.filter((v) => v.assessment.applicability === 'applicable');
+
+    expect(mapping.linkage.document).toBe(
+      applicableOnly(filterRequirements(loaded.views, { linkage: ['document'] })).length,
+    );
+    expect(mapping.linkage.unanalyzed).toBe(
+      applicableOnly(filterRequirements(loaded.views, { linkage: ['unanalyzed'] })).length,
+    );
+    expect(mapping.linkage.none).toBe(
+      applicableOnly(filterRequirements(loaded.views, { linkage: ['none'] })).length,
+    );
+
+    // データとの紐づけは disclosure_mappings × 当期の値から計算される
+    const withData = loaded.views.filter((v) => v.hasDataLink);
+    expect(withData.length).toBeGreaterThan(0);
+    expect(mapping.linkage.data).toBe(applicableOnly(withData).length);
+
+    // 「未分析」と「紐づけ不可（分析済み）」は重ならない
+    for (const view of loaded.views) {
+      if (!view.analyzed) continue;
+      expect(filterRequirements([view], { linkage: ['unanalyzed'] })).toHaveLength(0);
+    }
+  });
+});
+
+describe('未分析のまとめて分析', () => {
+  it('未分析を優先度順に最大 limit 件だけ分析し、最終判定は入れない', async () => {
+    // フィクスチャは大半が分析済みなので、8 件を未分析へ戻してから確かめる
+    const applicable = fixture.ssbjAssessments.filter(
+      (a) => a.reportingPeriodId === period.id && a.applicability === 'applicable',
+    );
+    for (const a of applicable.slice(0, 8)) {
+      a.aiEvaluatedAt = null;
+      a.aiStatus = null;
+      a.aiRunId = null;
+      a.finalStatus = null;
+      a.reviewDecision = null;
+    }
+
+    const before = (await loadSsbjRequirementViews(db, manager(), period))!;
+    const pending = before.views.filter(
+      (v) => v.assessment.applicability === 'applicable' && !v.analyzed,
+    );
+    const pendingIds = new Set(pending.map((v) => v.assessment.id));
+    expect(pendingIds.size).toBeGreaterThan(5);
+
+    const result = await runSsbjGapAnalysisBulk(db, manager(), period, 5);
+    expect(result.analyzed).toBe(5);
+    expect(result.remaining).toBe(pendingIds.size - 5);
+
+    const after = (await loadSsbjRequirementViews(db, manager(), period))!;
+    const newlyAnalyzed = after.views.filter((v) => pendingIds.has(v.assessment.id) && v.analyzed);
+    expect(newlyAnalyzed).toHaveLength(5);
+    for (const view of newlyAnalyzed) {
+      expect(view.assessment.aiStatus).not.toBeNull();
+      // まとめて実行しても、AI が最終判定を確定しない原則は変わらない
+      expect(view.assessment.finalStatus).toBeNull();
+    }
+
+    // 優先度の高い順に処理される（選ばれた中の最低点 ≧ 残された中の最高点）
+    const remaining = after.views.filter((v) => pendingIds.has(v.assessment.id) && !v.analyzed);
+    const minChosen = Math.min(...newlyAnalyzed.map((v) => v.priority.score));
+    const maxRemaining = Math.max(...remaining.map((v) => v.priority.score));
+    expect(minChosen).toBeGreaterThanOrEqual(maxRemaining);
+  });
+
+  it('閲覧者は実行できない', async () => {
+    await expect(runSsbjGapAnalysisBulk(db, viewerCtx(), period, 5)).rejects.toThrow();
   });
 });
 

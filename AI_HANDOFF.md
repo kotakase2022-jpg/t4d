@@ -1946,3 +1946,7 @@ BOM 付与と数式インジェクション対策を持つ。`enterprise.export.
 tests/e2e/nav-structure.spec.ts（3 件）、ssbj-gap.spec に CSV
 ダウンロードの実 E2E（Playwright download → 中身の検証）を追加。
 本番スモークへ CSV リンク・ドラフト導線・新メニューの検証を追加。
+
+**結果**: 全ゲート通過（unit+integration 606 / RLS 101 / E2E 279 /
+本番スモーク 28）。11d10af を deploy → terrast-t4d.vercel.app へ
+エイリアス済み。未解決なし。

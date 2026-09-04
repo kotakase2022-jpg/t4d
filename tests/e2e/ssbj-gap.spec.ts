@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { DEMO_USERS, loginAs } from './helpers';
 
@@ -150,6 +151,32 @@ test.describe('SSBJ 要求事項の評価（統合画面）', () => {
     // 絞り込み結果はすべて「資料」の紐づけを持つ
     const rows = await page.locator('tbody tr').count();
     expect(rows).toBeGreaterThan(0);
+  });
+
+  test('表示中の一覧を CSV で書き出せる（絞り込みを反映）', async ({ page }) => {
+    await loginAs(page, DEMO_USERS.sustainability);
+    await page.goto('/enterprise/disclosures/ssbj/requirements?priority=high');
+    const main = page.locator('#t4d-main');
+
+    const csvLink = main.getByRole('link', { name: /CSV を書き出す/ });
+    await expect(csvLink).toBeVisible();
+    // リンクは画面の絞り込みを引き継ぐ（見えている一覧と同じ行が出る）
+    await expect(csvLink).toHaveAttribute('href', /priority=high/);
+
+    const [download] = await Promise.all([page.waitForEvent('download'), csvLink.click()]);
+    expect(download.suggestedFilename()).toContain('.csv');
+
+    const filePath = await download.path();
+    const content = readFileSync(filePath!, 'utf8');
+    const lines = content.trim().split('\r\n');
+    expect(lines[0]).toContain('要求事項番号');
+    expect(lines[0]).toContain('人工知能による判定');
+    expect(lines[0]).toContain('最終判定');
+    expect(lines.length).toBeGreaterThan(1);
+    // 絞り込みが効いている（マスター全 133 行がそのまま出ていない）
+    expect(lines.length - 1).toBeLessThan(133);
+    // 値は内部コードではなく画面と同じラベル
+    expect(content).not.toContain('not_covered');
   });
 
   test('未分析をまとめて分析でき、判定は候補のままになる', async ({ page }) => {

@@ -28,7 +28,14 @@ export function useNavItems(variant: SidebarVariant, hiddenHrefs: string[]): Nav
   return React.useMemo(() => {
     const items =
       variant === 'enterprise' ? ENTERPRISE_NAV : assuranceNav(engagementIdFromPath(pathname));
-    return items.filter((item) => !hiddenHrefs.includes(item.href));
+    // 権限による非表示は子項目（例: 管理 > 設定）にも効かせる
+    return items
+      .filter((item) => !hiddenHrefs.includes(item.href))
+      .map((item) =>
+        item.children
+          ? { ...item, children: item.children.filter((c) => !hiddenHrefs.includes(c.href)) }
+          : item,
+      );
   }, [variant, hiddenHrefs, pathname]);
 }
 

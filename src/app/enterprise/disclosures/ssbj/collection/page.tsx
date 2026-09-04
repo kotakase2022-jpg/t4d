@@ -1,5 +1,13 @@
 import Link from 'next/link';
-import { ArrowLeft, CircleCheck, ClipboardList, Clock, RotateCcw, Upload } from 'lucide-react';
+import {
+  ArrowLeft,
+  CircleCheck,
+  ClipboardList,
+  Clock,
+  FileText,
+  RotateCcw,
+  Upload,
+} from 'lucide-react';
 import { DataPointStatusBadge } from '@/components/shared/badges';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -52,6 +60,13 @@ export default async function SsbjCollectionPage({
         ]}
         actions={
           <div className="flex items-center gap-1.5">
+            {/* データが集まったら開示ドラフトへ——次の工程を主導線として置く */}
+            <Button size="sm" asChild>
+              <Link href="/enterprise/disclosures/ssbj/draft">
+                <FileText aria-hidden="true" />
+                SSBJ 開示ドラフト
+              </Link>
+            </Button>
             <Button variant="outline" size="sm" asChild>
               <Link href="/enterprise/imports">
                 <Upload aria-hidden="true" />

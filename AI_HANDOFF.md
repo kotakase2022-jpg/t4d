@@ -1908,3 +1908,41 @@ Fixture は大半が分析済みのため、一括分析のテストは 8 件を
 **結果**: 全ゲート通過（unit+integration 603 / RLS 101 / E2E 257 /
 本番スモーク 28）。047cf8d を deploy → terrast-t4d.vercel.app へ
 エイリアス済み。未解決なし。
+
+### 2026-09-04 CSV 出力・開示ドラフト導線・左メニュー再設計
+
+発注者依頼の 3 点（① 要求事項一覧の CSV 出力 ② SSBJ 開示ドラフトへの
+3 導線 ③ 会議議事録に基づく左メニューの最適配置）に対応した。
+
+**① CSV 出力。** `/api/exports/ssbj-requirements`（Route Handler、
+既存の data-points Export と同じ作り）。列定義は
+`src/lib/exports/ssbj-requirements.ts` に分離してテスト可能にした。
+画面と同じ `loadSsbjRequirementViews` ＋ `filterRequirements` を通すので
+**画面の絞り込みが CSV にそのまま効く**（ボタンの href がクエリを引き継ぐ）。
+値は内部コードでなく画面と同じ日本語ラベル。既存 `toCsv` が
+BOM 付与と数式インジェクション対策を持つ。`enterprise.export.run` で
+表示・実行とも制御。audit_events（export_created）へ記録。
+
+**② 開示ドラフト導線（3 か所）。**
+- SSBJ データ収集の右上（primary。収集の次の工程として）
+- データ取込（/enterprise/imports）と取込ジョブ詳細の右上
+  （会議の指摘「取込後にドラフトへ自然に遷移できない」への対応）
+- 左メニュー「開示対応」配下、SSBJ データ収集の直下に「SSBJ 開示ドラフト」
+
+**③ 左メニュー再設計（開示対応は不変）。** 会議の決定を反映:
+- 2 つの入口を並べる: 開示対応（目的ドリブン）→ ESG データ（データ先行）
+- ESG データ配下 = データ取込 → 非財務データ → Evidence（データが流れる順）
+- GHG は独立モジュールとしてトップレベル維持（算定が重いため分離の決定）
+- 業務管理 = ワークフロー・アラート・レポート ／ 管理 = 組織・拠点・設定
+- 旧「データ収集」は「SSBJ データ収集」と紛れるため**「データ取込」へ改名**
+  （nav・imports 画面タイトル・パンくず）。トップレベルは 12 → 7 項目。
+
+**実装メモ**: 権限による非表示（設定）が子項目でも効くよう、
+`app-shell.tsx` の `hiddenNavHrefs` を階層走査に、`sidebar.tsx` の
+`useNavItems` を子のフィルタ付きに変更。コマンドパレットは
+「親 / 子」ラベルで従来どおり出る。
+
+**テスト**: tests/integration/ssbj-export.test.ts（3 件）、
+tests/e2e/nav-structure.spec.ts（3 件）、ssbj-gap.spec に CSV
+ダウンロードの実 E2E（Playwright download → 中身の検証）を追加。
+本番スモークへ CSV リンク・ドラフト導線・新メニューの検証を追加。

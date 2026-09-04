@@ -42,9 +42,13 @@ export interface AppShellProps {
 function hiddenNavHrefs(ctx: AuthorizationContext): string[] {
   const source =
     ctx.workspace.organizationType === 'enterprise' ? ENTERPRISE_NAV : assuranceNav(null);
-  return source
-    .filter((item) => item.permission && !can(ctx, item.permission))
-    .map((item) => item.href);
+  // 子項目（例: 管理 > 設定）にも権限が付くため、階層をたどって集める
+  const collect = (items: typeof source): string[] =>
+    items.flatMap((item) => [
+      ...(item.permission && !can(ctx, item.permission) ? [item.href] : []),
+      ...collect(item.children ?? []),
+    ]);
+  return collect(source);
 }
 
 /**

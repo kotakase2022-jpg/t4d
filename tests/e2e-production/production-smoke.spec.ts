@@ -487,6 +487,8 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   await expect(main.getByRole('columnheader', { name: '紐づけ' })).toBeVisible();
   await expect(main.getByRole('columnheader', { name: '最終判定' })).toBeVisible();
   expect(await page.locator('tbody tr').count()).toBeGreaterThan(100);
+  // 一覧の CSV 出力（会議の指摘「ギャップ分析の結果を CSV 出力」）
+  await expect(main.getByRole('link', { name: /CSV を書き出す/ })).toBeVisible();
 
   // ③ 詳細: 3 種類のギャップと優先順位の根拠
   await page.locator('tbody tr a').first().click();
@@ -500,9 +502,16 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   await page.goto(`${BASE}/enterprise/disclosures/ssbj/plans`);
   await expect(main.getByRole('columnheader', { name: '対応区分' })).toBeVisible();
 
-  // ⑤ データ収集
+  // ⑤ データ収集（右上に開示ドラフトへの導線がある）
   await page.goto(`${BASE}/enterprise/disclosures/ssbj/collection`);
   await expect(main.getByRole('columnheader', { name: 'データ項目' })).toBeVisible();
+  await expect(main.getByRole('link', { name: 'SSBJ 開示ドラフト' })).toBeVisible();
+
+  // 左メニュー: 2 つの入口（開示対応 / ESG データ）と SSBJ 開示ドラフト
+  const sidebar = page.getByRole('navigation', { name: 'メインナビゲーション' });
+  await expect(sidebar.getByRole('link', { name: 'ESG データ', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: 'データ取込', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: 'SSBJ 開示ドラフト' })).toBeVisible();
 });
 
 test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ page }) => {

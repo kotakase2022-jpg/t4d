@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAppMode } from '@/lib/config';
-import { AlertTriangle, FileWarning } from 'lucide-react';
+import { AlertTriangle, FileText, FileWarning } from 'lucide-react';
 import { AiGeneratedBadge, JobStatusBadge } from '@/components/shared/badges';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
@@ -44,9 +44,17 @@ export default async function ImportJobPage({
           description="このタブが保持している取込内容を表示しています"
           breadcrumbs={[
             { label: '企業ワークスペース' },
-            { label: 'データ収集', href: '/enterprise/imports' },
+            { label: 'データ取込', href: '/enterprise/imports' },
             { label: jobId.slice(0, 8) },
           ]}
+          actions={
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/enterprise/disclosures/ssbj/draft">
+                <FileText aria-hidden="true" />
+                SSBJ 開示ドラフト
+              </Link>
+            </Button>
+          }
         />
         <div className="space-y-3 p-4">
           <ImportPreviewFallback
@@ -103,9 +111,18 @@ export default async function ImportJobPage({
         }
         breadcrumbs={[
           { label: '企業ワークスペース' },
-          { label: 'データ収集', href: '/enterprise/imports' },
+          { label: 'データ取込', href: '/enterprise/imports' },
           { label: job.id.slice(0, 8) },
         ]}
+        actions={
+          // 取り込んだら開示ドラフトへ——「取込のあと自然に遷移できない」への対応
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/enterprise/disclosures/ssbj/draft">
+              <FileText aria-hidden="true" />
+              SSBJ 開示ドラフト
+            </Link>
+          </Button>
+        }
       />
 
       <div className="space-y-3 p-4">

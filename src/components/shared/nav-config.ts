@@ -9,6 +9,7 @@ import {
   FileSearch,
   FileSpreadsheet,
   FileStack,
+  FileText,
   Filter,
   FolderOpen,
   Gauge,
@@ -38,43 +39,21 @@ export interface NavItem {
   keywords?: string[];
 }
 
+/**
+ * 企業ワークスペースの左メニュー。
+ *
+ * 発注者会議（T4D 開発 Update）で決めた 2 つの入口に沿って並べる:
+ *  1. 開示目的ドリブン（SSBJ・CSRD から始める）→「開示対応」
+ *  2. データ先行（ESG データを先に取り込む）→「ESG データ」
+ * GHG は算定ロジックが重い独立モジュールとして ESG データから分離する。
+ * 旧「データ収集」は「SSBJ データ収集」と役割が紛れるため「データ取込」へ改名した。
+ */
 export const ENTERPRISE_NAV: NavItem[] = [
   {
     label: 'ホーム',
     href: '/enterprise/dashboard',
     icon: Home,
     keywords: ['dashboard', 'ダッシュボード'],
-  },
-  {
-    label: 'データ収集',
-    href: '/enterprise/imports',
-    icon: Upload,
-    keywords: ['import', '取込', 'アップロード'],
-  },
-  {
-    label: '非財務データ',
-    href: '/enterprise/data',
-    icon: Database,
-    keywords: ['data point', '台帳', '指標'],
-  },
-  {
-    label: '組織・拠点',
-    href: '/enterprise/organizations',
-    icon: Boxes,
-    keywords: ['組織', '拠点', '連結'],
-  },
-  { label: 'Evidence', href: '/enterprise/evidence', icon: FolderOpen, keywords: ['証憑', '根拠'] },
-  {
-    label: 'ワークフロー',
-    href: '/enterprise/workflows',
-    icon: Workflow,
-    keywords: ['承認', 'レビュー', 'タスク', 'PBC'],
-  },
-  {
-    label: 'GHG',
-    href: '/enterprise/ghg',
-    icon: Gauge,
-    keywords: ['scope1', 'scope2', 'scope3', '排出量'],
   },
   {
     label: '開示対応',
@@ -107,6 +86,13 @@ export const ENTERPRISE_NAV: NavItem[] = [
         icon: Database,
         keywords: ['SSBJ', 'データ収集', '不足データ'],
       },
+      {
+        // 会議での指摘「ドラフト作成を左メニューに明示する」
+        label: 'SSBJ 開示ドラフト',
+        href: '/enterprise/disclosures/ssbj/draft',
+        icon: FileText,
+        keywords: ['SSBJ', 'ドラフト', '草案', '開示文書'],
+      },
       { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
       { label: 'CSRD', href: '/enterprise/disclosures/csrd', icon: FileSpreadsheet },
       { label: 'MSCI', href: '/enterprise/disclosures/msci', icon: FileSpreadsheet },
@@ -114,23 +100,85 @@ export const ENTERPRISE_NAV: NavItem[] = [
     ],
   },
   {
-    label: 'アラート',
-    href: '/enterprise/alerts',
-    icon: AlertTriangle,
-    keywords: ['警告', '期限超過'],
+    // データ先行の入口。取込 → 台帳 → 根拠資料 の順（データが流れる順）
+    label: 'ESG データ',
+    href: '/enterprise/data',
+    icon: Database,
+    keywords: ['ESG', 'データ'],
+    children: [
+      {
+        label: 'データ取込',
+        href: '/enterprise/imports',
+        icon: Upload,
+        keywords: ['import', '取込', 'アップロード', 'データ収集'],
+      },
+      {
+        label: '非財務データ',
+        href: '/enterprise/data',
+        icon: Database,
+        keywords: ['data point', '台帳', '指標'],
+      },
+      {
+        label: 'Evidence',
+        href: '/enterprise/evidence',
+        icon: FolderOpen,
+        keywords: ['証憑', '根拠'],
+      },
+    ],
+  },
+  {
+    // 独立モジュール（Scope 3 まで含む算定）。ESG データとは分けるが、導線の重複は許容
+    label: 'GHG',
+    href: '/enterprise/ghg',
+    icon: Gauge,
+    keywords: ['scope1', 'scope2', 'scope3', '排出量'],
+  },
+  {
+    label: '業務管理',
+    href: '/enterprise/workflows',
+    icon: Workflow,
+    keywords: ['業務', '進捗'],
+    children: [
+      {
+        label: 'ワークフロー',
+        href: '/enterprise/workflows',
+        icon: Workflow,
+        keywords: ['承認', 'レビュー', 'タスク', 'PBC'],
+      },
+      {
+        label: 'アラート',
+        href: '/enterprise/alerts',
+        icon: AlertTriangle,
+        keywords: ['警告', '期限超過'],
+      },
+      {
+        label: 'レポート',
+        href: '/enterprise/reports',
+        icon: ScrollText,
+        keywords: ['export', '出力'],
+      },
+    ],
   },
   { label: 'AI Copilot', href: '/enterprise/ai', icon: Bot, keywords: ['AI', '生成'] },
   {
-    label: 'レポート',
-    href: '/enterprise/reports',
-    icon: ScrollText,
-    keywords: ['export', '出力'],
-  },
-  {
-    label: '設定',
-    href: '/enterprise/settings',
+    label: '管理',
+    href: '/enterprise/organizations',
     icon: Settings,
-    permission: 'enterprise.org.manage',
+    keywords: ['マスター', '管理'],
+    children: [
+      {
+        label: '組織・拠点',
+        href: '/enterprise/organizations',
+        icon: Boxes,
+        keywords: ['組織', '拠点', '連結', '指標マスター'],
+      },
+      {
+        label: '設定',
+        href: '/enterprise/settings',
+        icon: Settings,
+        permission: 'enterprise.org.manage',
+      },
+    ],
   },
 ];
 

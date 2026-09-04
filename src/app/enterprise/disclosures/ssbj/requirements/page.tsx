@@ -5,6 +5,7 @@ import {
   CircleAlert,
   ClipboardList,
   Database,
+  Download,
   FileText,
   Scale,
   Settings2,
@@ -89,6 +90,14 @@ export default async function SsbjRequirementsPage({
     loaded.views,
   );
   const canRunAi = can(shell.ctx, 'enterprise.ai.run');
+  const canExport = can(shell.ctx, 'enterprise.export.run');
+
+  // CSV は画面の絞り込みをそのまま引き継ぐ（見えている一覧と同じ行が出る）
+  const exportParams = new URLSearchParams({ period: shell.currentPeriod.id });
+  for (const key of ['area', 'coverage', 'materiality', 'priority', 'department', 'linkage']) {
+    for (const value of toList(query[key])) exportParams.append(key, value);
+  }
+  if (typeof query.q === 'string' && query.q !== '') exportParams.set('q', query.q);
 
   const filtered = filterRequirements(loaded.views, {
     area: toList(query.area),
@@ -493,8 +502,18 @@ export default async function SsbjRequirementsPage({
           <SectionTitle
             title={`要求事項（${filtered.length} 件）`}
             action={
-              <span className="text-[11px] text-ink-muted">
-                行を選ぶと、要求事項と現在の開示内容を並べて確認できます
+              <span className="flex items-center gap-2">
+                <span className="text-[11px] text-ink-muted">
+                  行を選ぶと、要求事項と現在の開示内容を並べて確認できます
+                </span>
+                {canExport && (
+                  <Button variant="outline" size="xs" asChild>
+                    <a href={`/api/exports/ssbj-requirements?${exportParams.toString()}`} download>
+                      <Download aria-hidden="true" />
+                      CSV を書き出す（絞り込みを反映）
+                    </a>
+                  </Button>
+                )}
               </span>
             }
           />

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ClipboardPaste, FileSpreadsheet } from 'lucide-react';
+import { ClipboardPaste, FileSpreadsheet, FileText } from 'lucide-react';
 import { JobStatusBadge } from '@/components/shared/badges';
 import { UploadForm } from './upload-form';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -15,7 +15,7 @@ import { formatJst } from '@/lib/format/datetime';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { pasteImportAction } from '../actions';
 
-export const metadata = { title: 'データ収集' };
+export const metadata = { title: 'データ取込' };
 
 export default async function ImportsPage() {
   const shell = await loadEnterpriseShell();
@@ -37,10 +37,19 @@ export default async function ImportsPage() {
 
   return (
     <>
+      {/* 名称は「データ取込」。開示対応側の「SSBJ データ収集」と役割が紛れないようにする */}
       <PageHeader
-        title="データ収集"
+        title="データ取込"
         description="Excel / CSV / PDF を取り込み、AI が組織・期間・指標・単位・値・根拠箇所を推定します。取込は非同期ジョブとして実行されます。"
-        breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'データ収集' }]}
+        breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'データ取込' }]}
+        actions={
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/enterprise/disclosures/ssbj/draft">
+              <FileText aria-hidden="true" />
+              SSBJ 開示ドラフト
+            </Link>
+          </Button>
+        }
       />
 
       <div className="space-y-3 p-4">

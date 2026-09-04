@@ -37,8 +37,10 @@ test('レポート画面から SSBJ / CSRD を出力できる', async ({ page })
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
   await page.goto('/enterprise/reports');
 
-  await expect(page.getByText('SSBJ 開示ドラフト')).toBeVisible();
-  await expect(page.getByText('CSRD 開示ドラフト')).toBeVisible();
+  // 左メニューにも「SSBJ 開示ドラフト」リンクがあるため、本文に限定して確かめる
+  const main = page.locator('#t4d-main');
+  await expect(main.getByText('SSBJ 開示ドラフト')).toBeVisible();
+  await expect(main.getByText('CSRD 開示ドラフト')).toBeVisible();
 
   for (const framework of ['ssbj', 'csrd']) {
     const res = await apiGet(page, `/api/exports/cdp?framework=${framework}&format=csv`);

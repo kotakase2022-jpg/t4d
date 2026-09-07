@@ -35,21 +35,19 @@ export function CommandPalette({
 
   const entries = React.useMemo<CommandEntry[]>(() => {
     const out: CommandEntry[] = [];
-    for (const item of navItems) {
-      out.push({
-        label: item.label,
-        href: item.href,
-        group: 'ナビゲーション',
-        keywords: item.keywords,
-      });
-      for (const child of item.children ?? []) {
+    // 3 階層対応: 「開示対応 / SSBJ / 対応状況」のように経路をラベルにして全階層を拾う
+    const walk = (items: typeof navItems, trail: string[]) => {
+      for (const item of items) {
         out.push({
-          label: `${item.label} / ${child.label}`,
-          href: child.href,
+          label: [...trail, item.label].join(' / '),
+          href: item.href,
           group: 'ナビゲーション',
+          keywords: item.keywords,
         });
+        if (item.children) walk(item.children, [...trail, item.label]);
       }
-    }
+    };
+    walk(navItems, []);
     return [...out, ...extraEntries];
   }, [navItems, extraEntries]);
 

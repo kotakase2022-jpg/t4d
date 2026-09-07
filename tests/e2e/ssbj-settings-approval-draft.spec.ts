@@ -175,9 +175,10 @@ test('⑤ 開示ドラフトを人工知能に書かせ、直して確定でき�
   test.setTimeout(180_000);
   await loginAs(page, DEMO_USERS.sustainability);
 
-  // 対応状況の右上から開示ドラフトへ入れる（手順 8 のカードにも同じ語が出るので厳密一致で取る）
+  // 対応状況の右上から開示ドラフトへ入れる（手順 8 のカードにも同じ語が出るので厳密一致で取り、
+  // 左メニュー（SSBJ 配下の「開示ドラフト」）と紛れないよう本文へスコープする）
   await page.goto('/enterprise/disclosures/ssbj');
-  await page.getByRole('link', { name: '開示ドラフト', exact: true }).click();
+  await page.locator('#t4d-main').getByRole('link', { name: '開示ドラフト', exact: true }).click();
   await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/draft/);
 
   await expect(page.getByText('ガバナンス').first()).toBeVisible();

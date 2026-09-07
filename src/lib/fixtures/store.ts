@@ -7,6 +7,7 @@
  */
 
 import { isCountedInTotals } from '@/lib/domain/boundaries';
+import { supplierInputLabel } from '@/lib/domain/scope3-labels';
 import { buildEvidenceText } from './evidence-documents';
 import { selectSample } from '@/lib/services/sampling';
 import { validateDataPoints } from '@/lib/validation/data-point-rules';
@@ -804,13 +805,18 @@ export function createFixtureDb(): FixtureDb {
     }
   }
 
-  // Scope3 Cat.1 の算定内訳
+  // Scope3 Cat.1 の算定内訳。
+  // ラベルは「<コード> <名前> / <品目>」規約（domain/scope3-labels.ts）。
+  // サプライヤーデータ取込（services/scope3-suppliers.ts）が同じ規約で読む
   const scope3DpId = dataPointId('HQ', 'scope3_cat1', 'FY2026');
   const factorByCode = new Map(EMISSION_FACTOR_SPECS.map((f) => [f.code, f]));
   const scope3Inputs = SCOPE3_PURCHASE_ROWS.map((row) => {
     const factor = must(factorByCode.get(row.factorCode), `factor ${row.factorCode}`);
     return {
-      label: `${must(unitByCode.get(row.supplierUnitCode), row.supplierUnitCode).name} / ${row.item}`,
+      label: supplierInputLabel(
+        must(unitByCode.get(row.supplierUnitCode), row.supplierUnitCode),
+        row.item,
+      ),
       value: Math.round(row.amountThousandJpy * factor.factorValue * 10) / 10,
       unit: 't-CO2e',
       sourceType: 'emission_factor' as const,

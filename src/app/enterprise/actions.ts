@@ -9,6 +9,12 @@ import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorizatio
 import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
+import {
+  confirmSupplierImport,
+  previewSupplierImport,
+  type SupplierImportPreview,
+  type SupplierRowDecision,
+} from '@/lib/services/scope3-suppliers';
 import { getDb } from '@/lib/repositories';
 import {
   carryOverSsbjAssessments,
@@ -235,6 +241,79 @@ export async function confirmImportAction(formData: FormData): Promise<void> {
   revalidatePath('/enterprise/imports');
   revalidatePath('/enterprise/data');
   redirect('/enterprise/data?flash=imported');
+}
+
+// ----------------------------------------------------------------------
+// サプライヤーデータ取込（GHG Scope3）
+// ----------------------------------------------------------------------
+
+/** サプライヤー CSV の解析結果。プレビューは行の内容ごとクライアントへ返す */
+export type SupplierUploadResult =
+  | { ok: true; preview: SupplierImportPreview; reportingPeriodId: string }
+  | { ok: false; message: string };
+
+export async function previewSupplierImportAction(
+  _previous: SupplierUploadResult | null,
+  formData: FormData,
+): Promise<SupplierUploadResult> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+
+  const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, message: 'ファイルが選択されていません。' };
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    return { ok: false, message: 'ファイルは 5MB までです。' };
+  }
+  if (!/\.(csv|tsv|txt)$/i.test(file.name)) {
+    return {
+      ok: false,
+      message: 'CSV 形式（.csv / .tsv / .txt）のファイルをドロップしてください。',
+    };
+  }
+
+  try {
+    const preview = await previewSupplierImport(
+      db,
+      ctx,
+      reportingPeriodId,
+      file.name,
+      new Uint8Array(await file.arrayBuffer()),
+    );
+    return { ok: true, preview, reportingPeriodId };
+  } catch (error) {
+    if (isUserFacingError(error)) return { ok: false, message: error.message };
+    throw error;
+  }
+}
+
+export async function confirmSupplierImportAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+
+  const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
+  // 行キーは連番。hidden で送られた値はサービス側でマスターと再照合する
+  const decisions: SupplierRowDecision[] = formData
+    .getAll('srow')
+    .map(String)
+    .filter((key) => formData.get(`include:${key}`) === 'on')
+    .map((key) => ({
+      supplierCode: String(formData.get(`supplierCode:${key}`) ?? ''),
+      item: String(formData.get(`item:${key}`) ?? ''),
+      amountThousandJpy: Number(String(formData.get(`amount:${key}`) ?? '').replace(/,/g, '')),
+      factorCode: String(formData.get(`factorCode:${key}`) ?? ''),
+    }));
+
+  await withUserFacingError('/enterprise/ghg/suppliers', async () => {
+    const result = await confirmSupplierImport(db, ctx, reportingPeriodId, decisions);
+    revalidatePath('/enterprise/ghg');
+    revalidatePath('/enterprise/ghg/suppliers');
+    redirect(
+      `/enterprise/ghg/suppliers?flash=supplierImported&added=${result.addedSuppliers.length}&replaced=${result.replacedSuppliers.length}&total=${result.result}`,
+    );
+  });
 }
 
 // ----------------------------------------------------------------------

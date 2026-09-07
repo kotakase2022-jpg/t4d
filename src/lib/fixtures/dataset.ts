@@ -64,6 +64,8 @@ export const UNIT_IDS = {
   sup3: fid('unit', 'AOMI/SUP-03'),
   sup4: fid('unit', 'AOMI/SUP-04'),
   sup5: fid('unit', 'AOMI/SUP-05'),
+  sup6: fid('unit', 'AOMI/SUP-06'),
+  sup7: fid('unit', 'AOMI/SUP-07'),
   sotenHq: fid('unit', 'SOTEN/HQ'),
 } as const;
 
@@ -1253,6 +1255,36 @@ const AOMI_UNITS: UnitSpec[] = [
     reports: false,
     scale: 0,
   },
+  {
+    // SUP-06 / SUP-07 は購買実績（SCOPE3_PURCHASE_ROWS）を持たない。
+    // 「サプライヤーデータ取込」画面で不足データ（未提出）を見せるためのデモ用サプライヤー。
+    id: UNIT_IDS.sup6,
+    code: 'SUP-06',
+    name: '若草金属工業',
+    unitType: 'supplier',
+    countryCode: 'JP',
+    currencyCode: 'JPY',
+    timezone: 'Asia/Tokyo',
+    consolidationMethod: 'excluded',
+    ownershipPercent: 0,
+    parent: 'hq',
+    reports: false,
+    scale: 0,
+  },
+  {
+    id: UNIT_IDS.sup7,
+    code: 'SUP-07',
+    name: '汐風運輸',
+    unitType: 'supplier',
+    countryCode: 'JP',
+    currencyCode: 'JPY',
+    timezone: 'Asia/Tokyo',
+    consolidationMethod: 'excluded',
+    ownershipPercent: 0,
+    parent: 'hq',
+    reports: false,
+    scale: 0,
+  },
 ];
 
 /** FY2025 の基準値（HQ 基準・単位は MetricSpec.unit） */
@@ -1853,6 +1885,16 @@ export const EMISSION_FACTOR_SPECS: Array<{
     name: '物流サービス（購入金額ベース）',
     category: 'purchased_services',
     factorValue: 0.00037,
+    factorUnit: 't-CO2e/千円',
+    activityUnit: '千円',
+    factorYear: 2025,
+  },
+  {
+    // 未提出サプライヤー（SUP-06 若草金属工業）の取込デモで使う係数
+    code: 'EF-PUR-METAL',
+    name: '金属材料（購入金額ベース）',
+    category: 'purchased_goods',
+    factorValue: 0.00063,
     factorUnit: 't-CO2e/千円',
     activityUnit: '千円',
     factorYear: 2025,

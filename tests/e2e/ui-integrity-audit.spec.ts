@@ -21,6 +21,7 @@ const PATHS = [
   '/enterprise/dashboard',
   '/enterprise/data',
   '/enterprise/ghg',
+  '/enterprise/ghg/suppliers',
   '/enterprise/disclosures/cdp',
   '/enterprise/disclosures/ssbj',
   // 列を足した画面・新設した画面は、横スクロールが出やすいので必ず含める

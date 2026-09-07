@@ -28,14 +28,12 @@ export function useNavItems(variant: SidebarVariant, hiddenHrefs: string[]): Nav
   return React.useMemo(() => {
     const items =
       variant === 'enterprise' ? ENTERPRISE_NAV : assuranceNav(engagementIdFromPath(pathname));
-    // 権限による非表示は子項目（例: 管理 > 設定）にも効かせる
-    return items
-      .filter((item) => !hiddenHrefs.includes(item.href))
-      .map((item) =>
-        item.children
-          ? { ...item, children: item.children.filter((c) => !hiddenHrefs.includes(c.href)) }
-          : item,
-      );
+    // 権限による非表示は全階層に効かせる（例: 管理 > 設定。3 階層目も同じ）
+    const filterTree = (nodes: NavItem[]): NavItem[] =>
+      nodes
+        .filter((node) => !hiddenHrefs.includes(node.href))
+        .map((node) => (node.children ? { ...node, children: filterTree(node.children) } : node));
+    return filterTree(items);
   }, [variant, hiddenHrefs, pathname]);
 }
 
@@ -118,6 +116,12 @@ function isActive(pathname: string, href: string): boolean {
   return pathname.startsWith(`${href}/`);
 }
 
+/** 自分または子孫のどこかが現在地か（3 階層対応） */
+function isSubtreeActive(pathname: string, item: NavItem): boolean {
+  if (isActive(pathname, item.href)) return true;
+  return item.children?.some((child) => isSubtreeActive(pathname, child)) ?? false;
+}
+
 function SidebarEntry({
   item,
   pathname,
@@ -128,7 +132,7 @@ function SidebarEntry({
   collapsed: boolean;
 }) {
   const active = isActive(pathname, item.href);
-  const hasActiveChild = item.children?.some((c) => isActive(pathname, c.href)) ?? false;
+  const hasActiveChild = item.children?.some((c) => isSubtreeActive(pathname, c)) ?? false;
   const Icon = item.icon;
 
   const link = (
@@ -153,25 +157,61 @@ function SidebarEntry({
     <li>
       {collapsed ? <Hint label={item.label}>{link}</Hint> : link}
       {!collapsed && item.children && (
-        <ul className="ml-6 border-l border-line pl-1.5">
-          {item.children.map((child) => (
-            <li key={child.href}>
-              <Link
-                href={child.href}
-                aria-current={isActive(pathname, child.href) ? 'page' : undefined}
-                className={cn(
-                  'block rounded-t4d px-2 py-1 text-[12px]',
-                  isActive(pathname, child.href)
-                    ? 'bg-brand-50 font-medium text-brand-800'
-                    : 'text-ink-muted hover:bg-brand-50 hover:text-ink',
-                )}
-              >
-                {child.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <SidebarChildList items={item.children} pathname={pathname} depth={1} />
       )}
     </li>
+  );
+}
+
+/**
+ * 2 階層目以降の入れ子リスト。
+ * 「開示対応 > SSBJ > 対応状況」のような 3 階層目は、さらに一段インデントして
+ * 左罫線を重ねることで、どこまでがどのグループかを線で追えるようにする。
+ */
+function SidebarChildList({
+  items,
+  pathname,
+  depth,
+}: {
+  items: NavItem[];
+  pathname: string;
+  depth: number;
+}) {
+  return (
+    <ul className={cn('border-l border-line pl-1.5', depth === 1 ? 'ml-6' : 'ml-2.5')}>
+      {items.map((child) => {
+        const hasChildren = (child.children?.length ?? 0) > 0;
+        // グループ行（例: SSBJ）と、兄弟の親パスを持つ入口行（例: 算定サマリー = /enterprise/ghg）は
+        // 配下・兄弟すべてに前方一致してしまうため、完全一致のときだけ「現在地」にする。
+        // そうしないと兄弟ページで aria-current="page" が複数並ぶ
+        const overlapsSibling = items.some(
+          (other) => other !== child && other.href.startsWith(`${child.href}/`),
+        );
+        const selfActive =
+          hasChildren || overlapsSibling ? pathname === child.href : isActive(pathname, child.href);
+        const childActive = !selfActive && hasChildren && isSubtreeActive(pathname, child);
+        return (
+          <li key={`${child.href}-${child.label}`}>
+            <Link
+              href={child.href}
+              aria-current={selfActive ? 'page' : undefined}
+              className={cn(
+                'block rounded-t4d px-2 py-1 text-[12px]',
+                selfActive
+                  ? 'bg-brand-50 font-medium text-brand-800'
+                  : childActive
+                    ? 'font-medium text-ink hover:bg-brand-50'
+                    : 'text-ink-muted hover:bg-brand-50 hover:text-ink',
+              )}
+            >
+              {child.label}
+            </Link>
+            {hasChildren && child.children && (
+              <SidebarChildList items={child.children} pathname={pathname} depth={depth + 1} />
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

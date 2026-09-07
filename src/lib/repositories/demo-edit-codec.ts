@@ -148,6 +148,10 @@ const PERSISTED_TABLES = new Set<TableName>([
   'ingestionJobs',
   'ingestionJobFiles',
   'ingestionRows',
+  // サプライヤーデータ取込が追記する Scope3 の算定版。
+  // 1 回の取込で 1 行（inputs は十数行の JSON）なので Cookie に収まる。
+  // 持ち回さないと、取込直後の GHG 画面で内訳が元に戻って見える。
+  'calculations',
   'materialityTopics',
   'comments',
   'dataPoints',

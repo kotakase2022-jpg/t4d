@@ -44,9 +44,14 @@ export interface NavItem {
  *
  * 発注者会議（T4D 開発 Update）で決めた 2 つの入口に沿って並べる:
  *  1. 開示目的ドリブン（SSBJ・CSRD から始める）→「開示対応」
- *  2. データ先行（ESG データを先に取り込む）→「ESG データ」
- * GHG は算定ロジックが重い独立モジュールとして ESG データから分離する。
+ *  2. データ先行（ESG データを先に取り込む）→「ESG データ（GHG以外）」
+ * GHG は算定ロジックが重い独立モジュールとして ESG データから分離する
+ * （分離が分かるよう、データ側のラベルにも「GHG以外」と明記する）。
  * 旧「データ収集」は「SSBJ データ収集」と役割が紛れるため「データ取込」へ改名した。
+ *
+ * 開示対応の配下は基準ごとにまとめる（SSBJ → 対応状況/要求事項/…）。
+ * SSBJ の画面が 5 つに増え、CDP 以降と同じ階層に並べると
+ * どこまでが SSBJ なのか読み取れなくなったため 3 階層にした。
  */
 export const ENTERPRISE_NAV: NavItem[] = [
   {
@@ -63,35 +68,43 @@ export const ENTERPRISE_NAV: NavItem[] = [
     keywords: ['disclosure', '開示'],
     children: [
       {
-        label: 'SSBJ 対応状況',
+        label: 'SSBJ',
         href: '/enterprise/disclosures/ssbj',
-        icon: Gauge,
-        keywords: ['SSBJ', 'ギャップ', '全体状況'],
-      },
-      {
-        label: 'SSBJ 要求事項',
-        href: '/enterprise/disclosures/ssbj/requirements',
-        icon: ListChecks,
-        keywords: ['SSBJ', '要求事項', 'ギャップ分析'],
-      },
-      {
-        label: 'SSBJ 対応計画',
-        href: '/enterprise/disclosures/ssbj/plans',
-        icon: ClipboardList,
-        keywords: ['SSBJ', '対応計画', '担当', '期限'],
-      },
-      {
-        label: 'SSBJ データ収集',
-        href: '/enterprise/disclosures/ssbj/collection',
-        icon: Database,
-        keywords: ['SSBJ', 'データ収集', '不足データ'],
-      },
-      {
-        // 会議での指摘「ドラフト作成を左メニューに明示する」
-        label: 'SSBJ 開示ドラフト',
-        href: '/enterprise/disclosures/ssbj/draft',
         icon: FileText,
-        keywords: ['SSBJ', 'ドラフト', '草案', '開示文書'],
+        keywords: ['SSBJ', 'サステナビリティ基準'],
+        children: [
+          {
+            label: '対応状況',
+            href: '/enterprise/disclosures/ssbj',
+            icon: Gauge,
+            keywords: ['SSBJ', 'ギャップ', '全体状況'],
+          },
+          {
+            label: '要求事項',
+            href: '/enterprise/disclosures/ssbj/requirements',
+            icon: ListChecks,
+            keywords: ['SSBJ', '要求事項', 'ギャップ分析'],
+          },
+          {
+            label: '対応計画',
+            href: '/enterprise/disclosures/ssbj/plans',
+            icon: ClipboardList,
+            keywords: ['SSBJ', '対応計画', '担当', '期限'],
+          },
+          {
+            label: 'データ収集',
+            href: '/enterprise/disclosures/ssbj/collection',
+            icon: Database,
+            keywords: ['SSBJ', 'データ収集', '不足データ'],
+          },
+          {
+            // 会議での指摘「ドラフト作成を左メニューに明示する」
+            label: '開示ドラフト',
+            href: '/enterprise/disclosures/ssbj/draft',
+            icon: FileText,
+            keywords: ['SSBJ', 'ドラフト', '草案', '開示文書'],
+          },
+        ],
       },
       { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
       { label: 'CSRD', href: '/enterprise/disclosures/csrd', icon: FileSpreadsheet },
@@ -101,7 +114,7 @@ export const ENTERPRISE_NAV: NavItem[] = [
   },
   {
     // データ先行の入口。取込 → 台帳 → 根拠資料 の順（データが流れる順）
-    label: 'ESG データ',
+    label: 'ESG データ（GHG以外）',
     href: '/enterprise/data',
     icon: Database,
     keywords: ['ESG', 'データ'],
@@ -132,6 +145,20 @@ export const ENTERPRISE_NAV: NavItem[] = [
     href: '/enterprise/ghg',
     icon: Gauge,
     keywords: ['scope1', 'scope2', 'scope3', '排出量'],
+    children: [
+      {
+        label: '算定サマリー',
+        href: '/enterprise/ghg',
+        icon: Gauge,
+        keywords: ['GHG', 'scope3', '連結集計', '排出係数'],
+      },
+      {
+        label: 'サプライヤーデータ取込',
+        href: '/enterprise/ghg/suppliers',
+        icon: Upload,
+        keywords: ['GHG', 'scope3', 'サプライヤー', '一次データ', '購買'],
+      },
+    ],
   },
   {
     label: '業務管理',

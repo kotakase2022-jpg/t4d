@@ -31,6 +31,7 @@ const ENTERPRISE_PATHS = [
   '/enterprise/evidence',
   '/enterprise/workflows',
   '/enterprise/ghg',
+  '/enterprise/ghg/suppliers',
   '/enterprise/disclosures/cdp',
   '/enterprise/disclosures/cdp/import',
   '/enterprise/disclosures/ssbj',

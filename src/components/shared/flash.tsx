@@ -11,6 +11,15 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
  */
 const MESSAGES: Record<string, (params: URLSearchParams) => string> = {
   imported: () => '取込内容を確定し、非財務データへ反映しました。',
+  supplierImported: (params) => {
+    const added = params.get('added') ?? '0';
+    const replaced = params.get('replaced') ?? '0';
+    const total = params.get('total');
+    return (
+      `サプライヤーデータを取り込み、Scope3 Cat.1 の算定根拠へ新しい版を追記しました` +
+      `（新規 ${added} 社 ／ 置き換え ${replaced} 社${total ? ` ／ 一次データ合計 ${total} t-CO2e` : ''}）。`
+    );
+  },
   carried: (params) => {
     const count = params.get('count');
     return count ? `前年度から ${count} 件を複製しました。` : '前年度から複製しました。';

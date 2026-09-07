@@ -507,11 +507,43 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   await expect(main.getByRole('columnheader', { name: 'データ項目' })).toBeVisible();
   await expect(main.getByRole('link', { name: 'SSBJ 開示ドラフト' })).toBeVisible();
 
-  // 左メニュー: 2 つの入口（開示対応 / ESG データ）と SSBJ 開示ドラフト
+  // 左メニュー: 2 つの入口（開示対応 / ESG データ（GHG以外））と SSBJ の 3 階層
   const sidebar = page.getByRole('navigation', { name: 'メインナビゲーション' });
-  await expect(sidebar.getByRole('link', { name: 'ESG データ', exact: true })).toBeVisible();
+  await expect(
+    sidebar.getByRole('link', { name: 'ESG データ（GHG以外）', exact: true }),
+  ).toBeVisible();
   await expect(sidebar.getByRole('link', { name: 'データ取込', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('link', { name: 'SSBJ 開示ドラフト' })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: 'SSBJ', exact: true })).toBeVisible();
+  for (const child of ['対応状況', '要求事項', '対応計画', 'データ収集', '開示ドラフト']) {
+    await expect(sidebar.getByRole('link', { name: child, exact: true })).toBeVisible();
+  }
+  await expect(
+    sidebar.getByRole('link', { name: 'サプライヤーデータ取込', exact: true }),
+  ).toBeVisible();
+});
+
+test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({ page }) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '海野 みどり');
+  const main = page.locator('#t4d-main');
+
+  // 内訳の可視化: 提出状況・構成比・一次データ比率
+  await page.goto(`${BASE}/enterprise/ghg`);
+  await expect(
+    main.getByRole('heading', { name: 'Scope3 Category 1 サプライヤー内訳（一次データ）' }),
+  ).toBeVisible();
+  await expect(main.getByText('確定値に占める一次データ比率')).toBeVisible();
+  const tokiwa = page.locator('tr', { hasText: '常盤精密工業' }).first();
+  await expect(tokiwa.getByText('提出済み')).toBeVisible();
+  // 未提出（不足データ）の社が見え、取込への導線がある
+  await expect(main.getByText('未提出').first()).toBeVisible();
+
+  // 取込画面: 提出状況・CSV テンプレート・係数コード一覧
+  await page.goto(`${BASE}/enterprise/ghg/suppliers`);
+  await expect(page.getByRole('heading', { name: 'サプライヤーデータ取込' }).first()).toBeVisible();
+  await expect(main.getByText(/サプライヤー別の提出状況/)).toBeVisible();
+  await expect(main.getByRole('link', { name: 'CSV テンプレート' })).toBeVisible();
+  await expect(main.getByText(/排出係数コード一覧/)).toBeVisible();
 });
 
 test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ page }) => {

@@ -1952,3 +1952,57 @@ tests/e2e/nav-structure.spec.ts（3 件）、ssbj-gap.spec に CSV
 **結果**: 全ゲート通過（unit+integration 606 / RLS 101 / E2E 279 /
 本番スモーク 28）。11d10af を deploy → terrast-t4d.vercel.app へ
 エイリアス済み。未解決なし。
+
+### 2026-09-07 左メニュー 3 階層化・Scope3 サプライヤー内訳と取込画面
+
+発注者依頼の 2 点（① 左メニュー: 開示対応へ SSBJ の階層を追加、
+「ESG データ」→「ESG データ（GHG以外）」 ② GHG: スコープ3 サプライヤー
+データの内訳可視化と「サプライヤーデータ取込」画面）に対応した。
+
+**① 左メニュー。** 開示対応の配下を基準ごとにまとめ、
+SSBJ → 対応状況／要求事項／対応計画／データ収集／開示ドラフト の
+3 階層にした（CDP・CSRD・MSCI・FTSE は SSBJ の兄弟のまま）。
+GHG 配下に 算定サマリー／サプライヤーデータ取込 を追加。
+`sidebar.tsx`（描画・権限フィルタ）と `command-palette.tsx`（経路ラベル
+「開示対応 / SSBJ / 対応状況」）を再帰化。グループ入口と同じ href を持つ
+葉（対応状況・算定サマリー）が兄弟ページで `aria-current` を二重に
+出さないよう、兄弟パスと前方一致する行は完全一致のときだけ現在地にする。
+
+**② Scope3 サプライヤーデータ。** GHG 画面の算定根拠カードを
+「サプライヤー内訳（一次データ）」へ拡張: 提出 5/7 社・一次データ排出量・
+確定値に占める一次データ比率・未提出数のミニ KPI、構成比の積み上げバー
+（新部品 `ui/stacked-bar.tsx`、凡例チップ＋数値併記で色だけに頼らない）、
+社別テーブル（未提出行は取込画面への導線）。
+`/enterprise/ghg/suppliers` を新設: CSV ドロップ →規則ベース解析
+（AI 不使用。文字コード・区切り・合計/注記行の除外は既存 parsers を再利用）
+→プレビュー（排出量計算・新規/置き換え表示・行エラー名指し）→人が確定。
+確定は `data_point_calculations` へ**版の追記**（追記専用 RLS と整合）で、
+Data Point の確定値は変えない（変更は承認フロー）。テンプレート CSV
+（未提出社が行に並ぶ・選択中期間を引き継ぐ）と排出係数コード一覧も同画面に。
+
+**設計の要点（多角レビュー→反証検証で 20 件確定→全対応）:**
+
+- サプライヤー識別はラベル「<コード> <名前> / <品目>」規約
+  （`domain/scope3-labels.ts`、書き手はサービスと fixture の 2 か所）。
+  突き合わせは不変・一意な**コード**で行い、改名・同名・名前内「 / 」でも
+  二重計上・欠落しない（改名の回帰テストあり）。
+- 確定は `enterprise.import.run` ＋ `enterprise.data.write` ＋
+  対象 Data Point の Unit スコープ（`assertUnitInScope`）を要求。
+- 係数は activityUnit「千円」のみ許可（kWh 係数の次元違い混入を防ぐ）。
+- テンプレート CSV は共有 `toCsv`（数式インジェクション無害化・BOM）。
+- `demo-edit-codec.ts` の PERSISTED_TABLES へ `calculations` を追加
+  （取込直後の内訳が別インスタンスで消えないように。1 取込 1 行）。
+- Fixture: 未提出サプライヤー SUP-06 若草金属工業・SUP-07 汐風運輸と
+  係数 EF-PUR-METAL を追加し seed.sql 再生成。
+
+**テスト**: unit 2 本（CSV 解釈 6 件・ラベル規約 5 件）、
+integration 10 件（内訳・追記・置き換え・改名回帰・権限 3 種・次元検査）、
+e2e `ghg-suppliers.spec.ts` 3 件（可視化→テンプレート実体検証→取込一巡）、
+nav-structure 書き換え（3 階層・href 検証・aria-current 一意）、
+full-audit / ui-integrity へ新画面追加、ssbj-settings-approval-draft の
+「開示ドラフト」リンクを #t4d-main へスコープ（左メニュー改名で同名 2 件に
+なったため）。本番スモークへ GHG 内訳・取込画面の検証を追加。
+
+**結果**: 全ゲート通過（unit+integration 627 / RLS 101 / E2E 264 /
+本番スモーク 29）。6a83ce7 を deploy → terrast-t4d.vercel.app へ
+エイリアス済み。未解決なし。

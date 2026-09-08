@@ -7,7 +7,7 @@
  */
 
 import { isCountedInTotals } from '@/lib/domain/boundaries';
-import { supplierInputLabel } from '@/lib/domain/scope3-labels';
+import { SCOPE3_FORMULA, supplierInputLabel } from '@/lib/domain/scope3-labels';
 import { buildEvidenceText } from './evidence-documents';
 import { selectSample } from '@/lib/services/sampling';
 import { validateDataPoints } from '@/lib/validation/data-point-rules';
@@ -26,7 +26,7 @@ import {
   PERIOD_IDS,
   PROCEDURE_SPECS,
   REVIEW_NOTE_SPECS,
-  SCOPE3_PURCHASE_ROWS,
+  SCOPE3_SUPPLIER_ACTIVITY_ROWS,
   UNIT_IDS,
   at,
   buildDataPointSeeds,
@@ -50,6 +50,7 @@ import type {
   AssuranceTestResult,
   AiRun,
   AuditEvent,
+  CalculationInput,
   ClientAccessGrant,
   Comment,
   DataPoint,
@@ -412,6 +413,18 @@ export function createFixtureDb(): FixtureDb {
 
   db.periods.push(
     {
+      // GHG「直近3年の推移」用の過年度。承認済みの GHG 3 指標だけを持つ
+      id: PERIOD_IDS.fy2024,
+      organizationId: ORG_IDS.aomi,
+      code: 'FY2024',
+      label: '2024年度（2024-04-01〜2025-03-31）',
+      startDate: '2024-04-01',
+      endDate: '2025-03-31',
+      status: 'closed',
+      submissionDueDate: '2025-06-30',
+      ...audit(at(700)),
+    },
+    {
       id: PERIOD_IDS.fy2025,
       organizationId: ORG_IDS.aomi,
       code: 'FY2025',
@@ -578,8 +591,23 @@ export function createFixtureDb(): FixtureDb {
 
   const fileVersionByKey = new Map<string, string>();
 
-  for (const periodCode of ['FY2025', 'FY2026'] as const) {
-    const periodId = periodCode === 'FY2025' ? PERIOD_IDS.fy2025 : PERIOD_IDS.fy2026;
+  // 期間コード → ID と、Fixture の作成時期（日数オフセット）。
+  // 「FY2025 か否か」の二値分岐にすると、期間を増やしたとき FY2026 へ黙って
+  // 割り当てられる事故が起きるため、必ずこの対応表を通す
+  const AOMI_PERIOD_IDS = {
+    FY2024: PERIOD_IDS.fy2024,
+    FY2025: PERIOD_IDS.fy2025,
+    FY2026: PERIOD_IDS.fy2026,
+  } as const;
+  const PERIOD_AGE = { FY2024: 660, FY2025: 300, FY2026: 60 } as const;
+  const PERIOD_RANGE = {
+    FY2024: { start: '2024-04-01', end: '2025-03-31', obtained: '2025-04-15' },
+    FY2025: { start: '2025-04-01', end: '2026-03-31', obtained: '2026-04-15' },
+    FY2026: { start: '2026-04-01', end: '2027-03-31', obtained: null },
+  } as const;
+
+  for (const periodCode of ['FY2024', 'FY2025', 'FY2026'] as const) {
+    const periodId = AOMI_PERIOD_IDS[periodCode];
     for (const spec of FILE_SPECS) {
       const fileKey = `${spec.key}/${periodCode}`;
       const fileIdValue = fid('file', `AOMI/${fileKey}`);
@@ -599,8 +627,8 @@ export function createFixtureDb(): FixtureDb {
         scanStatus: 'skipped',
         deletedAt: null,
         ...audit(
-          at(periodCode === 'FY2025' ? 300 : 60),
-          at(periodCode === 'FY2025' ? 300 : 60),
+          at(PERIOD_AGE[periodCode]),
+          at(PERIOD_AGE[periodCode]),
           userId('site-user@demo.local'),
         ),
       });
@@ -612,7 +640,7 @@ export function createFixtureDb(): FixtureDb {
         storageKey,
         sizeBytes: 120_000 + spec.key.length * 731,
         sha256: contentHash(`${fileKey}/content`),
-        createdAt: at(periodCode === 'FY2025' ? 300 : 60),
+        createdAt: at(PERIOD_AGE[periodCode]),
         createdBy: userId('site-user@demo.local'),
       });
       fileVersionByKey.set(fileKey, versionId);
@@ -628,7 +656,7 @@ export function createFixtureDb(): FixtureDb {
           // Fixture は実体を持たないため、ここが Evidence Viewer に出る唯一の中身になる。
           text: buildEvidenceText(spec.key, periodCode, p),
           locator: spec.mime === 'application/pdf' ? `p.${p}` : 'Sheet1!A1:E40',
-          createdAt: at(periodCode === 'FY2025' ? 300 : 60),
+          createdAt: at(PERIOD_AGE[periodCode]),
         });
       }
     }
@@ -658,9 +686,9 @@ export function createFixtureDb(): FixtureDb {
   for (const seed of seeds) {
     const spec = must(metricByCode.get(seed.metricCode), `metric ${seed.metricCode}`);
     const unit = must(unitByCode.get(seed.unitCode), `unit ${seed.unitCode}`);
-    const periodId = seed.periodCode === 'FY2025' ? PERIOD_IDS.fy2025 : PERIOD_IDS.fy2026;
+    const periodId = AOMI_PERIOD_IDS[seed.periodCode];
     const dpId = dataPointId(seed.unitCode, seed.metricCode, seed.periodCode);
-    const createdAt = seed.periodCode === 'FY2025' ? at(300) : at(70);
+    const createdAt = at(seed.periodCode === 'FY2026' ? 70 : PERIOD_AGE[seed.periodCode]);
     const owner =
       seed.unitCode === 'EAST'
         ? userId('site-user@demo.local')
@@ -738,7 +766,10 @@ export function createFixtureDb(): FixtureDb {
             : '実測値の集計',
       ownerUserId: owner,
       reviewerUserId: userId('reviewer@demo.local'),
-      approvedAt: seed.status === 'approved' ? at(seed.periodCode === 'FY2025' ? 280 : 35) : null,
+      approvedAt:
+        seed.status === 'approved'
+          ? at(seed.periodCode === 'FY2026' ? 35 : PERIOD_AGE[seed.periodCode] - 20)
+          : null,
       approvedBy: seed.status === 'approved' ? userId('approver@demo.local') : null,
       changedAfterApproval: Boolean(seed.changedAfterApproval),
       deletedAt: null,
@@ -756,7 +787,7 @@ export function createFixtureDb(): FixtureDb {
         decision: 'approved',
         actorUserId: userId('approver@demo.local'),
         comment: null,
-        decidedAt: at(seed.periodCode === 'FY2025' ? 280 : 35),
+        decidedAt: at(seed.periodCode === 'FY2026' ? 35 : PERIOD_AGE[seed.periodCode] - 20),
       });
     }
     if (seed.status === 'returned') {
@@ -790,13 +821,13 @@ export function createFixtureDb(): FixtureDb {
             cellRef: fileKeyBase.endsWith('invoice') ? null : 'Sheet1!C12',
             fragmentId: fid('fragment', `${fileKeyBase}/${seed.periodCode}/p1`),
             sourceUrl: null,
-            coveragePeriodStart: seed.periodCode === 'FY2025' ? '2025-04-01' : '2026-04-01',
-            coveragePeriodEnd: seed.periodCode === 'FY2025' ? '2026-03-31' : '2027-03-31',
-            obtainedAt: seed.periodCode === 'FY2025' ? '2026-04-15' : day(-50),
+            coveragePeriodStart: PERIOD_RANGE[seed.periodCode].start,
+            coveragePeriodEnd: PERIOD_RANGE[seed.periodCode].end,
+            obtainedAt: PERIOD_RANGE[seed.periodCode].obtained ?? day(-50),
             note: null,
             ...audit(
-              at(seed.periodCode === 'FY2025' ? 295 : 55),
-              at(seed.periodCode === 'FY2025' ? 295 : 55),
+              at(seed.periodCode === 'FY2026' ? 55 : PERIOD_AGE[seed.periodCode] - 5),
+              at(seed.periodCode === 'FY2026' ? 55 : PERIOD_AGE[seed.periodCode] - 5),
               owner,
             ),
           });
@@ -807,28 +838,47 @@ export function createFixtureDb(): FixtureDb {
 
   // Scope3 Cat.1 の算定内訳。
   // ラベルは「<コード> <名前> / <品目>」規約（domain/scope3-labels.ts）。
-  // サプライヤーデータ取込（services/scope3-suppliers.ts）が同じ規約で読む
+  // サプライヤーデータ取込（services/scope3-suppliers.ts）が同じ規約・同じ
+  // note 形式で読む（金額・物理量は活動量を activityAmount に構造化して持つ）
   const scope3DpId = dataPointId('HQ', 'scope3_cat1', 'FY2026');
   const factorByCode = new Map(EMISSION_FACTOR_SPECS.map((f) => [f.code, f]));
-  const scope3Inputs = SCOPE3_PURCHASE_ROWS.map((row) => {
-    const factor = must(factorByCode.get(row.factorCode), `factor ${row.factorCode}`);
+  const scope3Inputs = SCOPE3_SUPPLIER_ACTIVITY_ROWS.map((row): CalculationInput => {
+    const label = supplierInputLabel(
+      must(unitByCode.get(row.supplierUnitCode), row.supplierUnitCode),
+      row.item,
+    );
+    if (row.dataType === 'emissions') {
+      return {
+        label,
+        value: row.amount,
+        unit: 't-CO2e',
+        sourceType: 'constant',
+        sourceId: null,
+        note: 'サプライヤー報告排出量（一次データ）',
+        activityAmount: null,
+        activityUnit: null,
+      };
+    }
+    const factor = must(factorByCode.get(row.factorCode ?? ''), `factor ${row.factorCode}`);
     return {
-      label: supplierInputLabel(
-        must(unitByCode.get(row.supplierUnitCode), row.supplierUnitCode),
-        row.item,
-      ),
-      value: Math.round(row.amountThousandJpy * factor.factorValue * 10) / 10,
+      label,
+      value: Math.round(row.amount * factor.factorValue * 10) / 10,
       unit: 't-CO2e',
-      sourceType: 'emission_factor' as const,
+      sourceType: 'emission_factor',
       sourceId: fid('emission_factor', `AOMI/${row.factorCode}`),
-      note: `購買金額 ${row.amountThousandJpy.toLocaleString('ja-JP')} 千円 × 係数 ${factor.factorValue} (${factor.factorYear}年度)`,
+      note:
+        row.dataType === 'monetary'
+          ? `購買金額 ${row.amount.toLocaleString('ja-JP')} 千円 × 係数 ${factor.factorValue} (${factor.factorYear}年度)`
+          : `活動量 ${row.amount.toLocaleString('ja-JP')} ${row.unit} × 係数 ${factor.factorValue} (${factor.factorYear}年度)`,
+      activityAmount: row.amount,
+      activityUnit: row.unit,
     };
   });
   db.calculations.push({
     id: fid('calculation', `${scope3DpId}/v1`),
     dataPointId: scope3DpId,
     organizationId: ORG_IDS.aomi,
-    formula: 'Σ(購買金額[千円] × 排出係数[t-CO2e/千円])',
+    formula: SCOPE3_FORMULA,
     inputs: scope3Inputs,
     result: Math.round(scope3Inputs.reduce((s, i) => s + i.value, 0) * 10) / 10,
     resultUnit: 't-CO2e',

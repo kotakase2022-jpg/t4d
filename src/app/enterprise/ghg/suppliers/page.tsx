@@ -1,16 +1,19 @@
 import Link from 'next/link';
-import { ArrowLeft, CircleCheck, Clock, Download } from 'lucide-react';
+import { ArrowLeft, CircleCheck, Clock, Download, Link2 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatNumber } from '@/lib/format/datetime';
+import { buildSupplierDemoFiles } from '@/lib/fixtures/supplier-demo-files';
 import { loadScope3SupplierBreakdown } from '@/lib/services/scope3-suppliers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { relinkSupplierFactorAction } from '../../actions';
 import { SupplierUploadForm } from './supplier-upload-form';
 
 export const metadata = { title: 'サプライヤーデータ取込' };
@@ -18,9 +21,11 @@ export const metadata = { title: 'サプライヤーデータ取込' };
 /**
  * Scope3 Cat.1 のサプライヤー一次データ取込。
  *
- * GHG 画面の内訳で「未提出」になっている社の購買実績 CSV をここで取り込む。
- * 確定は算定根拠（data_point_calculations）への版の追記であり、
- * Data Point の確定値は変えない（値の変更は承認フローで行う）。
+ * 排出量（t-CO2e）だけでなく、物理量（kWh・m3・L・kg）・金額（千円）の素データを
+ * 受け付け、規則ベースで自動仕訳する。物理量・金額の行は排出量原単位（排出係数）と
+ * 紐づけて排出量へ換算する。紐づけは取込プレビュー内の選択と、確定後の
+ * 「原単位の紐づけ状況」からの再紐づけ（新しい算定版の追記）の 2 か所で行える。
+ * Data Point の確定値は変えない（値の変更は承認フロー）。
  */
 export default async function GhgSuppliersPage({
   searchParams,
@@ -37,6 +42,21 @@ export default async function GhgSuppliersPage({
     breakdown.suppliers.length === 0
       ? 0
       : Math.round((breakdown.submittedCount / breakdown.suppliers.length) * 100);
+
+  const factorById = new Map(breakdown.factors.map((f) => [f.id, f]));
+  // 紐づけ状況: 活動量を持つ内訳行（金額・物理量の素データ由来）だけが再紐づけの対象
+  const linkedRows = breakdown.suppliers
+    .flatMap((supplier) =>
+      supplier.inputs
+        .filter((input) => input.activityAmount !== null && input.activityUnit !== null)
+        .map((input) => ({
+          supplier,
+          input,
+          factor: input.factorId ? factorById.get(input.factorId) : undefined,
+        })),
+    )
+    .map((row, index) => ({ ...row, index }));
+  const demoFiles = buildSupplierDemoFiles();
 
   return (
     <>
@@ -113,10 +133,10 @@ export default async function GhgSuppliersPage({
 
         <Card className="overflow-hidden">
           <SectionTitle
-            title="CSV から取り込む"
+            title="CSV から取り込む（排出量・物理量・金額の素データ）"
             action={
               <span className="text-[11px] text-ink-muted">
-                解析・突き合わせは規則ベース（AI 不使用）／ 確定は人が行います
+                仕訳・原単位の解決は規則ベース（AI 不使用）／ 確定は人が行います
               </span>
             }
           />
@@ -130,6 +150,34 @@ export default async function GhgSuppliersPage({
             </p>
           )}
         </Card>
+
+        {canImport && (
+          <Card className="overflow-hidden">
+            <SectionTitle
+              title="デモ用サンプルファイル（多様なフォーマット・言語）"
+              action={<Badge tone="warning">架空データ</Badge>}
+            />
+            <ul className="divide-y divide-line">
+              {demoFiles.map((file) => (
+                <li key={file.key} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div>
+                    <p className="text-[13px] font-medium text-ink">{file.title}</p>
+                    <p className="text-[11px] text-ink-muted">{file.description}</p>
+                  </div>
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={`/api/exports/supplier-demo-files?file=${file.key}`} download>
+                      <Download aria-hidden="true" />
+                      ダウンロード
+                    </a>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
+              ダウンロードして、そのまま上の取込へドロップすると自動仕訳を体験できます。
+            </p>
+          </Card>
+        )}
 
         <Card className="overflow-hidden">
           <SectionTitle
@@ -181,7 +229,115 @@ export default async function GhgSuppliersPage({
 
         <Card className="overflow-hidden">
           <SectionTitle
-            title={`排出係数コード一覧（${breakdown.factors.length}）`}
+            title={`排出量原単位の紐づけ状況（素データ ${linkedRows.length} 行）`}
+            action={
+              <span className="text-[11px] text-ink-muted">
+                紐づけ直すと新しい算定版を追記します（過去の版は残ります）
+              </span>
+            }
+          />
+          {linkedRows.length === 0 ? (
+            <p className="px-3 pb-3 text-[12px] text-ink-muted">
+              活動量を持つ内訳行がまだありません。物理量・金額の素データを取り込むとここに並びます。
+            </p>
+          ) : (
+            <div className="t4d-scroll-x">
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>サプライヤー</TH>
+                    <TH>品目</TH>
+                    <TH align="right">活動量</TH>
+                    <TH>単位</TH>
+                    <TH>現在の原単位</TH>
+                    <TH align="right">
+                      排出量<span className="normal-case">(t-CO2e)</span>
+                    </TH>
+                    {canImport && <TH>原単位の変更</TH>}
+                  </TR>
+                </THead>
+                <TBody>
+                  {linkedRows.map(({ supplier, input, factor, index }) => {
+                    const candidates = breakdown.factors.filter(
+                      (f) => f.activityUnit === input.activityUnit,
+                    );
+                    return (
+                      <TR key={`${supplier.code}-${input.item}-${index}`}>
+                        <TD className="font-medium text-ink">
+                          {supplier.name}
+                          <span className="ml-1 font-mono text-[11px] font-normal text-ink-muted">
+                            {supplier.code}
+                          </span>
+                        </TD>
+                        <TD>{input.item}</TD>
+                        <TD align="right">{formatNumber(input.activityAmount)}</TD>
+                        <TD className="text-[11px]">{input.activityUnit}</TD>
+                        <TD className="text-[11px]">
+                          {factor ? (
+                            <>
+                              {factor.name}
+                              <span className="ml-1 font-mono text-ink-muted">{factor.code}</span>
+                            </>
+                          ) : (
+                            <span className="text-ink-muted">不明（旧形式）</span>
+                          )}
+                        </TD>
+                        <TD align="right">{formatNumber(input.value)}</TD>
+                        {canImport && (
+                          <TD>
+                            {candidates.length > 1 ? (
+                              <form
+                                action={relinkSupplierFactorAction}
+                                className="flex items-center gap-1"
+                              >
+                                <input
+                                  type="hidden"
+                                  name="reportingPeriodId"
+                                  value={shell.currentPeriod.id}
+                                />
+                                <input type="hidden" name="supplierCode" value={supplier.code} />
+                                <input type="hidden" name="item" value={input.item} />
+                                <select
+                                  name="factorCode"
+                                  defaultValue={factor?.code ?? ''}
+                                  aria-label={`${supplier.name} ${input.item} の排出量原単位`}
+                                  className="h-6 rounded-t4d border border-line bg-surface px-1 text-[11px]"
+                                >
+                                  {candidates.map((candidate) => (
+                                    <option key={candidate.id} value={candidate.code}>
+                                      {candidate.name}（{candidate.factorValue}{' '}
+                                      {candidate.factorUnit}）
+                                    </option>
+                                  ))}
+                                </select>
+                                <SubmitButton
+                                  size="sm"
+                                  variant="outline"
+                                  icon={<Link2 aria-hidden="true" />}
+                                  pendingLabel="更新中…"
+                                >
+                                  更新
+                                </SubmitButton>
+                              </form>
+                            ) : (
+                              <span className="text-[11px] text-ink-muted">
+                                同じ単位の原単位が他にありません
+                              </span>
+                            )}
+                          </TD>
+                        )}
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </div>
+          )}
+        </Card>
+
+        <Card className="overflow-hidden">
+          <SectionTitle
+            title={`排出量原単位（排出係数）マスター（${breakdown.factors.length}）`}
             action={<Badge tone="warning">架空値（実係数ではありません）</Badge>}
           />
           <Table>
@@ -191,6 +347,8 @@ export default async function GhgSuppliersPage({
                 <TH>名称</TH>
                 <TH align="right">係数</TH>
                 <TH>単位</TH>
+                <TH>活動量単位</TH>
+                <TH>用途</TH>
                 <TH align="right">係数年度</TH>
               </TR>
             </THead>
@@ -200,14 +358,20 @@ export default async function GhgSuppliersPage({
                   <TD className="font-mono text-[11px]">{factor.code}</TD>
                   <TD>{factor.name}</TD>
                   <TD align="right">{factor.factorValue}</TD>
-                  <TD>{factor.factorUnit}</TD>
+                  <TD className="text-[11px]">{factor.factorUnit}</TD>
+                  <TD className="text-[11px]">{factor.activityUnit}</TD>
+                  <TD className="text-[11px]">
+                    {factor.activityUnit === '千円' ? '金額データ' : '物理データ'}
+                  </TD>
                   <TD align="right">{factor.factorYear}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
           <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
-            CSV の「排出係数コード」列にはこの一覧のコードを記入してください。
+            CSV
+            の「排出係数コード」列にはこの一覧のコードを記入してください（空欄でも単位・過去実績から
+            自動解決し、候補が複数のときは取込時に選べます）。
           </p>
         </Card>
       </div>

@@ -437,6 +437,13 @@ export interface CalculationInput {
   sourceType: 'data_point' | 'emission_factor' | 'constant' | 'rate';
   sourceId: Uuid | null;
   note: string | null;
+  /**
+   * 物理量・金額データ由来の行の活動量（例: 42,000 kWh・5,200 千円）。
+   * 排出量原単位の再紐づけ時に value を再計算するために持つ。
+   * サプライヤー報告排出量（sourceType 'constant'）や旧形式の行は未設定。
+   */
+  activityAmount?: number | null;
+  activityUnit?: string | null;
 }
 
 export const VALIDATION_SEVERITIES = ['error', 'warning', 'info'] as const;

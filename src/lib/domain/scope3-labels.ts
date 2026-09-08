@@ -16,6 +16,13 @@
 
 export const SCOPE3_LABEL_SEPARATOR = ' / ';
 
+/**
+ * Scope3 Cat.1 算定版の式ラベル。
+ * 金額・物理量データは活動量 × 排出係数、報告排出量はそのまま加算する。
+ * 書き手（fixtures/store.ts と services/scope3-suppliers.ts）で共有する。
+ */
+export const SCOPE3_FORMULA = 'Σ(活動量[金額・物理量] × 排出係数) ＋ サプライヤー報告排出量';
+
 export interface Scope3LabelSupplier {
   code: string;
   name: string;

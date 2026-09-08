@@ -227,3 +227,59 @@ export async function computeConsolidatedAggregation(
 
   return { period, previousPeriod: previous, metrics: results };
 }
+
+export interface ConsolidatedTrendEntry {
+  period: ReportingPeriod;
+  /** metricCodes の順に並ぶ（存在しない指標は除かれる） */
+  metrics: MetricAggregate[];
+}
+
+/**
+ * 直近 N 年の連結集計（GHG 画面の「直近3年の推移」用）。
+ *
+ * 「対象指標の承認済み実績を持つ年度」だけを開始日順に並べ、末尾 N 件を返す。
+ * 期間コードは自由入力なのでコード順には頼らない。実績の無い年度
+ * （作成直後の planning 年度など）を含めると、前年補完によって
+ * 「実データゼロなのに全部推計のバー」が描かれてしまうため除外する。
+ */
+export async function loadConsolidatedTrend(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  periods: ReportingPeriod[],
+  metricCodes: string[],
+  count = 3,
+): Promise<ConsolidatedTrendEntry[]> {
+  const organizationId = ctx.workspace.organizationId;
+
+  const [metrics, approved] = await Promise.all([
+    db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),
+    db.select('dataPoints', {
+      where: { organizationId, status: 'approved', deletedAt: { isNull: true } },
+    }),
+  ]);
+  const metricIds = new Set(
+    metricCodes
+      .map((code) => metrics.find((m) => m.code === code)?.id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const periodsWithData = new Set(
+    approved.filter((dp) => metricIds.has(dp.metricId)).map((dp) => dp.reportingPeriodId),
+  );
+
+  const recent = periods
+    .filter((p) => p.organizationId === organizationId && periodsWithData.has(p.id))
+    .sort((a, b) => (a.startDate < b.startDate ? -1 : 1))
+    .slice(-count);
+  return Promise.all(
+    recent.map(async (period) => {
+      const aggregation = await computeConsolidatedAggregation(
+        db,
+        ctx,
+        period,
+        periods,
+        metricCodes,
+      );
+      return { period, metrics: aggregation.metrics };
+    }),
+  );
+}

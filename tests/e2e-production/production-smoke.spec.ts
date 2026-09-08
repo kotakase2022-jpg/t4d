@@ -527,7 +527,7 @@ test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({
   await prodLogin(page, '海野 みどり');
   const main = page.locator('#t4d-main');
 
-  // 内訳の可視化: 提出状況・構成比・一次データ比率
+  // 内訳の可視化: 提出状況・構成比・一次データ比率（30 社・素データ 3 種別の混在）
   await page.goto(`${BASE}/enterprise/ghg`);
   await expect(
     main.getByRole('heading', { name: 'Scope3 Category 1 サプライヤー内訳（一次データ）' }),
@@ -535,15 +535,27 @@ test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({
   await expect(main.getByText('確定値に占める一次データ比率')).toBeVisible();
   const tokiwa = page.locator('tr', { hasText: '常盤精密工業' }).first();
   await expect(tokiwa.getByText('提出済み')).toBeVisible();
+  // 物理量データ（活動量 × 係数）と報告排出量が内訳に混在する
+  await expect(main.getByText(/活動量 42,000 kWh/)).toBeVisible();
+  await expect(main.getByText(/サプライヤー報告排出量/).first()).toBeVisible();
   // 未提出（不足データ）の社が見え、取込への導線がある
   await expect(main.getByText('未提出').first()).toBeVisible();
 
-  // 取込画面: 提出状況・CSV テンプレート・係数コード一覧
+  // 連結集計: 女性管理職比率の行は無く、直近3年の推移（FY2024〜）が出る
+  await expect(main.getByText('女性管理職比率')).toHaveCount(0);
+  await expect(
+    main.getByRole('heading', { name: '直近3年の推移（連結値・推計込み）' }),
+  ).toBeVisible();
+  await expect(main.getByText('FY2024').first()).toBeVisible();
+
+  // 取込画面: 提出状況・CSV テンプレート・原単位マスター・紐づけ状況・デモ用サンプル
   await page.goto(`${BASE}/enterprise/ghg/suppliers`);
   await expect(page.getByRole('heading', { name: 'サプライヤーデータ取込' }).first()).toBeVisible();
   await expect(main.getByText(/サプライヤー別の提出状況/)).toBeVisible();
   await expect(main.getByRole('link', { name: 'CSV テンプレート' })).toBeVisible();
-  await expect(main.getByText(/排出係数コード一覧/)).toBeVisible();
+  await expect(main.getByText(/排出量原単位（排出係数）マスター/)).toBeVisible();
+  await expect(main.getByText(/排出量原単位の紐づけ状況/)).toBeVisible();
+  await expect(main.getByText(/デモ用サンプルファイル/)).toBeVisible();
 });
 
 test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ page }) => {

@@ -38,25 +38,39 @@ export async function GET(request: Request) {
   interface TemplateRow {
     code: string;
     item: string;
+    dtype: string;
     amount: string;
+    unit: string;
     factor: string;
   }
+  const empty = (code: string): TemplateRow => ({
+    code,
+    item: '',
+    dtype: '',
+    amount: '',
+    unit: '',
+    factor: '',
+  });
   const rows: TemplateRow[] = [
     // 未提出の社を先に並べる（記入するだけで取り込める）。提出済みの社の再提出も同じ形式でよい
-    ...missing.map((s) => ({ code: s.code, item: '', amount: '', factor: '' })),
-    {
-      code: '※ 記入例: SUP-06 / 金属筐体 / 12400 / EF-PUR-METAL（この注記行は取り込まれません）',
-      item: '',
-      amount: '',
-      factor: '',
-    },
+    ...missing.map((s) => empty(s.code)),
+    // 3 種類の素データの記入例（注記行として自動的に取込対象外になる）
+    empty(
+      '※ 記入例①排出量: SUP-16 / 報告排出量 / 排出量 / 8.4 / t-CO2e / （係数不要・この注記行は取り込まれません）',
+    ),
+    empty(
+      '※ 記入例②物理量: SUP-27 / 購入電力 / 物理量 / 28400 / kWh / （係数コード空欄なら単位から自動解決）',
+    ),
+    empty('※ 記入例③金額: SUP-06 / 金属筐体 / 金額 / 12400 / 千円 / EF-PUR-METAL'),
   ];
   const csv = toCsv<TemplateRow>({
     name: 'サプライヤーデータ取込テンプレート',
     columns: [
       { key: 'code', header: 'サプライヤーコード', value: (r) => r.code },
       { key: 'item', header: '品目', value: (r) => r.item },
-      { key: 'amount', header: '購買金額(千円)', value: (r) => r.amount },
+      { key: 'dtype', header: 'データ種別', value: (r) => r.dtype },
+      { key: 'amount', header: '数値', value: (r) => r.amount },
+      { key: 'unit', header: '単位', value: (r) => r.unit },
       { key: 'factor', header: '排出係数コード', value: (r) => r.factor },
     ],
     rows,

@@ -1,12 +1,13 @@
 'use client';
 
 import * as React from 'react';
-import { AlertTriangle, CheckCircle2, FileUp, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileUp, Link2, Upload } from 'lucide-react';
 import { FileDropZone } from '@/components/shared/file-drop-zone';
 import { Badge } from '@/components/ui/badge';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatNumber } from '@/lib/format/datetime';
+import type { SupplierPreviewRow } from '@/lib/services/scope3-suppliers';
 import {
   confirmSupplierImportAction,
   previewSupplierImportAction,
@@ -14,12 +15,33 @@ import {
 } from '../../actions';
 
 /**
- * サプライヤー購買 CSV の投入フォーム。
+ * サプライヤー一次データ CSV の投入フォーム。
  *
  * 一般のデータ取込（AI マッピング）と違い、ここは規則ベースの決定論解析。
- * 解析結果はサーバーの応答としてこの画面へ返し、行を確認してから確定する
- * （確定時はサーバー側でマスターと再照合するため、hidden の改ざんでは通らない）。
+ * 行ごとに 排出量／物理量／金額 のどれかへ自動仕訳し、物理量・金額の行は
+ * 排出量原単位（排出係数）を自動解決する。単位から一意に決まらない行は
+ * プレビュー内のセレクトで人が紐づけてから確定する（＝原単位の紐づけ）。
+ * 確定時はサーバー側でマスターと再照合するため、hidden の改ざんでは通らない。
  */
+
+const DATA_TYPE_LABELS: Record<string, string> = {
+  emissions: '排出量',
+  physical: '物理量',
+  monetary: '金額',
+};
+
+function DataTypeBadge({ dataType }: { dataType: SupplierPreviewRow['dataType'] }) {
+  if (!dataType) return <span className="text-[11px] text-ink-muted">—</span>;
+  return (
+    <Badge
+      tone={dataType === 'emissions' ? 'brand' : dataType === 'physical' ? 'neutral' : 'outline'}
+    >
+      <CheckCircle2 className="size-3" aria-hidden="true" />
+      {DATA_TYPE_LABELS[dataType]}
+    </Badge>
+  );
+}
+
 export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: string }) {
   const [state, formAction] = React.useActionState<SupplierUploadResult | null, FormData>(
     previewSupplierImportAction,
@@ -27,6 +49,9 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
   );
   const formRef = React.useRef<HTMLFormElement>(null);
   const [selectedName, setSelectedName] = React.useState<string | null>(null);
+  // 紐づけ待ち行で選んだ原単位。未選択のままチェック→確定→全行やり直し、を防ぐため
+  // 選択されるまでチェックボックスを無効にする
+  const [chosenFactors, setChosenFactors] = React.useState<Record<string, string>>({});
 
   const preview = state?.ok ? state.preview : null;
 
@@ -48,8 +73,8 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
             クリックして CSV を選択 ／ ここへドロップ
           </span>
           <span className="text-[11px] text-ink-muted">
-            列: サプライヤーコード ／ 品目 ／ 購買金額(千円) ／ 排出係数コード（テンプレートを参照）
-            ／ 対応形式: .csv / .tsv ／ 5MB まで
+            排出量（t-CO2e）・物理量（kWh・m3・L・kg）・金額（千円）の素データを自動仕訳します ／
+            多言語ヘッダー・前置き行・独式数値（1.234,5）対応 ／ .csv / .tsv ／ 5MB まで
           </span>
           <input
             id="supplier-file"
@@ -81,7 +106,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
             解析する
           </SubmitButton>
           <span className="text-[11px] text-ink-muted">
-            解析は規則ベースで行います（AI は使いません）。確定するまでデータは変わりません。
+            解析・仕訳は規則ベースで行います（AI は使いません）。確定するまでデータは変わりません。
           </span>
         </div>
       </form>
@@ -91,8 +116,8 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
           <p className="text-[12px] text-ink">
             <span className="font-medium">{preview.fileName}</span>
             <span className="ml-2 text-ink-muted">
-              文字コード: {preview.encoding} ／ 取込可能 {preview.validCount} 行 ／ 全{' '}
-              {preview.rows.length} 行
+              文字コード: {preview.encoding} ／ そのまま確定できる行 {preview.validCount} ／
+              原単位の紐づけ待ち {preview.needsMappingCount} ／ 全 {preview.rows.length} 行
             </span>
           </p>
 
@@ -125,8 +150,10 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                       </TH>
                       <TH>サプライヤー</TH>
                       <TH>品目</TH>
-                      <TH align="right">購買金額(千円)</TH>
-                      <TH>排出係数</TH>
+                      <TH>種別</TH>
+                      <TH align="right">数値</TH>
+                      <TH>単位</TH>
+                      <TH>排出量原単位（係数）</TH>
                       {/* TH は uppercase が掛かるため、大小文字に意味がある単位は normal-case で守る */}
                       <TH align="right">
                         排出量<span className="normal-case">(t-CO2e)</span>
@@ -152,19 +179,21 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                                 <input type="hidden" name={`item:${key}`} value={row.item} />
                                 <input
                                   type="hidden"
-                                  name={`amount:${key}`}
-                                  value={row.amountThousandJpy ?? ''}
+                                  name={`dataType:${key}`}
+                                  value={row.dataType ?? ''}
                                 />
                                 <input
                                   type="hidden"
-                                  name={`factorCode:${key}`}
-                                  value={row.factorCode}
+                                  name={`amount:${key}`}
+                                  value={row.amount ?? ''}
                                 />
+                                <input type="hidden" name={`unit:${key}`} value={row.unit ?? ''} />
                                 <input
                                   type="checkbox"
                                   name={`include:${key}`}
-                                  defaultChecked
-                                  aria-label={`${row.supplierName ?? row.supplierCode} ${row.item} を取り込む`}
+                                  defaultChecked={!row.needsFactorChoice}
+                                  disabled={row.needsFactorChoice && !chosenFactors[key]}
+                                  aria-label={`${row.supplierName ?? row.supplierCode} ${row.item} を取り込む${row.needsFactorChoice && !chosenFactors[key] ? '（先に原単位を選択してください）' : ''}`}
                                   className="size-3.5 accent-brand-600"
                                 />
                               </>
@@ -179,17 +208,67 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                             </span>
                           </TD>
                           <TD>{row.item}</TD>
-                          <TD align="right">{row.amountRaw}</TD>
+                          <TD>
+                            <DataTypeBadge dataType={row.dataType} />
+                          </TD>
+                          {/* 単位は正規形へ換算して見せるため、数値も換算後で揃える
+                              （2.5 MWh の行を「2.5 / kWh」と読ませない） */}
+                          <TD align="right">
+                            {row.amount !== null ? formatNumber(row.amount) : row.amountRaw}
+                          </TD>
+                          <TD className="text-[11px]">{row.unit ?? '—'}</TD>
                           <TD className="text-[11px]">
-                            {row.factorName ? (
+                            {row.dataType === 'emissions' ? (
+                              <span className="text-ink-muted">不要（報告値）</span>
+                            ) : row.needsFactorChoice && importable ? (
+                              <span className="flex items-center gap-1">
+                                {/* text-warning は明度が高く読めないため、警告文字色は既存慣例の #8a5d00 */}
+                                <Link2
+                                  className="size-3 shrink-0 text-[#8a5d00]"
+                                  aria-hidden="true"
+                                />
+                                <select
+                                  name={`factorCode:${key}`}
+                                  value={chosenFactors[key] ?? ''}
+                                  onChange={(event) =>
+                                    setChosenFactors((prev) => ({
+                                      ...prev,
+                                      [key]: event.target.value,
+                                    }))
+                                  }
+                                  aria-label={`${row.supplierName ?? row.supplierCode} ${row.item} の排出量原単位`}
+                                  className="h-6 rounded-t4d border border-line bg-surface px-1 text-[11px]"
+                                >
+                                  <option value="">原単位を選択…</option>
+                                  {row.factorCandidates.map((candidate) => (
+                                    <option key={candidate.id} value={candidate.code}>
+                                      {candidate.name}（{candidate.factorValue}{' '}
+                                      {candidate.factorUnit}）
+                                    </option>
+                                  ))}
+                                </select>
+                              </span>
+                            ) : row.factor ? (
                               <>
-                                {row.factorName}
+                                <input
+                                  type="hidden"
+                                  name={`factorCode:${key}`}
+                                  value={row.factor.code}
+                                />
+                                {row.factor.name}
                                 <span className="ml-1 font-mono text-ink-muted">
-                                  {row.factorCode}
+                                  {row.factor.code}
+                                </span>
+                                <span className="ml-1 text-ink-muted">
+                                  {row.factorResolution === 'learned'
+                                    ? '（過去実績から自動）'
+                                    : row.factorResolution === 'unit'
+                                      ? '（単位から自動）'
+                                      : ''}
                                 </span>
                               </>
                             ) : (
-                              <span className="font-mono">{row.factorCode}</span>
+                              <span className="font-mono">{row.factorCode || '—'}</span>
                             )}
                           </TD>
                           <TD align="right" className="font-medium">
@@ -215,6 +294,11 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                                   </li>
                                 ))}
                               </ul>
+                            ) : row.needsFactorChoice ? (
+                              <Badge tone="warning">
+                                <Link2 className="size-3" aria-hidden="true" />
+                                原単位の紐づけ待ち
+                              </Badge>
                             ) : row.replacesExisting ? (
                               <Badge tone="warning">
                                 <AlertTriangle className="size-3" aria-hidden="true" />
@@ -239,12 +323,13 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                   size="sm"
                   icon={<CheckCircle2 aria-hidden="true" />}
                   pendingLabel="確定中…"
-                  disabled={preview.validCount === 0}
+                  disabled={preview.validCount === 0 && preview.needsMappingCount === 0}
                 >
                   チェックした行を確定する
                 </SubmitButton>
                 <span className="text-[11px] text-ink-muted">
                   確定すると Scope3 Cat.1 の算定根拠へ新しい版を追記します（過去の版は残ります）。
+                  「紐づけ待ち」の行は原単位を選んでからチェックしてください。
                 </span>
               </div>
             </form>

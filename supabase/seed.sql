@@ -186,9 +186,33 @@ insert into organization_units (id, organization_id, parent_id, code, name, unit
   ('2595bf06-f63b-4b96-a3e9-ed14cbaab3af', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-05', 'アルプス電子部品', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 9, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
   ('2595be06-f63b-49e3-af11-d482d0aede85', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-06', '若草金属工業', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 10, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
   ('2595bd06-f63b-4830-a1aa-2fd623f2633f', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-07', '汐風運輸', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 11, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('2595cc06-f63b-41ad-b7f0-590b65f8fc11', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-08', '東雲電力サービス', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 12, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('2595cb06-f63b-4ffa-b994-ed88cd91b00f', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-09', '榛名ガスエナジー', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 13, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25923e06-f638-4a8c-a4c1-6b18a9c5f82f', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-10', '燕沢燃料', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 14, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25923f06-f638-4c3f-a4d5-c5f06f20ddb5', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-11', '高千穂鋼材', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 15, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25924006-f638-4df2-ada3-9a9aa1fb62b3', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-12', '琥珀アルミ工業', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 16, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25924106-f638-4fa5-92b8-cf214d293b0d', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-13', 'Ostsee Metallwerke GmbH', 'supplier', 'DE', 'EUR', 'Europe/Berlin', 'excluded', 0, 'サプライヤーのため連結対象外', 17, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25923a06-f638-43c0-bf37-4c7a312c6c3f', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-14', '白鷺電装', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 18, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25923b06-f638-4573-a358-c4a6303c98a5', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-15', '真砂樹脂工業', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 19, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25923c06-f638-4726-b4aa-899d131e7f4b', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-16', 'Verte Logistique SA', 'supplier', 'FR', 'EUR', 'Europe/Berlin', 'excluded', 0, 'サプライヤーのため連結対象外', 20, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25923d06-f638-48d9-9bd9-6ffa845560cd', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-17', 'Pine Ridge Components Inc.', 'supplier', 'US', 'USD', 'America/New_York', 'excluded', 0, 'サプライヤーのため連結対象外', 21, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25924606-f638-4824-96c4-5d0606ee623f', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-18', 'くれない印刷', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 22, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25924706-f638-49d7-9ad7-f0127df00305', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-19', '早瀬田金型', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 23, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259cd006-f641-4727-ba13-7d8fed330d65', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-20', 'みかづき電子材料', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 24, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259ccf06-f641-4574-b3a7-df994f47339b', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-21', 'Nordlicht Chemie GmbH', 'supplier', 'DE', 'EUR', 'Europe/Berlin', 'excluded', 0, 'サプライヤーのため連結対象外', 25, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259cd206-f641-4a8d-83c1-5c5f6495dd41', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-22', '青梅精密ばね', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 26, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259cd106-f641-48da-bfdd-7c43e8f043f3', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-23', '常磐台運送', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 27, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259ccc06-f641-405b-8187-c63b7afefe55', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-24', 'ひなた包装', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 28, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259ccb06-f641-4ea8-b66e-9ae9a3cd6273', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-25', 'Silverbirch Materials Ltd.', 'supplier', 'GB', 'GBP', 'Europe/London', 'excluded', 0, 'サプライヤーのため連結対象外', 29, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259cce06-f641-43c1-a306-17f62325e5c9', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-26', '遠野樹脂成形', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 30, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259ccd06-f641-420e-bf5b-8beb98a8cd4b', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-27', '曙光電機', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 31, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259cc806-f641-498f-be5d-962dbd3be7e5', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-28', '若狭台金属表面処理', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 32, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('259cc706-f641-47dc-a282-a3c61264da5b', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-29', 'かささぎ電子材料', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 33, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
+  ('25994a06-f63e-4d9e-b3bf-09a37ced35ef', '65f36d85-8a52-4668-8451-adcea4448565', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', 'SUP-30', '汐見台運輸倉庫', 'supplier', 'JP', 'JPY', 'Asia/Tokyo', 'excluded', 0, 'サプライヤーのため連結対象外', 34, null, '2025-08-29T03:00:00.000Z', '2025-08-29T03:00:00.000Z', null, null),
   ('3910ca8d-532a-42e2-ae2e-1b26a533e91d', 'acca1c51-8f48-48b7-bc53-e9e384836003', null, 'HQ', '本社', 'headquarters', 'JP', 'JPY', 'Asia/Tokyo', 'full', 100, null, 0, null, '2025-09-08T03:00:00.000Z', '2025-09-08T03:00:00.000Z', null, null);
 
 insert into reporting_periods (id, organization_id, code, label, start_date, end_date, status, submission_due_date, created_at, updated_at, created_by, updated_by) values
+  ('6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '65f36d85-8a52-4668-8451-adcea4448565', 'FY2024', '2024年度（2024-04-01〜2025-03-31）', '2024-04-01', '2025-03-31', 'closed', '2025-06-30', '2024-09-13T03:00:00.000Z', '2024-09-13T03:00:00.000Z', null, null),
   ('6d6e3d7c-bc1c-4771-932b-c758a0c5920b', '65f36d85-8a52-4668-8451-adcea4448565', 'FY2025', '2025年度（2025-04-01〜2026-03-31）', '2025-04-01', '2026-03-31', 'closed', '2026-06-30', '2025-09-08T03:00:00.000Z', '2025-09-08T03:00:00.000Z', null, null),
   ('6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', '65f36d85-8a52-4668-8451-adcea4448565', 'FY2026', '2026年度（2026-04-01〜2027-03-31）', '2026-04-01', '2027-03-31', 'collecting', '2026-09-13', '2026-03-27T03:00:00.000Z', '2026-03-27T03:00:00.000Z', null, null),
   ('41fea289-27a0-43a1-926d-8b44670482d1', 'acca1c51-8f48-48b7-bc53-e9e384836003', 'FY2026', '2026年度', '2026-04-01', '2027-03-31', 'collecting', '2026-09-13', '2026-03-27T03:00:00.000Z', '2026-03-27T03:00:00.000Z', null, null);
@@ -329,9 +353,24 @@ insert into emission_factors (id, organization_id, code, name, category, factor_
   ('229ce227-3653-4c68-8398-ba96a7c703bf', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-PUR-PACK', '包装資材（購入金額ベース）', 'purchased_goods', 0.00056, 't-CO2e/千円', '千円', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z'),
   ('6c253ca4-0527-446e-a81a-6351a70e99e7', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-LOGI', '物流サービス（購入金額ベース）', 'purchased_services', 0.00037, 't-CO2e/千円', '千円', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z'),
   ('75f78d7e-25df-4024-94f0-9acc06ef1e3f', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-PUR-METAL', '金属材料（購入金額ベース）', 'purchased_goods', 0.00063, 't-CO2e/千円', '千円', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z'),
-  ('bd6f47e7-6c44-4007-b055-8e269f5e4469', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-ELEC-JP', '電力（日本・全国平均）', 'electricity', 0.000434, 't-CO2e/kWh', 'kWh', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z');
+  ('bd6f47e7-6c44-4007-b055-8e269f5e4469', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-ELEC-JP', '電力（日本・全国平均）', 'electricity', 0.000434, 't-CO2e/kWh', 'kWh', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z'),
+  ('5ec919f1-8bca-477b-aa57-1d7c9a685b47', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-GAS-M3', '都市ガス（物理量ベース）', 'fuel', 0.00224, 't-CO2e/m3', 'm3', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z'),
+  ('b822f81d-3ffd-4470-b6c4-92b6814cddbf', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-DIESEL-L', '軽油（物理量ベース）', 'fuel', 0.00258, 't-CO2e/L', 'L', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z'),
+  ('6b2dda89-3cac-48ff-9edf-627dd0686a57', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-STEEL-KG', '鋼材（重量ベース）', 'purchased_goods', 0.0021, 't-CO2e/kg', 'kg', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z'),
+  ('8e96d6e0-7a58-4d6e-a025-26f5108519af', '65f36d85-8a52-4668-8451-adcea4448565', 'EF-ALU-KG', 'アルミ材（重量ベース）', 'purchased_goods', 0.009, 't-CO2e/kg', 'kg', 2025, 'FIXTURE（架空値・実係数ではありません）', '2026-01-26T03:00:00.000Z');
 
 insert into data_points (id, organization_id, metric_id, unit_id, reporting_period_id, boundary, status, current_version_id, value, text_value, unit_of_measure, methodology, owner_user_id, reviewer_user_id, approved_at, approved_by, changed_after_approval, deleted_at, created_at, updated_at, created_by, updated_by) values
+  ('fd56bf3c-72b2-4fd2-9e7a-c483fbc9de51', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ebf9-e6d2-4fcb-9fe9-fad240fa2dd1', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', 'f1c6c3fc-d81e-41f2-bfc8-310a870ef4bf', 1352.1, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('fd56be3c-72b2-4e1f-90d0-f81afdffef87', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ecf9-e6d2-417e-9dab-637d7a7e9ed7', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', '369e4c51-8ec2-444b-80d7-947ab05db17d', 3371, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('de42f8b0-f043-4bbe-a0f0-45ab6a470881', '65f36d85-8a52-4668-8451-adcea4448565', '53b18610-2477-411d-b759-e8ec11b4ecc5', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', '13d6951c-c423-4046-bd84-4f3017e47af3', 44835.3, null, 't-CO2e', '購買金額 × 排出係数（金額ベース）', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('cacd4ede-7726-4764-9098-e85cb54767f9', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ebf9-e6d2-4fcb-9fe9-fad240fa2dd1', '49a14b29-ba09-4237-ba61-c2f3dd066b65', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', '62d0cf75-a51c-4c82-91f4-e47e427c1de7', 4326.9, null, 't-CO2e', '実測値の集計', 'b90ab786-9068-4d7f-8476-1729a64d1d49', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('cacd51de-7726-4c7d-81bc-812d132eec8b', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ecf9-e6d2-417e-9dab-637d7a7e9ed7', '49a14b29-ba09-4237-ba61-c2f3dd066b65', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', '39e1905f-b103-4601-acc1-4959adc9df49', 10787.2, null, 't-CO2e', '実測値の集計', 'b90ab786-9068-4d7f-8476-1729a64d1d49', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('997f745b-0ec7-4e0e-bc1e-c79d879c0ad1', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ebf9-e6d2-4fcb-9fe9-fad240fa2dd1', '80ac27a0-f88d-428d-a996-6de47588ee8d', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', 'a47bc2f9-b1e3-4f0a-b70a-c9497459a273', 3245.1, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('997f735b-0ec7-4c5b-b083-0fdb33c10dc7', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ecf9-e6d2-417e-9dab-637d7a7e9ed7', '80ac27a0-f88d-428d-a996-6de47588ee8d', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', '3ceb49c7-dee3-4eeb-a1a5-692ef54aeced', 8090.4, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('b98c20aa-e610-40cd-bb60-d4a2001da083', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ebf9-e6d2-4fcb-9fe9-fad240fa2dd1', 'ac8d96d4-8c56-44cc-9faf-b052092c0293', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', 'd4f819a6-27cb-430a-ab24-86863a731b93', 811.3, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('b98c1daa-e610-4bb4-b372-fe58c8a42359', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ecf9-e6d2-417e-9dab-637d7a7e9ed7', 'ac8d96d4-8c56-44cc-9faf-b052092c0293', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '連結', 'approved', '0402c60f-b2a2-4c61-8029-2450f53588b1', 2022.6, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('4565e113-fd32-41bb-acdb-2cf120c1365b', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ebf9-e6d2-4fcb-9fe9-fad240fa2dd1', 'ac75e7d4-8c42-4c8e-acbd-dedd2ab2205b', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '単体', 'approved', '9c7380f5-a300-4e8b-a586-22488dba90fd', 473.3, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('4565e213-fd32-436e-9e33-b3582bbc316d', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ecf9-e6d2-417e-9dab-637d7a7e9ed7', 'ac75e7d4-8c42-4c8e-acbd-dedd2ab2205b', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', '単体', 'approved', 'df73d591-57e0-4584-8ec4-967c0aaba507', 1179.9, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2024-11-12T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('19482763-444a-4b9d-9397-90c24a2cf86b', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ebf9-e6d2-4fcb-9fe9-fad240fa2dd1', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', '連結', 'approved', '668264e0-d5d2-485f-a016-48f09607098d', 1240.5, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2025-11-07T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('19482463-444a-4684-8e1b-fd6b4ebfc309', '65f36d85-8a52-4668-8451-adcea4448565', '02a1ecf9-e6d2-417e-9dab-637d7a7e9ed7', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', '連結', 'approved', '2d20b331-bb9a-47e1-a087-01ec46b6f0f5', 3180.2, null, 't-CO2e', '実測値の集計', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2025-11-07T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('640ffb4e-7d5a-45b7-9a23-bad78d618101', '65f36d85-8a52-4668-8451-adcea4448565', '53b18610-2477-411d-b759-e8ec11b4ecc5', 'ac7c96d4-8c48-4199-b0f8-949640fa1f8d', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', '連結', 'approved', 'a3957f5c-e265-407f-9ad6-a1c0830b73cd', 48210, null, 't-CO2e', '購買金額 × 排出係数（金額ベース）', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2025-11-07T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
@@ -482,6 +521,17 @@ insert into data_points (id, organization_id, metric_id, unit_id, reporting_peri
   ('4edf2dd2-26fe-439a-b288-cb22be3470fd', '65f36d85-8a52-4668-8451-adcea4448565', '53b18610-2477-411d-b759-e8ec11b4ecc5', '49a14b29-ba09-4237-ba61-c2f3dd066b65', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', '内部取引', 'approved', 'd28e6860-263a-4f0c-bdc3-1325d310df23', 640.5, null, 't-CO2e', 'グループ会社からの調達額 × 排出係数（連結時に控除）', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', '8c0244f0-7d66-4e21-8ec8-e159387d7f8b', '2026-07-10T03:00:00.000Z', '76a63ea0-b02d-4ac3-964c-b84749bd822b', false, null, '2026-07-05T03:00:00.000Z', '2026-07-10T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f');
 
 insert into data_point_versions (id, data_point_id, organization_id, version_no, value, text_value, unit_of_measure, status, source_type, source_reference, change_reason, content_hash, created_at, created_by) values
+  ('f1c6c3fc-d81e-41f2-bfc8-310a870ef4bf', 'fd56bf3c-72b2-4fd2-9e7a-c483fbc9de51', '65f36d85-8a52-4668-8451-adcea4448565', 1, 1352.1, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, 'f24d30bc2dc0045db48eb7cb8a28868e', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('369e4c51-8ec2-444b-80d7-947ab05db17d', 'fd56be3c-72b2-4e1f-90d0-f81afdffef87', '65f36d85-8a52-4668-8451-adcea4448565', 1, 3371, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, '86012510df282b0af93da47dc09dd1aa', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('13d6951c-c423-4046-bd84-4f3017e47af3', 'de42f8b0-f043-4bbe-a0f0-45ab6a470881', '65f36d85-8a52-4668-8451-adcea4448565', 1, 44835.3, null, 't-CO2e', 'approved', 'calculation', '購買明細からの算定', null, '57922326822e5dc8d6f8fffa7ac38424', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('62d0cf75-a51c-4c82-91f4-e47e427c1de7', 'cacd4ede-7726-4764-9098-e85cb54767f9', '65f36d85-8a52-4668-8451-adcea4448565', 1, 4326.9, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, '90bead847d656c8b50b8f4da8f6c5d7e', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('39e1905f-b103-4601-acc1-4959adc9df49', 'cacd51de-7726-4c7d-81bc-812d132eec8b', '65f36d85-8a52-4668-8451-adcea4448565', 1, 10787.2, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, '100d9c4f7f5e936fc27519043060899e', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('a47bc2f9-b1e3-4f0a-b70a-c9497459a273', '997f745b-0ec7-4e0e-bc1e-c79d879c0ad1', '65f36d85-8a52-4668-8451-adcea4448565', 1, 3245.1, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, 'ae4be67de4d58d3ebab1b483397ac6c6', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('3ceb49c7-dee3-4eeb-a1a5-692ef54aeced', '997f735b-0ec7-4c5b-b083-0fdb33c10dc7', '65f36d85-8a52-4668-8451-adcea4448565', 1, 8090.4, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, 'a965933fd76faf4d4db7312e8689ba2e', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('d4f819a6-27cb-430a-ab24-86863a731b93', 'b98c20aa-e610-40cd-bb60-d4a2001da083', '65f36d85-8a52-4668-8451-adcea4448565', 1, 811.3, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, '9d8891a2b3b8db863a4f5c975ff2b5d0', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('0402c60f-b2a2-4c61-8029-2450f53588b1', 'b98c1daa-e610-4bb4-b372-fe58c8a42359', '65f36d85-8a52-4668-8451-adcea4448565', 1, 2022.6, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, '17607440d61a0174c9fe3f2c8114a1de', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('9c7380f5-a300-4e8b-a586-22488dba90fd', '4565e113-fd32-41bb-acdb-2cf120c1365b', '65f36d85-8a52-4668-8451-adcea4448565', 1, 473.3, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, 'f9cab0c9ff273c27be2fb351aefbf06e', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('df73d591-57e0-4584-8ec4-967c0aaba507', '4565e213-fd32-436e-9e33-b3582bbc316d', '65f36d85-8a52-4668-8451-adcea4448565', 1, 1179.9, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, '1de39d5aa9600c106ee36db092757672', '2024-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('668264e0-d5d2-485f-a016-48f09607098d', '19482763-444a-4b9d-9397-90c24a2cf86b', '65f36d85-8a52-4668-8451-adcea4448565', 1, 1240.5, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, 'd0dc7a8e413de66a0e39a8cbd397fd86', '2025-10-18T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('2d20b331-bb9a-47e1-a087-01ec46b6f0f5', '19482463-444a-4684-8e1b-fd6b4ebfc309', '65f36d85-8a52-4668-8451-adcea4448565', 1, 3180.2, null, 't-CO2e', 'approved', 'import', '拠点提出ファイル', null, 'daebfeffc34daf26c63683aea100a0ee', '2025-10-18T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('a3957f5c-e265-407f-9ad6-a1c0830b73cd', '640ffb4e-7d5a-45b7-9a23-bad78d618101', '65f36d85-8a52-4668-8451-adcea4448565', 1, 48210, null, 't-CO2e', 'approved', 'calculation', '購買明細からの算定', null, '4cd529c429a597f1c8b33f0ead0444de', '2025-10-18T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
@@ -635,7 +685,7 @@ insert into data_point_versions (id, data_point_id, organization_id, version_no,
   ('d28e6860-263a-4f0c-bdc3-1325d310df23', '4edf2dd2-26fe-439a-b288-cb22be3470fd', '65f36d85-8a52-4668-8451-adcea4448565', 1, 640.5, null, 't-CO2e', 'approved', 'manual', 'グループ内取引の集計', null, '7ad287fb0e60dc9601df81679070940a', '2026-07-05T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f');
 
 insert into data_point_calculations (id, data_point_id, organization_id, formula, inputs, result, result_unit, calculated_at, calculated_by) values
-  ('da43e985-67f8-4aa8-84fb-2bf2ed08443f', 'e5181a3b-affc-46fc-9426-e864b0b5b1f9', '65f36d85-8a52-4668-8451-adcea4448565', 'Σ(購買金額[千円] × 排出係数[t-CO2e/千円])', '[{"label":"SUP-01 常盤精密工業 / 精密加工部品","value":18,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"3d1c8185-4fe3-4c38-b1b0-c242c07de07f","note":"購買金額 42,800 千円 × 係数 0.00042 (2025年度)"},{"label":"SUP-02 橙陽ケミカル / 樹脂・接着剤","value":15.1,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"874c1bb4-cef8-488c-a0e8-bd299aa49547","note":"購買金額 18,600 千円 × 係数 0.00081 (2025年度)"},{"label":"SUP-03 白樺物流 / 国内輸送","value":3.5,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"6c253ca4-0527-446e-a81a-6351a70e99e7","note":"購買金額 9,400 千円 × 係数 0.00037 (2025年度)"},{"label":"SUP-04 みなと包装資材 / 包装資材","value":3.5,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"229ce227-3653-4c68-8398-ba96a7c703bf","note":"購買金額 6,200 千円 × 係数 0.00056 (2025年度)"},{"label":"SUP-05 アルプス電子部品 / 電子部品","value":13.2,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"3d1c8185-4fe3-4c38-b1b0-c242c07de07f","note":"購買金額 31,500 千円 × 係数 0.00042 (2025年度)"}]'::jsonb, 53.3, 't-CO2e', '2026-06-10T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f');
+  ('da43e985-67f8-4aa8-84fb-2bf2ed08443f', 'e5181a3b-affc-46fc-9426-e864b0b5b1f9', '65f36d85-8a52-4668-8451-adcea4448565', 'Σ(活動量[金額・物理量] × 排出係数) ＋ サプライヤー報告排出量', '[{"label":"SUP-01 常盤精密工業 / 精密加工部品","value":18,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"3d1c8185-4fe3-4c38-b1b0-c242c07de07f","note":"購買金額 42,800 千円 × 係数 0.00042 (2025年度)","activityAmount":42800,"activityUnit":"千円"},{"label":"SUP-02 橙陽ケミカル / 樹脂・接着剤","value":15.1,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"874c1bb4-cef8-488c-a0e8-bd299aa49547","note":"購買金額 18,600 千円 × 係数 0.00081 (2025年度)","activityAmount":18600,"activityUnit":"千円"},{"label":"SUP-03 白樺物流 / 国内輸送","value":3.5,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"6c253ca4-0527-446e-a81a-6351a70e99e7","note":"購買金額 9,400 千円 × 係数 0.00037 (2025年度)","activityAmount":9400,"activityUnit":"千円"},{"label":"SUP-04 みなと包装資材 / 包装資材","value":3.5,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"229ce227-3653-4c68-8398-ba96a7c703bf","note":"購買金額 6,200 千円 × 係数 0.00056 (2025年度)","activityAmount":6200,"activityUnit":"千円"},{"label":"SUP-05 アルプス電子部品 / 電子部品","value":13.2,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"3d1c8185-4fe3-4c38-b1b0-c242c07de07f","note":"購買金額 31,500 千円 × 係数 0.00042 (2025年度)","activityAmount":31500,"activityUnit":"千円"},{"label":"SUP-08 東雲電力サービス / 購入電力","value":18.2,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"bd6f47e7-6c44-4007-b055-8e269f5e4469","note":"活動量 42,000 kWh × 係数 0.000434 (2025年度)","activityAmount":42000,"activityUnit":"kWh"},{"label":"SUP-09 榛名ガスエナジー / 都市ガス","value":14.3,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"5ec919f1-8bca-477b-aa57-1d7c9a685b47","note":"活動量 6,400 m3 × 係数 0.00224 (2025年度)","activityAmount":6400,"activityUnit":"m3"},{"label":"SUP-10 燕沢燃料 / 軽油","value":10.1,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"b822f81d-3ffd-4470-b6c4-92b6814cddbf","note":"活動量 3,900 L × 係数 0.00258 (2025年度)","activityAmount":3900,"activityUnit":"L"},{"label":"SUP-11 高千穂鋼材 / 鋼材","value":10.9,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"6b2dda89-3cac-48ff-9edf-627dd0686a57","note":"活動量 5,200 kg × 係数 0.0021 (2025年度)","activityAmount":5200,"activityUnit":"kg"},{"label":"SUP-12 琥珀アルミ工業 / アルミ材","value":7.5,"unit":"t-CO2e","sourceType":"emission_factor","sourceId":"8e96d6e0-7a58-4d6e-a025-26f5108519af","note":"活動量 830 kg × 係数 0.009 (2025年度)","activityAmount":830,"activityUnit":"kg"},{"label":"SUP-13 Ostsee Metallwerke GmbH / 報告排出量（EcoVadis）","value":12.4,"unit":"t-CO2e","sourceType":"constant","sourceId":null,"note":"サプライヤー報告排出量（一次データ）","activityAmount":null,"activityUnit":null},{"label":"SUP-14 白鷺電装 / 報告排出量（自社算定）","value":9.6,"unit":"t-CO2e","sourceType":"constant","sourceId":null,"note":"サプライヤー報告排出量（一次データ）","activityAmount":null,"activityUnit":null},{"label":"SUP-15 真砂樹脂工業 / 報告排出量（自社算定）","value":6.8,"unit":"t-CO2e","sourceType":"constant","sourceId":null,"note":"サプライヤー報告排出量（一次データ）","activityAmount":null,"activityUnit":null}]'::jsonb, 143.1, 't-CO2e', '2026-06-10T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f');
 
 insert into data_point_validation_results (id, data_point_id, organization_id, rule_key, severity, message, details, detected_at, resolved_at) values
   ('679a5bb1-8434-4a19-a41f-f3e75de8e11b', '80c8423f-9edd-4855-9142-a0f9a055e9a5', '65f36d85-8a52-4668-8451-adcea4448565', 'missing_evidence', 'error', '本社 の「労働災害度数率（LTIFR）」に Evidence が紐付いていません（この指標は Evidence 必須です）。', '{}'::jsonb, '2026-08-13T03:00:00.000Z', null),
@@ -661,6 +711,12 @@ insert into data_point_validation_results (id, data_point_id, organization_id, r
   ('8c1a84b6-24c8-4b3c-9b41-902222529dad', '10e627da-4dfc-4bc9-a730-f7f85931ffb5', '65f36d85-8a52-4668-8451-adcea4448565', 'missing_evidence', 'warning', '青海マテリアル合弁会社 の「労働災害度数率（LTIFR）」に Evidence が紐付いていません（この指標は Evidence 必須です）。', '{}'::jsonb, '2026-08-13T03:00:00.000Z', null);
 
 insert into files (id, organization_id, bucket, original_name, mime_type, confidentiality, current_version_id, document_type, reporting_period_id, scan_status, deleted_at, created_at, updated_at, created_by, updated_by) values
+  ('fa4c0710-f53c-461b-98e3-d0b37bc35e7d', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '電力請求書_FY2024.pdf', 'application/pdf', 'confidential', '3fab155b-ceaf-431a-9a21-face40ff0d15', '請求書', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', 'skipped', null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('8e0bca19-fcff-418a-9106-3a60b188d725', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '廃棄物マニフェスト_FY2024.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'confidential', 'ba69a87d-be09-4bb7-9773-796be2e3b6ef', 'マニフェスト', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', 'skipped', null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('d73716fc-e514-4b29-8638-7af105123619', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '人事データ_FY2024.csv', 'text/csv', 'confidential', '2a836069-1e43-417c-8a94-d18fa829ca05', '人事データ', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', 'skipped', null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('40079b23-e07c-40b7-a898-0735bf2aeb5d', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '購買明細_FY2024.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'confidential', 'c6ccc1cc-54b0-4992-a8ec-5d9923d9edfd', '購買台帳', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', 'skipped', null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('9822c45d-22cf-43eb-9393-dc94a11aa5cd', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '燃料使用記録_FY2024.pdf', 'application/pdf', 'confidential', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', '計測記録', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', 'skipped', null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('58196dc9-b2c0-4d23-a708-a03dea90e0bd', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '有価証券報告書_FY2024.pdf', 'application/pdf', 'confidential', 'be2d645b-d677-446e-8423-28a708bfe755', '有価証券報告書', '6d6e3c7c-bc1c-45be-8128-68cd07dd13b9', 'skipped', null, '2024-10-23T03:00:00.000Z', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('fa4c0610-f53c-4468-ad38-c0063bd37aeb', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '電力請求書_FY2025.pdf', 'application/pdf', 'confidential', 'bebc8164-a2a7-46cf-a7c9-1381486ff075', '請求書', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', 'skipped', null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('8e0bcb19-fcff-433d-9693-8d240dc7713d', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '廃棄物マニフェスト_FY2025.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'confidential', '25bbfc74-4cb5-4722-84a8-aa36e4605231', 'マニフェスト', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', 'skipped', null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('d73715fc-e514-4976-90ce-7e059ef3d3bf', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '人事データ_FY2025.csv', 'text/csv', 'confidential', 'bf9d8c72-8ff3-4e71-a2e7-334d8b47f4a5', '人事データ', '6d6e3d7c-bc1c-4771-932b-c758a0c5920b', 'skipped', null, '2025-10-18T03:00:00.000Z', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
@@ -675,6 +731,12 @@ insert into files (id, organization_id, bucket, original_name, mime_type, confid
   ('58196fc9-b2c0-4089-bb85-76f9b11fdf95', '65f36d85-8a52-4668-8451-adcea4448565', 'evidence-private', '有価証券報告書_FY2026.pdf', 'application/pdf', 'confidential', 'b967584a-28e4-47bc-8048-3bcec65116c5', '有価証券報告書', '6d6e3a7c-bc1c-4258-a8a1-6850d1cead65', 'skipped', null, '2026-06-15T03:00:00.000Z', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49');
 
 insert into file_versions (id, file_id, organization_id, version_no, storage_key, size_bytes, sha256, created_at, created_by) values
+  ('3fab155b-ceaf-431a-9a21-face40ff0d15', 'fa4c0710-f53c-461b-98e3-d0b37bc35e7d', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/3fab155b-ceaf-431a-9a21-face40ff0d15/power-invoice.bin', 129503, 'c003656dad3ae98245baba25d1f6c302', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('ba69a87d-be09-4bb7-9773-796be2e3b6ef', '8e0bca19-fcff-418a-9106-3a60b188d725', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/ba69a87d-be09-4bb7-9773-796be2e3b6ef/waste-manifest.bin', 130234, 'd890119523da252d856aacab18c9ddce', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('2a836069-1e43-417c-8a94-d18fa829ca05', 'd73716fc-e514-4b29-8638-7af105123619', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/2a836069-1e43-417c-8a94-d18fa829ca05/hr-data.bin', 125117, '13ae3bf50971fb24df4f620cfa74ba76', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('c6ccc1cc-54b0-4992-a8ec-5d9923d9edfd', '40079b23-e07c-40b7-a898-0735bf2aeb5d', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/c6ccc1cc-54b0-4992-a8ec-5d9923d9edfd/purchase-ledger.bin', 130965, 'd1dfcebe44b040d2b1a7c8601276f71e', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('69f64446-b825-4ebc-b7a7-f95dec8f6ad5', '9822c45d-22cf-43eb-9393-dc94a11aa5cd', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/69f64446-b825-4ebc-b7a7-f95dec8f6ad5/fuel-log.bin', 125848, '61878e5a822b0d48179086728ec287b8', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('be2d645b-d677-446e-8423-28a708bfe755', '58196dc9-b2c0-4d23-a708-a03dea90e0bd', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/be2d645b-d677-446e-8423-28a708bfe755/securities-report.bin', 132427, '20b0c0eeb2518dbe6ba9b7822bf1b2be', '2024-10-23T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('bebc8164-a2a7-46cf-a7c9-1381486ff075', 'fa4c0610-f53c-4468-ad38-c0063bd37aeb', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/bebc8164-a2a7-46cf-a7c9-1381486ff075/power-invoice.bin', 129503, 'c5ebbb604a118e29c43f35063bc8c0a6', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('25bbfc74-4cb5-4722-84a8-aa36e4605231', '8e0bcb19-fcff-433d-9693-8d240dc7713d', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/25bbfc74-4cb5-4722-84a8-aa36e4605231/waste-manifest.bin', 130234, '8887aa3456384df6327fdcdf61aa84f8', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
   ('bf9d8c72-8ff3-4e71-a2e7-334d8b47f4a5', 'd73715fc-e514-4976-90ce-7e059ef3d3bf', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/bf9d8c72-8ff3-4e71-a2e7-334d8b47f4a5/hr-data.bin', 125117, '77a53d364f1a5a937000ecdbbb0056ca', '2025-10-18T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
@@ -689,6 +751,188 @@ insert into file_versions (id, file_id, organization_id, version_no, storage_key
   ('b967584a-28e4-47bc-8048-3bcec65116c5', '58196fc9-b2c0-4089-bb85-76f9b11fdf95', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'enterprise/65f36d85-8a52-4668-8451-adcea4448565/evidence/b967584a-28e4-47bc-8048-3bcec65116c5/securities-report.bin', 132427, '980f59ed3e01f0b03caa0a47372d436e', '2026-06-15T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49');
 
 insert into extracted_fragments (id, file_version_id, organization_id, page, kind, text, locator, created_at) values
+  ('e7b52604-cf5a-4ba2-bcbb-2b442d234577', '3fab155b-ceaf-431a-9a21-face40ff0d15', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '電気ご使用量のお知らせ（電力需給契約に基づく請求書）
+発行: 中央電力株式会社 法人営業部
+請求番号: DENKI-FY2024-004128 ／ 発行日: 2027-04-10
+需要場所: 青海テクノロジー株式会社 本社ビル（東京都港区）
+契約種別: 高圧電力 A ／ 契約電力: 480 kW
+検針期間: FY2024 通年（2026-04-01 〜 2027-03-31）
+項目                          数量           単価         金額
+基本料金                      480 kW         2,675.00     1,284,000 円
+電力量料金（昼間）            2,933,270 kWh    24.60        72,158,442 円
+再エネ賦課金                  2,933,270 kWh     3.49        10,237,112 円
+合計使用電力量: 2,933,270 kWh
+ご請求金額（税込）: 83,679,554 円
+※ 本書は架空のサンプルです。実在の電力会社・契約とは関係ありません。', 'p.1', '2024-10-23T03:00:00.000Z'),
+  ('e7b52504-cf5a-49ef-bb66-4ddaf75658b9', '3fab155b-ceaf-431a-9a21-face40ff0d15', '65f36d85-8a52-4668-8451-adcea4448565', 2, 'text', '月別ご使用量明細（2 ページ目）
+検針月        使用電力量(kWh)    最大需要電力(kW)   力率
+2026年 4月         244,439           420      96%
+2026年 5月         263,994           432      97%
+2026年 6月         278,310           444      98%
+2026年 7月         283,549           456      96%
+2026年 8月         278,310           468      97%
+2026年 9月         263,994           420      98%
+2026年10月         244,439           432      96%
+2026年11月         224,884           444      97%
+2026年12月         210,569           456      98%
+2027年 1月         205,329           468      96%
+2027年 2月         210,569           420      97%
+2027年 3月         224,884           432      98%
+年間合計: 2,933,270 kWh
+※ CO2 排出係数 0.000434 t-CO2e/kWh（2026 年度・全国平均）', 'p.2', '2024-10-23T03:00:00.000Z'),
+  ('e7b52404-cf5a-483c-9481-2195ad4c6a1f', '3fab155b-ceaf-431a-9a21-face40ff0d15', '65f36d85-8a52-4668-8451-adcea4448565', 3, 'text', '月別ご使用量明細（2 ページ目）
+検針月        使用電力量(kWh)    最大需要電力(kW)   力率
+2026年 4月         244,439           420      96%
+2026年 5月         263,994           432      97%
+2026年 6月         278,310           444      98%
+2026年 7月         283,549           456      96%
+2026年 8月         278,310           468      97%
+2026年 9月         263,994           420      98%
+2026年10月         244,439           432      96%
+2026年11月         224,884           444      97%
+2026年12月         210,569           456      98%
+2027年 1月         205,329           468      96%
+2027年 2月         210,569           420      97%
+2027年 3月         224,884           432      98%
+年間合計: 2,933,270 kWh
+※ CO2 排出係数 0.000434 t-CO2e/kWh（2026 年度・全国平均）', 'p.3', '2024-10-23T03:00:00.000Z'),
+  ('e7b52304-cf5a-4689-8a2c-b555a40a14dd', '3fab155b-ceaf-431a-9a21-face40ff0d15', '65f36d85-8a52-4668-8451-adcea4448565', 4, 'text', '月別ご使用量明細（2 ページ目）
+検針月        使用電力量(kWh)    最大需要電力(kW)   力率
+2026年 4月         244,439           420      96%
+2026年 5月         263,994           432      97%
+2026年 6月         278,310           444      98%
+2026年 7月         283,549           456      96%
+2026年 8月         278,310           468      97%
+2026年 9月         263,994           420      98%
+2026年10月         244,439           432      96%
+2026年11月         224,884           444      97%
+2026年12月         210,569           456      98%
+2027年 1月         205,329           468      96%
+2027年 2月         210,569           420      97%
+2027年 3月         224,884           432      98%
+年間合計: 2,933,270 kWh
+※ CO2 排出係数 0.000434 t-CO2e/kWh（2026 年度・全国平均）', 'p.4', '2024-10-23T03:00:00.000Z'),
+  ('e7b52204-cf5a-44d6-af3a-60b8588d55ef', '3fab155b-ceaf-431a-9a21-face40ff0d15', '65f36d85-8a52-4668-8451-adcea4448565', 5, 'text', '月別ご使用量明細（2 ページ目）
+検針月        使用電力量(kWh)    最大需要電力(kW)   力率
+2026年 4月         244,439           420      96%
+2026年 5月         263,994           432      97%
+2026年 6月         278,310           444      98%
+2026年 7月         283,549           456      96%
+2026年 8月         278,310           468      97%
+2026年 9月         263,994           420      98%
+2026年10月         244,439           432      96%
+2026年11月         224,884           444      97%
+2026年12月         210,569           456      98%
+2027年 1月         205,329           468      96%
+2027年 2月         210,569           420      97%
+2027年 3月         224,884           432      98%
+年間合計: 2,933,270 kWh
+※ CO2 排出係数 0.000434 t-CO2e/kWh（2026 年度・全国平均）', 'p.5', '2024-10-23T03:00:00.000Z'),
+  ('e7b52104-cf5a-4323-a6dc-a25b738bc709', '3fab155b-ceaf-431a-9a21-face40ff0d15', '65f36d85-8a52-4668-8451-adcea4448565', 6, 'text', '月別ご使用量明細（2 ページ目）
+検針月        使用電力量(kWh)    最大需要電力(kW)   力率
+2026年 4月         244,439           420      96%
+2026年 5月         263,994           432      97%
+2026年 6月         278,310           444      98%
+2026年 7月         283,549           456      96%
+2026年 8月         278,310           468      97%
+2026年 9月         263,994           420      98%
+2026年10月         244,439           432      96%
+2026年11月         224,884           444      97%
+2026年12月         210,569           456      98%
+2027年 1月         205,329           468      96%
+2027年 2月         210,569           420      97%
+2027年 3月         224,884           432      98%
+年間合計: 2,933,270 kWh
+※ CO2 排出係数 0.000434 t-CO2e/kWh（2026 年度・全国平均）', 'p.6', '2024-10-23T03:00:00.000Z'),
+  ('0327d3a8-855d-4153-96cd-62d8ac59b309', 'ba69a87d-be09-4bb7-9773-796be2e3b6ef', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'table', '産業廃棄物管理票（電子マニフェスト）交付等状況報告書
+交付番号: MF-FY2024-E-0412 ／ 報告年度: FY2024
+排出事業者: 青海テクノロジー株式会社 東日本工場
+収集運搬業者: 東部環境サービス株式会社（許可番号 1182-A）
+処分業者: 東部リサイクルセンター（許可番号 2204-B）
+廃棄物の種類            数量(t)     処理方法        処分場所
+廃プラスチック類         359.5     再生利用        東部RC 第2工場
+金属くず                 232.0     再生利用        東部RC 第1工場
+汚泥                     116.7     中間処理(脱水)  東部RC 第3工場
+木くず                    84.2     再生利用        東部RC 第2工場
+廃油                      38.7     中間処理(焼却)  東部RC 焼却施設
+その他産業廃棄物         175.0     埋立            東部最終処分場
+合計排出量: 1006.2 t
+再生利用量: 791.6 t（再生利用率 78.7%）
+※ 本書は架空のサンプルです。実在の許可番号・事業者とは関係ありません。', 'Sheet1!A1:E40', '2024-10-23T03:00:00.000Z'),
+  ('206c3b83-85f9-45b0-bbbd-f8aaf4fe6647', '2a836069-1e43-417c-8a94-d18fa829ca05', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'table', '人員構成表（人事システム出力）
+作成: 人事部 人事企画課 ／ 出力日: 2027-04-05
+基準日: 2027-03-31
+定義: 管理職は課長相当職以上。従業員数は正社員（出向者を除く）
+区分            男性      女性      合計      構成比
+一般職           220       148       368     73.8%
+管理職           107        24       131     26.2%
+合計             328       172       499    100.0%
+女性管理職比率: 18.3%（分母: 課長相当職以上）
+※ 国により管理職の定義が異なるため、グループ連結時は定義の読み替えが必要', 'Sheet1!A1:E40', '2024-10-23T03:00:00.000Z'),
+  ('7fb303c6-fe29-4842-a7f8-88cd849bfea3', 'c6ccc1cc-54b0-4992-a8ec-5d9923d9edfd', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'table', '購買実績台帳（Scope3 カテゴリ 1 算定用）
+作成: 調達部 ／ 出力日: 2027-04-15 ／ 出力システム: 購買管理システム
+対象期間: FY2024
+仕入先            品目区分          購買金額(千円)   排出係数   排出量(t-CO2e)
+常盤精密工業　　　　　　　　　　精密加工部品　　　　　　　　      40,232   0.00042        16.9
+橙陽ケミカル　　　　　　　　　　樹脂・接着剤　　　　　　　　      17,484   0.00081        14.2
+白樺物流　　　　　　　　　　　　国内輸送　　　　　　　　　　       8,836   0.00037         3.3
+みなと包装資材　　　　　　　　　包装資材　　　　　　　　　　       5,828   0.00056         3.3
+アルプス電子部品　　　　　　　　電子部品　　　　　　　　　　      29,610   0.00042        12.4
+購買金額合計: 101,990 千円
+うち購買金額ベース算定分: 50.1 t-CO2e（本明細 5 社分）
+※ うち グループ内取引 2,490.5 t-CO2e は連結時に控除対象（内部取引）', 'Sheet1!A1:E40', '2024-10-23T03:00:00.000Z'),
+  ('e4c24e19-1b87-4e3c-8acc-f8f41da0d9b9', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '燃料使用記録票（自家発電設備・社用車）
+作成: 設備管理課 ／ 承認: 工場長
+対象期間: FY2024（2026-04-01 〜 2027-03-31）
+対象設備: 非常用発電機 2 基、ボイラー 3 基、社用車 24 台
+燃料種別        使用量        単位     排出係数      排出量(t-CO2e)
+A 重油             281.2      kL       2.710         762.1
+軽油               108.9      kL       2.585         281.4
+ガソリン            63.5      kL       2.322         147.5
+合計燃料使用量: 453.6 kL
+Scope1 排出量（燃料由来）: 1191.0 t-CO2e
+※ 排出係数は環境省「温室効果ガス排出量算定・報告・公表制度」準拠（架空値）', 'p.1', '2024-10-23T03:00:00.000Z'),
+  ('e4c25119-1b87-4355-9ec7-c5c9296dccd5', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', '65f36d85-8a52-4668-8451-adcea4448565', 2, 'text', '給油記録（抜粋・2 ページ目）
+日付          設備/車両        燃料      給油量(L)     記録者
+2026-04-03    ボイラー1号      A重油         1,200     設備管理課
+2026-05-05    発電機A      A重油         1,337     設備管理課
+2026-06-07    社用車 102      ガソリン       1,474     設備管理課
+2026-07-09    ボイラー1号      A重油         1,611     設備管理課
+2026-08-11    発電機A      A重油         1,748     設備管理課
+2026-09-13    社用車 105      ガソリン       1,885     設備管理課
+2026-10-15    ボイラー1号      A重油         2,022     設備管理課
+2026-11-17    発電機A      A重油         2,159     設備管理課
+2026-12-19    社用車 108      ガソリン       2,296     設備管理課
+2026-04-21    ボイラー1号      A重油         2,433     設備管理課
+※ 全 248 件のうち先頭 10 件を表示（架空データ）', 'p.2', '2024-10-23T03:00:00.000Z'),
+  ('e4c25019-1b87-41a2-82db-9300ae4e0045', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', '65f36d85-8a52-4668-8451-adcea4448565', 3, 'text', '給油記録（抜粋・2 ページ目）
+日付          設備/車両        燃料      給油量(L)     記録者
+2026-04-03    ボイラー1号      A重油         1,200     設備管理課
+2026-05-05    発電機A      A重油         1,337     設備管理課
+2026-06-07    社用車 102      ガソリン       1,474     設備管理課
+2026-07-09    ボイラー1号      A重油         1,611     設備管理課
+2026-08-11    発電機A      A重油         1,748     設備管理課
+2026-09-13    社用車 105      ガソリン       1,885     設備管理課
+2026-10-15    ボイラー1号      A重油         2,022     設備管理課
+2026-11-17    発電機A      A重油         2,159     設備管理課
+2026-12-19    社用車 108      ガソリン       2,296     設備管理課
+2026-04-21    ボイラー1号      A重油         2,433     設備管理課
+※ 全 248 件のうち先頭 10 件を表示（架空データ）', 'p.3', '2024-10-23T03:00:00.000Z'),
+  ('4090cb72-f071-4696-b6e5-6f443f5fdfcb', 'be2d645b-d677-446e-8423-28a708bfe755', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '有価証券報告書（2025年3月期）
+提出者: 青海テクノロジー株式会社 ／ 関東財務局長宛
+第一部 企業情報 ／ 第1 企業の概況
+4 関係会社の状況
+欧州販売子会社（オランダ・アムステルダム） 議決権比率 100% 連結子会社 電子部品の販売
+青海マテリアル合弁会社（日本・千葉） 議決権比率 35% 持分法適用関連会社 素材の製造
+（注）連結財務諸表の作成において、連結子会社 1 社を連結の範囲に含め、関連会社 1 社に持分法を適用しています。
+※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。', 'p.1', '2024-10-23T03:00:00.000Z'),
+  ('4090ca72-f071-44e3-ad91-805efa53f651', 'be2d645b-d677-446e-8423-28a708bfe755', '65f36d85-8a52-4668-8451-adcea4448565', 2, 'text', '有価証券報告書（2025年3月期）
+第一部 企業情報 ／ 第3 設備の状況
+2 主要な設備の状況（提出会社）
+本社（東京都港区） 統括業務・研究開発 従業員 180 名
+東日本工場（茨城県） 精密電子部品の製造 従業員 210 名
+西日本工場（岡山県） 精密電子部品の製造 従業員 90 名
+※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。', 'p.2', '2024-10-23T03:00:00.000Z'),
   ('53b7120d-0820-49f7-9e5b-6ef645d86e3d', 'bebc8164-a2a7-46cf-a7c9-1381486ff075', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '電気ご使用量のお知らせ（電力需給契約に基づく請求書）
 発行: 中央電力株式会社 法人営業部
 請求番号: DENKI-FY2025-004128 ／ 発行日: 2027-04-10
@@ -817,7 +1061,7 @@ insert into extracted_fragments (id, file_version_id, organization_id, page, kin
 みなと包装資材　　　　　　　　　包装資材　　　　　　　　　　       6,200   0.00056         3.5
 アルプス電子部品　　　　　　　　電子部品　　　　　　　　　　      31,500   0.00042        13.2
 購買金額合計: 108,500 千円
-Scope3 Cat.1 排出量: 53.3 t-CO2e（上位 5 社分）
+うち購買金額ベース算定分: 53.3 t-CO2e（本明細 5 社分）
 ※ うち グループ内取引 2,490.5 t-CO2e は連結時に控除対象（内部取引）', 'Sheet1!A1:E40', '2025-10-18T03:00:00.000Z'),
   ('2884fa20-1c1b-4eb1-a009-07a4b5f24ecd', '02767050-2cb8-44b1-a918-10365ee6e1a3', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '燃料使用記録票（自家発電設備・社用車）
 作成: 設備管理課 ／ 承認: 工場長
@@ -999,7 +1243,7 @@ Scope1 排出量（燃料由来）: 1267.2 t-CO2e
 みなと包装資材　　　　　　　　　包装資材　　　　　　　　　　       5,828   0.00056         3.3
 アルプス電子部品　　　　　　　　電子部品　　　　　　　　　　      29,610   0.00042        12.4
 購買金額合計: 101,990 千円
-Scope3 Cat.1 排出量: 50.1 t-CO2e（上位 5 社分）
+うち購買金額ベース算定分: 50.1 t-CO2e（本明細 5 社分）
 ※ うち グループ内取引 2,490.5 t-CO2e は連結時に控除対象（内部取引）', 'Sheet1!A1:E40', '2026-06-15T03:00:00.000Z'),
   ('f9aefa08-0eca-42fe-971f-f133b2624b69', '6ebc5058-65b8-4b6e-9f28-a1c326ce856d', '65f36d85-8a52-4668-8451-adcea4448565', 1, 'text', '燃料使用記録票（自家発電設備・社用車）
 作成: 設備管理課 ／ 承認: 工場長
@@ -1055,6 +1299,17 @@ Scope1 排出量（燃料由来）: 1191.0 t-CO2e
 ※ 架空のサンプル資料（デモ用）。実在の提出書類ではありません。', 'p.2', '2026-06-15T03:00:00.000Z');
 
 insert into evidence_links (id, organization_id, file_version_id, target_type, target_id, page, cell_ref, fragment_id, source_url, coverage_period_start, coverage_period_end, obtained_at, note, created_at, updated_at, created_by, updated_by) values
+  ('a65aa15d-6f67-4706-975a-08f1f7678357', '65f36d85-8a52-4668-8451-adcea4448565', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', 'data_point', 'fd56bf3c-72b2-4fd2-9e7a-c483fbc9de51', 2, 'Sheet1!C12', 'e4c24e19-1b87-4e3c-8acc-f8f41da0d9b9', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('bec60a06-f9c7-497b-8f20-843592560d61', '65f36d85-8a52-4668-8451-adcea4448565', '3fab155b-ceaf-431a-9a21-face40ff0d15', 'data_point', 'fd56be3c-72b2-4e1f-90d0-f81afdffef87', 2, null, 'e7b52604-cf5a-4ba2-bcbb-2b442d234577', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('00d4ecc9-a41b-4ca0-9440-f9889188e471', '65f36d85-8a52-4668-8451-adcea4448565', 'c6ccc1cc-54b0-4992-a8ec-5d9923d9edfd', 'data_point', 'de42f8b0-f043-4bbe-a0f0-45ab6a470881', null, 'Sheet1!C12', '7fb303c6-fe29-4842-a7f8-88cd849bfea3', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('5704c474-9e68-4026-951b-15c204ae700f', '65f36d85-8a52-4668-8451-adcea4448565', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', 'data_point', 'cacd4ede-7726-4764-9098-e85cb54767f9', 2, 'Sheet1!C12', 'e4c24e19-1b87-4e3c-8acc-f8f41da0d9b9', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('2f5a6867-16ed-4dc9-b302-6ed8c964041d', '65f36d85-8a52-4668-8451-adcea4448565', '3fab155b-ceaf-431a-9a21-face40ff0d15', 'data_point', 'cacd51de-7726-4c7d-81bc-812d132eec8b', 2, null, 'e7b52604-cf5a-4ba2-bcbb-2b442d234577', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'b90ab786-9068-4d7f-8476-1729a64d1d49', 'b90ab786-9068-4d7f-8476-1729a64d1d49'),
+  ('66aa4b1a-3797-47d6-b3b0-29198b387a5b', '65f36d85-8a52-4668-8451-adcea4448565', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', 'data_point', '997f745b-0ec7-4e0e-bc1e-c79d879c0ad1', 2, 'Sheet1!C12', 'e4c24e19-1b87-4e3c-8acc-f8f41da0d9b9', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('1fc7389d-d687-4d93-b44d-596941deaa29', '65f36d85-8a52-4668-8451-adcea4448565', '3fab155b-ceaf-431a-9a21-face40ff0d15', 'data_point', '997f735b-0ec7-4c5b-b083-0fdb33c10dc7', 2, null, 'e7b52604-cf5a-4ba2-bcbb-2b442d234577', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('22f514c2-a4b1-4056-8a6e-fafec705a433', '65f36d85-8a52-4668-8451-adcea4448565', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', 'data_point', 'b98c20aa-e610-40cd-bb60-d4a2001da083', 2, 'Sheet1!C12', 'e4c24e19-1b87-4e3c-8acc-f8f41da0d9b9', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('ad628981-af7a-4261-afb9-5e9ac8078a4d', '65f36d85-8a52-4668-8451-adcea4448565', '3fab155b-ceaf-431a-9a21-face40ff0d15', 'data_point', 'b98c1daa-e610-4bb4-b372-fe58c8a42359', 2, null, 'e7b52604-cf5a-4ba2-bcbb-2b442d234577', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('3d7d2139-6b63-4bdb-8655-393cee90e431', '65f36d85-8a52-4668-8451-adcea4448565', '69f64446-b825-4ebc-b7a7-f95dec8f6ad5', 'data_point', '4565e113-fd32-41bb-acdb-2cf120c1365b', 2, 'Sheet1!C12', 'e4c24e19-1b87-4e3c-8acc-f8f41da0d9b9', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
+  ('cf516a4b-a23d-45ee-999f-2657acc1bd2d', '65f36d85-8a52-4668-8451-adcea4448565', '3fab155b-ceaf-431a-9a21-face40ff0d15', 'data_point', '4565e213-fd32-436e-9e33-b3582bbc316d', 2, null, 'e7b52604-cf5a-4ba2-bcbb-2b442d234577', null, '2024-04-01', '2025-03-31', '2025-04-15', null, '2024-10-28T03:00:00.000Z', '2024-10-28T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('1f940c79-6397-4f73-be53-88ad43f39845', '65f36d85-8a52-4668-8451-adcea4448565', '02767050-2cb8-44b1-a918-10365ee6e1a3', 'data_point', '19482763-444a-4b9d-9397-90c24a2cf86b', 2, 'Sheet1!C12', '2884fa20-1c1b-4eb1-a009-07a4b5f24ecd', null, '2025-04-01', '2026-03-31', '2026-04-15', null, '2025-10-23T03:00:00.000Z', '2025-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('f8fdbabe-bed2-4a35-9efa-98a59be08fe5', '65f36d85-8a52-4668-8451-adcea4448565', 'bebc8164-a2a7-46cf-a7c9-1381486ff075', 'data_point', '19482463-444a-4684-8e1b-fd6b4ebfc309', 2, null, '53b7120d-0820-49f7-9e5b-6ef645d86e3d', null, '2025-04-01', '2026-03-31', '2026-04-15', null, '2025-10-23T03:00:00.000Z', '2025-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
   ('59a6ac61-b74b-44b3-ae56-b6c47e2c1769', '65f36d85-8a52-4668-8451-adcea4448565', '32ceadd4-8d76-47e7-8108-ad257a99bc61', 'data_point', '640ffb4e-7d5a-45b7-9a23-bad78d618101', null, 'Sheet1!C12', 'ebb46fcf-36ee-4d17-9384-bd70867703e5', null, '2025-04-01', '2026-03-31', '2026-04-15', null, '2025-10-23T03:00:00.000Z', '2025-10-23T03:00:00.000Z', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f', 'ca0d35cc-f990-481f-bf1c-3f121fadea1f'),
@@ -1729,6 +1984,17 @@ insert into tasks (id, organization_id, title, description, target_type, target_
   ('79c8b67a-757e-4cc3-8973-f979c1d6ba45', '65db1d85-8a3d-4c97-ab96-80df81153d91', 'レビューNote RN-1 へ対応', null, 'engagement', 'df8c998b-6875-4c9f-8975-335e3b8a2acb', '77d89fb1-2a62-4522-a447-48fdef13a15d', '2026-08-17', 'open', 'medium', 'df8c998b-6875-4c9f-8975-335e3b8a2acb', '2026-07-30T03:00:00.000Z', '2026-07-30T03:00:00.000Z', null, null);
 
 insert into approvals (id, organization_id, target_type, target_id, target_version_id, stage, decision, actor_user_id, comment, decided_at) values
+  ('ffd197af-62f6-4354-bd9a-9e08b82367d5', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', 'fd56bf3c-72b2-4fd2-9e7a-c483fbc9de51', 'f1c6c3fc-d81e-41f2-bfc8-310a870ef4bf', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('d2b40092-b897-4c33-983e-544ebb647a51', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', 'fd56be3c-72b2-4e1f-90d0-f81afdffef87', '369e4c51-8ec2-444b-80d7-947ab05db17d', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('c20d69d1-90d4-4e94-a454-304a97b8f659', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', 'de42f8b0-f043-4bbe-a0f0-45ab6a470881', '13d6951c-c423-4046-bd84-4f3017e47af3', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('5c8244cb-5469-488c-bc3a-70f4b49ae05d', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', 'cacd4ede-7726-4764-9098-e85cb54767f9', '62d0cf75-a51c-4c82-91f4-e47e427c1de7', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('261456fd-c3c5-493d-aab2-9e4ca70d5299', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', 'cacd51de-7726-4c7d-81bc-812d132eec8b', '39e1905f-b103-4601-acc1-4959adc9df49', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('d8d7ba2d-6aeb-4170-9343-0233383be5c5', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', '997f745b-0ec7-4e0e-bc1e-c79d879c0ad1', 'a47bc2f9-b1e3-4f0a-b70a-c9497459a273', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('fe8b01f0-dd73-4f7f-86dc-b87dfba75985', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', '997f735b-0ec7-4c5b-b083-0fdb33c10dc7', '3ceb49c7-dee3-4eeb-a1a5-692ef54aeced', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('60447666-28e7-4190-bde8-36db1ced2325', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', 'b98c20aa-e610-40cd-bb60-d4a2001da083', 'd4f819a6-27cb-430a-ab24-86863a731b93', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('c7321758-ca3b-400d-a386-574b88767c91', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', 'b98c1daa-e610-4bb4-b372-fe58c8a42359', '0402c60f-b2a2-4c61-8029-2450f53588b1', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('d7c15c50-3750-499b-a8d3-9e5337f712e9', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', '4565e113-fd32-41bb-acdb-2cf120c1365b', '9c7380f5-a300-4e8b-a586-22488dba90fd', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
+  ('cdf0b6e3-476c-4bf6-8339-b959aa77278d', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', '4565e213-fd32-436e-9e33-b3582bbc316d', 'df73d591-57e0-4584-8ec4-967c0aaba507', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2024-11-12T03:00:00.000Z'),
   ('f032b5b8-2ed1-455f-a636-338f943e31e9', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', '19482763-444a-4b9d-9397-90c24a2cf86b', '668264e0-d5d2-485f-a016-48f09607098d', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2025-11-07T03:00:00.000Z'),
   ('69b1eba7-781b-4cf9-8efd-b73dc4fe98f9', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', '19482463-444a-4684-8e1b-fd6b4ebfc309', '2d20b331-bb9a-47e1-a087-01ec46b6f0f5', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2025-11-07T03:00:00.000Z'),
   ('cc144fda-cb34-4947-b95b-9ca1ad659ec1', '65f36d85-8a52-4668-8451-adcea4448565', 'data_point', '640ffb4e-7d5a-45b7-9a23-bad78d618101', 'a3957f5c-e265-407f-9ad6-a1c0830b73cd', 'final', 'approved', '76a63ea0-b02d-4ac3-964c-b84749bd822b', null, '2025-11-07T03:00:00.000Z'),

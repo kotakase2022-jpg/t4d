@@ -66,10 +66,34 @@ export const UNIT_IDS = {
   sup5: fid('unit', 'AOMI/SUP-05'),
   sup6: fid('unit', 'AOMI/SUP-06'),
   sup7: fid('unit', 'AOMI/SUP-07'),
+  sup8: fid('unit', 'AOMI/SUP-08'),
+  sup9: fid('unit', 'AOMI/SUP-09'),
+  sup10: fid('unit', 'AOMI/SUP-10'),
+  sup11: fid('unit', 'AOMI/SUP-11'),
+  sup12: fid('unit', 'AOMI/SUP-12'),
+  sup13: fid('unit', 'AOMI/SUP-13'),
+  sup14: fid('unit', 'AOMI/SUP-14'),
+  sup15: fid('unit', 'AOMI/SUP-15'),
+  sup16: fid('unit', 'AOMI/SUP-16'),
+  sup17: fid('unit', 'AOMI/SUP-17'),
+  sup18: fid('unit', 'AOMI/SUP-18'),
+  sup19: fid('unit', 'AOMI/SUP-19'),
+  sup20: fid('unit', 'AOMI/SUP-20'),
+  sup21: fid('unit', 'AOMI/SUP-21'),
+  sup22: fid('unit', 'AOMI/SUP-22'),
+  sup23: fid('unit', 'AOMI/SUP-23'),
+  sup24: fid('unit', 'AOMI/SUP-24'),
+  sup25: fid('unit', 'AOMI/SUP-25'),
+  sup26: fid('unit', 'AOMI/SUP-26'),
+  sup27: fid('unit', 'AOMI/SUP-27'),
+  sup28: fid('unit', 'AOMI/SUP-28'),
+  sup29: fid('unit', 'AOMI/SUP-29'),
+  sup30: fid('unit', 'AOMI/SUP-30'),
   sotenHq: fid('unit', 'SOTEN/HQ'),
 } as const;
 
 export const PERIOD_IDS = {
+  fy2024: fid('period', 'AOMI/FY2024'),
   fy2025: fid('period', 'AOMI/FY2025'),
   fy2026: fid('period', 'AOMI/FY2026'),
   sotenFy2026: fid('period', 'SOTEN/FY2026'),
@@ -1185,106 +1209,68 @@ const AOMI_UNITS: UnitSpec[] = [
     reports: true,
     scale: 0.35,
   },
-  {
-    id: UNIT_IDS.sup1,
-    code: 'SUP-01',
-    name: '常盤精密工業',
+  // ----------------------------------------------------------------
+  // サプライヤー 30 社（すべて架空）。
+  // SUP-01〜05: 購買金額データ、SUP-08〜12: 物理量データ、SUP-13〜15: 報告排出量を
+  // Fixture の算定内訳（SCOPE3_SUPPLIER_ACTIVITY_ROWS）として持つ。
+  // SUP-06/07 とSUP-16 以降は未提出で、取込デモ（テンプレート・多様な
+  // フォーマットのサンプルファイル）の対象になる。
+  // ----------------------------------------------------------------
+  ...(
+    [
+      [UNIT_IDS.sup1, 'SUP-01', '常盤精密工業'],
+      [UNIT_IDS.sup2, 'SUP-02', '橙陽ケミカル'],
+      [UNIT_IDS.sup3, 'SUP-03', '白樺物流'],
+      [UNIT_IDS.sup4, 'SUP-04', 'みなと包装資材'],
+      [UNIT_IDS.sup5, 'SUP-05', 'アルプス電子部品'],
+      [UNIT_IDS.sup6, 'SUP-06', '若草金属工業'],
+      [UNIT_IDS.sup7, 'SUP-07', '汐風運輸'],
+      [UNIT_IDS.sup8, 'SUP-08', '東雲電力サービス'],
+      [UNIT_IDS.sup9, 'SUP-09', '榛名ガスエナジー'],
+      [UNIT_IDS.sup10, 'SUP-10', '燕沢燃料'],
+      [UNIT_IDS.sup11, 'SUP-11', '高千穂鋼材'],
+      [UNIT_IDS.sup12, 'SUP-12', '琥珀アルミ工業'],
+      [UNIT_IDS.sup13, 'SUP-13', 'Ostsee Metallwerke GmbH', 'DE'],
+      [UNIT_IDS.sup14, 'SUP-14', '白鷺電装'],
+      [UNIT_IDS.sup15, 'SUP-15', '真砂樹脂工業'],
+      [UNIT_IDS.sup16, 'SUP-16', 'Verte Logistique SA', 'FR'],
+      [UNIT_IDS.sup17, 'SUP-17', 'Pine Ridge Components Inc.', 'US'],
+      [UNIT_IDS.sup18, 'SUP-18', 'くれない印刷'],
+      [UNIT_IDS.sup19, 'SUP-19', '早瀬田金型'],
+      [UNIT_IDS.sup20, 'SUP-20', 'みかづき電子材料'],
+      [UNIT_IDS.sup21, 'SUP-21', 'Nordlicht Chemie GmbH', 'DE'],
+      [UNIT_IDS.sup22, 'SUP-22', '青梅精密ばね'],
+      [UNIT_IDS.sup23, 'SUP-23', '常磐台運送'],
+      [UNIT_IDS.sup24, 'SUP-24', 'ひなた包装'],
+      [UNIT_IDS.sup25, 'SUP-25', 'Silverbirch Materials Ltd.', 'GB'],
+      [UNIT_IDS.sup26, 'SUP-26', '遠野樹脂成形'],
+      [UNIT_IDS.sup27, 'SUP-27', '曙光電機'],
+      [UNIT_IDS.sup28, 'SUP-28', '若狭台金属表面処理'],
+      [UNIT_IDS.sup29, 'SUP-29', 'かささぎ電子材料'],
+      [UNIT_IDS.sup30, 'SUP-30', '汐見台運輸倉庫'],
+    ] as Array<[string, string, string, string?]>
+  ).map(([id, code, name, countryCode]): UnitSpec => ({
+    id,
+    code,
+    name,
     unitType: 'supplier',
-    countryCode: 'JP',
-    currencyCode: 'JPY',
-    timezone: 'Asia/Tokyo',
+    countryCode: countryCode ?? 'JP',
+    currencyCode:
+      countryCode === 'US' ? 'USD' : countryCode === 'GB' ? 'GBP' : countryCode ? 'EUR' : 'JPY',
+    timezone:
+      countryCode === 'US'
+        ? 'America/New_York'
+        : countryCode === 'GB'
+          ? 'Europe/London'
+          : countryCode
+            ? 'Europe/Berlin'
+            : 'Asia/Tokyo',
     consolidationMethod: 'excluded',
     ownershipPercent: 0,
     parent: 'hq',
     reports: false,
     scale: 0,
-  },
-  {
-    id: UNIT_IDS.sup2,
-    code: 'SUP-02',
-    name: '橙陽ケミカル',
-    unitType: 'supplier',
-    countryCode: 'JP',
-    currencyCode: 'JPY',
-    timezone: 'Asia/Tokyo',
-    consolidationMethod: 'excluded',
-    ownershipPercent: 0,
-    parent: 'hq',
-    reports: false,
-    scale: 0,
-  },
-  {
-    id: UNIT_IDS.sup3,
-    code: 'SUP-03',
-    name: '白樺物流',
-    unitType: 'supplier',
-    countryCode: 'JP',
-    currencyCode: 'JPY',
-    timezone: 'Asia/Tokyo',
-    consolidationMethod: 'excluded',
-    ownershipPercent: 0,
-    parent: 'hq',
-    reports: false,
-    scale: 0,
-  },
-  {
-    id: UNIT_IDS.sup4,
-    code: 'SUP-04',
-    name: 'みなと包装資材',
-    unitType: 'supplier',
-    countryCode: 'JP',
-    currencyCode: 'JPY',
-    timezone: 'Asia/Tokyo',
-    consolidationMethod: 'excluded',
-    ownershipPercent: 0,
-    parent: 'hq',
-    reports: false,
-    scale: 0,
-  },
-  {
-    id: UNIT_IDS.sup5,
-    code: 'SUP-05',
-    name: 'アルプス電子部品',
-    unitType: 'supplier',
-    countryCode: 'JP',
-    currencyCode: 'JPY',
-    timezone: 'Asia/Tokyo',
-    consolidationMethod: 'excluded',
-    ownershipPercent: 0,
-    parent: 'hq',
-    reports: false,
-    scale: 0,
-  },
-  {
-    // SUP-06 / SUP-07 は購買実績（SCOPE3_PURCHASE_ROWS）を持たない。
-    // 「サプライヤーデータ取込」画面で不足データ（未提出）を見せるためのデモ用サプライヤー。
-    id: UNIT_IDS.sup6,
-    code: 'SUP-06',
-    name: '若草金属工業',
-    unitType: 'supplier',
-    countryCode: 'JP',
-    currencyCode: 'JPY',
-    timezone: 'Asia/Tokyo',
-    consolidationMethod: 'excluded',
-    ownershipPercent: 0,
-    parent: 'hq',
-    reports: false,
-    scale: 0,
-  },
-  {
-    id: UNIT_IDS.sup7,
-    code: 'SUP-07',
-    name: '汐風運輸',
-    unitType: 'supplier',
-    countryCode: 'JP',
-    currencyCode: 'JPY',
-    timezone: 'Asia/Tokyo',
-    consolidationMethod: 'excluded',
-    ownershipPercent: 0,
-    parent: 'hq',
-    reports: false,
-    scale: 0,
-  },
+  })),
 ];
 
 /** FY2025 の基準値（HQ 基準・単位は MetricSpec.unit） */
@@ -1310,6 +1296,20 @@ const FY2025_BASE: Record<string, number> = {
   female_officers: 2,
   female_officer_ratio: 16.7,
   directors_count: 9,
+};
+
+/**
+ * FY2024 の対 FY2025 比率（GHG 3 指標のみ）。
+ *
+ * GHG 画面の「直近3年の推移」用の過年度。全指標を遡及させるとギャップ体験が
+ * 消えるため、推移を見せたい GHG だけに限定する。
+ * 比率は FY2025 との差が YoY 検証の閾値（scope1/2: 30%・scope3: 40%）に
+ * 収まるように選ぶ（FY2025 の検証が FY2024 を基準に再計算されるため）。
+ */
+const FY2024_RATIO: Record<string, number> = {
+  scope1: 1.09,
+  scope2: 1.06,
+  scope3_cat1: 0.93,
 };
 
 /** FY2026 の対 FY2025 変化率 */
@@ -1340,7 +1340,7 @@ const FY2026_GROWTH: Record<string, number> = {
 export interface DataPointSeed {
   unitCode: string;
   metricCode: string;
-  periodCode: 'FY2025' | 'FY2026';
+  periodCode: 'FY2024' | 'FY2025' | 'FY2026';
   value: number;
   unitOfMeasure: string;
   status: DataPoint['status'];
@@ -1397,7 +1397,7 @@ function roundFor(metricCode: string, value: number): number {
 export function buildDataPointSeeds(): DataPointSeed[] {
   const seeds: DataPointSeed[] = [];
 
-  for (const period of ['FY2025', 'FY2026'] as const) {
+  for (const period of ['FY2024', 'FY2025', 'FY2026'] as const) {
     for (const unit of AOMI_UNITS) {
       if (!unit.reports) continue;
       for (const metric of METRIC_SPECS) {
@@ -1405,18 +1405,25 @@ export function buildDataPointSeeds(): DataPointSeed[] {
         // 基準から取り込んだだけでまだ社内に値が無い指標は、実績値を作らない。
         // 架空の値で埋めるとデータギャップが消え、SSBJ 対応の主題が体験できなくなる
         if (!metric.demoData) continue;
+        // FY2024 は GHG 推移用の過年度。対象 3 指標以外は遡及させない
+        if (period === 'FY2024' && FY2024_RATIO[metric.code] === undefined) continue;
 
         const base = FY2025_BASE[metric.code] ?? 0;
         const isRatioOrCount =
           metric.dataType === 'ratio' || metric.category === 'governance' || metric.hqOnly === true;
         const scaled = isRatioOrCount ? base : base * unit.scale;
-        const growth = period === 'FY2026' ? (FY2026_GROWTH[metric.code] ?? 1) : 1;
+        const growth =
+          period === 'FY2026'
+            ? (FY2026_GROWTH[metric.code] ?? 1)
+            : period === 'FY2024'
+              ? (FY2024_RATIO[metric.code] ?? 1)
+              : 1;
         let value = roundFor(metric.code, scaled * growth);
         let unitOfMeasure = metric.unit;
         let anomaly: string | undefined;
         const key = `${unit.code}/${metric.code}`;
         const status: DataPoint['status'] =
-          period === 'FY2025' ? 'approved' : (FY2026_STATUS[key] ?? 'draft');
+          period === 'FY2026' ? (FY2026_STATUS[key] ?? 'draft') : 'approved';
 
         if (period === 'FY2026') {
           // 異常 Fixture（指示書 18 章）
@@ -1908,44 +1915,174 @@ export const EMISSION_FACTOR_SPECS: Array<{
     activityUnit: 'kWh',
     factorYear: 2025,
   },
+  // ここから物理量ベースの原単位。サプライヤーの素データ（物理量）取込で使う
+  {
+    code: 'EF-GAS-M3',
+    name: '都市ガス（物理量ベース）',
+    category: 'fuel',
+    factorValue: 0.00224,
+    factorUnit: 't-CO2e/m3',
+    activityUnit: 'm3',
+    factorYear: 2025,
+  },
+  {
+    code: 'EF-DIESEL-L',
+    name: '軽油（物理量ベース）',
+    category: 'fuel',
+    factorValue: 0.00258,
+    factorUnit: 't-CO2e/L',
+    activityUnit: 'L',
+    factorYear: 2025,
+  },
+  {
+    // kg ベースは鋼材・アルミの 2 本ある。単位だけでは一意に決まらないため、
+    // 取込時の「原単位の紐づけ」で人が選ぶデモになる
+    code: 'EF-STEEL-KG',
+    name: '鋼材（重量ベース）',
+    category: 'purchased_goods',
+    factorValue: 0.0021,
+    factorUnit: 't-CO2e/kg',
+    activityUnit: 'kg',
+    factorYear: 2025,
+  },
+  {
+    code: 'EF-ALU-KG',
+    name: 'アルミ材（重量ベース）',
+    category: 'purchased_goods',
+    factorValue: 0.009,
+    factorUnit: 't-CO2e/kg',
+    activityUnit: 'kg',
+    factorYear: 2025,
+  },
 ];
 
-/** Scope3 Cat.1 の算定内訳（サプライヤー別購買実績・架空値） */
-export const SCOPE3_PURCHASE_ROWS: Array<{
+/** サプライヤーの一次データ種別（素データ = 金額・物理量、または報告排出量） */
+export type SupplierActivityDataType = 'monetary' | 'physical' | 'emissions';
+
+/**
+ * Scope3 Cat.1 の算定内訳（サプライヤー別の一次データ・架空値）。
+ *
+ * 3 種類の素データが混在する:
+ *  - monetary: 購買金額（千円） × 金額ベース係数
+ *  - physical: 物理量（kWh・m3・L・kg） × 物理量ベース係数
+ *  - emissions: サプライヤーが算定した報告排出量（t-CO2e、係数なし）
+ */
+export const SCOPE3_SUPPLIER_ACTIVITY_ROWS: Array<{
   supplierUnitCode: string;
   item: string;
-  amountThousandJpy: number;
-  factorCode: string;
+  dataType: SupplierActivityDataType;
+  amount: number;
+  /** monetary は 千円、physical は kWh/m3/L/kg、emissions は t-CO2e */
+  unit: string;
+  /** emissions（報告値）は null */
+  factorCode: string | null;
 }> = [
+  // 購買金額データ（従来分）
   {
     supplierUnitCode: 'SUP-01',
     item: '精密加工部品',
-    amountThousandJpy: 42_800_000 / 1000,
+    dataType: 'monetary',
+    amount: 42_800,
+    unit: '千円',
     factorCode: 'EF-PUR-ELEC',
   },
   {
     supplierUnitCode: 'SUP-02',
     item: '樹脂・接着剤',
-    amountThousandJpy: 18_600_000 / 1000,
+    dataType: 'monetary',
+    amount: 18_600,
+    unit: '千円',
     factorCode: 'EF-PUR-CHEM',
   },
   {
     supplierUnitCode: 'SUP-03',
     item: '国内輸送',
-    amountThousandJpy: 9_400_000 / 1000,
+    dataType: 'monetary',
+    amount: 9_400,
+    unit: '千円',
     factorCode: 'EF-LOGI',
   },
   {
     supplierUnitCode: 'SUP-04',
     item: '包装資材',
-    amountThousandJpy: 6_200_000 / 1000,
+    dataType: 'monetary',
+    amount: 6_200,
+    unit: '千円',
     factorCode: 'EF-PUR-PACK',
   },
   {
     supplierUnitCode: 'SUP-05',
     item: '電子部品',
-    amountThousandJpy: 31_500_000 / 1000,
+    dataType: 'monetary',
+    amount: 31_500,
+    unit: '千円',
     factorCode: 'EF-PUR-ELEC',
+  },
+  // 物理量データ（素データ × 物理量ベース原単位）
+  {
+    supplierUnitCode: 'SUP-08',
+    item: '購入電力',
+    dataType: 'physical',
+    amount: 42_000,
+    unit: 'kWh',
+    factorCode: 'EF-ELEC-JP',
+  },
+  {
+    supplierUnitCode: 'SUP-09',
+    item: '都市ガス',
+    dataType: 'physical',
+    amount: 6_400,
+    unit: 'm3',
+    factorCode: 'EF-GAS-M3',
+  },
+  {
+    supplierUnitCode: 'SUP-10',
+    item: '軽油',
+    dataType: 'physical',
+    amount: 3_900,
+    unit: 'L',
+    factorCode: 'EF-DIESEL-L',
+  },
+  {
+    supplierUnitCode: 'SUP-11',
+    item: '鋼材',
+    dataType: 'physical',
+    amount: 5_200,
+    unit: 'kg',
+    factorCode: 'EF-STEEL-KG',
+  },
+  {
+    supplierUnitCode: 'SUP-12',
+    item: 'アルミ材',
+    dataType: 'physical',
+    amount: 830,
+    unit: 'kg',
+    factorCode: 'EF-ALU-KG',
+  },
+  // サプライヤー報告排出量（エコバディス出力・自社算定など）
+  {
+    supplierUnitCode: 'SUP-13',
+    item: '報告排出量（EcoVadis）',
+    dataType: 'emissions',
+    amount: 12.4,
+    unit: 't-CO2e',
+    factorCode: null,
+  },
+  {
+    supplierUnitCode: 'SUP-14',
+    item: '報告排出量（自社算定）',
+    dataType: 'emissions',
+    amount: 9.6,
+    unit: 't-CO2e',
+    factorCode: null,
+  },
+  {
+    supplierUnitCode: 'SUP-15',
+    item: '報告排出量（自社算定）',
+    dataType: 'emissions',
+    amount: 6.8,
+    unit: 't-CO2e',
+    factorCode: null,
   },
 ];
 

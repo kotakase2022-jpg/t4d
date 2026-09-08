@@ -19,9 +19,13 @@ export interface EvidenceDocumentLine {
 
 const YEN = (n: number) => `${n.toLocaleString('ja-JP')} 円`;
 
-/** 期間ごとの係数（FY2025 と FY2026 で数字を変える） */
+/**
+ * 期間ごとの係数。Data Point の年度比率（dataset.ts の FY2024_RATIO / FY2026_GROWTH）と
+ * 増減の向きを揃える（書類と台帳が逆方向を指すと、推移デモの根拠として破綻する）。
+ */
+const PERIOD_FACTOR: Record<string, number> = { FY2024: 1.09, FY2025: 1, FY2026: 0.94 };
 function factor(periodCode: string): number {
-  return periodCode === 'FY2025' ? 1 : 0.94;
+  return PERIOD_FACTOR[periodCode] ?? 0.94;
 }
 
 function powerInvoice(periodCode: string, page: number): EvidenceDocumentLine[] {
@@ -190,17 +194,28 @@ function purchaseLedger(periodCode: string): EvidenceDocumentLine[] {
         .padStart(12)}   ${ef}    ${(Number(amount) * f * Number(ef)).toFixed(1).padStart(8)}`,
     })),
     { kind: 'total', text: `購買金額合計: ${Math.round(108500 * f).toLocaleString('ja-JP')} 千円` },
-    { kind: 'total', text: `Scope3 Cat.1 排出量: ${(53.3 * f).toFixed(1)} t-CO2e（上位 5 社分）` },
+    {
+      kind: 'total',
+      // 本明細は購買金額ベース算定分（5 社）のみ。物理量・報告排出量の一次データは
+      // 各サプライヤーの提出資料側にあり、算定内訳（GHG 画面）で合算される
+      text: `うち購買金額ベース算定分: ${(53.3 * f).toFixed(1)} t-CO2e（本明細 5 社分）`,
+    },
     { kind: 'note', text: '※ うち グループ内取引 2,490.5 t-CO2e は連結時に控除対象（内部取引）' },
   ];
 }
 
 function hrData(periodCode: string): EvidenceDocumentLine[] {
-  const f = periodCode === 'FY2025' ? 1 : 1.04;
+  const HR_FACTOR: Record<string, number> = { FY2024: 0.97, FY2025: 1, FY2026: 1.04 };
+  const BASIS_DATE: Record<string, string> = {
+    FY2024: '2025-03-31',
+    FY2025: '2026-03-31',
+    FY2026: '2027-03-31',
+  };
+  const f = HR_FACTOR[periodCode] ?? 1.04;
   return [
     { kind: 'title', text: '人員構成表（人事システム出力）' },
     { kind: 'meta', text: '作成: 人事部 人事企画課 ／ 出力日: 2027-04-05' },
-    { kind: 'meta', text: `基準日: ${periodCode === 'FY2025' ? '2026-03-31' : '2027-03-31'}` },
+    { kind: 'meta', text: `基準日: ${BASIS_DATE[periodCode] ?? '2027-03-31'}` },
     { kind: 'meta', text: '定義: 管理職は課長相当職以上。従業員数は正社員（出向者を除く）' },
     { kind: 'header', text: '区分            男性      女性      合計      構成比' },
     {

@@ -12,6 +12,7 @@ import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib
 import {
   confirmSupplierImport,
   previewSupplierImport,
+  relinkSupplierFactor,
   type SupplierImportPreview,
   type SupplierRowDecision,
 } from '@/lib/services/scope3-suppliers';
@@ -299,12 +300,20 @@ export async function confirmSupplierImportAction(formData: FormData): Promise<v
     .getAll('srow')
     .map(String)
     .filter((key) => formData.get(`include:${key}`) === 'on')
-    .map((key) => ({
-      supplierCode: String(formData.get(`supplierCode:${key}`) ?? ''),
-      item: String(formData.get(`item:${key}`) ?? ''),
-      amountThousandJpy: Number(String(formData.get(`amount:${key}`) ?? '').replace(/,/g, '')),
-      factorCode: String(formData.get(`factorCode:${key}`) ?? ''),
-    }));
+    .map((key) => {
+      const dataTypeRaw = String(formData.get(`dataType:${key}`) ?? '');
+      const factorCode = String(formData.get(`factorCode:${key}`) ?? '');
+      return {
+        supplierCode: String(formData.get(`supplierCode:${key}`) ?? ''),
+        item: String(formData.get(`item:${key}`) ?? ''),
+        dataType: (['emissions', 'physical', 'monetary'].includes(dataTypeRaw)
+          ? dataTypeRaw
+          : 'monetary') as SupplierRowDecision['dataType'],
+        amount: Number(String(formData.get(`amount:${key}`) ?? '').replace(/,/g, '')),
+        unit: String(formData.get(`unit:${key}`) ?? ''),
+        factorCode: factorCode === '' ? null : factorCode,
+      };
+    });
 
   await withUserFacingError('/enterprise/ghg/suppliers', async () => {
     const result = await confirmSupplierImport(db, ctx, reportingPeriodId, decisions);
@@ -312,6 +321,26 @@ export async function confirmSupplierImportAction(formData: FormData): Promise<v
     revalidatePath('/enterprise/ghg/suppliers');
     redirect(
       `/enterprise/ghg/suppliers?flash=supplierImported&added=${result.addedSuppliers.length}&replaced=${result.replacedSuppliers.length}&total=${result.result}`,
+    );
+  });
+}
+
+/** 確定済みの内訳行（金額・物理量データ）の排出量原単位を紐づけ直す */
+export async function relinkSupplierFactorAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+
+  const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
+  await withUserFacingError('/enterprise/ghg/suppliers', async () => {
+    const result = await relinkSupplierFactor(db, ctx, reportingPeriodId, {
+      supplierCode: String(formData.get('supplierCode') ?? ''),
+      item: String(formData.get('item') ?? ''),
+      factorCode: String(formData.get('factorCode') ?? ''),
+    });
+    revalidatePath('/enterprise/ghg');
+    revalidatePath('/enterprise/ghg/suppliers');
+    redirect(
+      `/enterprise/ghg/suppliers?flash=factorRelinked&rows=${result.relinkedCount}&value=${result.value}&total=${result.result}`,
     );
   });
 }

@@ -20,6 +20,15 @@ const MESSAGES: Record<string, (params: URLSearchParams) => string> = {
       `（新規 ${added} 社 ／ 置き換え ${replaced} 社${total ? ` ／ 一次データ合計 ${total} t-CO2e` : ''}）。`
     );
   },
+  factorRelinked: (params) => {
+    const rows = params.get('rows') ?? '1';
+    const value = params.get('value');
+    const total = params.get('total');
+    return (
+      `排出量原単位を紐づけ直し、新しい算定版を追記しました` +
+      `（対象 ${rows} 行 ／ 行の排出量 ${value ?? '—'} t-CO2e ／ 一次データ合計 ${total ?? '—'} t-CO2e）。`
+    );
+  },
   carried: (params) => {
     const count = params.get('count');
     return count ? `前年度から ${count} 件を複製しました。` : '前年度から複製しました。';

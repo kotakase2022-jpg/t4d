@@ -113,7 +113,16 @@ export async function appendDemoEdit(
   const key = `${table}:${id}`;
   const merged = current.filter((e) => `${e.t}:${e.id}` !== key);
   const previous = current.find((e) => `${e.t}:${e.id}` === key);
-  merged.push({ t: table, id, v: { ...(previous?.v ?? {}), ...changed } });
+  const nextEdit = { t: table, id, v: { ...(previous?.v ?? {}), ...changed } };
+
+  // 単体で 1 チャンクに入らない編集は追記を諦める（同一インスタンス内では
+  // メモリ上の Fixture に反映済み）。ここで諦めずに縮小ループへ進むと、
+  // 「新しい 1 件も入らない → 既存の編集まで全部落ちて空 Cookie を書く」
+  // という全消滅になる（レビュー指摘）。既存の持ち回りは守る。
+  if (packIntoChunks([nextEdit]).length === 0) {
+    return;
+  }
+  merged.push(nextEdit);
 
   // 全チャンクへ入りきらない分は、古い方から落とす
   let candidate = merged;

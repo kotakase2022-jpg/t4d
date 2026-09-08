@@ -8,7 +8,7 @@ import { DEMO_USERS, loginAs } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
-test('GHG 画面に連結集計（持分調整・内部取引控除・加重平均）が表示される', async ({ page }) => {
+test('GHG 画面に連結集計（持分調整・内部取引控除・直近3年推移）が表示される', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/ghg');
   await expect(page.locator('#t4d-main')).toBeVisible();
@@ -20,12 +20,23 @@ test('GHG 画面に連結集計（持分調整・内部取引控除・加重平�
 
   // 内部取引控除が表示される（Fixture: 1,850.0 + 640.5 = 2,490.5）
   await expect(page.getByText('− 2,490.5')).toBeVisible();
-  // 加重平均（分子合計 ÷ 分母合計）の行がある
-  await expect(page.getByText(/加重平均 = 分子合計 ÷ 分母合計/)).toBeVisible();
+  // 女性管理職比率の行は 2026-09 の依頼で GHG 画面から外した（GHG と無関係のため）
+  await expect(page.getByText('女性管理職比率')).toHaveCount(0);
+  await expect(page.getByText(/加重平均 = 分子合計 ÷ 分母合計/)).toHaveCount(0);
   // 列見出しが揃っている
   for (const head of ['単純合計', '持分調整後', '内部取引控除', '連結値', '推計込み']) {
     await expect(card.getByText(head).first()).toBeVisible();
   }
+
+  // 直近3年の推移: FY2024（過年度 Fixture）から並び、値と前年比が数値で出る
+  await expect(
+    page.getByRole('heading', { name: '直近3年の推移（連結値・推計込み）' }),
+  ).toBeVisible();
+  await expect(page.getByText('FY2024').first()).toBeVisible();
+  // FY2024 scope1 連結値（1,352.1 + 4,326.9 + 3,245.1 + 811.3）
+  await expect(page.getByText('9,735.4')).toBeVisible();
+  // scope1 の FY2025 前年比（8,931.6 / 9,735.4 − 1 = −8.3%）
+  await expect(page.getByText('-8.3%')).toBeVisible();
 });
 
 test('コピペ表入力: Excel から貼り付けた表が AI 仕分けされてプレビューに出る', async ({ page }) => {

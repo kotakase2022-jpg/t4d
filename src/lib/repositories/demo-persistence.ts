@@ -149,4 +149,42 @@ export async function appendDemoEdit(
   }
 }
 
+/**
+ * 指定したテーブル×ID の持ち回りだけを Cookie から取り除く（デモリセット用）。
+ *
+ * Cookie を丸ごと消すと、他の画面で行ったデモ操作（評価・コメント等）まで
+ * 巻き添えで消える。削除対象を名指しできるこの関数で、範囲をデモの
+ * 該当データに限定する。localStorage など他の保存領域には触らない。
+ */
+export async function removeDemoEditsFor(
+  table: TableName,
+  ids: ReadonlySet<string>,
+): Promise<void> {
+  let store: Awaited<ReturnType<typeof cookies>>;
+  try {
+    store = await cookies();
+  } catch {
+    return;
+  }
+  const current = await readDemoEdits();
+  const remaining = current.filter((e) => !(e.t === table && ids.has(e.id)));
+  if (remaining.length === current.length) return;
+
+  const chunks = packIntoChunks(remaining);
+  try {
+    const options = {
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      path: '/',
+      maxAge: 60 * 60 * 8,
+    };
+    for (let i = 0; i < COOKIE_CHUNKS; i += 1) {
+      const value = chunks[i];
+      store.set(chunkName(i), value ?? '', value ? options : { ...options, maxAge: 0 });
+    }
+  } catch {
+    // Server Component からは書けない。リセットは Server Action からのみ呼ぶ。
+  }
+}
+
 export { applyDemoEdits, isPersistedTable } from './demo-edit-codec';

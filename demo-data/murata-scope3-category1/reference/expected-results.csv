@@ -1,0 +1,265 @@
+﻿ファイル名,サプライヤーコード,品目,データ種別,正規化活動量,正規化単位,係数コード,係数の決まり方,期待排出量(t-CO2e)
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,高純度炭酸バリウム BC-90A,物理量,12500,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,36.3
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,高純度炭酸バリウム BC-90B,物理量,9800,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,28.4
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,高純度炭酸バリウム BC-91A,物理量,14200,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,41.2
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,微粒炭酸バリウム BC-20,物理量,8600,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,24.9
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,微粒炭酸バリウム BC-25,物理量,11350,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,32.9
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,炭酸バリウム顆粒 BCG-5,物理量,9200,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,26.7
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,炭酸バリウム顆粒 BCG-8,物理量,13800,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,40
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,高純度炭酸バリウム BC-92,物理量,10400,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,30.2
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,炭酸バリウム微粉 BCF-1,物理量,7650,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,22.2
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,炭酸バリウム微粉 BCF-2,物理量,12950,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,37.6
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,高純度炭酸バリウム BC-93,物理量,11800,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,34.2
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,炭酸バリウム顆粒 BCG-12,物理量,8900,kg,DEMO-EF-BACO3-JP-KG,係数コード記載,25.8
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,高純度酸化チタン TP-4N,物理量,7400,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,38.5
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,高純度酸化チタン TP-4NS,物理量,6150,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,32
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,ルチル型酸化チタン TR-11,物理量,8900,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,46.3
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,ルチル型酸化チタン TR-15,物理量,5300,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,27.6
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,アナターゼ型酸化チタン TA-01,物理量,9600,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,49.9
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,アナターゼ型酸化チタン TA-02,物理量,7050,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,36.7
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,高純度酸化チタン TP-5N,物理量,8300,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,43.2
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,酸化チタン微粒 TF-30,物理量,4750,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,24.7
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,酸化チタン微粒 TF-50,物理量,6800,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,35.4
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,ルチル型酸化チタン TR-21,物理量,9100,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,47.3
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,高純度酸化チタン TP-4NR,物理量,5900,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,30.7
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,酸化チタン顆粒 TG-8,物理量,7700,kg,DEMO-EF-TIO2-JP-KG,係数コード記載,40
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル微粉 NP-05,物理量,3200,kg,DEMO-EF-NI-JP-KG,係数コード記載,28.5
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル微粉 NP-08,物理量,2750,kg,DEMO-EF-NI-JP-KG,係数コード記載,24.5
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル微粉 NP-10,物理量,4100,kg,DEMO-EF-NI-JP-KG,係数コード記載,36.5
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル球状粉 NS-03,物理量,1850,kg,DEMO-EF-NI-JP-KG,係数コード記載,16.5
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル球状粉 NS-05,物理量,2400,kg,DEMO-EF-NI-JP-KG,係数コード記載,21.4
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケルフレーク NF-12,物理量,3600,kg,DEMO-EF-NI-JP-KG,係数コード記載,32
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケルフレーク NF-18,物理量,2100,kg,DEMO-EF-NI-JP-KG,係数コード記載,18.7
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル微粉 NP-12,物理量,3900,kg,DEMO-EF-NI-JP-KG,係数コード記載,34.7
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル球状粉 NS-08,物理量,1650,kg,DEMO-EF-NI-JP-KG,係数コード記載,14.7
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル微粉 NP-15,物理量,2950,kg,DEMO-EF-NI-JP-KG,係数コード記載,26.3
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル超微粉 NP-20（試作グレード）,物理量,1450,kg,DEMO-EF-NI-JP-KG,推薦候補（初期選択のまま確定）,12.9
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,ニッケル粉末 NP-80（海外調達枠）,物理量,2600,kg,DEMO-EF-NI-GLB-KG,推薦候補（初期選択のまま確定）,32.5
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,電解銅粉 CU-E100,物理量,5400,kg,DEMO-EF-CU-GLB-KG,係数コード記載,22.1
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,電解銅粉 CU-E200,物理量,7100,kg,DEMO-EF-CU-GLB-KG,係数コード記載,29.1
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,アトマイズ銅粉 CU-A50,物理量,4300,kg,DEMO-EF-CU-GLB-KG,係数コード記載,17.6
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,アトマイズ銅粉 CU-A80,物理量,6650,kg,DEMO-EF-CU-GLB-KG,係数コード記載,27.3
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,電解銅粉 CU-E150,物理量,5900,kg,DEMO-EF-CU-GLB-KG,係数コード記載,24.2
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,樹枝状銅粉 CU-D30,物理量,3800,kg,DEMO-EF-CU-GLB-KG,係数コード記載,15.6
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,樹枝状銅粉 CU-D60,物理量,4950,kg,DEMO-EF-CU-GLB-KG,係数コード記載,20.3
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,アトマイズ銅粉 CU-A120,物理量,7800,kg,DEMO-EF-CU-GLB-KG,係数コード記載,32
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,電解銅粉 CU-E250,物理量,6200,kg,DEMO-EF-CU-GLB-KG,係数コード記載,25.4
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,銅微粉 CU-F10,物理量,3350,kg,DEMO-EF-CU-GLB-KG,係数コード記載,13.7
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,銅微粉 CU-F20,物理量,4600,kg,DEMO-EF-CU-GLB-KG,係数コード記載,18.9
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,アトマイズ銅粉 CU-A160,物理量,7350,kg,DEMO-EF-CU-GLB-KG,係数コード記載,30.1
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-110,物理量,385,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,12.3
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-115,物理量,292,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,9.3
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-120,物理量,448,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,14.3
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀パラジウムペースト APD-20,物理量,210.5,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,6.7
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀パラジウムペースト APD-25,物理量,324,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,10.4
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-130,物理量,501,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,16
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-135,物理量,268,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,8.6
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀パラジウムペースト APD-30,物理量,189.5,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,6.1
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-140,物理量,416,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,13.3
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-145,物理量,355,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,11.4
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀パラジウムペースト APD-35,物理量,233,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,7.5
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,銀導電ペースト AGP-150,物理量,472,kg,DEMO-EF-AGPASTE-JP-KG,係数コード記載,15.1
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Mn-Zn ferrite powder FZ-110,物理量,9800,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,37.2
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Mn-Zn ferrite powder FZ-115,物理量,7600,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,28.9
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Ni-Zn ferrite powder FN-210,物理量,11400,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,43.3
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Ni-Zn ferrite powder FN-215,物理量,6900,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,26.2
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Mn-Zn ferrite powder FZ-120,物理量,12800,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,48.6
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Ferrite granule FG-30,物理量,8500,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,32.3
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Ferrite granule FG-35,物理量,10300,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,39.1
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Mn-Zn ferrite powder FZ-130,物理量,7200,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,27.4
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Ni-Zn ferrite powder FN-220,物理量,9100,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,34.6
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Ferrite granule FG-40,物理量,11900,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,45.2
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Mn-Zn ferrite powder FZ-140,物理量,6400,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,24.3
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,Ni-Zn ferrite powder FN-230,物理量,10800,kg,DEMO-EF-FERRITE-TW-KG,係数コード記載,41
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Magnetic alloy powder MA-1005,物理量,4600,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,30.8
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Magnetic alloy powder MA-1010,物理量,3900,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,26.1
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Fe-Si alloy powder FS-210,物理量,5800,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,38.9
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Fe-Si alloy powder FS-215,物理量,3200,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,21.4
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Magnetic alloy powder MA-1020,物理量,6400,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,42.9
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Amorphous alloy powder AM-31,物理量,2800,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,18.8
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Amorphous alloy powder AM-35,物理量,4100,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,27.5
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Magnetic alloy powder MA-1030,物理量,5200,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,34.8
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Fe-Si alloy powder FS-220,物理量,3600,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,24.1
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Amorphous alloy powder AM-40,物理量,4900,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,32.8
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Magnetic alloy powder MA-1040,物理量,2950,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,19.8
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,Fe-Si alloy powder FS-230,物理量,5600,kg,DEMO-EF-ALLOY-KR-KG,係数コード記載,37.5
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 UEW-0.05,物理量,6800,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,33.3
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 UEW-0.08,物理量,5400,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,26.5
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 UEW-0.10,物理量,8200,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,40.2
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 PEW-0.12,物理量,4700,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,23
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 PEW-0.16,物理量,9500,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,46.6
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,自己融着線 SB-0.08,物理量,3900,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,19.1
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,自己融着線 SB-0.10,物理量,5100,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,25
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 UEW-0.15,物理量,7300,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,35.8
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 PEW-0.20,物理量,6100,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,29.9
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,自己融着線 SB-0.12,物理量,4400,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,21.6
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 UEW-0.20,物理量,8800,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,43.1
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,エナメル銅線 PEW-0.25,物理量,5700,kg,DEMO-EF-MAGWIRE-JP-KG,係数コード記載,27.9
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Calcined alumina powder APC-02,物理量,8600,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,39.6
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Calcined alumina powder APC-05,物理量,7200,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,33.1
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Low-soda alumina LS-10,物理量,10400,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,47.8
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Low-soda alumina LS-12,物理量,6300,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,29
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Calcined alumina powder APC-08,物理量,11800,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,54.3
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Reactive alumina RA-20,物理量,5600,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,25.8
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Reactive alumina RA-22,物理量,7900,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,36.3
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Calcined alumina powder APC-11,物理量,9700,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,44.6
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Low-soda alumina LS-15,物理量,6800,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,31.3
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Reactive alumina RA-25,物理量,8900,kg,DEMO-EF-ALUMINA-MY-KG,係数コード記載,40.9
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,High-purity alumina powder AL-9N,物理量,4200,kg,DEMO-EF-ALUMINA-MY-KG,推薦候補（初期選択のまま確定）,19.3
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,Alumina base powder AL-5N,物理量,5800,kg,DEMO-EF-ALUMINA-GLB-KG,推薦候補（初期選択のまま確定）,35.4
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,HTCC substrate 96% Alumina 50x50 / セラミック基板 HS-5050,物理量,1850,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,33.3
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,HTCC substrate 96% Alumina 60x60 / セラミック基板 HS-6060,物理量,1420,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,25.6
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,LTCC substrate 40x40 / セラミック基板 LS-4040,物理量,2300,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,41.4
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,LTCC substrate 50x50 / セラミック基板 LS-5050,物理量,1150,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,20.7
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,HTCC substrate 99% Alumina 50x50 / セラミック基板 HP-5050,物理量,2650,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,47.7
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,Thin ceramic substrate 0.25t / セラミック基板 TC-025,物理量,980,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,17.6
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,Thin ceramic substrate 0.38t / セラミック基板 TC-038,物理量,1550,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,27.9
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,HTCC substrate 96% Alumina 70x70 / セラミック基板 HS-7070,物理量,2100,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,37.8
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,LTCC substrate 60x60 / セラミック基板 LS-6060,物理量,1300,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,23.4
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,Thin ceramic substrate 0.50t / セラミック基板 TC-050,物理量,1750,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,31.5
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,HTCC substrate 99% Alumina 60x60 / セラミック基板 HP-6060,物理量,890,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,16
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,LTCC substrate 70x70 / セラミック基板 LS-7070,物理量,2450,m2,DEMO-EF-CERSUB-CN-M2,係数コード記載,44.1
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,PVB バインダー樹脂 BR-105,物理量,4200,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,14.7
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,PVB バインダー樹脂 BR-110,物理量,3600,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,12.6
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,アクリル系バインダー AB-210,物理量,5100,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,17.9
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,アクリル系バインダー AB-215,物理量,2900,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,10.2
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,PVB バインダー樹脂 BR-120,物理量,5800,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,20.3
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,エチルセルロース EC-45,物理量,2400,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,8.4
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,エチルセルロース EC-50,物理量,3300,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,11.6
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,PVB バインダー樹脂 BR-130,物理量,4700,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,16.5
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,アクリル系バインダー AB-220,物理量,3100,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,10.9
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,エチルセルロース EC-55,物理量,3900,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,13.7
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,PVB バインダー樹脂 BR-140,物理量,2650,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,9.3
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,アクリル系バインダー AB-230,物理量,5400,kg,DEMO-EF-RESIN-JP-KG,係数コード記載,18.9
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,工業用溶剤 テルピネオール TP-90,物理量,9500,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,17.1
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,工業用溶剤 テルピネオール TP-95,物理量,7800,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,14
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,工業用溶剤 ブチルカルビトール BC-70,物理量,12400,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,22.3
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,工業用溶剤 ブチルカルビトール BC-75,物理量,6600,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,11.9
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,洗浄用溶剤 CL-110,物理量,14800,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,26.6
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,洗浄用溶剤 CL-115,物理量,8900,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,16
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,工業用溶剤 テルピネオール TP-98,物理量,11200,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,20.2
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,希釈用溶剤 DL-30,物理量,5800,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,10.4
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,希釈用溶剤 DL-35,物理量,9800,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,17.6
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,洗浄用溶剤 CL-120,物理量,13400,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,24.1
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,工業用溶剤 ブチルカルビトール BC-80,物理量,7200,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,13
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,希釈用溶剤 DL-40,物理量,10600,kg,DEMO-EF-SOLVENT-CN-KG,係数コード記載,19.1
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET離型フィルム RF-25,物理量,7600,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,21.3
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET離型フィルム RF-38,物理量,6200,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,17.4
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET離型フィルム RF-50,物理量,9100,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,25.5
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET離型フィルム RF-75,物理量,5100,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,14.3
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PETキャリアフィルム CF-25,物理量,10400,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,29.1
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PETキャリアフィルム CF-38,物理量,6900,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,19.3
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET離型フィルム RF-100,物理量,8300,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,23.2
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET保護フィルム PF-30,物理量,4400,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,12.3
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET保護フィルム PF-50,物理量,7000,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,19.6
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PETキャリアフィルム CF-50,物理量,9700,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,27.2
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET離型フィルム RF-125,物理量,5600,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,15.7
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,PET保護フィルム PF-75,物理量,8800,kg,DEMO-EF-PETFILM-JP-KG,係数コード記載,24.6
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 25um LF-25A,物理量,2800,m2,DEMO-EF-LCP-TW-M2,係数コード記載,26.3
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 25um LF-25B,物理量,2300,m2,DEMO-EF-LCP-TW-M2,係数コード記載,21.6
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 50um LF-50A,物理量,3400,m2,DEMO-EF-LCP-TW-M2,係数コード記載,32
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 50um LF-50B,物理量,1900,m2,DEMO-EF-LCP-TW-M2,係数コード記載,17.9
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 100um LF-100A,物理量,4100,m2,DEMO-EF-LCP-TW-M2,係数コード記載,38.5
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP bonding sheet LB-20,物理量,1500,m2,DEMO-EF-LCP-TW-M2,係数コード記載,14.1
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP bonding sheet LB-30,物理量,2100,m2,DEMO-EF-LCP-TW-M2,係数コード記載,19.7
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 25um LF-25C,物理量,3000,m2,DEMO-EF-LCP-TW-M2,係数コード記載,28.2
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 50um LF-50C,物理量,2500,m2,DEMO-EF-LCP-TW-M2,係数コード記載,23.5
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP bonding sheet LB-40,物理量,1750,m2,DEMO-EF-LCP-TW-M2,係数コード記載,16.5
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 100um LF-100B,物理量,3700,m2,DEMO-EF-LCP-TW-M2,係数コード記載,34.8
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,LCP film 25um LF-25D,物理量,2650,m2,DEMO-EF-LCP-TW-M2,係数コード記載,24.9
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,多層プリント基板 PW-0604,物理量,820,m2,DEMO-EF-PCB-CN-M2,係数コード記載,50.8
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,多層プリント基板 PW-0806,物理量,650,m2,DEMO-EF-PCB-CN-M2,係数コード記載,40.3
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,多層プリント基板 PW-1004,物理量,980,m2,DEMO-EF-PCB-CN-M2,係数コード記載,60.8
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,両面プリント基板 PD-0402,物理量,540,m2,DEMO-EF-PCB-CN-M2,係数コード記載,33.5
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,両面プリント基板 PD-0602,物理量,1150,m2,DEMO-EF-PCB-CN-M2,係数コード記載,71.3
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,多層プリント基板 PW-1206,物理量,720,m2,DEMO-EF-PCB-CN-M2,係数コード記載,44.6
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,ビルドアップ基板 PB-0808,物理量,460,m2,DEMO-EF-PCB-CN-M2,係数コード記載,28.5
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,ビルドアップ基板 PB-1010,物理量,880,m2,DEMO-EF-PCB-CN-M2,係数コード記載,54.6
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,多層プリント基板 PW-1408,物理量,610,m2,DEMO-EF-PCB-CN-M2,係数コード記載,37.8
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,両面プリント基板 PD-0802,物理量,1050,m2,DEMO-EF-PCB-CN-M2,係数コード記載,65.1
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,HTCC セラミック基板 CS-88,物理量,520,m2,DEMO-EF-CERSUB-CN-M2,推薦候補（初期選択のまま確定）,9.4
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,高密度プリント基板 PW-1608HD,物理量,760,m2,DEMO-EF-PCB-CN-M2,推薦候補（初期選択のまま確定）,47.1
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,RF module IC HMD-3210,物理量,86000,個,DEMO-EF-CFP-IC-PC,係数コード記載,94.6
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,RF module IC HMD-3220,物理量,64000,個,DEMO-EF-CFP-IC-PC,係数コード記載,70.4
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,Power management IC HMD-4110,物理量,112000,個,DEMO-EF-CFP-IC-PC,係数コード記載,123.2
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,Power management IC HMD-4120,物理量,48000,個,DEMO-EF-CFP-IC-PC,係数コード記載,52.8
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,RF module IC HMD-3230,物理量,95000,個,DEMO-EF-CFP-IC-PC,係数コード記載,104.5
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,Sensor interface IC HMD-5010,物理量,38000,個,DEMO-EF-CFP-IC-PC,係数コード記載,41.8
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,Sensor interface IC HMD-5020,物理量,57000,個,DEMO-EF-CFP-IC-PC,係数コード記載,62.7
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,Power management IC HMD-4130,物理量,78000,個,DEMO-EF-CFP-IC-PC,係数コード記載,85.8
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,RF module IC HMD-3240,物理量,69000,個,DEMO-EF-CFP-IC-PC,係数コード記載,75.9
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,Sensor interface IC HMD-5030,物理量,44000,個,DEMO-EF-CFP-IC-PC,係数コード記載,48.4
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,Power management IC HMD-4140,物理量,102000,個,DEMO-EF-CFP-IC-PC,係数コード記載,112.2
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,RF module IC HMD-3250,物理量,73000,個,DEMO-EF-CFP-IC-PC,係数コード記載,80.3
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LT-4in PZ-401,物理量,18500,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,44.4
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LT-4in PZ-402,物理量,14200,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,34.1
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LN-4in PZ-411,物理量,22800,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,54.7
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LN-4in PZ-412,物理量,11600,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,27.8
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LT-6in PZ-601,物理量,9800,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,23.5
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LT-6in PZ-602,物理量,12400,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,29.8
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LN-6in PZ-611,物理量,7600,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,18.2
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LT-4in PZ-403,物理量,16900,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,40.6
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LN-4in PZ-413,物理量,13100,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,31.4
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LT-6in PZ-603,物理量,8900,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,21.4
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LN-6in PZ-612,物理量,6800,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,16.3
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,圧電ウエハー LT-4in PZ-404,物理量,15400,個,DEMO-EF-CFP-PIEZO-PC,係数コード記載,37
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,エンボスキャリアテープ CT-08,物理量,3800,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,9.9
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,エンボスキャリアテープ CT-12,物理量,3100,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,8.1
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,エンボスキャリアテープ CT-16,物理量,4600,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,12
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,トップカバーテープ TC-08,物理量,2500,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,6.5
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,トップカバーテープ TC-12,物理量,5300,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,13.8
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,紙キャリアテープ PC-08,物理量,2100,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,5.5
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,紙キャリアテープ PC-12,物理量,2900,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,7.5
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,エンボスキャリアテープ CT-24,物理量,4200,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,10.9
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,トップカバーテープ TC-16,物理量,3400,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,8.8
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,紙キャリアテープ PC-16,物理量,2700,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,7
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,エンボスキャリアテープ CT-32,物理量,4900,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,12.7
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,トップカバーテープ TC-24,物理量,3600,kg,DEMO-EF-TAPE-JP-KG,係数コード記載,9.4
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール外装箱 C5-210,物理量,9200,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,10.1
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール外装箱 C5-260,物理量,7800,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,8.6
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール外装箱 C6-310,物理量,11500,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,12.7
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール仕切り PT-45,物理量,5400,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,5.9
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール仕切り PT-60,物理量,13800,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,15.2
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボールパレット DP-11,物理量,6600,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,7.3
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール外装箱 C6-360,物理量,10300,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,11.3
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール緩衝材 CB-20,物理量,4700,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,5.2
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボール緩衝材 CB-30,物理量,7100,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,7.8
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,段ボールパレット DP-12,物理量,8500,kg,DEMO-EF-CARDBOARD-JP-KG,係数コード記載,9.4
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,梱包用副資材一式（上期）,金額,3400,千円,EF-PUR-PACK,人が候補から選択（EF-PUR-PACK を選ぶ想定）,1.9
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,梱包用副資材一式（下期）,金額,3150,千円,EF-PUR-PACK,人が候補から選択（EF-PUR-PACK を選ぶ想定）,1.8
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密切削（4月度）,金額,18400,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,10.7
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密切削（5月度）,金額,15600,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,9
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密研削（6月度）,金額,22300,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,12.9
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密切削（7月度）,金額,12800,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,7.4
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密研削（8月度）,金額,25100,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,14.6
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密切削（9月度）,金額,17200,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,10
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 レーザー加工（10月度）,金額,14500,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,8.4
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密切削（11月度）,金額,20800,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,12.1
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 レーザー加工（12月度）,金額,11900,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,6.9
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 精密研削（1月度）,金額,16400,千円,DEMO-EF-MACHINING-JP-KJPY,係数コード記載,9.5
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 追加試作（2月度）,金額,6800,千円,DEMO-EF-MACHINING-JP-KJPY,品目・単位から一意,3.9
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,外注加工 金型メンテナンス（3月度）,金額,5200,千円,DEMO-EF-MACHINING-JP-KJPY,品目・単位から一意,3
+
+# ファイル別合計（t-CO2e）
+01_白鳳化学工業_納入実績_2025年度.xlsx,SUP-31,,,,,,合計,380.4
+02_燕青チタン工業_出荷明細_FY2025.csv,SUP-32,,,,,,合計,452.3
+03_深山金属粉体_purchase_ledger_FY2025.xlsx,SUP-33,,,,,,合計,299.2
+04_旭峰銅材_購買明細_2025.xlsx,SUP-34,,,,,,合計,276.3
+05_琥山電子材料_納品実績_FY2025.csv,SUP-35,,,,,,合計,131
+06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx,SUP-36,,,,,,合計,428.1
+07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv,SUP-37,,,,,,合計,355.4
+08_近江マグネットワイヤ_出荷実績_2025年度.xlsx,SUP-38,,,,,,合計,372
+09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx,SUP-39,,,,,,合計,437.4
+10_South_China_Precision_Substrate_supply_FY2025.xlsx,SUP-40,,,,,,合計,367
+11_千曲樹脂化学_納入明細_FY2025.csv,SUP-41,,,,,,合計,165
+12_蘇河化学材料_出荷明細_2025年度.xlsx,SUP-42,,,,,,合計,212.3
+13_霞浦フィルム工業_納品実績_FY2025.xlsx,SUP-43,,,,,,合計,249.5
+14_Formosa_LCP_Films_shipment_FY2025.csv,SUP-44,,,,,,合計,298
+15_深圳華聯電路板_納入実績_FY2025.xlsx,SUP-45,,,,,,合計,543.8
+16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx,SUP-46,,,,,,合計,952.6
+17_常磐圧電結晶_製品CFP報告_2025年度.xlsx,SUP-47,,,,,,合計,379.2
+18_早川テープ工業_出荷明細_FY2025.csv,SUP-48,,,,,,合計,112.1
+19_みずほ紙器工業_納品実績_FY2025.xlsx,SUP-49,,,,,,合計,97.2
+20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx,SUP-50,,,,,,合計,108.4
+# 20 ファイル合計,,,,,,,,6617.2
+# 注記: アプリの「一次データ合計」は既存デモの提出済み 13 社（143.1 t-CO2e）を含むため、投入後は 143.1 + 上記合計になる

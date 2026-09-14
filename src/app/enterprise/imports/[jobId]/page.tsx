@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getAppMode } from '@/lib/config';
 import { AlertTriangle, FileText, FileWarning } from 'lucide-react';
 import { AiGeneratedBadge, JobStatusBadge } from '@/components/shared/badges';
+import { DemoSimulationNotice } from '@/components/shared/demo-simulation-notice';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatEstimatedCostUsd, formatJst } from '@/lib/format/datetime';
+import { displayRunConfidence, withDisplayConfidence } from '@/lib/imports/demo-display';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { JobPoller } from './job-poller';
 import { ImportPreviewTable } from '../preview-table';
@@ -57,6 +59,7 @@ export default async function ImportJobPage({
           }
         />
         <div className="space-y-3 p-4">
+          <DemoSimulationNotice />
           <ImportPreviewFallback
             jobId={jobId}
             metrics={fallbackShell.metrics.map((m) => ({ id: m.id, name: m.name }))}
@@ -126,6 +129,7 @@ export default async function ImportJobPage({
       />
 
       <div className="space-y-3 p-4">
+        {getAppMode() === 'demo' && <DemoSimulationNotice />}
         <Card>
           <div className="p-3">
             <JobPoller
@@ -215,19 +219,21 @@ export default async function ImportJobPage({
             <ImportPreviewTable
               jobId={job.id}
               reportingPeriodId={job.reportingPeriodId}
-              rows={pendingRows.map((row) => ({
-                id: row.id,
-                rowIndex: row.rowIndex,
-                raw: row.raw,
-                sourceLocator: row.sourceLocator,
-                metricId: row.metricId,
-                unitId: row.unitId,
-                value: row.value,
-                unitOfMeasure: row.unitOfMeasure,
-                confidence: row.confidence,
-                warnings: row.warnings,
-                status: row.status,
-              }))}
+              rows={withDisplayConfidence(
+                pendingRows.map((row) => ({
+                  id: row.id,
+                  rowIndex: row.rowIndex,
+                  raw: row.raw,
+                  sourceLocator: row.sourceLocator,
+                  metricId: row.metricId,
+                  unitId: row.unitId,
+                  value: row.value,
+                  unitOfMeasure: row.unitOfMeasure,
+                  confidence: row.confidence,
+                  warnings: row.warnings,
+                  status: row.status,
+                })),
+              )}
               metrics={shell.metrics.map((m) => ({ id: m.id, name: m.name }))}
               units={editableUnits.map((u) => ({ id: u.id, name: u.name }))}
             />
@@ -241,7 +247,20 @@ export default async function ImportJobPage({
               <Meta label="Provider" value={aiRun.provider} />
               <Meta label="Model" value={aiRun.model} />
               <Meta label="Prompt Version" value={aiRun.promptVersion} />
-              <Meta label="確信度" value={`${Math.round(aiRun.confidence * 100)}%`} />
+              {(() => {
+                const run = displayRunConfidence(aiRun.id, aiRun.confidence);
+                return (
+                  <Meta
+                    label="確信度"
+                    value={`${Math.round((run.displayConfidence ?? aiRun.confidence) * 100)}%`}
+                    hint={
+                      run.confidenceSource === 'demo_simulated'
+                        ? `実測スコア ${Math.round(aiRun.confidence * 100)}%（表示はデモ用シミュレーション）`
+                        : undefined
+                    }
+                  />
+                );
+              })()}
               <Meta label="Latency" value={`${aiRun.latencyMs} ms`} />
               <Meta label="Token" value={`${aiRun.tokenUsage.total}`} />
               <Meta label="推定コスト" value={formatEstimatedCostUsd(aiRun.estimatedCostUsd)} />
@@ -263,9 +282,9 @@ export default async function ImportJobPage({
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function Meta({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="flex justify-between gap-2 border-b border-line py-1">
+    <div className="flex justify-between gap-2 border-b border-line py-1" title={hint}>
       <span className="text-ink-muted">{label}</span>
       <span className="truncate text-ink">{value}</span>
     </div>

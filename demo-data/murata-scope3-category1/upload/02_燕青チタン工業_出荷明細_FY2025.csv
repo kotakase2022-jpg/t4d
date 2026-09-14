@@ -1,0 +1,14 @@
+﻿サプライヤーコード,品名,データ種別,出荷数量,単位,排出係数コード,出荷月
+SUP-32,高純度酸化チタン TP-4N,物理量,7400,kg,DEMO-EF-TIO2-JP-KG,2025-04
+SUP-32,高純度酸化チタン TP-4NS,物理量,6150,kg,DEMO-EF-TIO2-JP-KG,2025-05
+SUP-32,ルチル型酸化チタン TR-11,物理量,8900,kg,DEMO-EF-TIO2-JP-KG,2025-06
+SUP-32,ルチル型酸化チタン TR-15,物理量,5300,kg,DEMO-EF-TIO2-JP-KG,2025-07
+SUP-32,アナターゼ型酸化チタン TA-01,物理量,9600,kg,DEMO-EF-TIO2-JP-KG,2025-08
+SUP-32,アナターゼ型酸化チタン TA-02,物理量,7050,kg,DEMO-EF-TIO2-JP-KG,2025-09
+SUP-32,高純度酸化チタン TP-5N,物理量,8300,kg,DEMO-EF-TIO2-JP-KG,2025-10
+SUP-32,酸化チタン微粒 TF-30,物理量,4750,kg,DEMO-EF-TIO2-JP-KG,2025-11
+SUP-32,酸化チタン微粒 TF-50,物理量,6800,kg,DEMO-EF-TIO2-JP-KG,2025-12
+SUP-32,ルチル型酸化チタン TR-21,物理量,9100,kg,DEMO-EF-TIO2-JP-KG,2026-01
+SUP-32,高純度酸化チタン TP-4NR,物理量,5900,kg,DEMO-EF-TIO2-JP-KG,2026-02
+SUP-32,酸化チタン顆粒 TG-8,物理量,7700,kg,DEMO-EF-TIO2-JP-KG,2026-03
+合計,,,86950,,,

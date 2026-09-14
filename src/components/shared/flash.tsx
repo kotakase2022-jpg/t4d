@@ -20,6 +20,13 @@ const MESSAGES: Record<string, (params: URLSearchParams) => string> = {
       `（新規 ${added} 社 ／ 置き換え ${replaced} 社${total ? ` ／ 一次データ合計 ${total} t-CO2e` : ''}）。`
     );
   },
+  supplierDemoReset: (params) => {
+    const removed = params.get('removed') ?? '0';
+    return (
+      `サプライヤーデモの算定版をリセットしました（削除した版 ${removed} 件）。` +
+      `初期の算定内訳（版 1）は残っています。同じファイルを再投入すると同じ結果になります。`
+    );
+  },
   factorRelinked: (params) => {
     const rows = params.get('rows') ?? '1';
     const value = params.get('value');

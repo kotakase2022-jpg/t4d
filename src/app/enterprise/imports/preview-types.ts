@@ -21,7 +21,14 @@ export interface ImportPreviewRow {
   unitId: string | null;
   value: number | null;
   unitOfMeasure: string | null;
+  /** 取込処理が返した実測スコア（rawConfidence）。承認・品質判定はこちらを使う */
   confidence: number;
+  /**
+   * 画面に出す信頼度。デモモードで正常解析行のみシミュレーション値になる
+   * （lib/imports/demo-display.ts で一元計算。永続化はしない）
+   */
+  displayConfidence?: number | null;
+  confidenceSource?: 'measured' | 'demo_simulated';
   warnings: string[];
   status: string;
 }

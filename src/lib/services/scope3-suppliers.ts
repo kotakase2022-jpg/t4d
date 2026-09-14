@@ -5,11 +5,23 @@ import {
   SCOPE3_FORMULA,
   supplierInputLabel,
 } from '@/lib/domain/scope3-labels';
+import {
+  countryLabel,
+  normalizeCountry,
+  SCOPE3_FACTOR_HINTS,
+} from '@/lib/domain/scope3-factor-hints';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
-import { decodeText, detectDelimiter, detectHeaderRow, parseCsvText } from '@/lib/imports/parsers';
+import {
+  decodeText,
+  detectDelimiter,
+  detectHeaderRow,
+  parseCsvText,
+  parseExcel,
+} from '@/lib/imports/parsers';
 import { parseFlexibleNumber } from '@/lib/imports/number';
 import { classifyRowRoles } from '@/lib/imports/row-role';
+import { DemoDbClient } from '@/lib/repositories/demo-client';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -86,12 +98,15 @@ function normalizeUnit(raw: string): NormalizedUnit | null {
     return { kind: 'physical', unit: 'L', multiplier: 1 };
   if (v === 'kl') return { kind: 'physical', unit: 'L', multiplier: 1000 };
   if (v === 'kg') return { kind: 'physical', unit: 'kg', multiplier: 1 };
+  if (v === 'g' || v === 'グラム') return { kind: 'physical', unit: 'kg', multiplier: 0.001 };
   if (v === 't' || v === 'トン') return { kind: 'physical', unit: 't', multiplier: 1 };
+  if (/^(個|pcs?|pieces?|ea)$/.test(v)) return { kind: 'physical', unit: '個', multiplier: 1 };
+  if (/^(m2|㎡|m²|sqm)$/.test(v)) return { kind: 'physical', unit: 'm2', multiplier: 1 };
   return null;
 }
 
 const SUPPORTED_UNITS_HINT =
-  '対応単位: t-CO2e（排出量）／ 千円・円・百万円（金額）／ kWh・MWh・m3・L・kL・kg・t（物理量）';
+  '対応単位: t-CO2e（排出量）／ 千円・円・百万円（金額）／ kWh・MWh・m3・L・kL・g・kg・t・個・m2（物理量）';
 
 // ----------------------------------------------------------------------
 // CSV の解釈（純粋・決定論）
@@ -110,6 +125,10 @@ export interface SupplierCsvRow {
   /** 正規化後の単位。判定できなければ null */
   unit: string | null;
   factorCode: string;
+  /** 生産国（原文）。空欄可 */
+  countryRaw: string;
+  /** 正規化した生産国コード。判定できなければ null（勝手に決めない） */
+  country: 'JP' | 'CN' | 'TW' | 'KR' | 'MY' | null;
   /** 合計行・注記行として除外した理由。null なら取込候補 */
   skippedReason: string | null;
   errors: string[];
@@ -118,24 +137,43 @@ export interface SupplierCsvRow {
 export interface SupplierCsvExtract {
   rows: SupplierCsvRow[];
   fileErrors: string[];
+  /**
+   * ファイルの構造シグナル（信頼度ルーブリックの材料）。
+   * 種別列・単位列・生産国列が明示されている帳票は解釈の裏取りが多い分、
+   * 実測スコアを高く評価できる
+   */
+  structure: { hasTypeColumn: boolean; hasUnitColumn: boolean; hasCountryColumn: boolean };
 }
 
 type ColumnRole =
-  'factor' | 'supplier' | 'dtype' | 'emissions' | 'quantity' | 'amount' | 'value' | 'unit' | 'item';
+  | 'factor'
+  | 'supplier'
+  | 'dtype'
+  | 'emissions'
+  | 'quantity'
+  | 'amount'
+  | 'value'
+  | 'unit'
+  | 'country'
+  | 'item';
 
 /**
  * 列の役割判定。上から順に試し、1 列につき 1 役割・1 役割につき最初の 1 列。
  * 「排出係数コード」が排出量の列と誤認されないよう factor を最優先にする。
+ * 生産国はサプライヤー所在国と同一概念ではないため、
+ * country は「生産国／原産国／Country of Origin」だけに反応させる
+ * （単なる Country 列＝所在国かもしれない列は拾わない）。
  */
 const COLUMN_ROLE_RULES: Array<{ role: ColumnRole; match: RegExp }> = [
   { role: 'factor', match: /係数|原単位|factor/i },
   { role: 'supplier', match: /サプライヤ|供給|仕入|supplier|lieferant/i },
   { role: 'dtype', match: /データ種別|data\s*type|^種別$|^art$/i },
   { role: 'emissions', match: /排出量|emissions?|t-?co2/i },
-  { role: 'quantity', match: /活動量|数量|使用量|quantity|menge|volume/i },
+  { role: 'quantity', match: /活動量|数量|使用量|qty|quantity|menge|volume/i },
   { role: 'amount', match: /購買金額|金額|amount|spend|betrag/i },
   { role: 'value', match: /^数値$|^値$|^value$|wert/i },
   { role: 'unit', match: /単位|einheit|^unit$/i },
+  { role: 'country', match: /生産国|原産国|country\s*of\s*origin|production\s*country/i },
   { role: 'item', match: /品目|品名|item|position|内容|燃料種|fuel/i },
 ];
 
@@ -148,6 +186,12 @@ function classifyDataTypeCell(raw: string): SupplierDataType | 'unknown' | null 
   return 'unknown';
 }
 
+const EMPTY_STRUCTURE = {
+  hasTypeColumn: false,
+  hasUnitColumn: false,
+  hasCountryColumn: false,
+} as const;
+
 /**
  * サプライヤー一次データ CSV を列役割の規則で割り当て、行を種別へ自動仕訳する。
  * 前置き行（帳票名など）はヘッダー行の自動検出（detectHeaderRow）で読み飛ばす。
@@ -158,8 +202,20 @@ export function extractSupplierCsvRows(text: string): SupplierCsvExtract {
   const table = parseCsvText(text, detectDelimiter(text)).filter((cells) =>
     cells.some((cell) => cell.trim() !== ''),
   );
+  return extractSupplierRowsFromTable(table);
+}
+
+/**
+ * XLSX などテーブル化済みの入力用。CSV と同じ規則で仕訳する
+ * （テーブルの作り方だけが違い、判定は 1 か所に集約する）。
+ */
+export function extractSupplierRowsFromTable(table: string[][]): SupplierCsvExtract {
   if (table.length === 0) {
-    return { rows: [], fileErrors: ['データ行がありません。ヘッダー行と明細行を含めてください。'] };
+    return {
+      rows: [],
+      fileErrors: ['データ行がありません。ヘッダー行と明細行を含めてください。'],
+      structure: EMPTY_STRUCTURE,
+    };
   }
 
   const headerIndex = detectHeaderRow(table);
@@ -196,8 +252,15 @@ export function extractSupplierCsvRows(text: string): SupplierCsvExtract {
       fileErrors: [
         `必須列が見つかりません: ${missing.join(' / ')}（検出したヘッダー: ${header.join(', ')}）。テンプレート CSV の列名を参考にしてください。`,
       ],
+      structure: EMPTY_STRUCTURE,
     };
   }
+
+  const structure = {
+    hasTypeColumn: columnOfRole.has('dtype') || columnOfRole.has('emissions'),
+    hasUnitColumn: columnOfRole.has('unit'),
+    hasCountryColumn: columnOfRole.has('country'),
+  };
 
   // 「購買金額(千円)」「Betrag (JPY k)」のようにヘッダー側が通貨単位を持つ場合の補完
   const amountHeader = (header[columnOfRole.get('amount') ?? -1] ?? '').normalize('NFKC');
@@ -292,6 +355,8 @@ export function extractSupplierCsvRows(text: string): SupplierCsvExtract {
     const supplierCode = pick('supplier');
     let item = pick('item');
     if (item === '' && dataType === 'emissions') item = '報告排出量';
+    const countryRaw = pick('country');
+    const country = countryRaw === '' ? null : normalizeCountry(countryRaw);
 
     if (rowRole === 'detail') {
       if (supplierCode === '') errors.push('サプライヤーコードが空です。');
@@ -315,6 +380,8 @@ export function extractSupplierCsvRows(text: string): SupplierCsvExtract {
       amount,
       unit,
       factorCode: pick('factor').normalize('NFKC').toUpperCase(),
+      countryRaw,
+      country,
       skippedReason:
         rowRole === 'total'
           ? '合計行と判定したため取込対象外です（明細行と重複するため）。'
@@ -325,7 +392,7 @@ export function extractSupplierCsvRows(text: string): SupplierCsvExtract {
     };
   });
 
-  return { rows, fileErrors: [] };
+  return { rows, fileErrors: [], structure };
 }
 
 // ----------------------------------------------------------------------
@@ -339,6 +406,18 @@ export interface FactorCandidate {
   factorValue: number;
   factorUnit: string;
   factorYear: number;
+  /** 対象地域（ヒント由来。汎用係数は null） */
+  region: string | null;
+  /** 算定境界（ヒント由来） */
+  boundary: string | null;
+  /** 算定方式（ヒント由来） */
+  basis: string | null;
+  /** 出典（マスターの factorSource。デモ係数は架空である旨が入る） */
+  source: string;
+  /** この明細に対する候補理由（単位一致・品目一致・生産国一致など） */
+  reason: string;
+  /** 推薦候補か（生産国一致 ＞ 世界平均 の順で 1 件だけ true） */
+  recommended: boolean;
 }
 
 export interface SupplierPreviewRow extends SupplierCsvRow {
@@ -346,15 +425,28 @@ export interface SupplierPreviewRow extends SupplierCsvRow {
   supplierName: string | null;
   /** 解決済みの原単位（emissions 行と未解決の行は null） */
   factor: FactorCandidate | null;
-  /** 原単位の決まり方: 行の係数コード ／ 過去実績からの学習 ／ 単位から一意 */
+  /** 原単位の決まり方: 行の係数コード ／ 過去実績からの学習 ／ 品目・単位から一意 */
   factorResolution: 'row' | 'learned' | 'unit' | null;
-  /** 単位は合うが複数候補があり、人の紐づけが要る行の選択肢 */
+  /** 原単位の決まり方の説明（画面の根拠表示用） */
+  factorReason: string | null;
+  /** 複数候補があり、人の紐づけ（選択）ができる行の選択肢 */
   factorCandidates: FactorCandidate[];
   needsFactorChoice: boolean;
+  /** 候補のうち推薦する係数コード（生産国一致 ＞ 世界平均）。無ければ null */
+  recommendedFactorCode: string | null;
   /** 購買金額 × 係数（0.1 t-CO2e 丸め）。emissions 行は報告値そのもの */
   emissions: number | null;
   /** この社は最新の算定内訳に既に載っており、確定すると置き換えになる */
   replacesExisting: boolean;
+  /**
+   * 解析品質の実測スコア（0〜1）。列構造・種別判定・原単位解決・生産国照合の
+   * 裏取り数から決まる決定論ルーブリック。エラー行・除外行は null。
+   * 画面のデモ表示値はこの値から別途つくる（domain/demo-confidence.ts）
+   */
+  rawConfidence: number | null;
+  /** 画面に出す信頼度（アクション層でデモ変換を適用）。未適用時は raw と同じ */
+  displayConfidence?: number | null;
+  confidenceSource?: 'measured' | 'demo_simulated';
 }
 
 export interface SupplierImportPreview {
@@ -362,6 +454,8 @@ export interface SupplierImportPreview {
   encoding: string;
   rows: SupplierPreviewRow[];
   fileErrors: string[];
+  /** エラーではない情報（別シート未解析・前置き/注記の読み飛ばし等）。黙って落とさない */
+  fileNotes: string[];
   /** エラーなし・除外なし・原単位選択も不要で、そのまま確定できる行数 */
   validCount: number;
   /** 原単位の紐づけ（選択）が必要な行数 */
@@ -372,7 +466,12 @@ function roundEmissions(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function toCandidate(factor: EmissionFactor): FactorCandidate {
+function toCandidate(
+  factor: EmissionFactor,
+  reason: string,
+  recommended: boolean,
+): FactorCandidate {
+  const hint = SCOPE3_FACTOR_HINTS[factor.code];
   return {
     id: factor.id,
     code: factor.code,
@@ -380,7 +479,107 @@ function toCandidate(factor: EmissionFactor): FactorCandidate {
     factorValue: factor.factorValue,
     factorUnit: factor.factorUnit,
     factorYear: factor.factorYear,
+    region: hint?.region ?? null,
+    boundary: hint?.boundary ?? null,
+    basis: hint?.basis ?? null,
+    source: factor.factorSource,
+    reason,
+    recommended,
   };
+}
+
+/**
+ * 明細に適用可能な原単位候補。
+ *
+ * ヒント付き係数（材料特化）は品目キーワードが一致したときだけ候補になる。
+ * 一致する材料特化係数が無いときは、ヒントの無い汎用係数（従来分）へフォールバック。
+ * 単位はどちらの経路でも必ず一致させる（高スコアでも単位不一致は推薦しない）。
+ */
+function eligibleFactorsFor(
+  item: string,
+  unit: string,
+  factors: EmissionFactor[],
+): EmissionFactor[] {
+  const unitMatched = factors.filter((f) => f.activityUnit === unit);
+  const itemLower = item.normalize('NFKC').toLowerCase();
+  const hinted = unitMatched.filter((f) => {
+    const hint = SCOPE3_FACTOR_HINTS[f.code];
+    return hint ? hint.keywords.some((k) => itemLower.includes(k.toLowerCase())) : false;
+  });
+  if (hinted.length > 0) return hinted;
+  return unitMatched.filter((f) => !SCOPE3_FACTOR_HINTS[f.code]);
+}
+
+/** 候補の推薦順位: 生産国一致 → 世界平均 → なし（人が選ぶ） */
+function pickRecommended(
+  candidates: EmissionFactor[],
+  country: SupplierCsvRow['country'],
+): { factor: EmissionFactor; reason: string } | null {
+  if (country) {
+    const byCountry = candidates.find((f) => SCOPE3_FACTOR_HINTS[f.code]?.countryCode === country);
+    if (byCountry) {
+      return { factor: byCountry, reason: `生産国一致（${countryLabel(country)}）` };
+    }
+  }
+  const global = candidates.find((f) => SCOPE3_FACTOR_HINTS[f.code]?.region === '世界平均');
+  if (global) {
+    return {
+      factor: global,
+      reason: country
+        ? `世界平均（生産国 ${countryLabel(country)} の係数が未登録のため）`
+        : '世界平均（生産国の指定が無いため）',
+    };
+  }
+  return null;
+}
+
+function candidateReason(
+  factor: EmissionFactor,
+  unit: string,
+  itemMatched: boolean,
+  recommendedReason: string | null,
+): string {
+  const hint = SCOPE3_FACTOR_HINTS[factor.code];
+  const parts = [`単位一致（${unit}）`];
+  if (itemMatched && hint) parts.push('品目キーワード一致');
+  if (hint?.region) parts.push(`地域: ${hint.region}`);
+  if (recommendedReason) parts.push(`推薦: ${recommendedReason}`);
+  return parts.join('・');
+}
+
+/**
+ * 解析品質の実測スコア（0〜1）。裏取りできた事実の数で決まる決定論ルーブリック。
+ * AI 判定ではないため、同じファイル・同じ行なら常に同じ値になる。
+ */
+function rowRawConfidence(
+  row: SupplierCsvRow,
+  structure: SupplierCsvExtract['structure'],
+  resolution: SupplierPreviewRow['factorResolution'],
+  hasRecommendation: boolean,
+  hasErrors: boolean,
+): number | null {
+  if (row.skippedReason !== null || hasErrors || row.dataType === null) return null;
+  let score = 0.36;
+  if (row.dataType === 'emissions') {
+    score += 0.22; // 報告値そのもの（係数解決が不要）
+  } else if (resolution === 'row') {
+    score += 0.26; // 帳票記載の係数コードと照合済み
+  } else if (resolution === 'learned') {
+    score += 0.22; // 過去の確定実績と一致
+  } else if (resolution === 'unit') {
+    score += 0.17; // 品目・単位から一意
+  } else {
+    score += hasRecommendation ? 0.07 : 0; // 候補提示（推薦なしは裏取り加点なし）
+  }
+  if (structure.hasTypeColumn) score += 0.07; // 種別が帳票側で明示されている
+  if (structure.hasUnitColumn) score += 0.05; // 単位列で裏取りできた
+  if (row.country !== null) score += 0.04; // 生産国を照合できた
+  // 単位換算（g→kg・円→千円 等）を挟んだ行は、読み取りの裏取りが一段弱い
+  if (row.amount !== null && row.amountRaw !== '') {
+    const parsedRaw = parseFlexibleNumber(row.amountRaw);
+    if (parsedRaw !== null && parsedRaw !== row.amount) score -= 0.07;
+  }
+  return Math.min(Math.round(score * 100) / 100, 0.98);
 }
 
 async function loadSupplierMaster(db: DbClient, ctx: AuthorizationContext) {
@@ -465,6 +664,9 @@ async function loadScope3Context(db: DbClient, ctx: AuthorizationContext, report
   return { metric, dataPoint, calculations, latest: calculations[calculations.length - 1] ?? null };
 }
 
+/** サプライヤー取込が受け付ける拡張子（PDF は表再構成の基盤が無いため対象外） */
+export const SUPPLIER_IMPORT_EXTENSIONS = /\.(csv|tsv|txt|xlsx|xlsm)$/i;
+
 export async function previewSupplierImport(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -474,10 +676,30 @@ export async function previewSupplierImport(
 ): Promise<SupplierImportPreview> {
   assertCan(ctx, 'enterprise.import.run');
 
-  const decoded = decodeText(bytes);
-  const extract = extractSupplierCsvRows(decoded.text);
-  const fileErrors = [...extract.fileErrors];
-  if (decoded.warning) fileErrors.push(decoded.warning);
+  // 形式ごとにテーブル化し、仕訳規則は 1 か所（extractSupplierRowsFromTable）に集約する
+  let extract: SupplierCsvExtract;
+  let encoding: string;
+  const fileErrors: string[] = [];
+  const fileNotes: string[] = [];
+  if (/\.(xlsx|xlsm)$/i.test(fileName)) {
+    const parsed = await parseExcel(bytes);
+    encoding = parsed.sheetName ? `XLSX（${parsed.sheetName}）` : 'XLSX';
+    // 「別シートは解析していない」「前置き・注記を読み飛ばした」は黙って落とさず
+    // 情報として画面へ出す（エラーではないので fileErrors とは分ける）
+    fileNotes.push(...parsed.warnings);
+    // parseExcel は前置き行・末尾注記を分離済み。ヘッダー＋明細をテーブルへ戻す
+    const table = [
+      parsed.headers,
+      ...parsed.rows.map((r) => parsed.headers.map((h) => r[h] ?? '')),
+    ];
+    extract = extractSupplierRowsFromTable(parsed.headers.length > 0 ? table : []);
+  } else {
+    const decoded = decodeText(bytes);
+    encoding = decoded.encoding;
+    if (decoded.warning) fileErrors.push(decoded.warning);
+    extract = extractSupplierCsvRows(decoded.text);
+  }
+  fileErrors.push(...extract.fileErrors);
 
   const [{ suppliers, factors }, scope3] = await Promise.all([
     loadSupplierMaster(db, ctx),
@@ -485,12 +707,6 @@ export async function previewSupplierImport(
   ]);
   const factorByCode = new Map(factors.map((f) => [f.code.toUpperCase(), f]));
   const factorById = new Map(factors.map((f) => [f.id, f]));
-  const factorsByUnit = new Map<string, EmissionFactor[]>();
-  for (const factor of factors) {
-    const list = factorsByUnit.get(factor.activityUnit) ?? [];
-    list.push(factor);
-    factorsByUnit.set(factor.activityUnit, list);
-  }
   const submittedCodes = submittedSupplierCodes(suppliers, scope3.latest?.inputs ?? []);
   const learned = buildLearnedFactorIndex(scope3.calculations, suppliers);
 
@@ -505,8 +721,10 @@ export async function previewSupplierImport(
 
     let factor: EmissionFactor | null = null;
     let factorResolution: SupplierPreviewRow['factorResolution'] = null;
-    let factorCandidates: EmissionFactor[] = [];
+    let factorReason: string | null = null;
+    let factorCandidates: FactorCandidate[] = [];
     let needsFactorChoice = false;
+    let recommendedFactorCode: string | null = null;
 
     if (
       row.skippedReason === null &&
@@ -525,6 +743,7 @@ export async function previewSupplierImport(
         } else {
           factor = byCode;
           factorResolution = 'row';
+          factorReason = '帳票記載の係数コードと照合';
         }
       } else if (supplier) {
         const learnedId = learned.get(`${supplier.code}|${row.item}|${rowUnit}`);
@@ -532,25 +751,51 @@ export async function previewSupplierImport(
         if (learnedFactor && learnedFactor.activityUnit === rowUnit) {
           factor = learnedFactor;
           factorResolution = 'learned';
+          factorReason = '過去の確定実績から自動（同一サプライヤー×品目×単位）';
         } else {
-          const candidates = factorsByUnit.get(rowUnit) ?? [];
+          const candidates = eligibleFactorsFor(row.item, rowUnit, factors);
           if (candidates.length === 1) {
             factor = candidates[0] ?? null;
             factorResolution = 'unit';
+            factorReason = factor
+              ? SCOPE3_FACTOR_HINTS[factor.code]
+                ? '品目キーワード・単位から一意に決定'
+                : '単位から一意に決定'
+              : null;
           } else if (candidates.length === 0) {
             errors.push(
               `単位「${rowUnit}」に対応する排出量原単位がマスターにありません。原単位を登録するか、単位を見直してください。`,
             );
           } else {
             needsFactorChoice = true;
-            factorCandidates = candidates;
+            const recommended = pickRecommended(candidates, row.country);
+            recommendedFactorCode = recommended?.factor.code ?? null;
+            const itemLower = row.item.normalize('NFKC').toLowerCase();
+            factorCandidates = candidates.map((candidate) => {
+              const hint = SCOPE3_FACTOR_HINTS[candidate.code];
+              const itemMatched = Boolean(
+                hint?.keywords.some((k) => itemLower.includes(k.toLowerCase())),
+              );
+              const isRecommended = candidate.code === recommendedFactorCode;
+              return toCandidate(
+                candidate,
+                candidateReason(
+                  candidate,
+                  rowUnit,
+                  itemMatched,
+                  isRecommended ? (recommended?.reason ?? null) : null,
+                ),
+                isRecommended,
+              );
+            });
           }
         }
       }
     }
 
+    const hasErrors = errors.length > 0;
     const emissions =
-      row.skippedReason !== null || errors.length > 0 || row.amount === null
+      row.skippedReason !== null || hasErrors || row.amount === null
         ? null
         : row.dataType === 'emissions'
           ? roundEmissions(row.amount)
@@ -563,25 +808,45 @@ export async function previewSupplierImport(
       errors,
       supplierUnitId: supplier?.id ?? null,
       supplierName: supplier?.name ?? null,
-      factor: factor ? toCandidate(factor) : null,
+      factor: factor ? toCandidate(factor, factorReason ?? '', false) : null,
       factorResolution,
-      factorCandidates: factorCandidates.map(toCandidate),
+      factorReason,
+      factorCandidates,
       needsFactorChoice,
+      recommendedFactorCode,
       emissions,
       replacesExisting: supplier ? submittedCodes.has(supplier.code) : false,
+      rawConfidence: rowRawConfidence(
+        row,
+        extract.structure,
+        factorResolution,
+        recommendedFactorCode !== null,
+        hasErrors,
+      ),
     };
   });
 
   return {
     fileName,
-    encoding: decoded.encoding,
+    encoding,
     rows,
     fileErrors,
+    fileNotes,
+    // validCount と needsMappingCount は重ならない集合にする（合算＝取込可能な行数）。
+    // 推薦付きの候補行は既定で推薦係数が選ばれた状態なので「そのまま確定できる」側、
+    // 紐づけ待ちは「人が選ぶまで確定できない行（推薦なし候補のみ）」だけを数える
     validCount: rows.filter(
-      (row) => row.skippedReason === null && row.errors.length === 0 && !row.needsFactorChoice,
+      (row) =>
+        row.skippedReason === null &&
+        row.errors.length === 0 &&
+        (!row.needsFactorChoice || row.recommendedFactorCode !== null),
     ).length,
     needsMappingCount: rows.filter(
-      (row) => row.skippedReason === null && row.errors.length === 0 && row.needsFactorChoice,
+      (row) =>
+        row.skippedReason === null &&
+        row.errors.length === 0 &&
+        row.needsFactorChoice &&
+        row.recommendedFactorCode === null,
     ).length,
   };
 }
@@ -938,6 +1203,69 @@ export async function relinkSupplierFactor(
     relinkedCount: relinkedRows.length,
     result: calculation.result,
   };
+}
+
+// ----------------------------------------------------------------------
+// デモリセット（Demo Mode 専用）
+// ----------------------------------------------------------------------
+
+export interface SupplierDemoResetResult {
+  /** 削除した算定版の件数（初期版は残す） */
+  removedCalculations: number;
+  keptCalculationId: Uuid | null;
+}
+
+/**
+ * サプライヤーデモをやり直せる状態に戻す（Demo Mode 専用）。
+ *
+ * 削除範囲は「この組織 × この期間の Scope3 Cat.1 Data Point に取込・再紐づけで
+ * 積まれた算定版」だけ。初期データ（最初の版）・Data Point 本体・承認履歴・
+ * 他の指標・他のアプリ領域（localStorage 等）には触らない。
+ * Cookie の持ち回りも削除した版の分だけ取り除く。
+ *
+ * Supabase モードでは実行できない（data_point_calculations は追記専用で、
+ * 実運用データの物理削除経路を作らないため）。
+ */
+export async function resetSupplierDemoData(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  reportingPeriodId: Uuid,
+): Promise<SupplierDemoResetResult> {
+  assertCan(ctx, 'enterprise.import.run');
+  assertCan(ctx, 'enterprise.data.write');
+  if (!(db instanceof DemoDbClient)) {
+    throw new ValidationError(
+      'デモリセットは Demo Mode 専用です。実運用データベースでは実行できません。',
+    );
+  }
+
+  const scope3 = await loadScope3Context(db, ctx, reportingPeriodId);
+  if (!scope3.dataPoint) {
+    throw new ValidationError('Scope3 Category 1 の Data Point がこの期間にありません。');
+  }
+  assertUnitInScope(ctx, scope3.dataPoint.unitId);
+
+  // loadScope3Context は calculatedAt 昇順で返す。先頭＝Fixture の初期版を残す
+  const baseline = scope3.calculations[0] ?? null;
+  const toRemove = new Set(scope3.calculations.slice(1).map((c) => c.id));
+  if (toRemove.size === 0) {
+    return { removedCalculations: 0, keptCalculationId: baseline?.id ?? null };
+  }
+
+  const removed = await db.hardDeleteDemoRows('calculations', toRemove);
+
+  // 'data_deleted' は AUDIT_EVENT_TYPES に無い（DB の CHECK と対のため勝手に増やさない）。
+  // デモ限定の巻き戻しなので data_updated ＋ 要約で内容を残す。
+  // resourceId は Data Point（削除した版は複数あり ID を 1 つに決められない）
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_updated',
+    resourceType: 'data_point',
+    resourceId: scope3.dataPoint.id,
+    afterSummary: `Scope3 Cat.1 のサプライヤーデモ算定版をリセット（${removed} 版を削除・初期版は保持）`,
+    metadata: { dataPointId: scope3.dataPoint.id, removedCount: removed },
+  });
+
+  return { removedCalculations: removed, keptCalculationId: baseline?.id ?? null };
 }
 
 // ----------------------------------------------------------------------

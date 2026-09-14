@@ -2069,3 +2069,71 @@ integration ghg-trend 3 / scope3-suppliers 17（3 種別・学習・再紐づけ
 **結果**: 全ゲート通過（unit+integration 645 / RLS 101 / E2E 266 /
 本番スモーク 29）。5198f8b を deploy → terrast-t4d.vercel.app へ
 エイリアス済み。未解決なし。
+
+---
+
+## 2026-09-14 村田製作所向けデモ改善（信頼度80〜97%・20ファイル・係数選択・リセット）
+
+9/15 の村田デモに向けた発注者指示（①デモ信頼度 80〜97%、②Scope3 Cat.1 の
+架空購買データ 20 ファイル、⑤係数候補の選択→算定、⑥リセットと再現性、
+⑦成果物、⑧実投入検証）への対応。
+
+**① デモ信頼度（両取込共通）。** `src/lib/domain/demo-confidence.ts` 新設
+（純粋・決定論。FNV-1a＋固定シード、3 区間折れ線で 90〜96% 中心・±0.02 ゆらぎ、
+80〜97% にクランプ。欠損・NaN・範囲外は変換しない）。適用は
+`src/lib/imports/demo-display.ts` の 1 か所（一般取込 `withDisplayConfidence`／
+サプライヤー `withSupplierDisplayConfidence`／AI 実行記録 `displayRunConfidence`）。
+**raw は保存値のまま・display はレンダ時計算でどこにも保存しない**ため、
+デモ解除後に表示値が実測として復活する経路が構造的に無い。ゲートは
+`getAppMode()==='demo'` のみ（ファイル名判定なし）。対象は正常解析行
+（mapped/confirmed）だけで、要確認・エラー行は実測のまま。デモ画面には
+`DemoSimulationNotice`（「表示スコアはシミュレーション」）を常設。
+承認チェックや取込可否は従来どおり status / errors 判定で、表示値を読まない。
+
+**② 20 ファイル（電子部品メーカー架空購買・Cat.1 cradle-to-gate）。**
+生成器 `scripts/murata-dataset.ts`＋`scripts/generate-murata-dataset.ts`（決定論）。
+SUP-31〜50 の 20 社 × 12 明細 = 240 明細、期間 2025-04〜2026-03、日英混在、
+XLSX 14 / CSV 6（**指示の PDF 4 件は XLSX へ置換**。サプライヤー取込は規則
+ベースの表解析で、PDF 表再構成は OCR 基盤新設＝禁止事項に当たるため。
+総数と内容は維持、manifest・docs に理由を記載）。数量ベース（kg/g/m2/個）＋
+金額ベース（円→千円換算の外注加工）＋製品 CFP（個数×サプライヤー固有係数）。
+係数は DEMO-EF-* 23 本（fixtures へ追加。出所は「架空係数」明示で実在 DB 由来と
+書かない）。ヒント表 `src/lib/domain/scope3-factor-hints.ts`（品目キーワード・
+地域・境界・方式）。出力は `demo-data/murata-scope3-category1/`（upload=20 ファイル
+のみ／reference=manifest・独立計算の正解・デモ係数・デモ為替・検証結果）と
+`public/demo/murata-scope3-cat1-{upload,full}.zip`（suppliers 画面から配布導線）。
+
+**⑤ 係数選択→算定。** 取込フォームを複数ファイル対応へ
+（`files` name・action は旧 `file` も互換受理、25 ファイル上限）。プレビューは
+ファイル別セクション＋全体サマリー（明細数・信頼度 min/avg/max・80〜97% 内割合）。
+候補絞込みは「ヒント付き係数は品目キーワード一致時のみ候補、無ければ従来の
+汎用係数へフォールバック」（旧 EF-STEEL/EF-ALU 2 候補挙動を保持）。推薦は
+生産国一致 → 世界平均 → なし の決定論で、**単位不一致は候補にすら出さない**。
+推薦付き候補行はセレクト初期選択＋既定チェック済み（240 行の手動選択は不要）、
+変更するとクライアントで再計算。推薦なし行（汎用候補のみ）は選ぶまでチェック不可。
+確定はサーバー側でマスター再照合（従来どおり）。実測スコアは決定論ルーブリック
+`rowRawConfidence`（解決方法＋種別列・単位列・生産国の裏取り、単位換算 −0.07）。
+
+**⑥ リセット。** `resetSupplierDemoData`（Demo Mode 専用・DemoDbClient 判定）。
+削除範囲は「当組織×当期間の Scope3 Cat.1 に取込・再紐づけで積まれた算定版のみ」
+（最古の Fixture 初期版・Data Point・承認履歴・他テーブルは保持）。
+`DemoDbClient.hardDeleteDemoRows`（ID 名指しのみ・全消し経路なし）＋
+`removeDemoEditsFor`（Cookie から該当 ID の持ち回りだけ除去。全 Cookie 消去はしない）。
+画面は削除範囲明示＋確認チェック必須。二重投入は「既存の内訳を置き換え」表示＋
+置き換え動作で二重計上しない（既存挙動を検証で確認）。
+
+**検証（⑧）。** 詳細は `demo-data/murata-scope3-category1/reference/verification-results.md`。
+
+- unit+integration **667/667**（村田 13 件含む・human-capital 回帰含む）、RLS 101、build ✓
+- E2E 全件 **267 成功／1 失敗**（既存 spec の文言断言が新表示「単位から一意に
+  決定」へ未追従。断言を更新して該当 spec 再実行 5/5。アプリ変更なし）
+- 実ブラウザで 20 ファイル一括投入→候補選択→240 明細確定→リセット→再投入同値
+  （`zz-murata-demo.spec.ts`、スクリーンショット `test-results/murata-demo/`）
+- 算定は独立計算の正解と 240/240 一致（合計 6,617.2、確定後の一次データ合計 6,760.3）
+- 表示信頼度の実測分布: 最小 84 / 平均 93.4 / 最大 97%、80 台 3 行・90〜96% 229 行・
+  97% 8 行・全 240 行が 80〜97% 内・値 10 種
+- 既知の制約: 240 行の算定版は Cookie 持ち回り上限を超えるため**同一インスタンス内
+  でのみ表示**（known-limitations D-3。デモ台本に運用手順を記載）
+
+**手順書**: `docs/murata-scope3-demo.md`（起動・デモモード・取得・3〜5 分台本・
+リセット・別ブラウザ手順・既知の制約）。

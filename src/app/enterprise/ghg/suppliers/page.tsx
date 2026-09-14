@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ArrowLeft, CircleCheck, Clock, Download, Link2 } from 'lucide-react';
+import { ArrowLeft, CircleCheck, Clock, Download, Link2, RotateCcw } from 'lucide-react';
+import { DemoSimulationNotice } from '@/components/shared/demo-simulation-notice';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -9,11 +10,12 @@ import { Progress } from '@/components/ui/progress';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { getAppMode } from '@/lib/config';
 import { formatNumber } from '@/lib/format/datetime';
 import { buildSupplierDemoFiles } from '@/lib/fixtures/supplier-demo-files';
 import { loadScope3SupplierBreakdown } from '@/lib/services/scope3-suppliers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { relinkSupplierFactorAction } from '../../actions';
+import { relinkSupplierFactorAction, resetSupplierDemoAction } from '../../actions';
 import { SupplierUploadForm } from './supplier-upload-form';
 
 export const metadata = { title: 'サプライヤーデータ取込' };
@@ -89,6 +91,7 @@ export default async function GhgSuppliersPage({
 
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
+        {getAppMode() === 'demo' && <DemoSimulationNotice />}
 
         <div className="grid grid-cols-4 gap-2">
           <Card className="space-y-1 p-2.5">
@@ -133,7 +136,7 @@ export default async function GhgSuppliersPage({
 
         <Card className="overflow-hidden">
           <SectionTitle
-            title="CSV から取り込む（排出量・物理量・金額の素データ）"
+            title="ファイルから取り込む（排出量・物理量・金額の素データ ／ CSV・Excel）"
             action={
               <span className="text-[11px] text-ink-muted">
                 仕訳・原単位の解決は規則ベース（AI 不使用）／ 確定は人が行います
@@ -176,6 +179,74 @@ export default async function GhgSuppliersPage({
             <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
               ダウンロードして、そのまま上の取込へドロップすると自動仕訳を体験できます。
             </p>
+          </Card>
+        )}
+
+        {canImport && getAppMode() === 'demo' && (
+          <Card className="overflow-hidden">
+            <SectionTitle
+              title="Scope3 Cat.1 デモデータセット（電子部品メーカー・20 ファイル 240 明細）"
+              action={<Badge tone="warning">架空データ</Badge>}
+            />
+            <div className="space-y-2 px-3 pb-3">
+              <p className="text-[12px] text-ink-muted">
+                架空の電子部品メーカーを想定した Scope3 カテゴリー1（購入した製品・サービス）の
+                購買データです。20 ファイル（Excel 14 ／ CSV 6・日英混在）に架空サプライヤー 20 社 ×
+                各 12 明細＝240 明細を収録。上の取込へ 20 ファイルまとめてドロップできます。
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/demo/murata-scope3-cat1-upload.zip" download>
+                    <Download aria-hidden="true" />
+                    投入用 ZIP（20 ファイルのみ）
+                  </a>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/demo/murata-scope3-cat1-full.zip" download>
+                    <Download aria-hidden="true" />
+                    一式 ZIP（正解データ・手順書つき）
+                  </a>
+                </Button>
+              </div>
+              <p className="text-[11px] text-ink-muted">
+                収録の係数コード（DEMO-EF-*）・為替レートはすべて架空の説明用で、実算定には使用できません。
+              </p>
+            </div>
+          </Card>
+        )}
+
+        {canImport && getAppMode() === 'demo' && (
+          <Card className="overflow-hidden">
+            <SectionTitle
+              title="デモのリセット（Demo Mode 専用）"
+              action={<Badge tone="warning">取り消せません</Badge>}
+            />
+            <form action={resetSupplierDemoAction} className="space-y-2 px-3 pb-3">
+              <input type="hidden" name="reportingPeriodId" value={shell.currentPeriod.id} />
+              <p className="text-[12px] text-ink-muted">
+                削除範囲: この組織 × {shell.currentPeriod.label} の Scope3 Cat.1
+                に「サプライヤーデータ取込・原単位の再紐づけ」で追記された算定版のみ。
+                初期の算定内訳（版 1）・Data Point 本体・承認履歴・他の指標・ログイン情報・
+                ブラウザの他の保存領域には触りません。
+              </p>
+              <label className="flex items-center gap-1.5 text-[12px] text-ink">
+                <input
+                  type="checkbox"
+                  name="confirmScope"
+                  required
+                  className="size-3.5 accent-brand-600"
+                />
+                上記の削除範囲を確認しました
+              </label>
+              <SubmitButton
+                size="sm"
+                variant="outline"
+                icon={<RotateCcw aria-hidden="true" />}
+                pendingLabel="リセット中…"
+              >
+                取込済みの算定版をリセットする
+              </SubmitButton>
+            </form>
           </Card>
         )}
 

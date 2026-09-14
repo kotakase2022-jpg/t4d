@@ -59,11 +59,12 @@ beforeEach(() => {
   db = new DemoDbClient(fixture);
 });
 
-describe('Scope3 サプライヤー内訳（30 社）', () => {
-  it('提出済み 13 社（金額・物理量・報告排出量の混在）と未提出 17 社を区別して返す', async () => {
+describe('Scope3 サプライヤー内訳（50 社）', () => {
+  it('提出済み 13 社（金額・物理量・報告排出量の混在）と未提出 37 社を区別して返す', async () => {
     const breakdown = await loadScope3SupplierBreakdown(db, manager(), PERIOD_IDS.fy2026);
 
-    expect(breakdown.suppliers).toHaveLength(30);
+    // 30 社デモ + 村田デモ用の架空サプライヤー SUP-31〜50
+    expect(breakdown.suppliers).toHaveLength(50);
     const submitted = breakdown.suppliers.filter((s) => s.submitted);
     expect(submitted.map((s) => s.code)).toEqual([
       'SUP-01',
@@ -80,7 +81,7 @@ describe('Scope3 サプライヤー内訳（30 社）', () => {
       'SUP-14',
       'SUP-15',
     ]);
-    expect(breakdown.suppliers.filter((s) => !s.submitted)).toHaveLength(17);
+    expect(breakdown.suppliers.filter((s) => !s.submitted)).toHaveLength(37);
 
     // 一次データ合計 = 金額 53.3 + 物理量 61.0 + 報告排出量 28.8
     expect(breakdown.primaryTotal).toBe(143.1);

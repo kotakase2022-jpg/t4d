@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.png binary
+# 村田デモの投入ファイルはバイト列を固定する（manifest の sha256 と一致させる）
+demo-data/** -text
+public/demo/*.zip binary

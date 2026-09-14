@@ -1,0 +1,347 @@
+{
+  "dataset": "murata-scope3-category1",
+  "generatedBy": "scripts/generate-murata-dataset.ts（決定論・再実行で同一内容）",
+  "notice": "すべて架空のデモデータです。実在のサプライヤー・実測データ・第三者検証済みデータではありません。係数（DEMO-EF-*）は架空の説明用係数で、実算定には使用できません。",
+  "period": "2025-04-01〜2026-03-31（架空年度）",
+  "fileCount": 20,
+  "detailRowTotal": 240,
+  "detailRowDefinition": "明細行 = 取込対象行（合計行・注記行・前置き行を除く）。各ファイル 12 行 × 20 ファイル = 240 行。",
+  "expectedGrandTotalTco2e": 6617.2,
+  "files": [
+    {
+      "fileName": "01_白鳳化学工業_納入実績_2025年度.xlsx",
+      "sha256": "8e224e1b7e2085e361794bf976ada3634cb157b40a395f8991eb0c852e722db8",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日本語",
+      "supplierCode": "SUP-31",
+      "supplierName": "白鳳化学工業",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 380.4,
+      "specialRows": []
+    },
+    {
+      "fileName": "02_燕青チタン工業_出荷明細_FY2025.csv",
+      "sha256": "44f6f0f2521ed8f92faf0b15ccd062b992aefb6859c2f511e69a98582960e8ae",
+      "format": "CSV",
+      "encoding": "UTF-8 BOM",
+      "language": "日本語",
+      "supplierCode": "SUP-32",
+      "supplierName": "燕青チタン工業",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 452.3,
+      "specialRows": []
+    },
+    {
+      "fileName": "03_深山金属粉体_purchase_ledger_FY2025.xlsx",
+      "sha256": "fd257b3a317238fab341ac12fd585ed59a4bd817ac499d0b2e035157cbd82afa",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日英混在",
+      "supplierCode": "SUP-33",
+      "supplierName": "深山金属粉体",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）。末尾 2 行は係数コード空欄（候補から選ぶデモ）",
+      "expectedTotalTco2e": 299.2,
+      "specialRows": [
+        {
+          "item": "ニッケル超微粉 NP-20（試作グレード）",
+          "resolution": "recommended",
+          "expectedFactorCode": "DEMO-EF-NI-JP-KG"
+        },
+        {
+          "item": "ニッケル粉末 NP-80（海外調達枠）",
+          "resolution": "recommended",
+          "expectedFactorCode": "DEMO-EF-NI-GLB-KG"
+        }
+      ]
+    },
+    {
+      "fileName": "04_旭峰銅材_購買明細_2025.xlsx",
+      "sha256": "02e42b11cf28b4b8dc7b689e7eae21a66beae8e3487ae746cb460f47bf2cfff0",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日本語",
+      "supplierCode": "SUP-34",
+      "supplierName": "旭峰銅材",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 276.3,
+      "specialRows": []
+    },
+    {
+      "fileName": "05_琥山電子材料_納品実績_FY2025.csv",
+      "sha256": "038c6e8c29312622109134989389804fc694aa4207ae39708f8d8809cc0b87c3",
+      "format": "CSV",
+      "encoding": "UTF-8 BOM",
+      "language": "日本語",
+      "supplierCode": "SUP-35",
+      "supplierName": "琥山電子材料",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（g 表記 → kg 換算 × 架空係数）",
+      "expectedTotalTco2e": 131,
+      "specialRows": []
+    },
+    {
+      "fileName": "06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx",
+      "sha256": "7d3156324290f5a3f1e1fa72823e8fa546b3868e58004448806c228dc8fbce98",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "英語",
+      "supplierCode": "SUP-36",
+      "supplierName": "Taihoku Ferrite Materials Co.",
+      "supplierCountry": "台湾",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 428.1,
+      "specialRows": []
+    },
+    {
+      "fileName": "07_Hanbit_Magnetic_Alloys_deliveries_FY2025.csv",
+      "sha256": "7f3b75733c3fcec38c2138f4df702bca31fbe560fa4b725e95869fa6b4fadab4",
+      "format": "CSV",
+      "encoding": "UTF-8 BOM",
+      "language": "英語",
+      "supplierCode": "SUP-37",
+      "supplierName": "Hanbit Magnetic Alloys Co.",
+      "supplierCountry": "韓国",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 355.4,
+      "specialRows": []
+    },
+    {
+      "fileName": "08_近江マグネットワイヤ_出荷実績_2025年度.xlsx",
+      "sha256": "6a8ff6b77f206ee6d7df1c0e8249654be61964d2b5a9db6c80903fbd9f06d259",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日本語",
+      "supplierCode": "SUP-38",
+      "supplierName": "近江マグネットワイヤ",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 372,
+      "specialRows": []
+    },
+    {
+      "fileName": "09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx",
+      "sha256": "54dfbb2f13ed9ca3d53b806ae2e20342d7ee06e346f6a9162151852bd3026ef9",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "英語",
+      "supplierCode": "SUP-39",
+      "supplierName": "Penang Advanced Ceramics Sdn. Bhd.",
+      "supplierCountry": "マレーシア",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）。末尾 2 行は係数コード空欄（候補から選ぶデモ）",
+      "expectedTotalTco2e": 437.4,
+      "specialRows": [
+        {
+          "item": "High-purity alumina powder AL-9N",
+          "resolution": "recommended",
+          "expectedFactorCode": "DEMO-EF-ALUMINA-MY-KG"
+        },
+        {
+          "item": "Alumina base powder AL-5N",
+          "resolution": "recommended",
+          "expectedFactorCode": "DEMO-EF-ALUMINA-GLB-KG"
+        }
+      ]
+    },
+    {
+      "fileName": "10_South_China_Precision_Substrate_supply_FY2025.xlsx",
+      "sha256": "585ecdb440ff5ebe9787c8c9d7095219d203e1aeb28971dce20ae62c1ef5995f",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日英混在",
+      "supplierCode": "SUP-40",
+      "supplierName": "華南精密基板有限公司",
+      "supplierCountry": "中国",
+      "detailRows": 12,
+      "method": "数量ベース（m2 × 架空係数）",
+      "expectedTotalTco2e": 367,
+      "specialRows": []
+    },
+    {
+      "fileName": "11_千曲樹脂化学_納入明細_FY2025.csv",
+      "sha256": "51790cb195f12146652ed88192a5b142c575d93427aef6ddd284bed46ca1c2e7",
+      "format": "CSV",
+      "encoding": "Shift_JIS",
+      "language": "日本語",
+      "supplierCode": "SUP-41",
+      "supplierName": "千曲樹脂化学",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 165,
+      "specialRows": []
+    },
+    {
+      "fileName": "12_蘇河化学材料_出荷明細_2025年度.xlsx",
+      "sha256": "0e60f886800b4202d4258861824ae674f332fbbcc09b3e3ff341370617a67f7c",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日英混在",
+      "supplierCode": "SUP-42",
+      "supplierName": "蘇河化学材料有限公司",
+      "supplierCountry": "中国",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 212.3,
+      "specialRows": []
+    },
+    {
+      "fileName": "13_霞浦フィルム工業_納品実績_FY2025.xlsx",
+      "sha256": "01c1ccbcf10e860a1fd2eff4a3d99c63b35c33656f27e29667d6135a048b7a15",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日本語",
+      "supplierCode": "SUP-43",
+      "supplierName": "霞浦フィルム工業",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 249.5,
+      "specialRows": []
+    },
+    {
+      "fileName": "14_Formosa_LCP_Films_shipment_FY2025.csv",
+      "sha256": "d625a92fd88d2ec981f2c1080e2a77a9dd7c858f4bc0fc11203e6036cb1e1457",
+      "format": "CSV",
+      "encoding": "UTF-8 BOM",
+      "language": "英語",
+      "supplierCode": "SUP-44",
+      "supplierName": "Formosa LCP Films Co.",
+      "supplierCountry": "台湾",
+      "detailRows": 12,
+      "method": "数量ベース（m2 × 架空係数）",
+      "expectedTotalTco2e": 298,
+      "specialRows": []
+    },
+    {
+      "fileName": "15_深圳華聯電路板_納入実績_FY2025.xlsx",
+      "sha256": "0ad81d98f3507747a62330fab76119e3afce0dfd9d4ea171e76040af3ca43f88",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日英混在",
+      "supplierCode": "SUP-45",
+      "supplierName": "深圳華聯電路板有限公司",
+      "supplierCountry": "中国",
+      "detailRows": 12,
+      "method": "数量ベース（m2 × 架空係数）。末尾 2 行は係数コード空欄（候補から選ぶデモ・3 候補あり）",
+      "expectedTotalTco2e": 543.8,
+      "specialRows": [
+        {
+          "item": "HTCC セラミック基板 CS-88",
+          "resolution": "recommended",
+          "expectedFactorCode": "DEMO-EF-CERSUB-CN-M2"
+        },
+        {
+          "item": "高密度プリント基板 PW-1608HD",
+          "resolution": "recommended",
+          "expectedFactorCode": "DEMO-EF-PCB-CN-M2"
+        }
+      ]
+    },
+    {
+      "fileName": "16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx",
+      "sha256": "d86de43e12d54d379ff422790ecfc8218107f1fd9e6e2eddd589287da1a57929",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "英語",
+      "supplierCode": "SUP-46",
+      "supplierName": "Hsinchu Micro Devices Co.",
+      "supplierCountry": "台湾",
+      "detailRows": 12,
+      "method": "製品CFP（個 × サプライヤー固有の架空 CFP 係数）",
+      "expectedTotalTco2e": 952.6,
+      "specialRows": []
+    },
+    {
+      "fileName": "17_常磐圧電結晶_製品CFP報告_2025年度.xlsx",
+      "sha256": "adabf4f365b747faccf7c8ff5ce3ba1fb8a27e1989f1ce1da2091dea6de938a0",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日本語",
+      "supplierCode": "SUP-47",
+      "supplierName": "常磐圧電結晶",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "製品CFP（個 × サプライヤー固有の架空 CFP 係数）",
+      "expectedTotalTco2e": 379.2,
+      "specialRows": []
+    },
+    {
+      "fileName": "18_早川テープ工業_出荷明細_FY2025.csv",
+      "sha256": "0b56dd2547eea42b281eb4a2d31c51f36cf6d10bdc6f743cfe97934c3db97a1b",
+      "format": "CSV",
+      "encoding": "UTF-8 BOM",
+      "language": "日本語",
+      "supplierCode": "SUP-48",
+      "supplierName": "早川テープ工業",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）",
+      "expectedTotalTco2e": 112.1,
+      "specialRows": []
+    },
+    {
+      "fileName": "19_みずほ紙器工業_納品実績_FY2025.xlsx",
+      "sha256": "193252b323b6114d0e4f2275446686fb1145140ea0b68ce580efd3e6400c1210",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日本語",
+      "supplierCode": "SUP-49",
+      "supplierName": "みずほ紙器工業",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "数量ベース（kg × 架空係数）＋ 金額ベース 2 行（係数コード空欄・推薦なし → 汎用係数から人が選択）",
+      "expectedTotalTco2e": 97.2,
+      "specialRows": [
+        {
+          "item": "梱包用副資材一式（上期）",
+          "resolution": "manual",
+          "expectedFactorCode": "EF-PUR-PACK"
+        },
+        {
+          "item": "梱包用副資材一式（下期）",
+          "resolution": "manual",
+          "expectedFactorCode": "EF-PUR-PACK"
+        }
+      ]
+    },
+    {
+      "fileName": "20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx",
+      "sha256": "51c52b6e896a685728814ed40ffb0cace0a125e7ba407529cb524bb86c95aaa1",
+      "format": "XLSX",
+      "encoding": "—",
+      "language": "日本語",
+      "supplierCode": "SUP-50",
+      "supplierName": "播磨精密加工サービス",
+      "supplierCountry": "日本",
+      "detailRows": 12,
+      "method": "金額ベース（円表記 → 千円換算 × 架空係数）。外注加工費のみで、支給材の負荷は含まない境界",
+      "expectedTotalTco2e": 108.4,
+      "specialRows": [
+        {
+          "item": "外注加工 追加試作（2月度）",
+          "resolution": "auto",
+          "expectedFactorCode": "DEMO-EF-MACHINING-JP-KJPY"
+        },
+        {
+          "item": "外注加工 金型メンテナンス（3月度）",
+          "resolution": "auto",
+          "expectedFactorCode": "DEMO-EF-MACHINING-JP-KJPY"
+        }
+      ]
+    }
+  ]
+}

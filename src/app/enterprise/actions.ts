@@ -9,10 +9,13 @@ import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorizatio
 import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
+import { withDisplayConfidence, withSupplierDisplayConfidence } from '@/lib/imports/demo-display';
 import {
   confirmSupplierImport,
   previewSupplierImport,
   relinkSupplierFactor,
+  resetSupplierDemoData,
+  SUPPLIER_IMPORT_EXTENSIONS,
   type SupplierImportPreview,
   type SupplierRowDecision,
 } from '@/lib/services/scope3-suppliers';
@@ -185,21 +188,23 @@ export async function uploadFilesAction(
           name: f.originalName,
           message: f.parseMessage ?? '解析できませんでした',
         })),
-      rows: rows
-        .filter((row) => row.status !== 'confirmed' && row.status !== 'rejected')
-        .map((row) => ({
-          id: row.id,
-          rowIndex: row.rowIndex,
-          raw: row.raw,
-          sourceLocator: row.sourceLocator,
-          metricId: row.metricId,
-          unitId: row.unitId,
-          value: row.value,
-          unitOfMeasure: row.unitOfMeasure,
-          confidence: row.confidence,
-          warnings: row.warnings,
-          status: row.status,
-        })),
+      rows: withDisplayConfidence(
+        rows
+          .filter((row) => row.status !== 'confirmed' && row.status !== 'rejected')
+          .map((row) => ({
+            id: row.id,
+            rowIndex: row.rowIndex,
+            raw: row.raw,
+            sourceLocator: row.sourceLocator,
+            metricId: row.metricId,
+            unitId: row.unitId,
+            value: row.value,
+            unitOfMeasure: row.unitOfMeasure,
+            confidence: row.confidence,
+            warnings: row.warnings,
+            status: row.status,
+          })),
+      ),
     },
   };
 }
@@ -248,10 +253,13 @@ export async function confirmImportAction(formData: FormData): Promise<void> {
 // サプライヤーデータ取込（GHG Scope3）
 // ----------------------------------------------------------------------
 
-/** サプライヤー CSV の解析結果。プレビューは行の内容ごとクライアントへ返す */
+/** サプライヤーファイルの解析結果。プレビューはファイル別にクライアントへ返す */
 export type SupplierUploadResult =
-  | { ok: true; preview: SupplierImportPreview; reportingPeriodId: string }
+  | { ok: true; previews: SupplierImportPreview[]; reportingPeriodId: string }
   | { ok: false; message: string };
+
+/** 20 ファイル一括デモ＋余裕。無制限にすると 1 リクエストの解析時間が読めない */
+const MAX_SUPPLIER_FILES = 25;
 
 export async function previewSupplierImportAction(
   _previous: SupplierUploadResult | null,
@@ -261,29 +269,45 @@ export async function previewSupplierImportAction(
   const db = await getDb();
 
   const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
-  const file = formData.get('file');
-  if (!(file instanceof File) || file.size === 0) {
+  // 複数選択（files）が基本。旧フォーム互換で単一（file）も受ける
+  const files = [...formData.getAll('files'), formData.get('file')].filter(
+    (f): f is File => f instanceof File && f.size > 0,
+  );
+  if (files.length === 0) {
     return { ok: false, message: 'ファイルが選択されていません。' };
   }
-  if (file.size > 5 * 1024 * 1024) {
-    return { ok: false, message: 'ファイルは 5MB までです。' };
+  if (files.length > MAX_SUPPLIER_FILES) {
+    return { ok: false, message: `一度に取り込めるのは ${MAX_SUPPLIER_FILES} ファイルまでです。` };
   }
-  if (!/\.(csv|tsv|txt)$/i.test(file.name)) {
-    return {
-      ok: false,
-      message: 'CSV 形式（.csv / .tsv / .txt）のファイルをドロップしてください。',
-    };
+  for (const file of files) {
+    if (file.size > 5 * 1024 * 1024) {
+      return { ok: false, message: `「${file.name}」が 5MB を超えています。` };
+    }
+    if (!SUPPLIER_IMPORT_EXTENSIONS.test(file.name)) {
+      return {
+        ok: false,
+        message: `「${file.name}」は未対応の形式です。CSV（.csv / .tsv / .txt）または Excel（.xlsx / .xlsm）を選択してください。`,
+      };
+    }
   }
 
   try {
-    const preview = await previewSupplierImport(
-      db,
-      ctx,
-      reportingPeriodId,
-      file.name,
-      new Uint8Array(await file.arrayBuffer()),
-    );
-    return { ok: true, preview, reportingPeriodId };
+    // 逐次解析（Excel 解析はメモリを使うため並列にしない）
+    const previews: SupplierImportPreview[] = [];
+    for (const file of files) {
+      const preview = await previewSupplierImport(
+        db,
+        ctx,
+        reportingPeriodId,
+        file.name,
+        new Uint8Array(await file.arrayBuffer()),
+      );
+      previews.push({
+        ...preview,
+        rows: withSupplierDisplayConfidence(preview.fileName, preview.rows),
+      });
+    }
+    return { ok: true, previews, reportingPeriodId };
   } catch (error) {
     if (isUserFacingError(error)) return { ok: false, message: error.message };
     throw error;
@@ -321,6 +345,32 @@ export async function confirmSupplierImportAction(formData: FormData): Promise<v
     revalidatePath('/enterprise/ghg/suppliers');
     redirect(
       `/enterprise/ghg/suppliers?flash=supplierImported&added=${result.addedSuppliers.length}&replaced=${result.replacedSuppliers.length}&total=${result.result}`,
+    );
+  });
+}
+
+/**
+ * サプライヤーデモのリセット（Demo Mode 専用）。
+ * 削除範囲は Scope3 Cat.1 の取込で積まれた算定版のみ（初期版は残す）。
+ * 画面側で削除範囲の確認チェックを必須にしている。
+ */
+export async function resetSupplierDemoAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+
+  const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
+  if (formData.get('confirmScope') !== 'on') {
+    redirect(
+      `/enterprise/ghg/suppliers?error=${encodeURIComponent('削除範囲を確認のうえ、チェックを入れてから実行してください。')}`,
+    );
+  }
+
+  await withUserFacingError('/enterprise/ghg/suppliers', async () => {
+    const result = await resetSupplierDemoData(db, ctx, reportingPeriodId);
+    revalidatePath('/enterprise/ghg');
+    revalidatePath('/enterprise/ghg/suppliers');
+    redirect(
+      `/enterprise/ghg/suppliers?flash=supplierDemoReset&removed=${result.removedCalculations}`,
     );
   });
 }

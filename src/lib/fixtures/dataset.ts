@@ -89,6 +89,26 @@ export const UNIT_IDS = {
   sup28: fid('unit', 'AOMI/SUP-28'),
   sup29: fid('unit', 'AOMI/SUP-29'),
   sup30: fid('unit', 'AOMI/SUP-30'),
+  sup31: fid('unit', 'AOMI/SUP-31'),
+  sup32: fid('unit', 'AOMI/SUP-32'),
+  sup33: fid('unit', 'AOMI/SUP-33'),
+  sup34: fid('unit', 'AOMI/SUP-34'),
+  sup35: fid('unit', 'AOMI/SUP-35'),
+  sup36: fid('unit', 'AOMI/SUP-36'),
+  sup37: fid('unit', 'AOMI/SUP-37'),
+  sup38: fid('unit', 'AOMI/SUP-38'),
+  sup39: fid('unit', 'AOMI/SUP-39'),
+  sup40: fid('unit', 'AOMI/SUP-40'),
+  sup41: fid('unit', 'AOMI/SUP-41'),
+  sup42: fid('unit', 'AOMI/SUP-42'),
+  sup43: fid('unit', 'AOMI/SUP-43'),
+  sup44: fid('unit', 'AOMI/SUP-44'),
+  sup45: fid('unit', 'AOMI/SUP-45'),
+  sup46: fid('unit', 'AOMI/SUP-46'),
+  sup47: fid('unit', 'AOMI/SUP-47'),
+  sup48: fid('unit', 'AOMI/SUP-48'),
+  sup49: fid('unit', 'AOMI/SUP-49'),
+  sup50: fid('unit', 'AOMI/SUP-50'),
   sotenHq: fid('unit', 'SOTEN/HQ'),
 } as const;
 
@@ -1248,6 +1268,28 @@ const AOMI_UNITS: UnitSpec[] = [
       [UNIT_IDS.sup28, 'SUP-28', '若狭台金属表面処理'],
       [UNIT_IDS.sup29, 'SUP-29', 'かささぎ電子材料'],
       [UNIT_IDS.sup30, 'SUP-30', '汐見台運輸倉庫'],
+      // SUP-31〜50: 村田製作所向けデモ（電子部品材料の架空サプライヤー 20 社）。
+      // Cat.1 デモデータ 20 ファイル（demo-data/murata-scope3-category1）と 1 社 1 ファイルで対応
+      [UNIT_IDS.sup31, 'SUP-31', '白鳳化学工業'],
+      [UNIT_IDS.sup32, 'SUP-32', '燕青チタン工業'],
+      [UNIT_IDS.sup33, 'SUP-33', '深山金属粉体'],
+      [UNIT_IDS.sup34, 'SUP-34', '旭峰銅材'],
+      [UNIT_IDS.sup35, 'SUP-35', '琥山電子材料'],
+      [UNIT_IDS.sup36, 'SUP-36', 'Taihoku Ferrite Materials Co.', 'TW'],
+      [UNIT_IDS.sup37, 'SUP-37', 'Hanbit Magnetic Alloys Co.', 'KR'],
+      [UNIT_IDS.sup38, 'SUP-38', '近江マグネットワイヤ'],
+      [UNIT_IDS.sup39, 'SUP-39', 'Penang Advanced Ceramics Sdn. Bhd.', 'MY'],
+      [UNIT_IDS.sup40, 'SUP-40', '華南精密基板有限公司', 'CN'],
+      [UNIT_IDS.sup41, 'SUP-41', '千曲樹脂化学'],
+      [UNIT_IDS.sup42, 'SUP-42', '蘇河化学材料有限公司', 'CN'],
+      [UNIT_IDS.sup43, 'SUP-43', '霞浦フィルム工業'],
+      [UNIT_IDS.sup44, 'SUP-44', 'Formosa LCP Films Co.', 'TW'],
+      [UNIT_IDS.sup45, 'SUP-45', '深圳華聯電路板有限公司', 'CN'],
+      [UNIT_IDS.sup46, 'SUP-46', 'Hsinchu Micro Devices Co.', 'TW'],
+      [UNIT_IDS.sup47, 'SUP-47', '常磐圧電結晶'],
+      [UNIT_IDS.sup48, 'SUP-48', '早川テープ工業'],
+      [UNIT_IDS.sup49, 'SUP-49', 'みずほ紙器工業'],
+      [UNIT_IDS.sup50, 'SUP-50', '播磨精密加工サービス'],
     ] as Array<[string, string, string, string?]>
   ).map(([id, code, name, countryCode]): UnitSpec => ({
     id,
@@ -1256,15 +1298,37 @@ const AOMI_UNITS: UnitSpec[] = [
     unitType: 'supplier',
     countryCode: countryCode ?? 'JP',
     currencyCode:
-      countryCode === 'US' ? 'USD' : countryCode === 'GB' ? 'GBP' : countryCode ? 'EUR' : 'JPY',
+      countryCode === 'US'
+        ? 'USD'
+        : countryCode === 'GB'
+          ? 'GBP'
+          : countryCode === 'CN'
+            ? 'CNY'
+            : countryCode === 'TW'
+              ? 'TWD'
+              : countryCode === 'KR'
+                ? 'KRW'
+                : countryCode === 'MY'
+                  ? 'MYR'
+                  : countryCode
+                    ? 'EUR'
+                    : 'JPY',
     timezone:
       countryCode === 'US'
         ? 'America/New_York'
         : countryCode === 'GB'
           ? 'Europe/London'
-          : countryCode
-            ? 'Europe/Berlin'
-            : 'Asia/Tokyo',
+          : countryCode === 'CN'
+            ? 'Asia/Shanghai'
+            : countryCode === 'TW'
+              ? 'Asia/Taipei'
+              : countryCode === 'KR'
+                ? 'Asia/Seoul'
+                : countryCode === 'MY'
+                  ? 'Asia/Kuala_Lumpur'
+                  : countryCode
+                    ? 'Europe/Berlin'
+                    : 'Asia/Tokyo',
     consolidationMethod: 'excluded',
     ownershipPercent: 0,
     parent: 'hq',
@@ -1954,6 +2018,56 @@ export const EMISSION_FACTOR_SPECS: Array<{
     activityUnit: 'kg',
     factorYear: 2025,
   },
+  // ------------------------------------------------------------------
+  // 村田製作所向けデモ（電子部品材料）の架空原単位。
+  // すべて DEMO- 接頭辞＋「架空係数」明示。実在 DB（IDEA 等）由来ではない。
+  // 品目キーワード・地域・境界は domain/scope3-factor-hints.ts が対で持つ
+  // ------------------------------------------------------------------
+  ...(
+    [
+      ['DEMO-EF-BACO3-JP-KG', '高純度炭酸バリウム（日本・重量ベース）', 0.0029, 'kg'],
+      ['DEMO-EF-TIO2-JP-KG', '高純度酸化チタン（日本・重量ベース）', 0.0052, 'kg'],
+      ['DEMO-EF-NI-JP-KG', '微粒ニッケル粉末（日本・重量ベース）', 0.0089, 'kg'],
+      ['DEMO-EF-NI-GLB-KG', '微粒ニッケル粉末（世界平均・重量ベース）', 0.0125, 'kg'],
+      ['DEMO-EF-CU-GLB-KG', '銅粉末（世界平均・重量ベース）', 0.0041, 'kg'],
+      ['DEMO-EF-AGPASTE-JP-KG', '銀系導電ペースト（日本・重量ベース）', 0.032, 'kg'],
+      ['DEMO-EF-FERRITE-TW-KG', 'フェライト材料（台湾・重量ベース）', 0.0038, 'kg'],
+      ['DEMO-EF-ALLOY-KR-KG', '磁性合金粉末（韓国・重量ベース）', 0.0067, 'kg'],
+      ['DEMO-EF-MAGWIRE-JP-KG', 'エナメル銅線（日本・重量ベース）', 0.0049, 'kg'],
+      ['DEMO-EF-ALUMINA-GLB-KG', '高純度アルミナ（世界平均・重量ベース）', 0.0061, 'kg'],
+      ['DEMO-EF-ALUMINA-MY-KG', '高純度アルミナ（マレーシア・重量ベース）', 0.0046, 'kg'],
+      ['DEMO-EF-CERSUB-CN-M2', 'セラミック基板（中国・面積ベース）', 0.018, 'm2'],
+      ['DEMO-EF-RESIN-JP-KG', 'バインダー樹脂（日本・重量ベース）', 0.0035, 'kg'],
+      ['DEMO-EF-SOLVENT-CN-KG', '製造工程用溶剤（中国・重量ベース）', 0.0018, 'kg'],
+      ['DEMO-EF-PETFILM-JP-KG', 'PET離型フィルム（日本・重量ベース）', 0.0028, 'kg'],
+      ['DEMO-EF-LCP-TW-M2', 'LCPフィルム（台湾・面積ベース）', 0.0094, 'm2'],
+      ['DEMO-EF-PCB-CN-M2', 'プリント基板（中国・面積ベース）', 0.062, 'm2'],
+      ['DEMO-EF-PCB-GLB-M2', 'プリント基板（世界平均・面積ベース）', 0.055, 'm2'],
+      [
+        'DEMO-EF-CFP-IC-PC',
+        '製品CFP: モジュール用IC（サプライヤー固有・個数ベース）',
+        0.0011,
+        '個',
+      ],
+      [
+        'DEMO-EF-CFP-PIEZO-PC',
+        '製品CFP: 圧電ウエハー（サプライヤー固有・個数ベース）',
+        0.0024,
+        '個',
+      ],
+      ['DEMO-EF-TAPE-JP-KG', 'キャリアテープ（日本・重量ベース）', 0.0026, 'kg'],
+      ['DEMO-EF-CARDBOARD-JP-KG', '段ボール包装材（日本・重量ベース）', 0.0011, 'kg'],
+      ['DEMO-EF-MACHINING-JP-KJPY', '外注加工サービス（日本・金額ベース）', 0.00058, '千円'],
+    ] as Array<[string, string, number, string]>
+  ).map(([code, name, factorValue, activityUnit]) => ({
+    code,
+    name,
+    category: code.includes('MACHINING') ? 'purchased_services' : 'purchased_goods',
+    factorValue,
+    factorUnit: `t-CO2e/${activityUnit}`,
+    activityUnit,
+    factorYear: 2025,
+  })),
 ];
 
 /** サプライヤーの一次データ種別（素データ = 金額・物理量、または報告排出量） */

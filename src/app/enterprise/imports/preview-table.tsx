@@ -153,17 +153,29 @@ export function ImportPreviewTable({
                     />
                   </TD>
                   <TD>
-                    <span
-                      className={
-                        row.confidence >= 0.7
-                          ? 'tnum text-success'
-                          : row.confidence >= 0.4
-                            ? 'tnum text-[#8a5d00]'
-                            : 'tnum text-danger'
-                      }
-                    >
-                      {Math.round(row.confidence * 100)}%
-                    </span>
+                    {(() => {
+                      // 表示値はデモ変換済みの displayConfidence（無い場合は実測）。
+                      // シミュレーション時も元スコアを title で追跡できるようにする
+                      const shown = row.displayConfidence ?? row.confidence;
+                      return (
+                        <span
+                          title={
+                            row.confidenceSource === 'demo_simulated'
+                              ? `実測スコア ${Math.round(row.confidence * 100)}%（表示はデモ用シミュレーション）`
+                              : undefined
+                          }
+                          className={
+                            shown >= 0.7
+                              ? 'tnum text-success'
+                              : shown >= 0.4
+                                ? 'tnum text-[#8a5d00]'
+                                : 'tnum text-danger'
+                          }
+                        >
+                          {Math.round(shown * 100)}%
+                        </span>
+                      );
+                    })()}
                   </TD>
                   <TD>
                     <Badge tone={status?.tone ?? 'neutral'}>{status?.label}</Badge>

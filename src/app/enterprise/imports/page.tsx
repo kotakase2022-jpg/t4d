@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ClipboardPaste, FileSpreadsheet, FileText } from 'lucide-react';
 import { JobStatusBadge } from '@/components/shared/badges';
 import { UploadForm } from './upload-form';
+import { DemoSimulationNotice } from '@/components/shared/demo-simulation-notice';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import { Textarea } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { getAppMode } from '@/lib/config';
 import { formatJst } from '@/lib/format/datetime';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { pasteImportAction } from '../actions';
@@ -53,6 +55,7 @@ export default async function ImportsPage() {
       />
 
       <div className="space-y-3 p-4">
+        {getAppMode() === 'demo' && <DemoSimulationNotice />}
         {can(ctx, 'enterprise.import.run') && (
           <Card>
             <SectionTitle

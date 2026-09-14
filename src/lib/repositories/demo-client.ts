@@ -1,5 +1,5 @@
 import { getDemoDb, type FixtureDb } from '@/lib/fixtures/store';
-import { appendDemoEdit, isPersistedTable } from './demo-persistence';
+import { appendDemoEdit, isPersistedTable, removeDemoEditsFor } from './demo-persistence';
 import {
   applyQuery,
   matchesQueryFilters,
@@ -95,5 +95,26 @@ export class DemoDbClient implements DbClient {
 
   async softDelete<K extends TableName>(table: K, id: Uuid, at: string): Promise<void> {
     await this.update(table, id, { deletedAt: at } as unknown as Partial<Row<K>>);
+  }
+
+  /**
+   * デモリセット専用の物理削除。DbClient の契約（物理削除なし）には載せず、
+   * Demo Mode（インメモリ Fixture ＋ demo-edits Cookie）の名前空間だけで完結させる。
+   * Supabase 側に同等の操作は無い（追記専用テーブルは本番では巻き戻さない）。
+   * 対象は ID を名指しした行のみ。テーブル全消しの経路は作らない。
+   */
+  async hardDeleteDemoRows<K extends TableName>(
+    table: K,
+    ids: ReadonlySet<string>,
+  ): Promise<number> {
+    const target = this.table(table) as unknown as Array<{ id?: string }>;
+    const before = target.length;
+    for (let i = target.length - 1; i >= 0; i -= 1) {
+      const id = target[i]?.id;
+      if (id && ids.has(id)) target.splice(i, 1);
+    }
+    // Cookie の持ち回りからも同じ行だけを取り除く（消した行が別インスタンスで蘇らないように）
+    await removeDemoEditsFor(table, ids);
+    return before - target.length;
   }
 }

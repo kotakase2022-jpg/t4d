@@ -142,7 +142,7 @@ test('素データ（独式・物理量/金額混在）を自動仕訳し、原�
   // kWh は原単位が単位から自動解決される（28,400 kWh × 0.000434 = 12.3）
   const autoRow = page.locator('tr', { hasText: '曙光電機' }).first();
   await expect(autoRow.getByText('物理量')).toBeVisible();
-  await expect(autoRow.getByText('単位から自動')).toBeVisible();
+  await expect(autoRow.getByText('単位から一意に決定')).toBeVisible();
   await expect(autoRow.getByText('12.3')).toBeVisible();
 
   // kg は鋼材・アルミの 2 候補 → 紐づけ待ち。人が選んでチェックする
@@ -195,5 +195,7 @@ test('確定済みの素データ行は「原単位の紐づけ状況」から�
     .filter({ has: page.getByRole('columnheader', { name: '現在の原単位' }) })
     .locator('tr', { hasText: 'ひなた包装' })
     .first();
-  await expect(relinked.getByRole('cell', { name: 'アルミ材（重量ベース）EF-ALU-KG' })).toBeVisible();
+  await expect(
+    relinked.getByRole('cell', { name: 'アルミ材（重量ベース）EF-ALU-KG' }),
+  ).toBeVisible();
 });

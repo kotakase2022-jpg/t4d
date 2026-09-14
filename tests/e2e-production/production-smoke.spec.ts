@@ -556,6 +556,17 @@ test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({
   await expect(main.getByText(/排出量原単位（排出係数）マスター/)).toBeVisible();
   await expect(main.getByText(/排出量原単位の紐づけ状況/)).toBeVisible();
   await expect(main.getByText(/デモ用サンプルファイル/)).toBeVisible();
+
+  // 村田デモ: デモ表示の注記・20 ファイルデータセットの取得導線・リセットカード
+  // （リセットの実行はしない。本番デモの状態を壊さない）
+  await expect(
+    main.getByText('デモ環境｜サンプルデータ・表示スコアはシミュレーション').first(),
+  ).toBeVisible();
+  await expect(main.getByRole('link', { name: /投入用 ZIP（20 ファイルのみ）/ })).toBeVisible();
+  await expect(main.getByText('デモのリセット（Demo Mode 専用）')).toBeVisible();
+  const zipResponse = await page.request.get(`${BASE}/demo/murata-scope3-cat1-upload.zip`);
+  expect(zipResponse.status()).toBe(200);
+  expect((await zipResponse.body()).length).toBeGreaterThan(50_000);
 });
 
 test('本番: デモシナリオが SSBJ 対応を軸に一巡する', async ({ page }) => {

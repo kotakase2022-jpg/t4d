@@ -256,7 +256,9 @@ export default async function ImportJobPage({
                     hint={
                       run.confidenceSource === 'demo_simulated'
                         ? `実測スコア ${Math.round(aiRun.confidence * 100)}%（表示はデモ用シミュレーション）`
-                        : undefined
+                        : getAppMode() === 'demo'
+                          ? '実測値（指標を特定できず取り込み対象外へ畳んだ行を含む全行平均）'
+                          : undefined
                     }
                   />
                 );

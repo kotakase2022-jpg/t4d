@@ -29,6 +29,11 @@ export interface ImportPreviewRow {
    */
   displayConfidence?: number | null;
   confidenceSource?: 'measured' | 'demo_simulated';
+  /**
+   * デモ表示で「取り込み対象外」の折りたたみへ畳む行（低確信）。
+   * 表示専用の印で、保存された status・confidence は変わらない
+   */
+  demoHiddenLowConfidence?: boolean;
   warnings: string[];
   status: string;
 }

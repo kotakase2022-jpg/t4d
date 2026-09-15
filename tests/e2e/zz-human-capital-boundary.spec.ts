@@ -25,7 +25,21 @@ test('20 ファイルを同時取込し、バウンダリ差異が警告とし�
 
   const rows = page.locator('input[name^="value:"]');
   await expect(rows.first()).toBeVisible({ timeout: 120_000 });
-  expect(await rows.count(), '人事システム出力の深さ（数百行）が出ていない').toBeGreaterThan(300);
+  // 2026-09-15 指示④: 指標を特定できない低確信の行はデモでは表へ出さず、
+  // 「取り込み対象外」の折りたたみへ回る。表に残るのは指標が特定できた行だけで、
+  // 件数は必ず折りたたみの見出しに出る（黙って消えない）
+  expect(await rows.count(), '指標が特定できた行が出ていない').toBeGreaterThan(50);
+  await expect(
+    page.getByText(/指標マスターと関係が無いため、\d+ 行を取り込み対象外にしました/),
+  ).toBeVisible();
+  // 表に残った行の信頼度表示はすべて 80% 以上（デモ表示の帯）
+  const percentTexts = await page
+    .locator('td span.tnum')
+    .filter({ hasText: /%$/ })
+    .allTextContents();
+  const percents = percentTexts.map((t) => parseInt(t, 10)).filter((v) => Number.isFinite(v));
+  expect(percents.length).toBeGreaterThan(0);
+  expect(Math.min(...percents)).toBeGreaterThanOrEqual(80);
 
   // バウンダリ差異の警告が人へ見える形で出る
   const main = page.locator('#t4d-main');

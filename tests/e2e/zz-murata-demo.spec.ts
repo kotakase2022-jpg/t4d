@@ -102,6 +102,23 @@ test('20 ファイルを一括投入 → 候補を選択 → 240 明細を確定
   const confidenceCell = ceramicRow.locator('span[title*="実測スコア"]');
   await expect(confidenceCell).toBeVisible();
 
+  // 2026-09-15 指示①-1: ファイル名クリックで投入した元ファイルがダウンロードされる
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: '01_白鳳化学工業_納入実績_2025年度.xlsx' }).click();
+  const redownload = await downloadPromise;
+  expect(redownload.suggestedFilename()).toBe('01_白鳳化学工業_納入実績_2025年度.xlsx');
+
+  // 2026-09-15 指示①-2: 数値を手修正するとその場で再計算される（520 → 1040 で倍の 18.7）
+  const ceramicAmount = ceramicRow.getByLabel(/HTCC セラミック基板 CS-88 の数値/);
+  await ceramicAmount.fill('1040');
+  await expect(ceramicRow.getByText('18.7')).toBeVisible();
+  await ceramicAmount.fill('520'); // 期待合計を変えないよう戻す
+  await expect(ceramicRow.getByText('9.4')).toBeVisible();
+
+  // 2026-09-15 指示①-2: 解決済みの行も原単位を選び直せる（セレクトに解決値が初期選択）
+  const bacoRow = page.locator('tr', { hasText: '高純度炭酸バリウム BC-90A' }).first();
+  await expect(bacoRow.getByRole('combobox')).toHaveValue('DEMO-EF-BACO3-JP-KG');
+
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
   await page.screenshot({
     path: path.join(SCREENSHOT_DIR, '01-preview-20-files.png'),

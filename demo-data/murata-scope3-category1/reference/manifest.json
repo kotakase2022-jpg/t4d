@@ -10,7 +10,7 @@
   "files": [
     {
       "fileName": "01_白鳳化学工業_納入実績_2025年度.xlsx",
-      "sha256": "291d7e6755162d381d2c26934f53e9a12954fd2c3f5932497d77e09ea7b4da4f",
+      "sha256": "771578ade2148b0666f4a65280bc287a8ccefaf9c22ccf38e9582b1b828fb2c3",
       "format": "XLSX",
       "encoding": "—",
       "language": "日本語",
@@ -38,7 +38,7 @@
     },
     {
       "fileName": "03_深山金属粉体_purchase_ledger_FY2025.xlsx",
-      "sha256": "412dc33a84481ba3fc6e817ca729d385199cf66e0930ed8cf2eef464df89ddae",
+      "sha256": "f80952efbaba42535362eee53beb7602d40afbed32a789d5a54f00f901083779",
       "format": "XLSX",
       "encoding": "—",
       "language": "日英混在",
@@ -63,7 +63,7 @@
     },
     {
       "fileName": "04_旭峰銅材_購買明細_2025.xlsx",
-      "sha256": "e3e0ba25e095c69dddf3ad4492ee6be794556c2ba5edc95dded2c24af88ddfdd",
+      "sha256": "d00de9c424d6fb3569e4b1259376fa5847dbb43a8fa9c6253016f78fbd134947",
       "format": "XLSX",
       "encoding": "—",
       "language": "日本語",
@@ -91,7 +91,7 @@
     },
     {
       "fileName": "06_Taihoku_Ferrite_Materials_Shipment_FY2025.xlsx",
-      "sha256": "790bd246ef8282bf23ad6ac9a7d8b7506ba412a5fe2432cfbf87760d27218b9e",
+      "sha256": "76681354a7307fe684aaaf4455030c4540a0de550506aca52f907081ff60e0dc",
       "format": "XLSX",
       "encoding": "—",
       "language": "英語",
@@ -119,7 +119,7 @@
     },
     {
       "fileName": "08_近江マグネットワイヤ_出荷実績_2025年度.xlsx",
-      "sha256": "8c10700301f96a57b8b3560b21fb302fcefb40c64ff095192b5536d2fd0b1936",
+      "sha256": "363c2d81d54138f8cddc3acbd2ef01b072f6edd5eb6e0c5f30afefcba6d74b98",
       "format": "XLSX",
       "encoding": "—",
       "language": "日本語",
@@ -133,7 +133,7 @@
     },
     {
       "fileName": "09_Penang_Advanced_Ceramics_PO_Summary_FY2025.xlsx",
-      "sha256": "59f81b9caece673b81a63f162cc2d07a69e7263ad7066dfe5fb2f54ff2c860c8",
+      "sha256": "0859d1b67858850b58c6078e68f31ba692129c5a98b5c619870349978050e5de",
       "format": "XLSX",
       "encoding": "—",
       "language": "英語",
@@ -158,7 +158,7 @@
     },
     {
       "fileName": "10_South_China_Precision_Substrate_supply_FY2025.xlsx",
-      "sha256": "607e158c1ee9d469f98d903f52eb102511215e2cb3654daa346e892d77bba9d4",
+      "sha256": "60857a5954c6dc07ca2abc57355c19a93a7580a1472c82a540070eac6a3df064",
       "format": "XLSX",
       "encoding": "—",
       "language": "日英混在",
@@ -186,7 +186,7 @@
     },
     {
       "fileName": "12_蘇河化学材料_出荷明細_2025年度.xlsx",
-      "sha256": "12e32564903df2cfdfefffecab2ed94202c1201ead7686c6197522562841ab4a",
+      "sha256": "f5609e95b829de90dbd8a505985d04d072c5cf08c5eac8a72f37eaca292c1983",
       "format": "XLSX",
       "encoding": "—",
       "language": "日英混在",
@@ -200,7 +200,7 @@
     },
     {
       "fileName": "13_霞浦フィルム工業_納品実績_FY2025.xlsx",
-      "sha256": "0c716b756292430486874d6f0135e3e2eda07f66aa4ead6cc67a7418aa40616c",
+      "sha256": "4109ff411bb0d8aaab0af5a87c24eee903182babcfe05a7f5153e8eed10438a2",
       "format": "XLSX",
       "encoding": "—",
       "language": "日本語",
@@ -228,7 +228,7 @@
     },
     {
       "fileName": "15_深圳華聯電路板_納入実績_FY2025.xlsx",
-      "sha256": "a54524869dbf10e692abde577eb7220b767d231805ded252d10fa7203aa6fa8d",
+      "sha256": "ce4cef5e510acff8e55bdaf45863f75ef2a9a2a31fcf0213f077156abbbcf413",
       "format": "XLSX",
       "encoding": "—",
       "language": "日英混在",
@@ -253,7 +253,7 @@
     },
     {
       "fileName": "16_Hsinchu_Micro_Devices_CFP_Report_FY2025.xlsx",
-      "sha256": "18785868f957ffa21b2422c9786e47201f4f26d10407b573bfc3e81d6d6c5d0f",
+      "sha256": "9f3535962d7f7d6c38860302aa34d6aeb53c3c6ebe578d31e6c9e214100806b9",
       "format": "XLSX",
       "encoding": "—",
       "language": "英語",
@@ -267,7 +267,7 @@
     },
     {
       "fileName": "17_常磐圧電結晶_製品CFP報告_2025年度.xlsx",
-      "sha256": "ef944d22838424ae7f79bf98dc40b5980e7e6d7627677f8745c0e138d516ee9a",
+      "sha256": "4dc30a25db53202cc2bc7579c731e23222413d925b40039f4e56640b7af744d2",
       "format": "XLSX",
       "encoding": "—",
       "language": "日本語",
@@ -295,7 +295,7 @@
     },
     {
       "fileName": "19_みずほ紙器工業_納品実績_FY2025.xlsx",
-      "sha256": "0228aefd99d7918842b827157f93ea40f54eccb899925787ec35b18e93757e56",
+      "sha256": "2453336a200a48288e79f016051ead3bf923b04a037bbe0cd1a8e0da160e9471",
       "format": "XLSX",
       "encoding": "—",
       "language": "日本語",
@@ -320,7 +320,7 @@
     },
     {
       "fileName": "20_播磨精密加工サービス_加工費請求明細_2025年度.xlsx",
-      "sha256": "04845aa633be2dbc11cc0bd35105fa8d2beb270ed93e6f2f1248dd9a93955a6e",
+      "sha256": "e284ab3306470bdffd1960b4f2d4677d2653dc9014f374f074e583230376ddd8",
       "format": "XLSX",
       "encoding": "—",
       "language": "日本語",

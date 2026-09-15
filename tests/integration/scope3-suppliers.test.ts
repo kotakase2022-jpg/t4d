@@ -405,6 +405,72 @@ describe('原単位（排出係数）の自動解決と紐づけ', () => {
   });
 });
 
+describe('サプライヤーデータ取込の確定（単位の手修正・2026-09-15 指示①-2）', () => {
+  it('手修正した単位は確定時に再正規化される（g→kg 換算・表記ゆらぎ吸収）', async () => {
+    const ctx = manager();
+    const result = await confirmSupplierImport(db, ctx, PERIOD_IDS.fy2026, [
+      {
+        supplierCode: 'SUP-06',
+        item: '銀ペースト補充分',
+        dataType: 'physical',
+        amount: 8200, // g 表記のまま入力しても
+        unit: 'g', // → 8.2 kg として係数（kg 分母）と照合される
+        factorCode: 'DEMO-EF-AGPASTE-JP-KG',
+      },
+      {
+        supplierCode: 'SUP-06',
+        item: '鋼材補充分',
+        dataType: 'physical',
+        amount: 1000,
+        unit: ' KG ', // NFKC・trim・小文字化のゆらぎも吸収
+        factorCode: 'EF-STEEL-KG',
+      },
+    ]);
+    // 8.2 kg × 0.032 = 0.2624 → 0.3 ／ 1,000 kg × 0.0021 = 2.1 → 143.1 + 0.3 + 2.1 = 145.5
+    expect(result.result).toBe(145.5);
+  });
+
+  it('解釈できない単位は行を名指しして拒否する', async () => {
+    await expect(
+      confirmSupplierImport(db, manager(), PERIOD_IDS.fy2026, [
+        {
+          supplierCode: 'SUP-06',
+          item: '謎の資材',
+          dataType: 'physical',
+          amount: 10,
+          unit: '箱',
+          factorCode: 'EF-STEEL-KG',
+        },
+      ]),
+    ).rejects.toThrow(/謎の資材.*単位「箱」は解釈できません/s);
+  });
+});
+
+describe('プレビューの原単位選び直し（解決済み行の候補・2026-09-15 指示①-2）', () => {
+  it('係数コードで解決した行にも同じ単位の候補が付き、解決済みが推薦として初期選択になる', async () => {
+    const csv = [
+      'サプライヤーコード,品目,データ種別,数量,単位,排出係数コード',
+      'SUP-06,金属筐体,物理量,1000,kg,EF-STEEL-KG',
+    ].join('\n');
+    const preview = await previewSupplierImport(
+      db,
+      manager(),
+      PERIOD_IDS.fy2026,
+      'resolved.csv',
+      new TextEncoder().encode(csv),
+    );
+    const row = preview.rows[0]!;
+    expect(row.factorResolution).toBe('row');
+    expect(row.needsFactorChoice).toBe(false);
+    // kg 分母の係数が候補として並び、解決済みの EF-STEEL-KG は recommended
+    expect(row.factorCandidates.length).toBeGreaterThan(1);
+    const resolved = row.factorCandidates.find((c) => c.code === 'EF-STEEL-KG');
+    expect(resolved?.recommended).toBe(true);
+    expect(resolved?.reason).toContain('係数コード');
+    expect(row.factorCandidates.every((c) => c.factorUnit.endsWith('/kg'))).toBe(true);
+  });
+});
+
 describe('サプライヤーデータ取込のプレビュー（旧形式との互換）', () => {
   it('旧形式 CSV をマスターと突き合わせて排出量を計算する', async () => {
     const csv = [

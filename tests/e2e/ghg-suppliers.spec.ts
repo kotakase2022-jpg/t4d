@@ -49,11 +49,12 @@ test('CSV テンプレートがダウンロードでき、未提出の社と 3 �
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/ghg/suppliers');
 
-  // 左メニュー: 現在地はサプライヤーデータ取込だけ（算定サマリーが同時に光らない）
+  // 左メニュー: 現在地は Scope3データ取込 配下の Cat.1（算定サマリーが同時に光らない）
   const nav = page.getByRole('navigation', { name: 'メインナビゲーション' });
-  await expect(
-    nav.getByRole('link', { name: 'サプライヤーデータ取込', exact: true }),
-  ).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Cat.1', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
   await expect(nav.getByRole('link', { name: '算定サマリー', exact: true })).not.toHaveAttribute(
     'aria-current',
     'page',

@@ -53,8 +53,12 @@ export function ImportPreviewTable({
   // 指標マスターと無関係と判断した行は、既定では表から畳んでおく。
   // 警告を出さない代わりに「何行を外したか」は必ず見せ、開けば中身も確認できる。
   // 黙って消すと、外した判断が誤っていたときに気づけない。
-  const ignored = rows.filter((row) => row.status === 'ignored');
-  const visible = rows.filter((row) => row.status !== 'ignored');
+  // デモでは低確信の行（demoHiddenLowConfidence）も同じ折りたたみへ畳む
+  // （2026-09-15 指示④。表示だけで、保存された行の状態・実測値は変えない）
+  const folded = (row: ImportPreviewRow) =>
+    row.status === 'ignored' || row.demoHiddenLowConfidence === true;
+  const ignored = rows.filter(folded);
+  const visible = rows.filter((row) => !folded(row));
 
   return (
     <form action={confirmImportAction}>
@@ -202,6 +206,21 @@ export function ImportPreviewTable({
             指標マスターと関係が無いため、{ignored.length} 行を取り込み対象外にしました
             <span className="ml-1 text-[11px]">（内容を確認する）</span>
           </summary>
+          {/* デモで畳んだ低確信行（status は needs_review のまま）も確定 POST に含め、
+              確定時は従来どおり「選択されなかった行」として除外（rejected）へ倒す。
+              hidden を出さないと確定後も要確認のまま残り続ける */}
+          {ignored
+            .filter((row) => row.status !== 'ignored')
+            .map((row) => (
+              <React.Fragment key={`hidden-${row.id}`}>
+                <input type="hidden" name="rowId" value={row.id} />
+                <input
+                  type="hidden"
+                  name={`sourceLocator:${row.id}`}
+                  value={row.sourceLocator ?? ''}
+                />
+              </React.Fragment>
+            ))}
           <div className="t4d-scroll-x border-t border-line">
             <Table>
               <THead>
@@ -237,7 +256,13 @@ export function ImportPreviewTable({
           確定すると Data Point 台帳へ反映されます（既存データがある場合は新しい Version
           が追加されます）。AI の推定は候補であり、確定は人が行います。
         </p>
-        <SubmitButton size="sm" icon={<Check aria-hidden="true" />} pendingLabel="確定中…">
+        {/* 表示できる行が 1 件も無いとき（全行が対象外）に空確定させない */}
+        <SubmitButton
+          size="sm"
+          icon={<Check aria-hidden="true" />}
+          pendingLabel="確定中…"
+          disabled={visible.length === 0}
+        >
           選択した行を確定
         </SubmitButton>
       </div>

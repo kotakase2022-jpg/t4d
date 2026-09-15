@@ -46,10 +46,14 @@ test('2 つの入口とグルーピングで並ぶ', async ({ page }) => {
   for (const child of ['データ取込', '非財務データ', 'Evidence']) {
     await expect(sidebar.getByRole('link', { name: child, exact: true })).toBeVisible();
   }
-  // GHG 配下: 算定の要約と Scope3 一次データの取込
-  for (const child of ['算定サマリー', 'サプライヤーデータ取込']) {
+  // GHG 配下: 算定の要約と Scope3 取込（カテゴリー別の 3 階層。現状は Cat.1 のみ）
+  for (const child of ['算定サマリー', 'Scope3データ取込', 'Cat.1']) {
     await expect(sidebar.getByRole('link', { name: child, exact: true })).toBeVisible();
   }
+  await expect(sidebar.getByRole('link', { name: 'Cat.1', exact: true })).toHaveAttribute(
+    'href',
+    '/enterprise/ghg/suppliers',
+  );
   // 業務管理配下
   for (const child of ['ワークフロー', 'アラート', 'レポート']) {
     await expect(sidebar.getByRole('link', { name: child, exact: true })).toBeVisible();

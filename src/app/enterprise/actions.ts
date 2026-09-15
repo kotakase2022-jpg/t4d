@@ -10,6 +10,7 @@ import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/e
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
 import { withDisplayConfidence, withSupplierDisplayConfidence } from '@/lib/imports/demo-display';
+import { parseFlexibleNumber } from '@/lib/imports/number';
 import {
   confirmSupplierImport,
   previewSupplierImport,
@@ -314,7 +315,17 @@ export async function previewSupplierImportAction(
   }
 }
 
-export async function confirmSupplierImportAction(formData: FormData): Promise<void> {
+export type SupplierConfirmState = { ok: false; message: string } | null;
+
+/**
+ * 確定は useActionState 経由で呼ぶ（フォーム側でエラーを画面内に出す）。
+ * 以前は検証エラーで一覧へリダイレクトしていたため、プレビューと手修正が
+ * 丸ごと消えていた（編集可能化でこの経路を踏みやすくなったための変更）。
+ */
+export async function confirmSupplierImportAction(
+  _previous: SupplierConfirmState,
+  formData: FormData,
+): Promise<SupplierConfirmState> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
 
@@ -327,26 +338,32 @@ export async function confirmSupplierImportAction(formData: FormData): Promise<v
     .map((key) => {
       const dataTypeRaw = String(formData.get(`dataType:${key}`) ?? '');
       const factorCode = String(formData.get(`factorCode:${key}`) ?? '');
+      // 数値の解釈はファイル解析と同じ規則（独仏式 1.234,5 等も同じ意味になる）。
+      // Number + カンマ除去だと欧州式が桁違いのまま黙って通る
+      const amount = parseFlexibleNumber(String(formData.get(`amount:${key}`) ?? ''));
       return {
         supplierCode: String(formData.get(`supplierCode:${key}`) ?? ''),
         item: String(formData.get(`item:${key}`) ?? ''),
         dataType: (['emissions', 'physical', 'monetary'].includes(dataTypeRaw)
           ? dataTypeRaw
           : 'monetary') as SupplierRowDecision['dataType'],
-        amount: Number(String(formData.get(`amount:${key}`) ?? '').replace(/,/g, '')),
+        amount: amount ?? Number.NaN,
         unit: String(formData.get(`unit:${key}`) ?? ''),
         factorCode: factorCode === '' ? null : factorCode,
       };
     });
 
-  await withUserFacingError('/enterprise/ghg/suppliers', async () => {
+  try {
     const result = await confirmSupplierImport(db, ctx, reportingPeriodId, decisions);
     revalidatePath('/enterprise/ghg');
     revalidatePath('/enterprise/ghg/suppliers');
     redirect(
       `/enterprise/ghg/suppliers?flash=supplierImported&added=${result.addedSuppliers.length}&replaced=${result.replacedSuppliers.length}&total=${result.result}`,
     );
-  });
+  } catch (error) {
+    if (isUserFacingError(error)) return { ok: false, message: error.message };
+    throw error;
+  }
 }
 
 /**

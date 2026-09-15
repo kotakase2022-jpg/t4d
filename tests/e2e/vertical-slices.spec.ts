@@ -85,7 +85,10 @@ test.describe('企業 Vertical Slice', () => {
     const previewForm = page.locator('form', {
       has: page.getByRole('button', { name: '選択した行を確定' }),
     });
-    const rows = previewForm.locator('tbody tr');
+    // 「取り込み対象外」の折りたたみ内の行（チェックボックスを持たない）は対象外
+    const rows = previewForm
+      .locator('tbody tr')
+      .filter({ has: page.locator('input[type="checkbox"]') });
     const rowCount = await rows.count();
     expect(rowCount).toBeGreaterThan(0);
 

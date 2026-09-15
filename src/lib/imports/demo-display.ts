@@ -17,12 +17,39 @@ import type { ConfidenceSource } from '@/lib/domain/demo-confidence';
  * 両方がこの 1 か所を通ることで、画面ごとに別の数値が出ないようにする。
  */
 
-/** シミュレーション表示の対象になる行状態（=正常解析済み） */
-const SIMULATED_STATUSES = new Set(['mapped', 'confirmed']);
+/**
+ * シミュレーション表示の対象になる行状態。
+ *
+ * 2026-09-15 指示④で needs_review / duplicate も対象に加えた。
+ * 表に残る行が 80〜97% 帯に収まるのは demoDisplayConfidence のクランプによる保証で、
+ * 指標特定済みの低確信行（定義ズレ等・実測 0.42〜0.52）も帯へ写る。
+ * 状態バッジ（要確認・重複）と警告はそのまま出す
+ * （変えるのは % の見た目と置き場所だけ。保存された行・状態・実測値は変えない）。
+ */
+const SIMULATED_STATUSES = new Set(['mapped', 'confirmed', 'needs_review', 'duplicate']);
+
+/**
+ * デモ表示要件（2026-09-15 指示④）: **指標を特定できず**かつ実測確信度がこの値を
+ * 下回る行は、プレビュー表に出さず「指標マスターと関係が無いため、取り込み対象外に
+ * しました」の折りたたみへ回す（Demo Mode 限定・**表示だけ**。保存された行の
+ * status・confidence は変更しないので、実運用モードやデモ解除後は従来どおり出る）。
+ *
+ * 「指標が特定できた行」（定義ズレ・単位違い等の要確認・重複を含む）は隠さない——
+ * 折りたたみの見出し（指標マスターと関係が無い）と意味が食い違ううえ、
+ * 数百行の帳票が数十行に見える事故になる。それらは SIMULATED_STATUSES 側で
+ * 80〜97% のデモ表示になるため、表に低い % が並ぶことはない。
+ * また **AI が評価していない行（confidence 0 = 行数上限の超過等）も畳まない**。
+ * 「マスターと無関係」ではなく未評価なだけで、表に残さないと手動で指標を
+ * 選んで確定する経路ごと消えてしまう。
+ * しきい値は指標不明行（MockAI で 0.2〜0.46）を確実に含む余裕を持たせた値。
+ */
+export const DEMO_MIN_VISIBLE_CONFIDENCE = 0.55;
 
 export interface DisplayConfidenceFields {
   displayConfidence: number | null;
   confidenceSource: ConfidenceSource;
+  /** デモ表示で「取り込み対象外」の折りたたみへ畳む行（低確信）。表示専用の印 */
+  demoHiddenLowConfidence?: boolean;
 }
 
 export function importRowConfidenceKey(row: {
@@ -36,13 +63,34 @@ export function withDisplayConfidence<
   T extends {
     confidence: number;
     status: string;
+    metricId: string | null;
     sourceLocator: string | null;
     raw: Record<string, string>;
   },
 >(rows: T[]): Array<T & DisplayConfidenceFields> {
   const appMode = getAppMode();
   return rows.map((row) => {
-    if (!SIMULATED_STATUSES.has(row.status)) {
+    // デモでは「指標を特定できず・低確信」の行を表へ出さず、
+    // 「取り込み対象外」の折りたたみへ（表示専用の印）。
+    // 確定済みの行は既に人が判断した行なので畳まない
+    if (
+      appMode === 'demo' &&
+      row.status !== 'confirmed' &&
+      row.status !== 'ignored' &&
+      row.metricId === null &&
+      row.confidence > 0 && // 0 = AI 未評価（行数上限の超過等）。低確信とは別物なので畳まない
+      row.confidence < DEMO_MIN_VISIBLE_CONFIDENCE
+    ) {
+      return {
+        ...row,
+        displayConfidence: row.confidence,
+        confidenceSource: 'measured' as const,
+        demoHiddenLowConfidence: true,
+      };
+    }
+    // AI 未評価（confidence 0）の行は実測のまま出す。帯へ写すと
+    // 「評価していないのに 80%」という嘘の表示になる
+    if (!SIMULATED_STATUSES.has(row.status) || row.confidence === 0) {
       return { ...row, displayConfidence: row.confidence, confidenceSource: 'measured' as const };
     }
     const resolved = resolveDisplayConfidence(appMode, row.confidence, importRowConfidenceKey(row));

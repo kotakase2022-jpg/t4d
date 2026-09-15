@@ -517,9 +517,8 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   for (const child of ['対応状況', '要求事項', '対応計画', 'データ収集', '開示ドラフト']) {
     await expect(sidebar.getByRole('link', { name: child, exact: true })).toBeVisible();
   }
-  await expect(
-    sidebar.getByRole('link', { name: 'サプライヤーデータ取込', exact: true }),
-  ).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: 'Scope3データ取込', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('link', { name: 'Cat.1', exact: true })).toBeVisible();
 });
 
 test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({ page }) => {

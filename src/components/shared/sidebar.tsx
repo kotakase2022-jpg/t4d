@@ -187,8 +187,15 @@ function SidebarChildList({
         const overlapsSibling = items.some(
           (other) => other !== child && other.href.startsWith(`${child.href}/`),
         );
+        // 親子が同一 href（SSBJ→対応状況、Scope3データ取込→Cat.1）のとき、
+        // 「現在地」は葉側だけに付ける（同一画面で aria-current が 2 つ並ばない）
+        const childClaimsSameHref =
+          hasChildren && (child.children?.some((c) => c.href === child.href) ?? false);
         const selfActive =
-          hasChildren || overlapsSibling ? pathname === child.href : isActive(pathname, child.href);
+          !childClaimsSameHref &&
+          (hasChildren || overlapsSibling
+            ? pathname === child.href
+            : isActive(pathname, child.href));
         const childActive = !selfActive && hasChildren && isSubtreeActive(pathname, child);
         return (
           <li key={`${child.href}-${child.label}`}>

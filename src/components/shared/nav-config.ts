@@ -153,10 +153,29 @@ export const ENTERPRISE_NAV: NavItem[] = [
         keywords: ['GHG', 'scope3', '連結集計', '排出係数'],
       },
       {
-        label: 'サプライヤーデータ取込',
+        // 2026-09-15 の発注者指示でカテゴリー別の 3 階層へ（SSBJ 配下と同じ構造）。
+        // 現状はカテゴリー1 のみだが、他カテゴリーを増やす場所を先に用意する
+        label: 'Scope3データ取込',
         href: '/enterprise/ghg/suppliers',
         icon: Upload,
         keywords: ['GHG', 'scope3', 'サプライヤー', '一次データ', '購買'],
+        children: [
+          {
+            label: 'Cat.1',
+            href: '/enterprise/ghg/suppliers',
+            icon: Upload,
+            // 旧メニュー名でも Command Palette から探せるよう残す
+            keywords: [
+              'GHG',
+              'scope3',
+              'カテゴリー1',
+              'サプライヤー',
+              '購買',
+              '購入した製品',
+              'サプライヤーデータ取込',
+            ],
+          },
+        ],
       },
     ],
   },

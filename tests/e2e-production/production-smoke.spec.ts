@@ -155,12 +155,15 @@ test('本番: 取込フロー（ファイル投入 → AI 仕分け → プレ�
   await expect(metricSelect).toBeVisible();
   expect(await metricSelect.inputValue()).not.toBe('');
 
-  // 指標が特定できなかった行は残るが、アラートは出さない（発注者の指示で非表示）。
-  // 指標欄が未選択・状態が要確認のままなので、人が指標を選ぶ導線は残っている
+  // 2026-09-15 指示④: 指標を特定できず低確信の行は、デモでは表に出さず
+  // 「取り込み対象外」の折りたたみへ回る（件数は必ず見え、開けば内容も確認できる。
+  // 保存された行は要確認のままで、確定時は「未選択＝除外」へ倒れる）
+  await expect(
+    page.getByText(/指標マスターと関係が無いため、\d+ 行を取り込み対象外にしました/),
+  ).toBeVisible();
+  await page.getByText(/取り込み対象外にしました/).click();
   await expect(page.getByText('圧縮空気（購入分）').first()).toBeVisible();
   await expect(page.locator('#t4d-main').getByText('指標を特定できませんでした')).toHaveCount(0);
-  const unmatched = page.locator('select[name^="metricId:"]').last();
-  expect(await unmatched.inputValue()).toBe('');
 });
 
 test('本番: SSBJ のマテリアリティ登録が永続化される', async ({ page }) => {
@@ -444,7 +447,12 @@ test('本番: 人的資本 20 ファイルの同時取込でバウンダリ差�
 
   const rows = page.locator('input[name^="value:"]');
   await expect(rows.first()).toBeVisible({ timeout: 120_000 });
-  expect(await rows.count(), '明細の深さが出ていない').toBeGreaterThan(300);
+  // 2026-09-15 指示④: 指標を特定できない低確信の行はデモでは表へ出さず、
+  // 「取り込み対象外」の折りたたみへ回る。表に残るのは指標が特定できた行だけ
+  expect(await rows.count(), '指標が特定できた行が出ていない').toBeGreaterThan(50);
+  await expect(
+    page.getByText(/指標マスターと関係が無いため、\d+ 行を取り込み対象外にしました/),
+  ).toBeVisible();
 
   const main = page.locator('#t4d-main');
   await expect(main.getByText(/バウンダリ差異（雇用範囲）/).first()).toBeVisible();

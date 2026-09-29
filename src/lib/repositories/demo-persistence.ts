@@ -13,6 +13,7 @@ import {
   decodeDemoResetMark,
   encodeDemoResetMark,
   isNewerDemoReset,
+  isPlausibleDemoResetMark,
   newDemoResetEpoch,
   type DemoResetMark,
 } from './demo-reset-sync';
@@ -48,9 +49,13 @@ export const MAX_BYTES_PER_COOKIE = 3800;
  * 1 つだと 2 ファイルの取込がちょうど境界に乗ってしまい、
  * 「入るときと入らないときがある」という一番たちの悪い挙動になった
  * （本番スモークが 2 回に 1 回落ちた）。分割して余裕を持たせる。
- * 上限まで使っても約 7.6KB で、リクエストヘッダー全体の上限には届かない。
+ *
+ * 2 つ（約 7.6KB）では、実演の流れ（§14.1 の 2〜7 手目: Scope3 → 標準 CSV → 定性 → AI 下書き →
+ * レビュー・承認 → KPI）の後半で、前半の取込の数値が押し出されていた（自己監査 第 3 回 F3）。
+ * 3 つ（約 11.4KB）にする。ほかの Cookie・ヘッダーを足しても、Node の既定のリクエストヘッダーの
+ * 上限（16KB）に収まる。4 つ以上にすると上限に近づくため、容量は編集の縮小（demo-client.ts）で稼ぐ
  */
-export const COOKIE_CHUNKS = 2;
+export const COOKIE_CHUNKS = 3;
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -132,16 +137,17 @@ export function packIntoChunks(edits: readonly DemoEdit[]): {
 }
 
 /**
- * 押し出しても「古い操作を保持できませんでした」と知らせない表。
- * 取込の行は 1 回の取込で数百行を追記し、同じ取込の後の行が前の行を押し出す。
- * 取込結果は同じリクエストで表示し終えており、大量の取込が同一インスタンスでしか
- * 参照できないことは取込の画面が案内している（docs/known-limitations.md D-3）
+ * 押し出しても「古い操作を保持できませんでした」と知らせない場合。
+ * 取込の行は 1 回の取込で数百行を追記し、同じ取込の後の行が前の行を押し出す。その取込の結果は
+ * 同じリクエストで表示し終えているため、**同じ取込の行どうし**の押し出しだけは知らせない。
+ * 取込ジョブ・ファイルの行や、別の操作による取込の行の押し出しは知らせる（別のサーバーでは
+ * 取込の履歴・詳細が消えるため。以前は押し出された表だけを見て、原因を問わず黙っていた）
  */
-const QUIET_EVICTION_TABLES: ReadonlySet<string> = new Set([
-  'ingestionJobs',
-  'ingestionJobFiles',
-  'ingestionRows',
-]);
+function isQuietEviction(dropped: DemoEdit, cause: DemoEdit): boolean {
+  if (dropped.t !== 'ingestionRows' || cause.t !== 'ingestionRows') return false;
+  const jobOf = (edit: DemoEdit) => (edit.v as { jobId?: unknown }).jobId;
+  return typeof jobOf(dropped) === 'string' && jobOf(dropped) === jobOf(cause);
+}
 
 function writeChunks(store: CookieStore, chunks: readonly string[]): void {
   for (let i = 0; i < COOKIE_CHUNKS; i += 1) {
@@ -195,11 +201,11 @@ export async function appendDemoEdit(
   // （落とすと新しいインスタンスでメニューとホームが従来の構成へ戻り、実演の途中で画面が変わる）
   let candidate = merged;
   let packed = packIntoChunks(candidate);
-  const evictedTables = new Set<string>();
+  const noisyTables = new Set<string>();
   while (candidate.length > 0 && packed.overflow.length > 0) {
     const next = dropOldestUnpinned(candidate) ?? candidate.slice(1);
     const dropped = candidate.find((e) => !next.includes(e));
-    if (dropped) evictedTables.add(dropped.t);
+    if (dropped && !isQuietEviction(dropped, nextEdit)) noisyTables.add(dropped.t);
     candidate = next;
     packed = packIntoChunks(candidate);
   }
@@ -209,7 +215,7 @@ export async function appendDemoEdit(
     // 古い操作を押し出したことを画面（デモの帯）で知らせる。別のサーバーでは押し出した操作が
     // 戻らないため、黙っていると「さっきの操作が消えた」ように見える。どの表の操作かを残し、
     // その表をリセットしたら知らせを消す（リセット後も古い注意を出し続けない）
-    const noisy = [...evictedTables].filter((t) => !QUIET_EVICTION_TABLES.has(t));
+    const noisy = [...noisyTables];
     if (noisy.length > 0) {
       writeEvicted(store, new Set([...readEvicted(store), ...noisy]));
     }
@@ -245,23 +251,52 @@ function appliedResets(): AppliedResets {
   return g.__t4dAppliedDemoResets;
 }
 
+/**
+ * このインスタンスのリセットの基準時刻を決める（まだなら今）。getDb が Cookie の操作をメモリへ
+ * 適用する**前**に呼ぶ。以前は、ログイン後にリセットの印を見たときに初めて基準を決めていたため、
+ * ログイン画面などで前のリハーサルの操作を適用した後の時刻が基準になり、その後に別のインスタンスで
+ * 行ったリセットを「起動より前のリセット」と見なして反映しなかった
+ */
+export function ensureDemoResetBaseline(): void {
+  appliedResets();
+}
+
 /** 反映済みの世代を進める（古い印で巻き戻さない） */
 function recordApplied(mark: DemoResetMark): void {
+  // 遠い未来を名乗る印を反映済みに記録すると、以後の本物の印をすべて古いと見なしてしまう
+  if (!isPlausibleDemoResetMark(mark)) return;
   const applied = appliedResets();
   if (isNewerDemoReset(mark, applied.byOrganization.get(mark.organizationId), applied.baseline)) {
     applied.byOrganization.set(mark.organizationId, mark.epoch);
   }
 }
 
-/** リセットを行ったことを Cookie に残す（このインスタンスは既に戻しているので反映済みとする） */
-export async function markDemoReset(organizationId: string): Promise<void> {
+/**
+ * リセットを行ったことを Cookie に残す（このインスタンスは既に戻しているので反映済みとする）。
+ * 印は最新の 1 件だけなので、前の印が数値データも戻すリセットで、まだ反映していないインスタンスが
+ * ありうるときは、その範囲を引き継ぐ（数値データを戻し直しても、その後の操作は Cookie から再び適用される）
+ */
+export async function markDemoReset(
+  organizationId: string,
+  options: { includeDataPoints?: boolean } = {},
+): Promise<void> {
+  let store: CookieStore | null = null;
+  try {
+    store = await cookies();
+  } catch {
+    // リクエストスコープ外（テスト・CLI）では Cookie に残さない
+  }
+  const previous = store ? decodeDemoResetMark(store.get(RESET_COOKIE)?.value) : null;
   const mark: DemoResetMark = {
     organizationId,
     epoch: newDemoResetEpoch(Date.now(), randomUUID()),
+    includesDataPoints:
+      options.includeDataPoints === true ||
+      (previous?.organizationId === organizationId && previous.includesDataPoints === true),
   };
   recordApplied(mark);
+  if (!store) return;
   try {
-    const store = await cookies();
     store.set(RESET_COOKIE, encodeDemoResetMark(mark), COOKIE_OPTIONS);
   } catch {
     // リクエストスコープ外（テスト・CLI）では何もしない
@@ -277,7 +312,7 @@ export async function pendingDemoReset(): Promise<DemoResetMark | null> {
   try {
     const store = await cookies();
     const mark = decodeDemoResetMark(store.get(RESET_COOKIE)?.value);
-    if (!mark) return null;
+    if (!mark || !isPlausibleDemoResetMark(mark)) return null;
     const applied = appliedResets();
     return isNewerDemoReset(mark, applied.byOrganization.get(mark.organizationId), applied.baseline)
       ? mark

@@ -146,6 +146,22 @@ export function insertRef(
   };
 }
 
+/**
+ * 段落の表示名（本文の中の位置で「段落 3」「見出し 1（段落 1）」と呼ぶ）。
+ * 段落 ID（p-mg3k1x2a のような内部の識別子）は画面・読み上げに出さない（§4.2）。
+ * 本文に無い段落（削除した段落・別の版の段落）は、位置が無いことをそのまま示す
+ */
+export function paragraphLabelOf(
+  paragraphs: ReadonlyArray<{ id: string; kind: 'paragraph' | 'heading' }>,
+  id: string | null | undefined,
+): string {
+  if (!id) return '段落（指定なし）';
+  const index = paragraphs.findIndex((p) => p.id === id);
+  if (index === -1) return '（この版に無い段落）';
+  const kind = paragraphs[index]?.kind;
+  return kind === 'heading' ? `見出し（段落 ${index + 1}）` : `段落 ${index + 1}`;
+}
+
 /** 本文内で一意の新しい段落 ID */
 export function newParagraphId(existing: readonly string[], seed: string): string {
   const used = new Set(existing);

@@ -12,11 +12,18 @@ import {
 } from '@/lib/repositories/demo-persistence';
 import type { DemoEdit } from '@/lib/repositories/demo-edit-codec';
 import {
+  DATA_DEMO_RESET_TABLES,
   DISCLOSURE_AI_FEATURE,
   DISCLOSURE_DEMO_RESET_TABLES,
+  isDataPointApproval,
   isDisclosureNotification,
 } from '@/lib/repositories/demo-reset-sync';
-import type { DbClient, Row } from '@/lib/repositories/types';
+import type { DbClient, Row, TableName } from '@/lib/repositories/types';
+
+type ResetTable =
+  | (typeof DISCLOSURE_DEMO_RESET_TABLES)[number]
+  | (typeof DATA_DEMO_RESET_TABLES)[number]
+  | Extract<TableName, 'approvals'>;
 import type { AuthorizationContext } from '@/types/domain';
 
 /**
@@ -29,7 +36,9 @@ import type { AuthorizationContext } from '@/types/domain';
  *  - Cookie の持ち回り（t4d.demo-edits）からも同じ行だけを取り除く（他の画面のデモ操作は残す）
  *
  * 通知は、開示の画面（依頼・差戻し・再確認）を指すデモ中の通知だけを消す（消えた依頼・節を指し続けないため）。
- * 触らないもの（他の領域）: 数値データ（Data Point と版）・資料（files）・SSBJ の評価・
+ * 「数値データも戻す」を選んだときだけ、数値データ（Data Point と版・Data Point の承認の記録・承認の道筋・
+ * 検証結果・標準 CSV の取込）も同じ方法で戻す（実演の 3 手目・8 手目を次のリハーサルへ持ち越さない）。
+ * 既定で触らないもの（他の領域）: 数値データ（Data Point と版）・資料（files）・SSBJ の評価・
  * Scope3 の算定・そのほかの通知・タスク・監査ログ・機能設定（開示優先モードの ON/OFF）。
  * 機能設定を戻さないのは、リセットした瞬間にメニューとホームが従来の構成へ切り替わり、
  * 実演の途中で画面が変わってしまうため。
@@ -70,10 +79,19 @@ function diffToFixture(current: Record<string, unknown>, fixture: Record<string,
 export async function resetDisclosureDemoData(
   db: DbClient,
   ctx: AuthorizationContext,
-  options: { pristine?: FixtureDb } = {},
+  options: {
+    pristine?: FixtureDb;
+    /**
+     * 数値データ（Data Point と版・承認の道筋・検証結果・標準 CSV の取込）も戻すか。
+     * 実演の 3 手目（標準 CSV）・8 手目（数値の訂正）を次のリハーサルへ持ち越さないために選ぶ
+     */
+    includeDataPoints?: boolean;
+  } = {},
 ): Promise<DisclosureDemoResetResult> {
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.disclosure.write');
+  // 数値データまで戻すのは、数値の入力権限もある人だけ（開示の担当だけでは数値を書き換えられない）
+  if (options.includeDataPoints) assertCan(ctx, 'enterprise.data.write');
   if (!(db instanceof DemoDbClient)) {
     throw new ValidationError(
       'デモリセットは Demo Mode 専用です。実運用データベースでは実行できません。',
@@ -87,14 +105,22 @@ export async function resetDisclosureDemoData(
   let removedRows = 0;
   let restoredRows = 0;
 
-  for (const table of DISCLOSURE_DEMO_RESET_TABLES) {
+  const tables: ReadonlyArray<ResetTable> = options.includeDataPoints
+    ? [...DATA_DEMO_RESET_TABLES, 'approvals', ...DISCLOSURE_DEMO_RESET_TABLES]
+    : DISCLOSURE_DEMO_RESET_TABLES;
+  for (const table of tables) {
+    // 承認の記録は Data Point の承認だけを戻す（開示回答の承認は別の領域）
+    const inScope = (row: IdRow) =>
+      table !== 'approvals' || isDataPointApproval(row as { targetType?: string });
     const fixtureRows = (pristine[table] as unknown as IdRow[]).filter(
-      (r) => r.organizationId === organizationId,
+      (r) => r.organizationId === organizationId && inScope(r),
     );
     const fixtureById = new Map(fixtureRows.map((r) => [r.id, r]));
-    const currentRows = (await db.select(table, {
-      where: { organizationId } as never,
-    })) as unknown as IdRow[];
+    const currentRows = (
+      (await db.select(table, {
+        where: { organizationId } as never,
+      })) as unknown as IdRow[]
+    ).filter(inScope);
 
     const created = new Set(currentRows.filter((r) => !fixtureById.has(r.id)).map((r) => r.id));
     const touched = new Set<string>([...created, ...fixtureById.keys()]);
@@ -175,9 +201,9 @@ export async function resetDisclosureDemoData(
   removedRows += removedNotifications;
 
   // ほかのインスタンスにも同じリセットを反映させる（次のリクエストで Fixture の初期値へ戻す）
-  await markDemoReset(organizationId);
-  // 開示の表の押し出しの知らせは、戻した今は意味を失う（ほかの表の押し出しの知らせは残す）
-  await clearDemoEviction(DISCLOSURE_DEMO_RESET_TABLES);
+  await markDemoReset(organizationId, { includeDataPoints: options.includeDataPoints === true });
+  // 戻した表の押し出しの知らせは、戻した今は意味を失う（ほかの表の押し出しの知らせは残す）
+  await clearDemoEviction(tables);
 
   await recordAuditEvent(db, ctx, {
     eventType: 'project_updated',

@@ -1,19 +1,14 @@
 import { ClipboardCheck, History, Info } from 'lucide-react';
-import { Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import type { ParagraphDiff } from '@/lib/domain/disclosure-block';
 import { reviewPolicyLabel } from '@/lib/domain/disclosure-status';
 import { formatJst } from '@/lib/format/datetime';
 import type { EditorReviewRequest } from '@/lib/services/disclosure-block';
 import type { ReviewActionState } from '@/lib/services/disclosure-review';
-import {
-  completeReviewAction,
-  finalApproveAction,
-  returnReviewAction,
-  withdrawReviewAction,
-} from '../actions';
+import { completeReviewAction, finalApproveAction } from '../actions';
 import { ReviewRequestStatusBadge } from '../status-badges';
 import { DiffText } from './diff-text';
+import { ReturnReviewForm, WithdrawReviewForm } from './review-decision-forms';
 
 /**
  * レビュー・最終承認の操作（依頼中・承認待ちの節）。
@@ -26,6 +21,7 @@ export function ReviewPanel({
   request,
   actions,
   paragraphs,
+  paragraphNames,
   diff,
   history,
 }: {
@@ -35,6 +31,8 @@ export function ReviewPanel({
   actions: ReviewActionState | null;
   /** 依頼で固定した版の段落（差戻しの対象を選ぶ） */
   paragraphs: Array<{ id: string; label: string }>;
+  /** 段落 ID → 表示名（本文の中の位置。内部の段落 ID は出さない） */
+  paragraphNames: Record<string, string>;
   /** 前の版からの差分（依頼で固定した版） */
   diff: ParagraphDiff[] | null;
   history: EditorReviewRequest[];
@@ -82,8 +80,10 @@ export function ReviewPanel({
                       key={`${d.kind}-${d.paragraphId}`}
                       className="rounded-t4d border border-line p-1.5"
                     >
-                      <span className="mr-1 font-mono text-[10px] text-ink-muted">
-                        {d.paragraphId}
+                      <span className="mr-1 text-[10px] text-ink-muted">
+                        {d.kind === 'removed'
+                          ? '前の版の段落'
+                          : (paragraphNames[d.paragraphId] ?? '（この版に無い段落）')}
                       </span>
                       {d.kind === 'changed' ? (
                         <DiffText segments={d.segments} />
@@ -126,53 +126,20 @@ export function ReviewPanel({
                   </SubmitButton>
                 </form>
               )}
-              {actions.canReturn && (
-                <form
-                  action={returnReviewAction}
-                  className="space-y-1 rounded-t4d border border-line p-2"
-                >
-                  {hidden}
-                  <label className="block text-[12px] text-ink">
-                    差戻しの対象の段落（必須）
-                    <select
-                      name="paragraphId"
-                      required
-                      defaultValue=""
-                      className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
-                    >
-                      <option value="" disabled>
-                        段落を選択
-                      </option>
-                      {paragraphs.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label htmlFor="return-reason" className="block text-[12px] text-ink">
-                    差戻しの理由（必須）
-                  </label>
-                  <Textarea id="return-reason" name="reason" rows={2} required />
-                  <SubmitButton size="sm" variant="outline" pendingLabel="差戻し中…">
-                    差し戻す
-                  </SubmitButton>
-                </form>
+              {actions.canReturn && request && (
+                <ReturnReviewForm
+                  projectId={projectId}
+                  blockId={blockId}
+                  requestId={request.id}
+                  paragraphs={paragraphs}
+                />
               )}
-              {actions.canWithdraw && (
-                <form
-                  action={withdrawReviewAction}
-                  className="space-y-1 rounded-t4d border border-line p-2"
-                >
-                  {hidden}
-                  <label htmlFor="withdraw-reason" className="block text-[12px] text-ink">
-                    依頼を取り下げて編集に戻る（理由は任意）
-                  </label>
-                  <Textarea id="withdraw-reason" name="reason" rows={1} />
-                  <SubmitButton size="sm" variant="ghost" pendingLabel="取下げ中…">
-                    依頼を取り下げる
-                  </SubmitButton>
-                </form>
+              {actions.canWithdraw && request && (
+                <WithdrawReviewForm
+                  projectId={projectId}
+                  blockId={blockId}
+                  requestId={request.id}
+                />
               )}
               {actions.reasons.length > 0 && !actions.canComplete && !actions.canApprove && (
                 <p className="text-[12px] text-ink-muted">{actions.reasons.join(' ')}</p>
@@ -208,7 +175,9 @@ export function ReviewPanel({
                     <li key={e.id}>
                       {formatJst(e.createdAt)} {e.label}（{e.stageLabel}） {e.actorName}
                       {e.reason ? ` ／ 理由: ${e.reason}` : ''}
-                      {e.paragraphId ? ` ／ 段落 ${e.paragraphId}` : ''}
+                      {e.paragraphId
+                        ? ` ／ ${paragraphNames[e.paragraphId] ?? '（現在の本文に無い段落）'}`
+                        : ''}
                     </li>
                   ))}
                 </ol>

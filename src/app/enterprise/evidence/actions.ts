@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
@@ -127,6 +127,8 @@ export async function uploadEvidenceDocumentFormAction(
       usagePurpose: values.usagePurpose || null,
     });
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (isUserFacingError(error)) return { status: 'error', message: error.message, values };
     console.error('[evidence upload]', error);
     return {
@@ -180,6 +182,8 @@ export async function addManualExcerptFormAction(
     }
     await addManualExcerpt(db, ctx, { fileId, page, locator: values.locator, text: values.text });
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (isUserFacingError(error)) return { status: 'error', message: error.message, values };
     console.error('[manual excerpt]', error);
     return {

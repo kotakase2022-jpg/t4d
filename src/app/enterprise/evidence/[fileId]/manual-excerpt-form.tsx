@@ -5,7 +5,7 @@ import { AlertTriangle, Quote } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { MANUAL_EXCERPT_MAX_LENGTH } from '@/lib/domain/evidence-limits';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { addManualExcerptFormAction, type ManualExcerptFormState } from '../actions';
 
 const INITIAL: ManualExcerptFormState = {
@@ -17,9 +17,9 @@ const INITIAL: ManualExcerptFormState = {
 /** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、手で写した文言を残す */
 const action = withNetworkFallback(
   addManualExcerptFormAction,
-  (_previous, formData): ManualExcerptFormState => ({
+  (_previous, formData, message): ManualExcerptFormState => ({
     status: 'error',
-    message: NETWORK_ERROR_MESSAGE,
+    message,
     values: {
       page: String(formData.get('page') ?? ''),
       locator: String(formData.get('locator') ?? ''),

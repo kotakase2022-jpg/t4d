@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { unstable_rethrow } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { isUserFacingError } from '@/lib/errors/user-facing';
 import {
@@ -125,6 +126,8 @@ export async function validateStandardImportAction(
     });
     return { ok: true, preview };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (isUserFacingError(error)) return { ok: false, kind: 'invalid', message: error.message };
     console.error('[standard-import] validate failed', error);
     return { ok: false, kind: 'failure', message: FAILURE_MESSAGE };
@@ -171,6 +174,8 @@ export async function commitStandardImportAction(
     revalidatePath('/enterprise/dashboard');
     return { ok: true, result };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (error instanceof QuantitativeImportExpiredError) {
       return { ok: false, kind: 'expired', message: error.message };
     }

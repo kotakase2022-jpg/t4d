@@ -6,6 +6,7 @@ import { assertCan, can, NotFoundError, permissionsFor } from '@/lib/authorizati
 import {
   APPLICABILITY_STATUS_LABELS,
   BLOCK_STATUS_LABELS,
+  DISCLOSURE_PROJECT_STATUS_LABELS,
   DISCLOSURE_PURPOSE_LABELS,
   FRAMEWORK_COVERAGE_STATUS_LABELS,
   frameworkLegalLabel,
@@ -38,6 +39,7 @@ import {
   type FrameworkKey,
   type FrameworkLegalStatus,
   type IsoDate,
+  type IsoDateTime,
   type ProjectFramework,
   type ProjectFrameworkDecision,
   type ReportingPeriod,
@@ -807,6 +809,11 @@ export interface UpdateProjectInput {
   scopeGhgBoundaryNote: string;
   scopeValueChainNote: string;
   includedUnitIds: Uuid[];
+  /**
+   * 画面が読み込んだ時点のプロジェクトの更新時刻（競合の検出）。違えば保存せず、競合として返す。
+   * 省略時（サービスを直接呼ぶテスト・移行）は検出しない
+   */
+  baseUpdatedAt?: IsoDateTime;
 }
 
 /** 変えると原稿・数値・承認の前提が変わる項目 */
@@ -1031,10 +1038,49 @@ function normalizeUpdate(
   return changed;
 }
 
+/** 競合で上書きしなかった項目（画面で「最新の値」と「あなたの入力」を並べる） */
+export interface ProjectConflictField {
+  key: string;
+  label: string;
+  current: string;
+  yours: string;
+}
+
 export type UpdateProjectResult =
   | { status: 'saved'; changedFields: string[]; impact: ChangeImpact }
   | { status: 'unchanged' }
-  | { status: 'needs_confirmation'; changedFields: string[]; impact: ChangeImpact };
+  | { status: 'needs_confirmation'; changedFields: string[]; impact: ChangeImpact }
+  | {
+      status: 'conflict';
+      /** 画面が読み込んだ後に保存した人と時刻 */
+      updatedByName: string;
+      currentUpdatedAt: IsoDateTime;
+      /** このまま保存すると最新の値を上書きする項目 */
+      fields: ProjectConflictField[];
+    };
+
+/** 項目の値の表示（利用者・拠点は名前で、配列は「、」でつなぐ） */
+function projectFieldDisplay(
+  key: string,
+  value: unknown,
+  members: readonly MemberEntry[],
+  units: ReadonlyArray<{ id: Uuid; name: string }>,
+): string {
+  if (value === null || value === undefined || value === '') return '（未設定）';
+  if (key === 'ownerUserId' || key === 'reviewerUserId' || key === 'finalApproverUserId') {
+    return members.find((m) => m.userId === value)?.displayName ?? '（不明な利用者）';
+  }
+  if (key === 'includedUnitIds' && Array.isArray(value)) {
+    return value.length === 0
+      ? '（未設定）'
+      : value.map((id) => units.find((u) => u.id === id)?.name ?? '（不明な拠点）').join('、');
+  }
+  if (key === 'status' && typeof value === 'string') {
+    return DISCLOSURE_PROJECT_STATUS_LABELS[value as DisclosureProjectStatus] ?? value;
+  }
+  if (Array.isArray(value)) return value.join('、');
+  return String(value);
+}
 
 /**
  * プロジェクトを更新する。報告範囲・期間を変える場合は、影響する原稿・数値・承認を返し、
@@ -1054,6 +1100,35 @@ export async function updateProject(
   });
   const changed = normalizeUpdate(detail.project, input, units, detail.members);
   const changedFields = Object.keys(changed);
+  // 画面が読み込んだ後に別の人が保存していれば、黙って上書きしない（古い画面の値で、ほかの人が変えた
+  // レビュー担当・報告範囲を戻してしまう。範囲なら改訂番号まで上げて承認済みの節を再確認にする）。
+  // 画面の値と最新の値が違う項目を並べて返し、入力は画面に残す（§4.2・A35「競合」）
+  if (input.baseUpdatedAt !== undefined && input.baseUpdatedAt !== detail.project.updatedAt) {
+    if (changedFields.length === 0) return { status: 'unchanged' };
+    return {
+      status: 'conflict',
+      updatedByName:
+        detail.members.find((m) => m.userId === detail.project.updatedBy)?.displayName ??
+        'ほかの利用者',
+      currentUpdatedAt: detail.project.updatedAt,
+      fields: changedFields.map((key) => ({
+        key,
+        label: PROJECT_FIELD_LABELS[key] ?? key,
+        current: projectFieldDisplay(
+          key,
+          (detail.project as unknown as Record<string, unknown>)[key],
+          detail.members,
+          units,
+        ),
+        yours: projectFieldDisplay(
+          key,
+          (changed as Record<string, unknown>)[key],
+          detail.members,
+          units,
+        ),
+      })),
+    };
+  }
   if (changedFields.length === 0) return { status: 'unchanged' };
 
   const scopeChanged = changedFields.some((f) => (SCOPE_FIELDS as readonly string[]).includes(f));
@@ -1107,6 +1182,20 @@ async function loadProjectFramework(
   return { pf, view, detail };
 }
 
+/** 適用条件の保存の競合（画面が読み込んだ後に、別の人が条件を保存した） */
+export class ProjectFrameworkConflictError extends ValidationError {
+  readonly code = 'CONFLICT';
+  constructor(
+    readonly updatedByName: string,
+    readonly currentUpdatedAt: IsoDateTime,
+  ) {
+    super(
+      `この画面を開いた後に、${updatedByName} さんが適用条件を保存しました。上書きせずに止めました（あなたの入力は残っています）。最新の条件を読み込んで確認するか、このまま上書き保存してください。`,
+    );
+    this.name = 'ProjectFrameworkConflictError';
+  }
+}
+
 /**
  * 「保存して準備を始める」。適用条件と準備の区分（適用候補／確認待ち）を保存する。
  * 判断は確定しない。確定済みの判断がある基準は区分を変えない（条件の変更は判断との差として示す）。
@@ -1119,10 +1208,19 @@ export async function saveProjectFramework(
     projectFrameworkId: Uuid;
     conditions: FrameworkConditions;
     preparationStatus: PreparationStatus;
+    /** 画面が読み込んだ時点の更新時刻（競合の検出）。省略時は検出しない */
+    baseUpdatedAt?: IsoDateTime;
   },
 ): Promise<ProjectFramework> {
   assertCan(ctx, 'enterprise.disclosure.write');
-  const { pf, view } = await loadProjectFramework(db, ctx, input.projectFrameworkId);
+  const { pf, view, detail } = await loadProjectFramework(db, ctx, input.projectFrameworkId);
+  if (input.baseUpdatedAt !== undefined && input.baseUpdatedAt !== pf.updatedAt) {
+    // 条件は丸ごと書き換えるため、古い画面の保存は別の人の入力を黙って消してしまう
+    throw new ProjectFrameworkConflictError(
+      detail.members.find((m) => m.userId === pf.updatedBy)?.displayName ?? 'ほかの利用者',
+      pf.updatedAt,
+    );
+  }
   if (!PREPARATION_STATUSES.includes(input.preparationStatus)) {
     throw new ValidationError('準備の区分は「適用候補」か「確認待ち」を選んでください。');
   }

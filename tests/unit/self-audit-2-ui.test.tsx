@@ -139,6 +139,7 @@ describe('UX-01 コメントの送信が通信で失敗しても、再試行で�
         canSelectForAi={false}
         onInsert={() => {}}
         onJump={() => {}}
+        paragraphLabel={(id) => id}
         paragraphOptions={[]}
         tab="comments"
         onTabChange={() => {}}

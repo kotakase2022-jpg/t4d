@@ -4,8 +4,13 @@ import { permissionsFor } from '@/lib/authorization/can';
 import { availabilityFromValue } from '@/lib/domain/disclosure-status';
 import type { FixtureDb } from '@/lib/fixtures/store';
 import type {
+  DataPoint,
+  DataPointVersion,
   DisclosureBlock,
+  OrganizationFeatureSettings,
   PermissionKey,
+  ProjectFramework,
+  ProjectFrameworkDecision,
   ReviewEvent,
   ReviewRequest,
   Uuid,
@@ -269,11 +274,19 @@ export function isPersistedTable(table: TableName): boolean {
  * これにより organizationMemberships（ロール注入）・membershipRoles・auditEvents・signoffs
  * といった、なりすましや証跡の改ざんに使える表には一切届かない。
  */
-/** 互いを参照して検証する表（依頼 ⇔ 記録 ⇔ 節）。受け付けられる順に適用する */
+/**
+ * 互いを参照して検証する表。受け付けられる順に適用する。
+ *  - 依頼 ⇔ 記録 ⇔ 節
+ *  - Data Point → 数値の版・承認の道筋（現在の版と値の一致、承認の根拠）
+ *  - 基準の適用区分 → 適用判断の記録（現在の判断と区分の一致）
+ */
 const REVIEW_TABLES: ReadonlySet<string> = new Set([
   'reviewRequests',
   'reviewEvents',
   'disclosureBlocks',
+  'dataPoints',
+  'projectFrameworks',
+  'projectFrameworkDecisions',
 ]);
 
 export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
@@ -429,6 +442,20 @@ function requestStatusAllows(
   }
 }
 
+/**
+ * 依頼の行の実際の段階。Cookie は依頼を最新の 1 行にまとめて持ち回すため、「依頼中」の行を
+ * 持つインスタンスには「レビュー完了」の状態が届かないまま「承認済み」「差戻し（最終段）」が届く。
+ * 行が「依頼中」でも、同じ版のレビュー完了の記録が既にあれば「レビュー完了」として扱う
+ * （状態は記録の後にしか進まないため、記録が段階を表す）
+ */
+function effectiveRequestStatus(
+  db: FixtureDb,
+  request: Pick<ReviewRequest, 'id' | 'targetVersionId' | 'status'>,
+): ReviewRequest['status'] {
+  if (request.status === 'open' && hasEvent(db, request, 'review_completed')) return 'reviewed';
+  return request.status;
+}
+
 function acceptReviewEvent(
   db: FixtureDb,
   event: ReviewEvent,
@@ -440,7 +467,8 @@ function acceptReviewEvent(
   const request = applied ?? (pending ? (pending.v as unknown as ReviewRequest) : undefined);
   if (!request || request.organizationId !== event.organizationId) return false;
   if (event.targetVersionId !== request.targetVersionId) return false;
-  if (!requestStatusAllows(event, request.status, applied !== undefined)) return false;
+  const status = applied ? effectiveRequestStatus(db, applied) : request.status;
+  if (!requestStatusAllows(event, status, applied !== undefined)) return false;
   // 指名: レビュー担当・最終承認者を指名した依頼は、その人の判断だけを受け付ける
   const reviewStage =
     event.eventType === 'review_completed' ||
@@ -553,13 +581,19 @@ function acceptReviewRequest(
     const project = db.disclosureProjects.find((p) => p.id === next.projectId);
     if (!project || (next.projectScopeRevision ?? 0) > (project.scopeRevision ?? 0)) return false;
   }
+  // 「依頼中」の行を持つインスタンスへ「承認済み」が直接届いても、レビュー完了の記録があれば進める
+  const existingStatus = existing ? effectiveRequestStatus(db, existing) : undefined;
   switch (next.status) {
     case 'open':
       return !existing;
     case 'reviewed':
       return (!existing || existing.status === 'open') && hasEvent(db, next, 'review_completed');
     case 'approved':
-      return (!existing || existing.status === 'reviewed') && hasEvent(db, next, 'approved');
+      return (
+        (!existing || existingStatus === 'reviewed') &&
+        hasEvent(db, next, 'review_completed') &&
+        hasEvent(db, next, 'approved')
+      );
     case 'returned':
       return hasEvent(db, next, 'returned');
     case 'withdrawn':
@@ -635,6 +669,149 @@ function acceptBlock(
   return true;
 }
 
+// ----------------------------------------------------------------------
+// 数値・適用判断・機能設定の検査（Cookie から承認・判断・設定を作らせない）
+//
+// 版の行は追記専用でも、表示する値は Data Point の行（現在の版を指すポインタと値の写し）にある。
+// ポインタと写しを自由に書けると、承認していない値を「承認済み」として全員の画面に出せてしまう
+// ----------------------------------------------------------------------
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** Data Point の行が写す、現在の版の値の列 */
+const DATA_POINT_VALUE_KEYS = [
+  'value',
+  'textValue',
+  'unitOfMeasure',
+  'valueKind',
+  'availabilityStatus',
+] as const;
+
+/** 状態ごとに要る権限（DB の t4d.enforce_data_point_transition と同じ） */
+const DATA_POINT_STATUS_PERMISSION: Partial<Record<DataPoint['status'], PermissionKey>> = {
+  approved: 'enterprise.data.approve',
+  in_review: 'enterprise.data.review',
+  returned: 'enterprise.data.review',
+  draft: 'enterprise.data.write',
+  submitted: 'enterprise.data.write',
+};
+
+function acceptDataPointVersion(next: DataPointVersion): boolean {
+  // 版は作成時点の状態で作られる（承認は Data Point と承認の記録で表す）。承認済みの版を Cookie から
+  // 足させない（承認の道筋・職務分離・監査記録を経ない「承認済み」の値になる）
+  return next.status !== 'approved';
+}
+
+function acceptDataPoint(db: FixtureDb, existing: DataPoint | undefined, next: DataPoint): boolean {
+  const version = next.currentVersionId
+    ? db.dataPointVersions.find((v) => v.id === next.currentVersionId)
+    : undefined;
+  if (next.currentVersionId) {
+    // 現在の版は、この Data Point の版でなければならない
+    if (!version || version.dataPointId !== next.id) return false;
+    if (version.organizationId !== next.organizationId) return false;
+  }
+  const pointerChanged = !existing || existing.currentVersionId !== next.currentVersionId;
+  const valueChanged =
+    !existing || DATA_POINT_VALUE_KEYS.some((key) => !sameValue(existing[key], next[key]));
+  if (pointerChanged || valueChanged) {
+    // 値は現在の版の写し。版の無い値・版と違う値を書かせない
+    if (!version) {
+      if (next.value !== null || next.textValue !== null) return false;
+    } else {
+      const normalized = normalizeLegacyRow('dataPointVersions', { ...version });
+      if (DATA_POINT_VALUE_KEYS.some((key) => !sameValue(normalized[key], next[key]))) {
+        return false;
+      }
+    }
+  }
+  const statusChanged = !existing || existing.status !== next.status;
+  const actor = next.updatedBy ?? null;
+  if (statusChanged && existing) {
+    const required = DATA_POINT_STATUS_PERMISSION[next.status];
+    if (required && (!actor || !memberPermissions(db, next.organizationId, actor).has(required))) {
+      return false;
+    }
+  }
+  // 承認済みにする（または承認済みのまま別の版を指す）には、承認者の権限と承認の道筋の完了が要る
+  // （data-point-workflow.ts の transitionDataPoint と同じ規則）
+  if (next.status === 'approved' && (statusChanged || pointerChanged)) {
+    const approver = next.approvedBy ?? null;
+    if (
+      !approver ||
+      !memberPermissions(db, next.organizationId, approver).has('enterprise.data.approve')
+    ) {
+      return false;
+    }
+    const steps = db.dataPointApprovalSteps.filter(
+      (s) => s.dataPointId === next.id && s.organizationId === next.organizationId,
+    );
+    if (steps.length > 0) {
+      const round = Math.max(...steps.map((s) => s.round));
+      const current = steps.filter((s) => s.round === round);
+      if (!current.every((s) => s.status === 'approved')) return false;
+    }
+  }
+  return true;
+}
+
+function acceptFrameworkDecision(db: FixtureDb, next: ProjectFrameworkDecision): boolean {
+  // 「適用判断を確定」と同じく、開示の編集権限を持つ組織の利用者の判断で、番号は前の判断より後
+  if (
+    !memberPermissions(db, next.organizationId, next.decidedBy).has('enterprise.disclosure.write')
+  ) {
+    return false;
+  }
+  const previous = db.projectFrameworkDecisions.filter(
+    (d) => d.projectFrameworkId === next.projectFrameworkId,
+  );
+  return previous.every((d) => d.decisionNo < next.decisionNo);
+}
+
+/** 判断の記録が無いまま名乗れる区分（準備の区分と未判定） */
+const UNDECIDED_STATUSES: ReadonlyArray<ProjectFramework['applicabilityStatus']> = [
+  'not_assessed',
+  'candidate',
+  'awaiting_confirmation',
+];
+
+function acceptProjectFramework(
+  db: FixtureDb,
+  existing: ProjectFramework | undefined,
+  next: ProjectFramework,
+): boolean {
+  if (next.currentDecisionId === null) {
+    // 確定した判断を外す操作は無い。判断なしで確定の区分（適用・対象外など）を名乗らせない
+    if (existing?.currentDecisionId) return false;
+    return UNDECIDED_STATUSES.includes(next.applicabilityStatus);
+  }
+  const decision = db.projectFrameworkDecisions.find((d) => d.id === next.currentDecisionId);
+  if (
+    !decision ||
+    decision.projectFrameworkId !== next.id ||
+    decision.organizationId !== next.organizationId ||
+    decision.applicabilityStatus !== next.applicabilityStatus
+  ) {
+    return false;
+  }
+  // 古い判断へ戻さない（判断は追記で見直す）
+  if (existing?.currentDecisionId && existing.currentDecisionId !== next.currentDecisionId) {
+    const before = db.projectFrameworkDecisions.find((d) => d.id === existing.currentDecisionId);
+    if (before && before.decisionNo > decision.decisionNo) return false;
+  }
+  return true;
+}
+
+function acceptFeatureSettings(db: FixtureDb, next: OrganizationFeatureSettings): boolean {
+  // 開示優先モードの切り替えは、その組織の管理者（enterprise.org.manage）だけ（setDisclosureFirst と同じ）
+  const actor = next.updatedBy ?? null;
+  return (
+    actor !== null && memberPermissions(db, next.organizationId, actor).has('enterprise.org.manage')
+  );
+}
+
 function acceptEdit(
   db: FixtureDb,
   table: string,
@@ -645,6 +822,24 @@ function acceptEdit(
 ): boolean {
   if (existing && APPEND_ONLY_TABLES.has(table)) return false;
   switch (table) {
+    case 'dataPointVersions':
+      return acceptDataPointVersion(next as unknown as DataPointVersion);
+    case 'dataPoints':
+      return acceptDataPoint(
+        db,
+        existing as unknown as DataPoint | undefined,
+        next as unknown as DataPoint,
+      );
+    case 'projectFrameworkDecisions':
+      return acceptFrameworkDecision(db, next as unknown as ProjectFrameworkDecision);
+    case 'projectFrameworks':
+      return acceptProjectFramework(
+        db,
+        existing as unknown as ProjectFramework | undefined,
+        next as unknown as ProjectFramework,
+      );
+    case 'organizationFeatureSettings':
+      return acceptFeatureSettings(db, next as unknown as OrganizationFeatureSettings);
     case 'reviewEvents':
       return acceptReviewEvent(db, next as unknown as ReviewEvent, pendingRequests);
     case 'reviewRequests':

@@ -468,7 +468,7 @@ describe('スナップショットからの出力', () => {
     const artifacts = await listExportArtifacts(db, approver(), [snapshot.id]);
     expect(artifacts).toHaveLength(2);
     for (const artifact of artifacts) {
-      expect(artifact.templateVersion).toBe('disclosure-report-v1');
+      expect(artifact.templateVersion).toBe('disclosure-report-v2');
       expect(artifact.fileSha256).toMatch(/^[0-9a-f]{64}$/);
       expect(artifact.byteSize).toBeGreaterThan(0);
       expect(artifact.fileName).not.toContain('提出済み');

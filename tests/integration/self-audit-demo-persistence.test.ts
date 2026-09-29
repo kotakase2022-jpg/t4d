@@ -142,15 +142,38 @@ describe('REG-F1 以前のデプロイの Cookie に残った Data Point の行�
     expect(
       normalizeLegacyRow('dataPointVersions', { id: 'y', value: null, textValue: null }),
     ).toMatchObject({ availabilityStatus: 'not_entered' });
-    const legacy = { ...fixture.dataPoints[0]!, id: fid('data_point', 'legacy') } as Record<
-      string,
-      unknown
-    >;
-    delete legacy.valueKind;
-    delete legacy.availabilityStatus;
-    delete legacy.absenceReason;
-    applyDemoEdits(fixture, [{ t: 'dataPoints', id: legacy.id as string, v: legacy }]);
-    const restored = fixture.dataPoints.find((d) => d.id === legacy.id)!;
+    // 以前のデプロイで作った Data Point と、その版（どちらも 0039 の列を持たない）。
+    // Data Point は自分の版を指す（Cookie から戻す Data Point は現在の版の値の写しでなければならない。SEC-2）
+    const legacyId = fid('data_point', 'legacy');
+    const legacyVersionId = fid('data_point_version', 'legacy/v1');
+    const template = fixture.dataPoints[0]!;
+    const legacyVersion = {
+      ...fixture.dataPointVersions.find((v) => v.id === template.currentVersionId)!,
+      id: legacyVersionId,
+      dataPointId: legacyId,
+      value: template.value,
+      textValue: template.textValue,
+      unitOfMeasure: template.unitOfMeasure,
+      status: 'draft',
+    } as Record<string, unknown>;
+    const legacy = {
+      ...template,
+      id: legacyId,
+      currentVersionId: legacyVersionId,
+      status: 'draft',
+      approvedAt: null,
+      approvedBy: null,
+    } as Record<string, unknown>;
+    for (const row of [legacy, legacyVersion]) {
+      delete row.valueKind;
+      delete row.availabilityStatus;
+      delete row.absenceReason;
+    }
+    applyDemoEdits(fixture, [
+      { t: 'dataPointVersions', id: legacyVersionId, v: legacyVersion },
+      { t: 'dataPoints', id: legacyId, v: legacy },
+    ]);
+    const restored = fixture.dataPoints.find((d) => d.id === legacyId)!;
     expect(restored.valueKind).toBe('actual');
     expect(restored.availabilityStatus).toBeDefined();
   });

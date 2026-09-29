@@ -2,13 +2,19 @@ import 'server-only';
 
 import { recordAiDecision, runAi } from '@/lib/ai';
 import { recordAuditEvent } from '@/lib/audit/logger';
-import { isCountedInTotals } from '@/lib/services/aggregation';
+import {
+  consolidationFactor,
+  isActualValue,
+  isCountedInTotals,
+  sumValues,
+} from '@/lib/services/aggregation';
 import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AiSourceReference,
   AuthorizationContext,
+  DataPoint,
   DisclosureResponse,
   DisclosureResponseVersion,
   ResponseStatus,
@@ -56,6 +62,13 @@ export async function generateDisclosureDraft(
   const metricValues: Array<{ label: string; value: number; unit: string; periodLabel: string }> =
     [];
   const sources: AiSourceReference[] = [];
+  const units = await db.select('units', { where: { organizationId: response.organizationId } });
+  const unitById = new Map(units.map((u) => [u.id, u]));
+  // 連結値と同じ係数（持分法・対象外の組織は 0、比例連結は持分割合）で足す
+  const factorOf = (dp: DataPoint) => {
+    const unit = unitById.get(dp.unitId);
+    return unit ? consolidationFactor(unit) : 1;
+  };
 
   for (const mapping of mappings) {
     const metric = await db.findById('metrics', mapping.metricId);
@@ -70,17 +83,20 @@ export async function generateDisclosureDraft(
         deletedAt: { isNull: true },
       },
     });
-    if (dataPoints.length === 0) continue;
+    // 実績の値がある行だけを足す。値の無い行（未入力・対象外など）を 0 として、目標・推計を実績として
+    // AI に渡さない（SSBJ ギャップ分析の W0 O4 と同じ規則）。足せる行が無ければ根拠にしない
+    const counted = dataPoints.filter(
+      (dp) => isCountedInTotals(dp) && isActualValue(dp) && factorOf(dp) > 0,
+    );
+    const { total } = sumValues(counted, 'actual', factorOf);
+    if (total === null) continue;
     metricValues.push({
       label: metric.name,
-      value:
-        Math.round(
-          dataPoints.filter(isCountedInTotals).reduce((s, dp) => s + (dp.value ?? 0), 0) * 100,
-        ) / 100,
+      value: Math.round(total * 100) / 100,
       unit: metric.unit,
       periodLabel: period?.label ?? '',
     });
-    for (const dp of dataPoints) {
+    for (const dp of counted) {
       sources.push({
         kind: 'data_point',
         id: dp.id,

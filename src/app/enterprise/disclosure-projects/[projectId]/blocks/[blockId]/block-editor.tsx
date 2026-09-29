@@ -43,6 +43,7 @@ import {
   insertRef,
   newParagraphId,
   paragraphFromEditable,
+  paragraphLabelOf,
   refsInParagraph,
   type EditableBody,
   type RefInline,
@@ -347,8 +348,9 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
   const removeParagraph = (id: string) => {
     const current = editableRef.current;
     const index = current.paragraphs.findIndex((p) => p.id === id);
+    const label = paragraphLabelOf(current.paragraphs, id);
     update({ ...current, paragraphs: current.paragraphs.filter((p) => p.id !== id) });
-    announce(`段落 ${id} を削除しました。`);
+    announce(`${label} を削除しました。`);
     const next = current.paragraphs[index + 1] ?? current.paragraphs[index - 1];
     if (next)
       requestAnimationFrame(() => document.getElementById(`para-input-${next.id}`)?.focus());
@@ -378,7 +380,9 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
     if (!result) return;
     update(result.body);
     active.current = { id: targetId, caret: result.caret };
-    announce(`${label} を段落 ${targetId} に ${result.token} として挿入しました。`);
+    announce(
+      `${label} を${paragraphLabelOf(result.body.paragraphs, targetId)}に ${result.token} として挿入しました。`,
+    );
     setPaneOpen(false);
     requestAnimationFrame(() => {
       const input = document.getElementById(`para-input-${targetId}`) as HTMLTextAreaElement | null;
@@ -393,7 +397,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
       const input = document.getElementById(`para-input-${paragraphId}`);
       const wrapper = document.getElementById(`para-${paragraphId}`);
       if (!wrapper) {
-        announce(`段落 ${paragraphId} は現在の本文にありません。`);
+        announce('指定の段落は現在の本文にありません（削除されたか、別の版の段落です）。');
         return;
       }
       wrapper.scrollIntoView({ block: 'center' });
@@ -569,7 +573,11 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
       setVersionError(result.message);
       return;
     }
-    const issues = result.issues?.map((i) => `段落 ${i.paragraphId}: ${i.message}`).join(' ／ ');
+    const issues = result.issues
+      ?.map(
+        (i) => `${paragraphLabelOf(editableRef.current.paragraphs, i.paragraphId)}: ${i.message}`,
+      )
+      .join(' ／ ');
     setVersionError(issues ? `${result.message}（${issues}）` : result.message);
   };
 
@@ -649,6 +657,8 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
     setPaneOpen(true);
   };
   const paneExpanded = wide ? paneDocked : paneOpen;
+  /** 狭い幅で根拠パネルをドロワーとして開いている（背面は操作させない） */
+  const drawerOpen = paneOpen && !wide;
 
   // 広い幅でも、パネル内で Esc を押すと閉じて開いたボタンへ戻る（狭い幅のドロワーは下の処理で扱う）
   React.useEffect(() => {
@@ -662,15 +672,40 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
     return () => window.removeEventListener('keydown', onKey);
   }, [closePane, paneDocked, wide]);
 
+  // 狭い幅のドロワーはモーダル: 開いている間は Tab・Shift+Tab をドロワーの中で回し、
+  // 背面（暗くした本文・状態の帯）へフォーカスを抜けさせない（A37・A38・UX-R3-08）
   React.useEffect(() => {
     if (!paneOpen) return;
     paneRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closePane();
+      if (event.key === 'Escape') {
+        closePane();
+        return;
+      }
+      if (event.key !== 'Tab' || wide) return;
+      const aside = asideRef.current;
+      if (!aside) return;
+      const focusable = [
+        ...aside.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => el.offsetParent !== null || el === document.activeElement);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
+      const active = document.activeElement;
+      const inside = active instanceof Node && aside.contains(active);
+      if (event.shiftKey && (!inside || active === first || active === paneRef.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || active === last)) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [closePane, paneOpen]);
+  }, [closePane, paneOpen, wide]);
 
   React.useEffect(() => {
     if (versionFormOpen) reasonRef.current?.focus();
@@ -687,7 +722,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
 
   const paragraphOptions = editable.paragraphs.map((p) => ({
     id: p.id,
-    label: `段落 ${p.id}${p.kind === 'heading' ? '（見出し）' : ''}: ${displayText(p, editable.refs).slice(0, 24)}`,
+    label: `${paragraphLabelOf(editable.paragraphs, p.id)}: ${displayText(p, editable.refs).slice(0, 24)}`,
   }));
 
   const statusItems: Array<{ key: keyof BlockEditorData['statusBar']; label: string }> = [
@@ -866,6 +901,24 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
           報告範囲（報告主体・期間・対象範囲）の変更より前に承認された節です。変更後の範囲で本文を確認し、「版として保存」してから再承認を受けてください（本文を変えなくても版を作れます）。
         </p>
       )}
+      {data.block.applicabilityRecheckNeeded && (
+        <p
+          className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-[12px] text-ink"
+          data-testid="applicability-recheck-banner"
+        >
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          最終承認の後に、この節の基準の適用判断が確定し直されました。更新後の判断で本文を確認し、「版として保存」してから再承認を受けてください（本文を変えなくても版を作れます）。
+        </p>
+      )}
+      {data.block.translationNeedsCheck && data.block.currentVersionId && (
+        <p
+          className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-[12px] text-ink"
+          data-testid="translation-recheck-banner"
+        >
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          翻訳元が、この翻訳の版より後に更新されています。翻訳元と照らして翻訳を確認し、「版として保存」してからレビューを受けてください（翻訳を直す必要が無ければ、本文を変えずに版を作れます）。
+        </p>
+      )}
       {data.block.workingUpdatedByOtherName && (
         <p className="flex items-start gap-1 border-b border-line bg-surface-muted px-3 py-1.5 text-[12px] text-ink">
           <CircleDot className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
@@ -956,9 +1009,11 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
               {conflictKind === 'working' ? 'ほかの人の作業中の本文を表示' : '最新の版の本文を表示'}
             </summary>
             <div className="mt-1 space-y-1 rounded-t4d border border-line bg-surface p-2">
-              {editableFromBody(conflictBody).paragraphs.map((p) => (
+              {editableFromBody(conflictBody).paragraphs.map((p, _index, all) => (
                 <p key={p.id} className="whitespace-pre-wrap">
-                  <span className="mr-1 font-mono text-[10px] text-ink-muted">{p.id}</span>
+                  <span className="mr-1 text-[10px] text-ink-muted">
+                    {paragraphLabelOf(all, p.id)}
+                  </span>
                   {displayText(p, editableFromBody(conflictBody).refs)}
                 </p>
               ))}
@@ -1028,7 +1083,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
         </nav>
 
         {/* 中央: 本文。AppShell が既に <main id="t4d-main"> を持つため、ここは名前付きの領域にする（main を入れ子にしない） */}
-        <section aria-label="本文" className="min-w-0 space-y-3 p-3">
+        <section aria-label="本文" className="min-w-0 space-y-3 p-3" inert={drawerOpen}>
           <AiPanel
             projectId={projectId}
             blockId={blockId}
@@ -1058,6 +1113,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
               announce(message);
             }}
             onAnnounce={announce}
+            paragraphLabel={(id) => paragraphLabelOf(editableRef.current.paragraphs, id)}
             paragraphText={(id) => {
               const p = editableRef.current.paragraphs.find((x) => x.id === id);
               return p ? displayText(p, editableRef.current.refs) : null;
@@ -1094,6 +1150,8 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
 
           <ol className="space-y-2">
             {editable.paragraphs.map((p) => {
+              // 内部の段落 ID は出さず、本文の中の位置で呼ぶ（UX-R3-05）
+              const label = paragraphLabelOf(editable.paragraphs, p.id);
               const refs = refsInParagraph(p, editable.refs);
               const warnings = handwritten.get(p.id) ?? [];
               const commentCount = commentsByParagraph.get(p.id) ?? 0;
@@ -1113,7 +1171,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
                       ) : (
                         <Pilcrow className="size-3" aria-hidden="true" />
                       )}
-                      {p.kind === 'heading' ? '見出し' : '段落'} {p.id}
+                      {label}
                     </label>
                     {p.aiRunId && (
                       <Badge tone="brand">
@@ -1134,7 +1192,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
                           size="sm"
                           variant="ghost"
                           onClick={() => toggleKind(p.id)}
-                          aria-label={`段落 ${p.id} を${p.kind === 'heading' ? '本文' : '見出し'}にする`}
+                          aria-label={`${label} を${p.kind === 'heading' ? '本文' : '見出し'}にする`}
                         >
                           {p.kind === 'heading' ? (
                             <Pilcrow aria-hidden="true" />
@@ -1147,7 +1205,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
                           size="sm"
                           variant="ghost"
                           onClick={() => addParagraph(p.id)}
-                          aria-label={`段落 ${p.id} の後に段落を追加`}
+                          aria-label={`${label} の後に段落を追加`}
                         >
                           <Plus aria-hidden="true" />
                         </Button>
@@ -1156,7 +1214,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
                           size="sm"
                           variant="ghost"
                           onClick={() => removeParagraph(p.id)}
-                          aria-label={`段落 ${p.id} を削除`}
+                          aria-label={`${label} を削除`}
                         >
                           <Trash2 aria-hidden="true" />
                         </Button>
@@ -1242,7 +1300,10 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
         {/* 右: 根拠（狭い画面ではドロワー） */}
         <aside
           id="block-right-pane"
-          aria-label="根拠パネル"
+          // 狭い幅で開いたドロワーはモーダルのダイアログとして読み上げる（背面は操作できない）
+          {...(drawerOpen
+            ? { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'block-right-pane-title' }
+            : { 'aria-label': '根拠パネル' })}
           className={`${paneOpen ? 'fixed inset-y-0 right-0 z-40 flex w-[min(420px,100vw)] shadow-xl' : 'hidden'} flex-col border-l border-line bg-surface ${
             paneDocked
               ? // 高さはスクロール領域（画面 − ヘッダー 48px）から、下に固定した「本文の状態」の帯（約 44px）を除いた分。
@@ -1257,7 +1318,9 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
             tabIndex={-1}
             className="flex items-center justify-between border-b border-line px-3 py-1.5 focus-visible:outline-none"
           >
-            <span className="text-[13px] font-semibold text-ink">根拠パネル</span>
+            <span id="block-right-pane-title" className="text-[13px] font-semibold text-ink">
+              根拠パネル
+            </span>
             <button
               type="button"
               onClick={closePane}
@@ -1283,6 +1346,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
             canSelectForAi={permissions.canRunAi && permissions.editable}
             onInsert={insert}
             onJump={jumpTo}
+            paragraphLabel={(id) => paragraphLabelOf(editable.paragraphs, id)}
             paragraphOptions={paragraphOptions}
             tab={paneTab}
             onTabChange={setPaneTab}
@@ -1303,6 +1367,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
       <div
         role="toolbar"
         aria-label="本文の状態"
+        inert={drawerOpen}
         className="sticky bottom-0 z-20 flex min-h-[2.75rem] flex-wrap items-center gap-1.5 border-t border-line bg-surface px-3 py-1.5 text-[12px]"
       >
         {statusItems.map(({ key, label }) => {

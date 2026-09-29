@@ -1338,6 +1338,8 @@ export async function loadKpiSnapshotComparison(
 ): Promise<KpiSnapshotComparison> {
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.data.read');
+  // スナップショット（開示プロジェクト名・内容ハッシュ）は開示の情報。出力タブと同じ権限を求める
+  assertCan(ctx, 'enterprise.disclosure.read');
   const snapshot = await loadOwnedSnapshot(db, ctx, snapshotId);
   const data = await loadKpiData(db, ctx);
   const project = await db.findById('disclosureProjects', snapshot.projectId);

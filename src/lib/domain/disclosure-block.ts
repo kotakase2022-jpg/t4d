@@ -12,6 +12,7 @@ import type {
   BlockBody,
   BlockInline,
   BlockParagraph,
+  BlockStatus,
   DataPointVersion,
   RecheckDecision,
   RecheckRefKind,
@@ -20,6 +21,19 @@ import type {
 } from '@/types/domain';
 
 export type { BlockBody, BlockInline, BlockParagraph } from '@/types/domain';
+
+/**
+ * 作業本文（working_body）を本文として扱ってよい状態か。自動保存できるのは下書き・差戻しの節だけで、
+ * レビュー中・承認済みの節の本文は、審査している版・承認した版（現在の版）でなければならない。
+ * 作業本文が残っていても、固定していない本文をレビュー担当に「版 N」として読ませず、
+ * 承認済みの節の鮮度もその本文で判定しない
+ */
+export function workingBodyInEffect(block: {
+  status: BlockStatus;
+  workingBody: BlockBody | null;
+}): block is { status: BlockStatus; workingBody: BlockBody } {
+  return Boolean(block.workingBody) && (block.status === 'draft' || block.status === 'returned');
+}
 
 /**
  * 値の区分の注記。推計・目標の値を、本文・下書き・出力で実績と読ませない（指示書 §7.1・§10.4

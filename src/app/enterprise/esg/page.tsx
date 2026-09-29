@@ -15,7 +15,7 @@ import {
 } from '@/lib/services/kpi';
 import { listOrganizationSnapshots, SNAPSHOT_KIND_DISPLAY } from '@/lib/services/report-snapshot';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { NotFoundError } from '@/lib/authorization/can';
+import { can, NotFoundError } from '@/lib/authorization/can';
 import { KpiCard, signed } from './kpi-card';
 
 export const metadata = { title: 'ESG 経営' };
@@ -34,11 +34,19 @@ function one(value: string | string[] | undefined): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-function ModeTabs({ mode, periodId }: { mode: 'latest' | 'snapshot'; periodId: string }) {
+function ModeTabs({
+  mode,
+  periodId,
+  canCompareSnapshots,
+}: {
+  mode: 'latest' | 'snapshot';
+  periodId: string;
+  canCompareSnapshots: boolean;
+}) {
   const tabs = [
     { key: 'latest', label: '最新承認値', href: `/enterprise/esg?period=${periodId}` },
     { key: 'snapshot', label: 'スナップショット照合', href: '/enterprise/esg?mode=snapshot' },
-  ] as const;
+  ].filter((tab) => tab.key === 'latest' || canCompareSnapshots);
   return (
     <nav aria-label="表示モード" className="flex gap-1">
       {tabs.map((tab) => (
@@ -170,7 +178,10 @@ export default async function EsgPage({ searchParams }: { searchParams: Promise<
   const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const { db, ctx } = shell;
-  const mode = one(query.mode) === 'snapshot' ? 'snapshot' : 'latest';
+  // スナップショット（開示プロジェクト名・版）は開示の情報。開示の閲覧権限が無い人には照合モードを出さない
+  const canCompareSnapshots = can(ctx, 'enterprise.disclosure.read');
+  const mode =
+    one(query.mode) === 'snapshot' && canCompareSnapshots ? 'snapshot' : ('latest' as const);
 
   // 照合モードでは KPI の計算は要らない（スナップショットの値と最新承認値の比較だけ）
   const dashboard =
@@ -210,7 +221,11 @@ export default async function EsgPage({ searchParams }: { searchParams: Promise<
 
       <div className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <ModeTabs mode={mode} periodId={selectedPeriodId} />
+          <ModeTabs
+            mode={mode}
+            periodId={selectedPeriodId}
+            canCompareSnapshots={canCompareSnapshots}
+          />
           {dashboard ? (
             <nav aria-label="対象年度" className="flex flex-wrap items-center gap-1 text-[12px]">
               <span className="text-ink-muted">対象年度:</span>

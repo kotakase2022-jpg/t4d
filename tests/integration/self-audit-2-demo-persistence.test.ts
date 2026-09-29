@@ -109,9 +109,9 @@ function sizedEdit(id: string, bytes: number, n: number): DemoEdit {
 }
 
 /** 以前の詰め方（先頭から入るだけを前のチャンクへ）。比較のため */
-function prefixPackOverflows(edits: readonly DemoEdit[]): boolean {
+function prefixPackOverflows(edits: readonly DemoEdit[], chunks: number = COOKIE_CHUNKS): boolean {
   let rest = [...edits];
-  for (let i = 0; i < COOKIE_CHUNKS && rest.length > 0; i += 1) {
+  for (let i = 0; i < chunks && rest.length > 0; i += 1) {
     let take = rest.length;
     while (take > 0 && encodeDemoEdits(rest.slice(0, take)).length > MAX_BYTES_PER_COOKIE) {
       take -= 1;
@@ -128,19 +128,21 @@ function prefixPackOverflows(edits: readonly DemoEdit[]): boolean {
 
 describe('F3 Cookie のチャンクは空きのあるところへ詰め、1 つ目の空きを残したまま押し出さない', () => {
   it('大きな編集が 1 つ目に入らなくても、後の小さな編集は 1 つ目の空きへ入る', () => {
-    const edits = [
-      sizedEdit('a', 1300, 1),
-      sizedEdit('big', 1900, 2),
-      sizedEdit('b', 900, 3),
-      sizedEdit('c', 800, 4),
-    ];
+    // チャンクの数によらず、先頭から詰めると 1 つ前のチャンクに空きを残す並び
+    // （中くらい・大きいの組を「チャンク数 - 1」回、最後に小さい 2 件）
+    const edits: DemoEdit[] = [];
+    for (let i = 0; i < COOKIE_CHUNKS - 1; i += 1) {
+      edits.push(sizedEdit(`a${i}`, 1300, edits.length + 1));
+      edits.push(sizedEdit(`big${i}`, 1900, edits.length + 1));
+    }
+    edits.push(sizedEdit('b', 600, edits.length + 1), sizedEdit('c', 500, edits.length + 1));
     // 以前の詰め方では入りきらない組み合わせであることを確かめる（空振りのテストにしない）
     expect(prefixPackOverflows(edits)).toBe(true);
     const packed = packIntoChunks(edits);
     expect(packed.overflow).toEqual([]);
     expect(packed.chunks.every((c) => c.length <= MAX_BYTES_PER_COOKIE)).toBe(true);
     const restored = packed.chunks.flatMap((c) => decodeDemoEdits(c));
-    expect(restored.map((e) => e.id).sort()).toEqual(['a', 'b', 'big', 'c']);
+    expect(restored.map((e) => e.id).sort()).toEqual(edits.map((e) => e.id).sort());
   });
 
   it('読み出しは追記の順（押し出しは古いものから）', async () => {
@@ -255,8 +257,9 @@ describe('F3 Cookie のチャンクは空きのあるところへ詰め、1 つ�
     });
     await requestReview(db, author(), { blockId: RISK.block });
 
-    // 以前の詰め方（先頭から入るだけ）では、この時点の編集が 2 チャンクに入りきらない（空振りでない確認）
-    expect(prefixPackOverflows(await readDemoEdits())).toBe(true);
+    // この時点の編集は 1 つのチャンクには入りきらない（チャンクをまたいで詰めることを確かめる。空振りでない確認）。
+    // 確認を終えた AI 実行の縮小（自己監査 第 3 回 F3）の後は、以前の 2 チャンクにも収まる大きさになった
+    expect(prefixPackOverflows(await readDemoEdits(), 1)).toBe(true);
     // 取込の数値は押し出されず、押し出しの知らせも出ない
     const remaining = new Set((await readDemoEdits()).map((e) => `${e.t}:${e.id}`));
     expect(importedIds.filter((id) => !remaining.has(id))).toEqual([]);
@@ -270,9 +273,15 @@ describe('F3 Cookie のチャンクは空きのあるところへ詰め、1 つ�
 
 describe('F4 押し出しの知らせは、押し出した表をリセット・ログアウトしたら消える', () => {
   async function overflowWith(table: 'reviewComments' | 'comments' | 'ingestionRows') {
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 12; i += 1) {
       const id = `${table}-${i}`;
-      await appendDemoEdit(table, id, { id, body: randomBytes(1400).toString('base64') });
+      // 取込の行は取込ジョブを持つ（同じ取込の行どうしの押し出しだけを黙る）
+      const jobId = table === 'ingestionRows' ? { jobId: 'job-1' } : {};
+      await appendDemoEdit(table, id, {
+        id,
+        ...jobId,
+        body: randomBytes(1400).toString('base64'),
+      });
     }
   }
 
@@ -478,16 +487,29 @@ describe('INV-7 追記専用の数値の版・適用判断は、Cookie から既
     const decision = fixture.projectFrameworkDecisions[0]!;
     const before = structuredClone({ version, decision });
     const newVersionId = fid('data_point_version', 'cookie-new');
+    const forgedApprovedId = fid('data_point_version', 'cookie-new-approved');
     applyDemoEdits(fixture, [
       { t: 'dataPointVersions', id: version.id, v: { value: 1 } },
       { t: 'projectFrameworkDecisions', id: decision.id, v: { reason: '改ざん' } },
-      { t: 'dataPointVersions', id: newVersionId, v: { ...version, id: newVersionId } },
+      // 画面の操作と同じく、新しい版は下書きで作られる
+      {
+        t: 'dataPointVersions',
+        id: newVersionId,
+        v: { ...version, id: newVersionId, status: 'draft' },
+      },
+      // 承認済みを名乗る新しい版は、承認の道筋を経ていないため受け付けない（SEC-2）
+      {
+        t: 'dataPointVersions',
+        id: forgedApprovedId,
+        v: { ...version, id: forgedApprovedId },
+      },
     ]);
     expect(fixture.dataPointVersions.find((v) => v.id === version.id)).toEqual(before.version);
     expect(fixture.projectFrameworkDecisions.find((d) => d.id === decision.id)).toEqual(
       before.decision,
     );
     expect(fixture.dataPointVersions.some((v) => v.id === newVersionId)).toBe(true);
+    expect(fixture.dataPointVersions.some((v) => v.id === forgedApprovedId)).toBe(false);
   });
 });
 

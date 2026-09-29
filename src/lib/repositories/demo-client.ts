@@ -72,7 +72,35 @@ function withoutWorkingBody(record: Record<string, unknown>): Record<string, unk
   return { ...record, workingBody: null, workingBaseVersionId: null, workingSavedAt: null };
 }
 
-function persistedPatch(table: TableName, patch: Record<string, unknown>): Record<string, unknown> {
+/**
+ * 確認を終えた（採用・破棄した）原稿の AI 下書きの実行は、Cookie では候補の本文と段落の指紋を省く。
+ * 実行 1 件で約 2.3KB あり、実演の流れの後半（レビュー・承認・KPI）で前半の取込の数値を押し出していた。
+ * 採用した段落は本文の版に残り、別のインスタンスで要るのは実行の有無・状態・根拠の一覧だけ
+ * （本文の段落が指す aiRunId の検証と、実行記録の一覧）。メモリの行は全体を持ったまま
+ */
+const CLOSED_DRAFT_RUN_OUTPUT = { candidatesOmitted: true } as const;
+
+function isClosedDraftRun(row: Record<string, unknown>): boolean {
+  return (
+    row.featureType === 'disclosureBlockDraft' &&
+    (row.status === 'accepted' || row.status === 'rejected')
+  );
+}
+
+function persistedPatch(
+  table: TableName,
+  patch: Record<string, unknown>,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  if (table === 'aiRuns' && isClosedDraftRun(row)) {
+    const tokens = Array.isArray(row.inputReferenceIds) ? (row.inputReferenceIds as string[]) : [];
+    return {
+      ...patch,
+      outputJson: CLOSED_DRAFT_RUN_OUTPUT,
+      // 段落ごとの指紋（採用時の競合の検出にだけ使う）は、確認を終えた実行では要らない
+      inputReferenceIds: tokens.filter((t) => !t.startsWith('p:') && !t.startsWith('pcount:')),
+    };
+  }
   if (table !== 'disclosureBlocks') return patch;
   const rest = { ...patch };
   for (const column of WORKING_COLUMNS) delete rest[column];
@@ -136,7 +164,7 @@ export class DemoDbClient implements DbClient {
 
     // 変更のあった列だけを Cookie へ（Cookie の容量を圧迫しないため）
     if (isPersistedTable(table)) {
-      const persisted = persistedPatch(table, patch as unknown as Record<string, unknown>);
+      const persisted = persistedPatch(table, patch as unknown as Record<string, unknown>, next);
       if (Object.keys(persisted).length > 0) await appendDemoEdit(table, id, persisted);
     }
     return structuredClone(next) as unknown as Row<K>;

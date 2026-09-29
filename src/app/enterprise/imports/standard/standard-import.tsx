@@ -526,6 +526,8 @@ export function StandardImport({
               <Button
                 type="submit"
                 size="sm"
+                // 検証の後は「登録を確定」が主要な操作。再検証は副次の操作として目立たせない（主要 CTA は 1 つ。§4.2）
+                variant={preview && !committed ? 'outline' : undefined}
                 disabled={validating || committing}
                 aria-busy={validating}
               >

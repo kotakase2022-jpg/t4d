@@ -4,7 +4,7 @@ import * as React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { saveProjectFrameworkFormAction, type FrameworkConditionsFormState } from '../../actions';
 
 export interface ConditionFieldView {
@@ -27,13 +27,13 @@ const INITIAL: FrameworkConditionsFormState = {
 /** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、入力した条件を残す */
 const action = withNetworkFallback(
   saveProjectFrameworkFormAction,
-  (_previous, formData): FrameworkConditionsFormState => {
+  (_previous, formData, message): FrameworkConditionsFormState => {
     const values: Record<string, string> = {};
     for (const [key, value] of formData.entries()) {
       if (typeof value !== 'string') continue;
       if (key.startsWith('condition.') || key === 'preparationStatus') values[key] = value;
     }
-    return { status: 'error', message: NETWORK_ERROR_MESSAGE, fieldErrors: {}, values };
+    return { status: 'error', message, fieldErrors: {}, values };
   },
 );
 
@@ -48,6 +48,7 @@ export function FrameworkConditionsForm({
   decided,
   decidedStatusLabel,
   preparationStatus,
+  baseUpdatedAt,
 }: {
   projectId: string;
   projectFrameworkId: string;
@@ -55,26 +56,44 @@ export function FrameworkConditionsForm({
   decided: boolean;
   decidedStatusLabel: string;
   preparationStatus: 'candidate' | 'awaiting_confirmation';
+  /** 画面が読み込んだ時点の更新時刻（別の人の保存を黙って上書きしない） */
+  baseUpdatedAt: string;
 }) {
   const [state, formAction] = React.useActionState(action, INITIAL);
   const errorId = `pf-error-${projectFrameworkId}`;
+  const failed = state.status === 'error' || state.status === 'conflict';
   // 失敗して戻ってきたら、送った値で入力欄を作り直す（key を変えて defaultValue を入れ替える）
-  const attempt = state.status === 'error' ? JSON.stringify(state.values) : 'saved';
+  const attempt = failed ? JSON.stringify([state.status, state.values]) : 'saved';
   const valueOf = (name: string, saved: string) =>
-    state.status === 'error' && name in state.values ? (state.values[name] ?? '') : saved;
+    failed && name in state.values ? (state.values[name] ?? '') : saved;
 
   return (
     <form action={formAction} className="space-y-2" key={attempt}>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="projectFrameworkId" value={projectFrameworkId} />
-      {state.status === 'error' && state.message && (
+      {/* 競合を見た後は最新の時刻を土台にする（「このまま上書き保存」） */}
+      <input type="hidden" name="baseUpdatedAt" value={state.baseUpdatedAt ?? baseUpdatedAt} />
+      {failed && state.message && (
         <p
           id={errorId}
           role="alert"
           className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1.5 text-[12px] text-ink"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" aria-hidden="true" />
-          {state.message}（入力は残っています）
+          <span>
+            {state.status === 'conflict' ? state.message : `${state.message}（入力は残っています）`}
+            {state.status === 'conflict' && (
+              <>
+                {' '}
+                <a
+                  href={`/enterprise/disclosure-projects/${projectId}?tab=settings#pf-${projectFrameworkId}`}
+                  className="text-brand-800 underline"
+                >
+                  最新の条件を読み込む
+                </a>
+              </>
+            )}
+          </span>
         </p>
       )}
       <div className="grid gap-2 sm:grid-cols-2">
@@ -137,7 +156,7 @@ export function FrameworkConditionsForm({
         )}
       </div>
       <SubmitButton variant="outline" pendingLabel="保存中…">
-        保存して準備を始める
+        {state.status === 'conflict' ? 'このまま上書き保存' : '保存して準備を始める'}
       </SubmitButton>
       <p className="text-[11px] text-ink-muted">
         空欄は「不明」として保存し、0 や対象外とは扱いません。保存しても適用判断は確定しません。

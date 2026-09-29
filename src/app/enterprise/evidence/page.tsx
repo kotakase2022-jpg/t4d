@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { AlertTriangle, FolderOpen, Lock } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
-import { EmptyState } from '@/components/shared/states';
+import { ScanStatusBadge } from '@/components/shared/scan-status-badge';
+import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -19,8 +20,12 @@ import {
 } from '@/lib/services/source-anchor';
 import { cn } from '@/lib/utils';
 import { EvidenceUploadForm } from './evidence-upload-form';
+import { evidenceTitles } from './titles';
 
-export const metadata = { title: '資料・証跡' };
+export async function generateMetadata() {
+  // 開示優先モードが OFF の組織は、メニューと同じ従来の画面名（A39）
+  return { title: (await evidenceTitles()).list };
+}
 
 /**
  * 資料・証跡（Evidence）。原本は非公開の保管領域に置き、取得は短時間の署名付き URL のみ。
@@ -44,15 +49,20 @@ export default async function EvidencePage({
   const pageTitle = disclosureFirst ? '資料・証跡' : 'Evidence';
   /** 開示優先の入力項目・列を出すか（OFF の組織でも ?purpose=qualitative を直接開いたときは出す） */
   const full = disclosureFirst || qualitative;
+  // 資料の一覧（ファイル名・機密区分・抽出件数）は資料の中身の一部。登録だけの権限（取引先の入力担当）
+  // には一覧を読み込まず、登録フォームだけを出す（資料の画面・実体の取得と同じ規則。§13 資料の ACL）
+  const canReadEvidence = can(ctx, 'enterprise.evidence.read');
 
-  const [allFiles, links] = await Promise.all([
-    db.select('files', {
-      where: { organizationId, deletedAt: { isNull: true } },
-      orderBy: { column: 'createdAt', dir: 'desc' },
-      limit: 100,
-    }),
-    db.select('evidenceLinks', { where: { organizationId } }),
-  ]);
+  const [allFiles, links] = canReadEvidence
+    ? await Promise.all([
+        db.select('files', {
+          where: { organizationId, deletedAt: { isNull: true } },
+          orderBy: { column: 'createdAt', dir: 'desc' },
+          limit: 100,
+        }),
+        db.select('evidenceLinks', { where: { organizationId } }),
+      ])
+    : [[], []];
   const files = qualitative ? allFiles.filter((f) => f.usagePurpose !== null) : allFiles;
 
   const versionIds = files.map((f) => f.currentVersionId).filter((v): v is string => Boolean(v));
@@ -80,8 +90,13 @@ export default async function EvidencePage({
   }
 
   const periodById = new Map(shell.periods.map((p) => [p.id, p]));
+  // 抽出件数・手動抜粋への案内は開示優先の機能。OFF の組織の従来画面には出さない（REG-2）。
+  // 手動抜粋の入力先（資料の画面）を開けない人にも案内しない
   const needsManualFile =
-    query.extraction === 'needs_manual' && typeof query.file === 'string' ? query.file : null;
+    full && canReadEvidence && query.extraction === 'needs_manual' && typeof query.file === 'string'
+      ? query.file
+      : null;
+  const flashParams = full ? query : { ...query, extraction: undefined, count: undefined };
 
   return (
     <>
@@ -92,7 +107,7 @@ export default async function EvidencePage({
       />
 
       <div className="space-y-3 p-4">
-        <FlashMessage searchParams={query} />
+        <FlashMessage searchParams={flashParams} />
         {needsManualFile && (
           <p
             role="alert"
@@ -148,138 +163,151 @@ export default async function EvidencePage({
           </Card>
         )}
 
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`${qualitative ? '定性情報の資料' : disclosureFirst ? '資料・証跡の一覧' : 'Evidence Library'}（${files.length}）`}
-          />
-          {files.length === 0 ? (
-            <EmptyState
-              title={
-                qualitative
-                  ? '定性情報の資料がありません'
-                  : disclosureFirst
-                    ? '資料・証跡がありません'
-                    : 'Evidence がありません'
-              }
-              icon={<FolderOpen className="size-5" aria-hidden="true" />}
+        {!canReadEvidence ? (
+          <Card>
+            <PermissionDeniedState description="資料の一覧・内容の閲覧には、資料の閲覧権限が必要です。登録した資料は、閲覧権限を持つ担当者が確認します。" />
+          </Card>
+        ) : (
+          <Card className="overflow-hidden">
+            <SectionTitle
+              title={`${qualitative ? '定性情報の資料' : disclosureFirst ? '資料・証跡の一覧' : 'Evidence Library'}（${files.length}）`}
             />
-          ) : (
-            <div className="t4d-scroll-x">
-              <Table>
-                <THead>
-                  {full ? (
-                    <TR>
-                      <TH>資料名</TH>
-                      <TH>文書種別</TH>
-                      <TH>対象年度</TH>
-                      <TH>版・発行日</TH>
-                      <TH>利用目的</TH>
-                      <TH>機密区分</TH>
-                      <TH>引用できる箇所</TH>
-                      <TH align="right">サイズ</TH>
-                      <TH align="right">紐付け</TH>
-                      <TH>登録日時</TH>
-                      <TH className="w-16" aria-label="操作" />
-                    </TR>
-                  ) : (
-                    // 開示優先モードが OFF の組織は、拡張前の Evidence Library と同じ列（REG-F7）
-                    <TR>
-                      <TH>ファイル名</TH>
-                      <TH>文書種別</TH>
-                      <TH>対象期間</TH>
-                      <TH>機密区分</TH>
-                      <TH>Bucket</TH>
-                      <TH align="right">サイズ</TH>
-                      <TH align="right">紐付け</TH>
-                      <TH>スキャン</TH>
-                      <TH>登録日時</TH>
-                      <TH className="w-16" aria-label="操作" />
-                    </TR>
-                  )}
-                </THead>
-                <TBody>
-                  {files.map((file) => {
-                    const version = versions.find((v) => v.id === file.currentVersionId);
-                    const counts = version ? fragmentCounts.get(version.id) : undefined;
-                    return (
-                      <TR key={file.id}>
-                        <TD
-                          className="max-w-[260px] truncate font-medium"
-                          title={file.originalName}
-                        >
-                          {file.originalName}
-                        </TD>
-                        <TD className="text-[12px]">{file.documentType ?? '—'}</TD>
-                        <TD className="text-[12px]">
-                          {file.reportingPeriodId
-                            ? (periodById.get(file.reportingPeriodId)?.code ?? '—')
-                            : '—'}
-                        </TD>
-                        {full && (
-                          <>
-                            <TD className="text-[12px]">
-                              {file.editionLabel ?? '—'}
-                              {file.issuedOn && (
-                                <span className="block text-[11px] text-ink-muted">
-                                  発行 {formatJstDate(file.issuedOn)}
-                                </span>
-                              )}
-                            </TD>
-                            <TD className="whitespace-nowrap text-[12px]">
-                              <span className={cn(file.usagePurpose === null && 'text-ink-muted')}>
-                                {usagePurposeLabel(file.usagePurpose)}
-                              </span>
-                            </TD>
-                          </>
-                        )}
-                        <TD>
-                          <Badge
-                            tone={
-                              file.confidentiality === 'restricted'
-                                ? 'danger'
-                                : file.confidentiality === 'confidential'
-                                  ? 'warning'
-                                  : 'neutral'
-                            }
+            {files.length === 0 ? (
+              <EmptyState
+                title={
+                  qualitative
+                    ? '定性情報の資料がありません'
+                    : disclosureFirst
+                      ? '資料・証跡がありません'
+                      : 'Evidence がありません'
+                }
+                icon={<FolderOpen className="size-5" aria-hidden="true" />}
+              />
+            ) : (
+              // 長い一覧でも列見出しを固定する（縦にスクロールする枠の中で sticky にする。§4.2）
+              <div className="max-h-[70vh] overflow-auto">
+                <Table>
+                  <THead className="sticky top-0 z-10 bg-surface">
+                    {full ? (
+                      <TR>
+                        <TH>資料名</TH>
+                        <TH>文書種別</TH>
+                        <TH>対象年度</TH>
+                        <TH>版・発行日</TH>
+                        <TH>利用目的</TH>
+                        <TH>機密区分</TH>
+                        <TH>引用できる箇所</TH>
+                        <TH align="right">サイズ</TH>
+                        <TH align="right">紐付け</TH>
+                        <TH>登録日時</TH>
+                        <TH className="w-16" aria-label="操作" />
+                      </TR>
+                    ) : (
+                      // 開示優先モードが OFF の組織は、拡張前の Evidence Library と同じ列（REG-F7）
+                      <TR>
+                        <TH>ファイル名</TH>
+                        <TH>文書種別</TH>
+                        <TH>対象期間</TH>
+                        <TH>機密区分</TH>
+                        <TH>Bucket</TH>
+                        <TH align="right">サイズ</TH>
+                        <TH align="right">紐付け</TH>
+                        <TH>スキャン</TH>
+                        <TH>登録日時</TH>
+                        <TH className="w-16" aria-label="操作" />
+                      </TR>
+                    )}
+                  </THead>
+                  <TBody>
+                    {files.map((file) => {
+                      const version = versions.find((v) => v.id === file.currentVersionId);
+                      const counts = version ? fragmentCounts.get(version.id) : undefined;
+                      return (
+                        <TR key={file.id}>
+                          <TD
+                            className="max-w-[260px] truncate font-medium"
+                            title={file.originalName}
                           >
-                            <Lock className="size-3" aria-hidden="true" />
-                            {CONFIDENTIALITY_LABELS[file.confidentiality]}
-                          </Badge>
-                        </TD>
-                        {full ? (
-                          <TD className="whitespace-nowrap text-[12px]">
-                            {counts
-                              ? `${counts.extracted} 箇所${counts.manual > 0 ? `（手動抜粋 ${counts.manual}）` : ''}`
+                            {file.originalName}
+                          </TD>
+                          <TD className="text-[12px]">{file.documentType ?? '—'}</TD>
+                          <TD className="text-[12px]">
+                            {file.reportingPeriodId
+                              ? (periodById.get(file.reportingPeriodId)?.code ?? '—')
                               : '—'}
                           </TD>
-                        ) : (
-                          <TD className="text-[11px]">{file.bucket}</TD>
-                        )}
-                        <TD align="right">
-                          {version ? `${Math.round(version.sizeBytes / 1024)} KB` : '—'}
-                        </TD>
-                        <TD align="right">
-                          {version ? (linkCountByVersion.get(version.id) ?? 0) : 0}
-                        </TD>
-                        {!full && <TD className="text-[11px] text-ink-muted">{file.scanStatus}</TD>}
-                        <TD className="whitespace-nowrap text-[11px] text-ink-muted">
-                          {formatJst(file.createdAt)}
-                        </TD>
-                        <TD>
-                          {version && (
-                            <Button variant="ghost" size="xs" asChild>
-                              <Link href={`/enterprise/evidence/${file.id}`}>画面内で開く</Link>
-                            </Button>
+                          {full && (
+                            <>
+                              <TD className="text-[12px]">
+                                {file.editionLabel ?? '—'}
+                                {file.issuedOn && (
+                                  <span className="block text-[11px] text-ink-muted">
+                                    発行 {formatJstDate(file.issuedOn)}
+                                  </span>
+                                )}
+                              </TD>
+                              <TD className="whitespace-nowrap text-[12px]">
+                                <span
+                                  className={cn(file.usagePurpose === null && 'text-ink-muted')}
+                                >
+                                  {usagePurposeLabel(file.usagePurpose)}
+                                </span>
+                              </TD>
+                            </>
                           )}
-                        </TD>
-                      </TR>
-                    );
-                  })}
-                </TBody>
-              </Table>
-            </div>
-          )}
-        </Card>
+                          <TD>
+                            <Badge
+                              tone={
+                                file.confidentiality === 'restricted'
+                                  ? 'danger'
+                                  : file.confidentiality === 'confidential'
+                                    ? 'warning'
+                                    : 'neutral'
+                              }
+                            >
+                              <Lock className="size-3" aria-hidden="true" />
+                              {CONFIDENTIALITY_LABELS[file.confidentiality]}
+                            </Badge>
+                          </TD>
+                          {full ? (
+                            <TD className="whitespace-nowrap text-[12px]">
+                              {counts
+                                ? `${counts.extracted} 箇所${counts.manual > 0 ? `（手動抜粋 ${counts.manual}）` : ''}`
+                                : '—'}
+                            </TD>
+                          ) : (
+                            <TD className="text-[11px]">{file.bucket}</TD>
+                          )}
+                          <TD align="right">
+                            {version ? `${Math.round(version.sizeBytes / 1024)} KB` : '—'}
+                          </TD>
+                          <TD align="right">
+                            {version ? (linkCountByVersion.get(version.id) ?? 0) : 0}
+                          </TD>
+                          {!full && (
+                            <TD>
+                              <ScanStatusBadge status={file.scanStatus} />
+                            </TD>
+                          )}
+                          <TD className="whitespace-nowrap text-[11px] text-ink-muted">
+                            {formatJst(file.createdAt)}
+                          </TD>
+                          <TD>
+                            {version && (
+                              <Button variant="ghost" size="xs" asChild>
+                                <Link href={`/enterprise/evidence/${file.id}`}>画面内で開く</Link>
+                              </Button>
+                            )}
+                          </TD>
+                        </TR>
+                      );
+                    })}
+                  </TBody>
+                </Table>
+              </div>
+            )}
+          </Card>
+        )}
       </div>
     </>
   );

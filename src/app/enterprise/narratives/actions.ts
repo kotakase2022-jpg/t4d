@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
 import { EVIDENCE_USAGE_PURPOSE_LABELS } from '@/lib/domain/disclosure-status';
@@ -129,6 +129,8 @@ export async function saveNarrativeAction(
       },
     };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return failure(error);
   }
 }
@@ -164,6 +166,8 @@ export async function createNarrativeAction(
     revalidatePath(BASE);
     return { status: 'created', narrativeId: record.id };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return failure(error);
   }
 }
@@ -228,6 +232,8 @@ export async function createAnchorAction(input: {
       },
     };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return failure(error);
   }
 }

@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { isUserFacingError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
@@ -15,8 +15,10 @@ import {
   parseFrameworkConditions,
   saveProjectFramework,
   updateProject,
+  ProjectFrameworkConflictError,
   type ChangeImpact,
   type DecisionStatus,
+  type ProjectConflictField,
   type PreparationStatus,
 } from '@/lib/services/disclosure-project';
 import {
@@ -39,12 +41,19 @@ const BASE = '/enterprise/disclosure-projects';
 export type ProjectFormValues = Record<string, string | string[]>;
 
 export interface ProjectFormState {
-  status: 'idle' | 'error' | 'needs_confirmation' | 'unchanged';
+  status: 'idle' | 'error' | 'needs_confirmation' | 'unchanged' | 'conflict';
   message: string | null;
   fieldErrors: Record<string, string>;
   impact: ChangeImpact | null;
   changedFields: string[];
   values: ProjectFormValues | null;
+  /** 競合のとき: 上書きになる項目（最新の値とあなたの入力） */
+  conflictFields?: ProjectConflictField[];
+  /**
+   * 次の保存で使う土台の更新時刻。競合を見たうえで「このまま上書き保存」するときは最新の時刻を渡す
+   * （画面を開いたときの時刻のままでは、何度押しても競合になる）
+   */
+  baseUpdatedAt?: string;
 }
 
 function str(formData: FormData, key: string): string {
@@ -154,6 +163,8 @@ export async function createProjectAction(
     });
     projectId = project.id;
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return errorState(error, formData);
   }
   revalidatePath(BASE);
@@ -194,13 +205,30 @@ export async function updateProjectAction(
         scopeGhgBoundaryNote: str(formData, 'scopeGhgBoundaryNote'),
         scopeValueChainNote: str(formData, 'scopeValueChainNote'),
         includedUnitIds: formData.getAll('includedUnitIds').map(String),
+        ...(strOrNull(formData, 'baseUpdatedAt')
+          ? { baseUpdatedAt: str(formData, 'baseUpdatedAt') }
+          : {}),
       },
       { confirmImpact: str(formData, 'confirmImpact') === '1' },
     );
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return errorState(error, formData);
   }
 
+  if (result.status === 'conflict') {
+    return {
+      status: 'conflict',
+      message: `この画面を開いた後に、${result.updatedByName} さんがプロジェクト情報を保存しました。上書きせずに止めました（あなたの入力は残っています）。下の項目は、保存すると最新の値を上書きします。最新の値を読み込んで確認するか、このまま上書き保存してください。`,
+      fieldErrors: {},
+      impact: null,
+      changedFields: result.fields.map((f) => f.key),
+      values: valuesOf(formData),
+      conflictFields: result.fields,
+      baseUpdatedAt: result.currentUpdatedAt,
+    };
+  }
   if (result.status === 'needs_confirmation') {
     return {
       status: 'needs_confirmation',
@@ -259,8 +287,10 @@ export async function saveProjectFrameworkAction(formData: FormData): Promise<vo
 }
 
 export interface FrameworkConditionsFormState {
-  status: 'idle' | 'error';
+  status: 'idle' | 'error' | 'conflict';
   message: string | null;
+  /** 競合を見たうえで上書き保存するときの土台の更新時刻 */
+  baseUpdatedAt?: string;
   /** 項目ごとのエラー（name をキーにする。例: condition.euNetTurnoverLatestFy） */
   fieldErrors: Record<string, string>;
   /** 入力した値（失敗しても消さない） */
@@ -300,8 +330,22 @@ export async function saveProjectFrameworkFormAction(
       preparationStatus: (PREPARATION_STATUSES as readonly string[]).includes(statusRaw)
         ? (statusRaw as PreparationStatus)
         : 'candidate',
+      ...(strOrNull(formData, 'baseUpdatedAt')
+        ? { baseUpdatedAt: str(formData, 'baseUpdatedAt') }
+        : {}),
     });
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
+    if (error instanceof ProjectFrameworkConflictError) {
+      return {
+        status: 'conflict',
+        message: error.message,
+        fieldErrors: {},
+        values,
+        baseUpdatedAt: error.currentUpdatedAt,
+      };
+    }
     if (error instanceof FieldValidationError) {
       return { status: 'error', message: error.message, fieldErrors: error.fieldErrors, values };
     }
@@ -368,6 +412,8 @@ export async function confirmApplicabilityFormAction(
     });
     decisionNo = decision.decisionNo;
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (isUserFacingError(error)) return { status: 'error', message: error.message, values };
     console.error('[confirm applicability]', error);
     return {

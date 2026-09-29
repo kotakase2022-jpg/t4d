@@ -4,7 +4,7 @@ import * as React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import {
   confirmApplicabilityFormAction,
   type ApplicabilityDecisionFormState,
@@ -26,9 +26,9 @@ function valuesOf(formData: FormData): ApplicabilityDecisionValues {
 
 const action = withNetworkFallback(
   confirmApplicabilityFormAction,
-  (_previous, formData): ApplicabilityDecisionFormState => ({
+  (_previous, formData, message): ApplicabilityDecisionFormState => ({
     status: 'error',
-    message: NETWORK_ERROR_MESSAGE,
+    message,
     values: valuesOf(formData),
   }),
 );

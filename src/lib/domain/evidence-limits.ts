@@ -6,6 +6,24 @@
 /** 手動抜粋の文言の最大文字数 */
 export const MANUAL_EXCERPT_MAX_LENGTH = 4000;
 
+export type ScanStatus = 'pending' | 'clean' | 'infected' | 'skipped';
+
+/** ウイルススキャンの状態の表示名（DB の値 skipped などを画面へそのまま出さない） */
+export const SCAN_STATUS_LABELS: Record<ScanStatus, string> = {
+  pending: '未実施',
+  clean: '問題なし',
+  infected: '検出あり',
+  skipped: '対象外',
+};
+
+/** 状態ごとのバッジの色（色だけで伝えず、必ずラベルとアイコンを添える） */
+export const SCAN_STATUS_TONES: Record<ScanStatus, 'neutral' | 'success' | 'danger'> = {
+  pending: 'neutral',
+  clean: 'success',
+  infected: 'danger',
+  skipped: 'neutral',
+};
+
 /**
  * 資料の形式の表示名。画面に MIME 型（application/vnd.openxmlformats-… など）をそのまま出さない。
  * 分からない形式は拡張子を大文字で添える（それも無ければ「その他の形式」）

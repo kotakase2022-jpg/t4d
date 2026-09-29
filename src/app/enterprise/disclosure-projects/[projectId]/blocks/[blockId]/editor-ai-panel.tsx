@@ -42,6 +42,8 @@ export interface AiPanelProps {
   onWorkingConflict: (body: BlockBody, message: string) => void;
   onAnnounce: (message: string) => void;
   paragraphText: (paragraphId: string) => string | null;
+  /** 段落の表示名（本文の中の位置。内部の段落 ID は出さない） */
+  paragraphLabel: (paragraphId: string) => string;
 }
 
 /** 通信そのものが失敗したとき（接続断・タイムアウト前の 5xx など）。手動の作業は続けられる */
@@ -433,7 +435,9 @@ function RunView({
                         ) : (
                           <Plus className="size-3" aria-hidden="true" />
                         )}
-                        {current !== null ? `段落 ${c.paragraphId} の置き換え案` : '新しい段落'}
+                        {current !== null && c.paragraphId
+                          ? `${props.paragraphLabel(c.paragraphId)} の置き換え案`
+                          : '新しい段落'}
                       </Badge>
                       {c.kind === 'heading' && (
                         <Badge tone="neutral">

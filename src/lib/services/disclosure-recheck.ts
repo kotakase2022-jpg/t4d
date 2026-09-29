@@ -2,7 +2,13 @@ import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
-import { collectRefs, latestRecheckDecision, paragraphText } from '@/lib/domain/disclosure-block';
+import {
+  collectRefs,
+  contentHashOf,
+  latestRecheckDecision,
+  paragraphText,
+  workingBodyInEffect,
+} from '@/lib/domain/disclosure-block';
 import {
   BLOCK_STATUS_LABELS,
   RECHECK_DECISION_LABELS,
@@ -13,6 +19,7 @@ import { fid } from '@/lib/fixtures/ids';
 import {
   appendBlockVersion,
   approvedDataPointVersionIds,
+  CLEARED_WORKING_COLUMNS,
   contributorsWith,
   currentVersionBody,
   isVersionApproved,
@@ -98,7 +105,8 @@ function paragraphsWith(body: BlockBody, match: (inline: BlockInline) => boolean
 }
 
 /**
- * 鮮度を判定する本文（作業本文があればそれ。無ければ現在の版）。
+ * 鮮度を判定する本文（下書き・差戻しで作業本文があればそれ。無ければ現在の版）。
+ * レビュー中・承認済みの節は、作業本文が残っていても審査・承認した版で判定する（workingBodyInEffect）。
  * 節が版を指しているのにその版を読めない（Demo Mode で別のサーバーが作った版など）ときは null。
  * 空の本文として判定すると、引用が 1 件も無い「現行」と誤って示してしまう
  */
@@ -109,7 +117,7 @@ async function freshnessBody(
   body?: BlockBody,
 ): Promise<BlockBody | null> {
   if (body) return body;
-  if (block.workingBody) return block.workingBody;
+  if (workingBodyInEffect(block)) return block.workingBody;
   const current = await currentVersionBody(db, ctx, block);
   if (block.currentVersionId && !current.version) return null;
   return current.body;
@@ -418,7 +426,7 @@ export async function getRecheckView(
   const approved = block.approvedVersionId
     ? await db.findById('disclosureBlockVersions', block.approvedVersionId)
     : null;
-  const body = block.workingBody ?? current.body;
+  const body = workingBodyInEffect(block) ? block.workingBody : current.body;
   const locked = block.status === 'review_requested' || block.status === 'approval_pending';
 
   return {
@@ -605,8 +613,15 @@ export async function decideRecheck(
       replacement = { t: 'narrative', narrativeVersionId: next.id, quote: next.body };
     }
 
+    // 新しい版は現在の版から作る。引用が作業本文にだけある（版として保存していない）なら、
+    // 置き換えても現在の版と同じ本文になり、承認済みの節を内容の同じ版で下書きへ戻してしまう
     const current = await currentVersionBody(db, ctx, block);
     const nextBody = replaceRef(current.body, input.refKind, input.oldRefId, replacement);
+    if (current.version && contentHashOf(nextBody) === current.version.contentHash) {
+      throw new ValidationError(
+        'この引用は作業中の本文にだけあり、現在の版にはありません。作業中の本文を版として保存してから判断してください。',
+      );
+    }
     const version = await appendBlockVersion(db, ctx, block, nextBody, {
       changeReason: reason || '引用先の新しい版を採用',
       baseVersionId: block.currentVersionId,
@@ -618,14 +633,15 @@ export async function decideRecheck(
       // 承認済みの節は「承認後に修正」と同じく下書きへ戻す。承認済みの版（approvedVersionId）は変えない
       status: block.status === 'approved' ? 'draft' : block.status,
       // 自動保存中の本文があれば、同じ置き換えをして新しい版を土台にする（利用者の編集を捨てない）
-      ...(block.workingBody
+      ...(workingBodyInEffect(block)
         ? {
             workingBody: replaceRef(block.workingBody, input.refKind, input.oldRefId, replacement),
             workingBaseVersionId: version.id,
             workingUpdatedBy: ctx.userId,
             workingContributorIds: contributorsWith(block, ctx.userId),
           }
-        : {}),
+        : // 承認済みの節に残った作業本文（依頼より前のもの）を、下書きへ戻したときに復活させない
+          CLEARED_WORKING_COLUMNS),
       updatedAt: now,
       updatedBy: ctx.userId,
     });

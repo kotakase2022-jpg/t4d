@@ -93,7 +93,19 @@ export async function ReviewsTab({
 
       <Card className="overflow-hidden">
         <SectionTitle title={`レビュー依頼（${visible.length}）`} />
-        {visible.length === 0 ? (
+        {visible.length === 0 && status !== null && items.length > 0 ? (
+          // 絞り込みで 0 件になっただけのときは、依頼が無いとは言わず、絞り込みを外す操作を示す
+          <EmptyState
+            title="条件に合うレビュー依頼はありません"
+            description={`「${REVIEW_REQUEST_STATUS_LABELS[status]}」の依頼はありません。ほかの状態の依頼は ${items.length} 件あります。`}
+            icon={<ClipboardCheck className="size-5" aria-hidden="true" />}
+            action={
+              <Link href={base} className="text-[12px] text-brand-800 underline">
+                絞り込みを外す（すべて表示）
+              </Link>
+            }
+          />
+        ) : visible.length === 0 ? (
           <EmptyState
             title="レビュー依頼はありません"
             description="原稿の画面で「レビュー依頼」を押すと、ここに並びます。"

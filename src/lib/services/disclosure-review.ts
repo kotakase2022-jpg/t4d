@@ -267,6 +267,32 @@ export interface RequestReviewResult {
   notified: boolean;
 }
 
+/**
+ * 進行中の依頼が、この呼び出しと同じ提出（二重押下）か。
+ * 同じ依頼者で、画面の本文を渡したならその本文が審査中の版と同じ内容で、画面の土台の版が
+ * 審査中の版（またはその土台）であること。どれかが違えば別の提出で、黙って「依頼済み」を返さない
+ */
+function isSameSubmission(
+  active: ReviewRequest,
+  version: DisclosureBlockVersion,
+  actorId: Uuid,
+  input: RequestReviewInput,
+): boolean {
+  if (active.requestedBy !== actorId) return false;
+  if (input.body === undefined) return true;
+  let body: BlockBody;
+  try {
+    body = parseBlockBody(input.body);
+  } catch {
+    return false;
+  }
+  const base = input.baseVersionId ?? null;
+  return (
+    contentHashOf(body) === version.contentHash &&
+    (base === version.id || base === (version.baseVersionId ?? null))
+  );
+}
+
 export async function requestReview(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -289,12 +315,19 @@ export async function requestReview(
     })
   )[0];
   if (active) {
-    if (active.targetVersionId === block.submittedVersionId) {
-      const version = await loadBlockVersion(db, ctx, active.targetVersionId);
+    const version = await loadBlockVersion(db, ctx, active.targetVersionId);
+    if (
+      active.targetVersionId === block.submittedVersionId &&
+      isSameSubmission(active, version, ctx.userId, input)
+    ) {
       // 2 回目の押下では通知しない（1 回目で済んでいる）
       return { request: active, version, createdVersion: false, notified: false };
     }
-    throw new ValidationError('この節には進行中のレビュー依頼があります。');
+    // 別の人の依頼・古い版を土台にした本文・違う本文を「依頼済み」と返すと、その本文はどの版にも
+    // 入らないまま、画面は提出できたと思い込む（編集を黙って失う）
+    throw new ValidationError(
+      `この節には進行中のレビュー依頼があります（版 ${version.versionNo}）。あなたの本文は提出していません。依頼の取下げか差戻しの後に、変更を反映してください。`,
+    );
   }
 
   const transition = transitionBlock('request_review', block.status);
@@ -409,6 +442,16 @@ export async function requestReview(
     const now = new Date().toISOString();
     block = await db.update('disclosureBlocks', block.id, {
       currentVersionId: version.id,
+      ...CLEARED_WORKING_COLUMNS,
+      updatedAt: now,
+      updatedBy: ctx.userId,
+    });
+  } else if (block.workingBody) {
+    // 現在の版をそのまま提出した（自動保存した段落を消してから、自動保存の前に依頼したなど）。
+    // 作業本文を残すと、レビュー担当が固定していない本文を「版 N」として読み、承認後の鮮度もその本文で
+    // 判定されてしまう。提出した本文が画面の本文なので、それと違う作業本文は役目を終えている
+    const now = new Date().toISOString();
+    block = await db.update('disclosureBlocks', block.id, {
       ...CLEARED_WORKING_COLUMNS,
       updatedAt: now,
       updatedBy: ctx.userId,
@@ -777,9 +820,16 @@ export async function finalApprove(
       frameworkVersionId: block.frameworkVersionId,
     },
   });
+  const currentDecision = projectFramework?.currentDecisionId
+    ? await db.findById('projectFrameworkDecisions', projectFramework.currentDecisionId)
+    : null;
   if (
     projectFramework &&
-    applicabilityDecisionChangedSince(request, projectFramework.currentDecisionId)
+    applicabilityDecisionChangedSince(
+      request,
+      projectFramework.currentDecisionId,
+      currentDecision?.organizationId === ctx.workspace.organizationId ? currentDecision : null,
+    )
   ) {
     throw new ReviewBlockedError([
       {

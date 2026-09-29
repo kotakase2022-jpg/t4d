@@ -13,6 +13,7 @@ import {
   exportFileName,
 } from '@/lib/exports/disclosure-report';
 import {
+  frozenMaskedFileNames,
   loadOwnedSnapshot,
   verifySnapshotIntegrity,
   type ReportSnapshotDetail,
@@ -68,7 +69,7 @@ export function parseExportAudience(value: string | null | undefined): ExportAud
   return EXPORT_AUDIENCES.includes(value as ExportAudience) ? (value as ExportAudience) : null;
 }
 
-/** 組織の非公開の資料のファイル名（対外用の原稿で伏せる） */
+/** 組織の非公開の資料のファイル名（固定した一覧を持たない古いスナップショットの対外用の原稿で伏せる） */
 async function nonPublicFileNames(db: DbClient, ctx: AuthorizationContext): Promise<string[]> {
   const files = await db.select('files', {
     where: { organizationId: ctx.workspace.organizationId },
@@ -113,15 +114,22 @@ export async function exportReportSnapshot(
         : (snapshot.frameworkVersions[0] ?? null);
 
   let bytes: Uint8Array;
+  let maskedNames: readonly string[] = [];
   if (request.format === 'docx') {
     if (!framework) {
       throw new ValidationError('指定した基準はこのスナップショットに含まれていません。');
     }
+    // 対外用は、本文に書かれた非公開資料の名前も伏せる（出典印の伏せ字と同じ扱い）。
+    // 伏せる名前はスナップショットに固定した一覧を使う（後から資料を登録・区分変更しても、
+    // 同じスナップショットの再出力の本文を変えない）。固定する前のスナップショットだけ、出力時の一覧から集める
+    maskedNames =
+      request.audience === 'external'
+        ? (frozenMaskedFileNames(snapshot) ?? (await nonPublicFileNames(db, ctx)))
+        : [];
     bytes = await buildDisclosureDocx(snapshot, {
       audience: request.audience,
       frameworkVersionId: framework.frameworkVersionId,
-      // 対外用は、本文に書かれた非公開資料の名前も伏せる（出典印の伏せ字と同じ扱い）
-      nonPublicFileNames: request.audience === 'external' ? await nonPublicFileNames(db, ctx) : [],
+      nonPublicFileNames: maskedNames,
     });
   } else if (request.format === 'xlsx') {
     bytes = await buildMappingXlsx(snapshot);
@@ -160,6 +168,14 @@ export async function exportReportSnapshot(
       templateVersion: artifact.templateVersion,
       fileSha256: artifact.fileSha256,
       contentHash: artifact.contentHash,
+      // 伏せた資料名の数と出所（固定した一覧か、出力時の一覧か）。同じスナップショットの出力の違いを説明する
+      maskedFileNameCount: maskedNames.length,
+      maskedFileNameSource:
+        request.format === 'docx' && request.audience === 'external'
+          ? frozenMaskedFileNames(snapshot) === null
+            ? 'live_files'
+            : 'snapshot'
+          : null,
     },
   });
 

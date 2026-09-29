@@ -149,7 +149,11 @@ export function AppShell({
           priority
         />
 
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        {/*
+          中央の列は幅が足りないときに右の操作（役割切替・通知）へはみ出して重ならないよう、はみ出しを切る。
+          並びは重要な順（企業 → 報告期間 → 開示プロジェクト → デモの表示）で、足りないときは末尾から見えなくなる
+        */}
+        <div className="group/hdr flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
           <WorkspaceSelector
             current={{
               organizationId: ctx.workspace.organizationId,
@@ -168,7 +172,8 @@ export function AppShell({
               />
               {currentPeriodRange && (
                 <span
-                  className="tnum whitespace-nowrap text-[11px] text-ink-muted"
+                  // 開示プロジェクトの画面では、プロジェクトの表示を優先する（広い画面でだけ期間の日付を並べる）
+                  className="tnum whitespace-nowrap text-[11px] text-ink-muted max-[1599px]:group-has-[[data-testid=header-project-context]]/hdr:hidden"
                   data-testid="header-period-range"
                 >
                   <span className="sr-only">報告期間の開始日と終了日: </span>

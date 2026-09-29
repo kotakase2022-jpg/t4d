@@ -807,3 +807,91 @@ test('本番: 開示ドラフトを人工知能に書かせられる', async ({ 
   await expect(page.getByText(/そのまま開示せず/).first()).toBeVisible();
   await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
 });
+
+/**
+ * 開示優先モード（2026-09-29 顧客候補向け D0）。
+ * 既定は OFF（従来メニュー）で、新しい画面は URL で開ける。ここでは読むだけにする。
+ */
+test('本番: 開示優先モードの新画面が URL で開ける（既定は従来メニューのまま）', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const problems: string[] = [];
+  page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  page.on('response', (r) => {
+    if (r.status() >= 500 && r.url().startsWith(BASE)) {
+      problems.push(`network: ${r.status()} ${r.url().replace(BASE, '')}`);
+    }
+  });
+  await prodLogin(page, '青海 太郎');
+
+  // 既定（OFF）では従来のメニューのまま
+  await page.goto(`${BASE}/enterprise/dashboard`);
+  const nav = page.getByRole('navigation').first();
+  await expect(nav.getByRole('link', { name: 'ESG経営' })).toHaveCount(0);
+
+  for (const path of [
+    '/enterprise/disclosure-projects',
+    '/enterprise/narratives',
+    '/enterprise/esg',
+    '/enterprise/imports/standard',
+  ]) {
+    const res = await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });
+    expect(res?.status(), `${path} が ${res?.status()}`).toBeLessThan(400);
+    await expect(page.locator('#t4d-main'), `${path} が描画されない`).toBeVisible();
+  }
+
+  await page.goto(`${BASE}/enterprise/disclosure-projects`);
+  await page
+    .locator('#t4d-main')
+    .getByRole('link', { name: 'FY2026 統合開示（SSBJ・CSRD域外準備）' })
+    .click();
+  await page.waitForURL(/\/enterprise\/disclosure-projects\/[0-9a-f-]+$/);
+  const projectUrl = page.url();
+  for (const tab of ['overview', 'requirements', 'manuscripts', 'reviews', 'outputs', 'settings']) {
+    const res = await page.goto(`${projectUrl}?tab=${tab}`, { waitUntil: 'domcontentloaded' });
+    expect(res?.status(), `tab=${tab} が ${res?.status()}`).toBeLessThan(400);
+    await expect(page.locator('#t4d-main')).toBeVisible();
+  }
+
+  // 原稿編集（3 ペイン）。主操作はレビュー依頼の 1 つ
+  await page.goto(`${projectUrl}?tab=manuscripts`);
+  await page.locator('#t4d-main').getByRole('link', { name: 'リスク及び機会' }).first().click();
+  await page.waitForURL(/\/blocks\/[0-9a-f-]+$/);
+  await expect(page.getByRole('region', { name: '本文' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'レビュー依頼' })).toBeVisible();
+
+  expect(problems.join('\n')).toBe('');
+});
+
+test('本番: 開示優先モードを ON にするとメニューとホームが切り替わり、OFF で元に戻る', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await prodLogin(page, '青海 太郎');
+  const setMode = async (label: '有効にする' | '無効にする（従来の構成）') => {
+    await page.goto(`${BASE}/enterprise/settings`);
+    await page.getByText(label, { exact: true }).click();
+    await page
+      .locator('form', { hasText: '有効にする' })
+      .getByRole('button', { name: '保存' })
+      .click();
+    await page.waitForURL(/flash=disclosureFirstChanged/);
+  };
+
+  await setMode('有効にする');
+  try {
+    await page.goto(`${BASE}/enterprise/dashboard`);
+    await expect(page.getByRole('link', { name: '開示業務' })).toBeVisible();
+    await expect(page.getByText(/自分が次に行う作業/)).toBeVisible();
+    await expect(page.getByText(/適用確定済み \d+ 項目中/).first()).toBeVisible();
+    await expect(
+      page.getByRole('navigation').first().getByRole('link', { name: 'ESG経営' }),
+    ).toBeVisible();
+  } finally {
+    // 共有のデモ状態を既定（OFF）へ戻す
+    await setMode('無効にする（従来の構成）');
+  }
+  await page.goto(`${BASE}/enterprise/dashboard`);
+  await expect(page.getByRole('link', { name: '開示業務' })).toHaveCount(0);
+});

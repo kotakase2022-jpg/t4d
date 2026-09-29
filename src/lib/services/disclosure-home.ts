@@ -14,7 +14,7 @@ import {
   isChangedAfterApproval,
   type BlockBlocker,
 } from '@/lib/domain/disclosure-status';
-import { isOldRefKept } from '@/lib/domain/disclosure-block';
+import { isOldRefKept, workingBodyInEffect } from '@/lib/domain/disclosure-block';
 import { unresolvedNarrativeFields } from '@/lib/domain/narrative-template';
 import { daysUntilJst } from '@/lib/format/datetime';
 import type { DbClient, Query, Row, TableName } from '@/lib/repositories/types';
@@ -547,9 +547,13 @@ export async function loadDisclosureHome(
   );
 
   // 本文（現在の本文と承認済みの版）が引用した数値・定性情報の現在の版
+  // レビュー中・承認済みの節は、残った作業本文ではなく審査・承認した版で見る（原稿画面と同じ）
   const bodyOf = (b: DisclosureBlock): BlockBody | null =>
-    b.workingBody ??
-    (b.currentVersionId ? (versionById.get(b.currentVersionId)?.body ?? null) : null);
+    workingBodyInEffect(b)
+      ? b.workingBody
+      : b.currentVersionId
+        ? (versionById.get(b.currentVersionId)?.body ?? null)
+        : null;
   const approvedBodyOf = (b: DisclosureBlock): BlockBody | null =>
     b.approvedVersionId ? (versionById.get(b.approvedVersionId)?.body ?? null) : null;
 
@@ -701,7 +705,7 @@ export async function loadDisclosureHome(
     const pf = pfByVersion.get(block.frameworkVersionId) ?? null;
     const body = bodyOf(block);
     const versionMissing =
-      block.workingBody === null &&
+      !workingBodyInEffect(block) &&
       block.currentVersionId !== null &&
       !versionById.has(block.currentVersionId);
     const blockers = evaluateBlockBlockers({

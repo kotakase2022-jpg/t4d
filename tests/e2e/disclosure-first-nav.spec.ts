@@ -126,6 +126,32 @@ async function expectNoHorizontalScroll(page: Page): Promise<void> {
   expect(overflow, '横スクロールが出ている（px）').toEqual({ document: 0, main: 0 });
 }
 
+/**
+ * ヘッダーの中央の列（企業・期間・開示プロジェクト・デモの表示）が、右の操作に重ならず、
+ * 開示プロジェクト名が読める幅で表示されている
+ */
+async function expectHeaderFits(page: Page): Promise<void> {
+  const name = page.getByTestId('header-project-context').locator('a span.font-medium');
+  await expect(name).toBeVisible();
+  const box = await name.boundingBox();
+  expect(box?.width ?? 0, 'ヘッダーのプロジェクト名の幅').toBeGreaterThan(80);
+  const overlap = await page.evaluate(() => {
+    const header = document.querySelector('header');
+    const middle = header?.children[1] as HTMLElement | undefined;
+    const right = header?.children[2] as HTMLElement | undefined;
+    if (!middle || !right) return 'ヘッダーの列が見つからない';
+    const middleRight = middle.getBoundingClientRect().right;
+    const rightLeft = right.getBoundingClientRect().left;
+    if (middleRight > rightLeft + 0.5)
+      return `中央の列（右端 ${middleRight}）が右の操作（左端 ${rightLeft}）に重なる`;
+    // 中央の列の子が列の外へはみ出して描かれない（はみ出しは切られる）
+    return getComputedStyle(middle).overflowX === 'hidden'
+      ? null
+      : '中央の列がはみ出しを切っていない';
+  });
+  expect(overlap).toBeNull();
+}
+
 test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニューとホームのまま、新しい画面は URL で開ける', async ({
   page,
 }) => {
@@ -188,6 +214,23 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
   }
   await expect(page.getByRole('columnheader', { name: 'スキャン' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '利用目的' })).toHaveCount(0);
+  // スキャンの状態は DB の値（skipped など）ではなく、ラベルで示す（UX-R3-07）
+  await expect(page.locator('#t4d-main').getByText('skipped', { exact: true })).toHaveCount(0);
+
+  // 資料の画面（証憑）も従来の画面名・機能のまま（開示優先の利用目的・手動抜粋・引用の利用先を出さない。REG-2）
+  await page
+    .locator('#t4d-main')
+    .getByRole('row', { name: /電力請求書_FY2026\.pdf/ })
+    .getByRole('link', { name: '画面内で開く' })
+    .click();
+  await page.waitForURL(/\/enterprise\/evidence\/[0-9a-f-]+/);
+  await expect(
+    page.getByRole('navigation', { name: 'パンくず' }).getByRole('link', { name: 'Evidence' }),
+  ).toBeVisible();
+  await expect(page).toHaveTitle(/Evidence Viewer/);
+  await expect(page.getByText(/^利用目的:/)).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '手動抜粋を登録' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /^引用の利用先/ })).toHaveCount(0);
 });
 
 test('A37: キーボードだけで 一覧 → プロジェクト → 原稿 → 根拠 → レビュー依頼 まで辿れ、フォーカスが見える', async ({
@@ -287,6 +330,8 @@ test('A38: 1366×768 で本文・主 CTA・状態が読め、1366px でも狭い
   // 1366px では本文と根拠を並べて読める
   await expect(pane).toBeVisible();
   await expectNoHorizontalScroll(page);
+  // ヘッダー: 開示プロジェクト名が潰れず、中央の列が右の操作（役割切替・通知）に重ならない（UX-R3-03）
+  await expectHeaderFits(page);
 
   // 1366px ちょうどでも根拠パネルを閉じられる。閉じると本文が広がり、フォーカスは開閉ボタンへ戻る
   const toggle = page.getByRole('button', { name: '根拠パネル', exact: true });
@@ -314,23 +359,41 @@ test('A38: 1366×768 で本文・主 CTA・状態が読め、1366px でも狭い
   await toggle.click();
   await expect(pane).toBeVisible();
 
-  // 狭い幅（アプリの最小幅 1280px）: 根拠パネルはドロワー。開いて閉じ、本文の編集に戻れる
+  // 1440px（主な対象の幅）でもヘッダーのプロジェクト名が見え、重ならない
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectHeaderFits(page);
+
+  // 狭い幅（アプリの最小幅 1280px）: 根拠パネルはドロワー（モーダルのダイアログ）。開いて閉じ、本文の編集に戻れる
   await page.setViewportSize({ width: 1280, height: 720 });
+  const drawer = page.getByRole('dialog', { name: '根拠パネル' });
   await expect(pane).toBeHidden();
+  await expect(drawer).toBeHidden();
   await expectNoHorizontalScroll(page);
   const trigger = page.getByRole('button', { name: '根拠パネル', exact: true });
   await expect(trigger).toBeInViewport();
   await trigger.click();
-  await expect(pane).toBeVisible();
-  await expect(pane.getByRole('tab', { name: '根拠資料' })).toBeVisible();
-  await pane.getByRole('button', { name: '根拠パネルを閉じる' }).click();
-  await expect(pane).toBeHidden();
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveAttribute('aria-modal', 'true');
+  await expect(drawer.getByRole('tab', { name: '根拠資料' })).toBeVisible();
+  // フォーカスはドロワーの中に留まる（背面の本文・状態の帯へ抜けない。UX-R3-08）
+  for (let i = 0; i < 25; i += 1) {
+    await page.keyboard.press(i % 2 === 0 ? 'Tab' : 'Shift+Tab');
+    const inside = await drawer.evaluate((el) => el.contains(document.activeElement));
+    expect(inside, `Tab ${i + 1} 回目でフォーカスがドロワーの外へ出た`).toBe(true);
+  }
+  for (let i = 0; i < 25; i += 1) {
+    await page.keyboard.press('Shift+Tab');
+    const inside = await drawer.evaluate((el) => el.contains(document.activeElement));
+    expect(inside, `Shift+Tab ${i + 1} 回目でフォーカスがドロワーの外へ出た`).toBe(true);
+  }
+  await drawer.getByRole('button', { name: '根拠パネルを閉じる' }).click();
+  await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();
   // Esc でも閉じられる
   await trigger.click();
-  await expect(pane).toBeVisible();
+  await expect(drawer).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(pane).toBeHidden();
+  await expect(drawer).toBeHidden();
   await expect(body.locator('textarea').first()).toBeEditable();
   await expect(page.getByRole('button', { name: 'レビュー依頼', exact: true })).toBeInViewport();
 });

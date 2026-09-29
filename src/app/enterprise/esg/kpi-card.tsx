@@ -54,7 +54,8 @@ export function targetText(view: KpiTargetView, unit: string): string {
   const t = view.target;
   const base =
     t.baseYear !== null && t.baseValue !== null
-      ? `基準 ${t.baseYear} 年 ${formatNumber(t.baseValue)}`
+      ? // 基準値にも単位を付ける（原単位の目標で、単位の無い数だけを読ませない。§4.2）
+        `基準 ${t.baseYear} 年 ${formatNumber(t.baseValue)} ${unit}`.trim()
       : '基準値なし';
   return `${t.targetYear} 年 ${formatNumber(t.targetValue)} ${unit}（${base}・${KPI_DIRECTION_LABELS[t.direction]}・${KPI_TARGET_TYPE_LABELS[t.targetType]}・範囲「${t.boundary}」）`;
 }

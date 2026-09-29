@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { isUserFacingError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
@@ -113,6 +113,8 @@ export async function autosaveBlockAction(
       knownWorkingSavedAt: input.knownWorkingSavedAt,
     });
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return toActionError(error);
   }
 }
@@ -144,6 +146,8 @@ export async function saveBlockVersionAction(
     revalidateBlock(input.projectId, input.blockId);
     return { status: 'saved', versionNo: version.versionNo, versionId: version.id };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (error instanceof BlockConflictError) return conflictResult(error);
     return toActionError(error);
   }
@@ -195,6 +199,8 @@ export async function requestReviewWithBodyAction(
       href: `${blockPath(projectId, blockId)}?flash=reviewRequested&notified=${result.notified ? '1' : '0'}`,
     };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (error instanceof BlockConflictError) return conflictResult(error);
     return toActionError(error);
   }
@@ -231,6 +237,8 @@ export async function generateBlockDraftAction(
     revalidateBlock(input.projectId, input.blockId);
     return result;
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return toActionError(error);
   }
 }
@@ -260,6 +268,8 @@ export async function adoptDraftAction(input: {
     revalidateBlock(input.projectId, input.blockId);
     return result;
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return toActionError(error);
   }
 }
@@ -284,6 +294,8 @@ export async function closeDraftRunAction(input: {
     revalidateBlock(input.projectId, input.blockId);
     return { status: 'closed', decision };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return toActionError(error);
   }
 }
@@ -311,6 +323,8 @@ export async function addReviewCommentAction(input: {
     revalidateBlock(input.projectId, input.blockId);
     return { status: 'ok' };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return toActionError(error);
   }
 }
@@ -328,6 +342,8 @@ export async function resolveReviewCommentAction(input: {
     revalidateBlock(input.projectId, input.blockId);
     return { status: 'ok' };
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return toActionError(error);
   }
 }
@@ -371,6 +387,83 @@ export async function returnReviewAction(formData: FormData): Promise<void> {
   });
   revalidateBlock(projectId, blockId);
   redirect(`${back}?flash=reviewReturned`);
+}
+
+/** 差戻し・取下げのフォームの状態（断られても、書いた理由と選んだ段落を消さない） */
+export interface ReviewDecisionFormState {
+  status: 'idle' | 'error';
+  message: string | null;
+  values: { reason: string; paragraphId: string };
+}
+
+function reviewDecisionValues(formData: FormData): ReviewDecisionFormState['values'] {
+  return { reason: field(formData, 'reason'), paragraphId: field(formData, 'paragraphId') };
+}
+
+function reviewDecisionError(
+  error: unknown,
+  formData: FormData,
+  label: string,
+): ReviewDecisionFormState {
+  if (isUserFacingError(error)) {
+    return { status: 'error', message: error.message, values: reviewDecisionValues(formData) };
+  }
+  console.error(`[${label}]`, error);
+  return {
+    status: 'error',
+    message: '処理に失敗しました。入力は残っています。時間をおいて再試行してください。',
+    values: reviewDecisionValues(formData),
+  };
+}
+
+/**
+ * 差し戻す（フォームの状態を返す版）。断られたときはリダイレクトせず、書いた理由と選んだ段落を返す
+ * （リダイレクトするとフォームが作り直され、長い差戻しの理由が消えていた）
+ */
+export async function returnReviewFormAction(
+  _previous: ReviewDecisionFormState,
+  formData: FormData,
+): Promise<ReviewDecisionFormState> {
+  const projectId = safeId(field(formData, 'projectId'));
+  const blockId = safeId(field(formData, 'blockId'));
+  try {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    await returnReview(db, ctx, {
+      requestId: safeId(field(formData, 'requestId')),
+      reason: field(formData, 'reason'),
+      paragraphId: field(formData, 'paragraphId'),
+    });
+  } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
+    return reviewDecisionError(error, formData, 'return review');
+  }
+  revalidateBlock(projectId, blockId);
+  redirect(`${blockPath(projectId, blockId)}?flash=reviewReturned`);
+}
+
+/** 依頼を取り下げる（フォームの状態を返す版。断られても書いた理由を残す） */
+export async function withdrawReviewFormAction(
+  _previous: ReviewDecisionFormState,
+  formData: FormData,
+): Promise<ReviewDecisionFormState> {
+  const projectId = safeId(field(formData, 'projectId'));
+  const blockId = safeId(field(formData, 'blockId'));
+  try {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    await withdrawReview(db, ctx, {
+      requestId: safeId(field(formData, 'requestId')),
+      reason: field(formData, 'reason'),
+    });
+  } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
+    return reviewDecisionError(error, formData, 'withdraw review');
+  }
+  revalidateBlock(projectId, blockId);
+  redirect(`${blockPath(projectId, blockId)}?flash=reviewWithdrawn`);
 }
 
 export async function completeReviewAction(formData: FormData): Promise<void> {
@@ -479,6 +572,8 @@ export async function decideRecheckFormAction(
       reason,
     });
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     return { status: 'error', decision, message: toActionError(error).message, reason };
   }
   revalidateBlock(projectId, blockId);
@@ -532,6 +627,8 @@ export async function createBlockFormAction(
     });
     created = block.id;
   } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
     if (isUserFacingError(error)) return { status: 'error', message: error.message, values };
     console.error('[create block]', error);
     return {

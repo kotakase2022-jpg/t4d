@@ -670,10 +670,27 @@ export async function toDraftRunView(
   const decoded = decodeRun(run);
   const resolver = await resolverFor(db, ctx, decoded.allowlist);
   const state = stateOf(run);
+  // Demo Mode の別インスタンスでは、確認を終えた実行の候補の本文を持ち回さない（demo-client.ts）。
+  // 「出力が形式に合わない」と誤って示さず、候補なしの確認済みの実行として扱う
+  const candidatesOmitted =
+    (state === 'accepted' || state === 'rejected') &&
+    (run.outputJson as { candidatesOmitted?: unknown }).candidatesOmitted === true;
   const validated =
     run.status === 'failed'
       ? null
-      : validateDraftOutput(run.outputJson, decoded.allowlist, currentParagraphIds, resolver);
+      : candidatesOmitted
+        ? {
+            candidates: [],
+            missingInformation: [],
+            conflicts: [],
+            warnings: [
+              '確認を終えた実行です。候補の本文はこのサーバーには残っていません（採用した段落は本文の版に残っています）。',
+            ],
+            usedRequirementVersions: [],
+            rejectedRefs: [],
+            confidence: 0,
+          }
+        : validateDraftOutput(run.outputJson, decoded.allowlist, currentParagraphIds, resolver);
   const labelOf = (r: DisclosureDraftSourceRef) => {
     if (r.kind === 'block_paragraph') return `現在の本文 段落 ${r.id}`;
     const source = run.sourceReferences.find((s) => s.kind === r.kind && s.id === r.id);

@@ -54,14 +54,15 @@ function param(searchParams: SearchParams, key: string): string | null {
 }
 
 function exportHref(
-  snapshotId: string,
+  snapshot: { id: string; projectId: string },
   format: ExportArtifactFormat,
   audience: ExportAudience,
   frameworkVersionId?: string,
 ): string {
-  const query = new URLSearchParams({ format, audience });
+  // project は、出力できなかったとき（デモで別のサーバーに当たったなど）に出力タブへ戻して理由を示すため
+  const query = new URLSearchParams({ format, audience, project: snapshot.projectId });
   if (frameworkVersionId) query.set('framework', frameworkVersionId);
-  return `/api/exports/disclosure-snapshots/${encodeURIComponent(snapshotId)}?${query.toString()}`;
+  return `/api/exports/disclosure-snapshots/${encodeURIComponent(snapshot.id)}?${query.toString()}`;
 }
 
 function SnapshotKindBadge({ kind }: { kind: ReportSnapshotKind }) {
@@ -81,7 +82,9 @@ function SnapshotKindBadge({ kind }: { kind: ReportSnapshotKind }) {
 function DownloadLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Button asChild variant="outline" size="xs">
-      <a href={href} download>
+      {/* download 属性は付けない（失敗時の出力タブへの戻りをファイルとして保存させない）。
+          成功時は Content-Disposition: attachment でダウンロードになる */}
+      <a href={href}>
         <Download aria-hidden="true" />
         {children}
       </a>
@@ -113,12 +116,12 @@ function SnapshotDownloads({ entry, canExport }: { entry: SnapshotListEntry; can
         <div key={framework.frameworkVersionId} className="flex flex-wrap items-center gap-1">
           <span className="mr-1 text-[11px] text-ink-muted">DOCX 原稿（{framework.label}）</span>
           <DownloadLink
-            href={exportHref(snapshot.id, 'docx', 'internal', framework.frameworkVersionId)}
+            href={exportHref(snapshot, 'docx', 'internal', framework.frameworkVersionId)}
           >
             社内確認用
           </DownloadLink>
           <DownloadLink
-            href={exportHref(snapshot.id, 'docx', 'external', framework.frameworkVersionId)}
+            href={exportHref(snapshot, 'docx', 'external', framework.frameworkVersionId)}
           >
             対外用
           </DownloadLink>
@@ -126,13 +129,13 @@ function SnapshotDownloads({ entry, canExport }: { entry: SnapshotListEntry; can
       ))}
       <div className="flex flex-wrap items-center gap-1">
         <span className="mr-1 text-[11px] text-ink-muted">対応表・数値</span>
-        <DownloadLink href={exportHref(snapshot.id, 'xlsx', 'internal')}>
+        <DownloadLink href={exportHref(snapshot, 'xlsx', 'internal')}>
           XLSX 対応表（社内確認用）
         </DownloadLink>
-        <DownloadLink href={exportHref(snapshot.id, 'csv', 'internal')}>
+        <DownloadLink href={exportHref(snapshot, 'csv', 'internal')}>
           CSV 数値（社内確認用）
         </DownloadLink>
-        <DownloadLink href={exportHref(snapshot.id, 'csv', 'external')}>
+        <DownloadLink href={exportHref(snapshot, 'csv', 'external')}>
           CSV 数値（対外用）
         </DownloadLink>
       </div>
@@ -180,7 +183,14 @@ export async function OutputsTab({
   // 番号以外が載った URL（手で作られたもの）で「作成しました」と見せない
   const createdParam = param(searchParams, 'snapshotCreated');
   const created = createdParam && /^\d{1,6}$/.test(createdParam) ? createdParam : null;
-  const createdKind = param(searchParams, 'kind');
+  const createdKind = param(searchParams, 'kind') === 'approved' ? 'approved' : 'review_draft';
+  // 作成したスナップショットが、この一覧（このサーバーのメモリ）にあるか。デモでは作成したサーバーと
+  // 一覧を描くサーバーが違うことがあり、無いのに「下の一覧から出力できます」と言わない
+  const createdListed =
+    created !== null &&
+    snapshots.some(
+      (s) => s.snapshot.snapshotKind === createdKind && String(s.snapshot.snapshotNo) === created,
+    );
   const outputError = param(searchParams, 'outputError');
   const blockerListId = `report-blockers-${projectId}`;
   const MAX_BLOCKERS = 8;
@@ -196,17 +206,32 @@ export async function OutputsTab({
           {outputError}
         </p>
       )}
-      {created && (
+      {created && createdListed && (
         <p
           role="status"
           aria-live="polite"
           className="flex items-center gap-1.5 rounded-t4d border border-success/40 bg-success-soft px-3 py-1.5 text-[12px] text-ink"
         >
           <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden="true" />
-          {createdKind === 'approved'
-            ? SNAPSHOT_KIND_DISPLAY.approved
-            : SNAPSHOT_KIND_DISPLAY.review_draft}
+          {SNAPSHOT_KIND_DISPLAY[createdKind]}
           のスナップショット No.{created} を作成しました。下の一覧から出力できます。
+        </p>
+      )}
+      {created && !createdListed && (
+        <p
+          role="alert"
+          className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-[12px] text-ink"
+          data-testid="snapshot-created-elsewhere"
+        >
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          <span>
+            {SNAPSHOT_KIND_DISPLAY[createdKind]}のスナップショット No.{created}
+            は作成しましたが、この画面を表示したサーバーの一覧にはありません
+            {db.mode === 'demo'
+              ? '（デモ環境ではスナップショットをサーバーのメモリにだけ保持するため、別のサーバーで作成された可能性があります）'
+              : ''}
+            。一覧に無い場合は、作成し直してから出力してください。
+          </span>
         </p>
       )}
 
@@ -373,9 +398,9 @@ export async function OutputsTab({
             まだスナップショットがありません。上のどちらかの版を作成すると、ここから出力できます。
           </p>
         ) : (
-          <div className="t4d-scroll-x">
+          <div className="max-h-[70vh] overflow-auto">
             <Table>
-              <THead>
+              <THead className="sticky top-0 z-10 bg-surface">
                 <TR>
                   <TH>No.</TH>
                   <TH>種別</TH>
@@ -454,9 +479,9 @@ export async function OutputsTab({
         {artifacts.length === 0 ? (
           <p className="px-3 py-3 text-[12px] text-ink-muted">まだ出力していません。</p>
         ) : (
-          <div className="t4d-scroll-x">
+          <div className="max-h-[70vh] overflow-auto">
             <Table>
-              <THead>
+              <THead className="sticky top-0 z-10 bg-surface">
                 <TR>
                   <TH>出力日時</TH>
                   <TH>スナップショット</TH>

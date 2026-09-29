@@ -48,23 +48,31 @@ export function HeaderProjectContext({
 
   const otherPeriod = currentPeriodId !== null && project.reportingPeriodId !== currentPeriodId;
 
+  // 1366px 幅ではヘッダーに企業・期間・バッジ・役割切替が並び、flex の縮小で
+  // プロジェクト名が幅 0 まで潰れていた（指示書 §4.2「重要なラベルを切り詰めて意味不明にしない」）。
+  // 名前には最低幅を確保し、範囲はツールチップと本文見出しに任せて広い画面でだけ並べる。
+  // 期間は選択中の報告期間と同じならヘッダー左の表示と重複するため、年度が違う時だけ出す。
   return (
-    <div className="flex min-w-0 items-center gap-1.5" data-testid="header-project-context">
+    <div className="flex min-w-[9rem] items-center gap-1.5" data-testid="header-project-context">
       <Hint label={`対象範囲: ${project.scopeDetail}`}>
         <Link
           href={`/enterprise/disclosure-projects/${project.id}`}
-          className="inline-flex min-w-0 max-w-[420px] items-center gap-1.5 rounded-t4d px-1.5 py-0.5 text-[12px] text-ink hover:bg-brand-50"
+          className="inline-flex min-w-[8.5rem] max-w-[420px] items-center gap-1.5 overflow-hidden rounded-t4d px-1.5 py-0.5 text-[12px] text-ink hover:bg-brand-50"
         >
           <FolderKanban className="size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
           <span className="sr-only">開示プロジェクト:</span>
-          <span className="truncate font-medium">{project.name}</span>
-          <span className="shrink-0 text-ink-muted" aria-hidden="true">
+          <span className="min-w-[7rem] truncate font-medium">{project.name}</span>
+          <span className="hidden shrink-0 text-ink-muted min-[1600px]:inline" aria-hidden="true">
             ｜
           </span>
-          <span className="truncate text-ink-muted">範囲 {project.reportingEntity}</span>
-          <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-muted">
-            （{project.periodText}）
+          <span className="hidden truncate text-ink-muted min-[1600px]:inline">
+            範囲 {project.reportingEntity}
           </span>
+          {otherPeriod && (
+            <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-ink-muted min-[1600px]:inline">
+              （{project.periodText}）
+            </span>
+          )}
         </Link>
       </Hint>
       {otherPeriod && (
@@ -73,8 +81,11 @@ export function HeaderProjectContext({
           role="note"
         >
           <AlertTriangle className="size-3" aria-hidden="true" />
-          {project.reportingPeriodCode ?? 'プロジェクトの年度'} を表示中（選択中の報告期間は{' '}
-          {currentPeriodCode ?? '—'}）
+          {project.reportingPeriodCode ?? 'プロジェクトの年度'} を表示中
+          {/* 狭い画面では理由の文を読み上げだけにする（年度の違いはアイコンと年度で分かる） */}
+          <span className="max-[1599px]:sr-only">
+            （選択中の報告期間は {currentPeriodCode ?? '—'}）
+          </span>
         </span>
       )}
     </div>

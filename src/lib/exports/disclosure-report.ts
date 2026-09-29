@@ -39,7 +39,15 @@ import type { BlockInline, ConfidentialityLevel, ExportAudience, Uuid } from '@/
  * 生成したファイルを「提出済み」とは扱わない（出力は開示先への提出ではない）。
  */
 
-export const DISCLOSURE_REPORT_TEMPLATE_VERSION = 'disclosure-report-v1';
+/**
+ * 描画の版。同じスナップショットから描く本文・表紙が変わる変更をしたら必ず上げる
+ * （export_artifacts に記録し、同じ内容ハッシュの出力の違いを説明できるようにする。§6.10・§10.3）。
+ * tests/unit/disclosure-report-template.test.ts が描画結果の指紋をこの版と組で固定している。
+ *  - v1: 初版
+ *  - v2: 表紙の基準の位置付けを frameworkLegalLabel に統一（草案 →「公開草案に基づく準備」等）、
+ *        本文の推計・目標の数値に区分（（推計）（目標））を添える
+ */
+export const DISCLOSURE_REPORT_TEMPLATE_VERSION = 'disclosure-report-v2';
 
 export const AUDIENCE_DISPLAY: Record<ExportAudience, string> = {
   internal: '社内確認用',
@@ -312,7 +320,10 @@ export function coverRows(
 export interface DocxBuildOptions {
   audience: ExportAudience;
   frameworkVersionId: Uuid;
-  /** スナップショットの引用位置以外で伏せる非公開資料の名前（出力時に DB から集める） */
+  /**
+   * スナップショットの引用位置以外で伏せる非公開資料の名前。スナップショットに固定した一覧
+   * （frozenMaskedFileNames）を渡す。固定していない古いスナップショットだけ出力時の資料一覧を渡す
+   */
   nonPublicFileNames?: readonly string[];
 }
 

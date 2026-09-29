@@ -5,7 +5,7 @@ import { AlertTriangle, Upload } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { EVIDENCE_USAGE_PURPOSE_LABELS } from '@/lib/domain/disclosure-status';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import {
   CONFIDENTIALITY_LEVELS,
   EVIDENCE_USAGE_PURPOSES,
@@ -37,9 +37,9 @@ function valuesOf(formData: FormData): EvidenceUploadValues {
 
 const action = withNetworkFallback(
   uploadEvidenceDocumentFormAction,
-  (_previous, formData): EvidenceUploadFormState => ({
+  (_previous, formData, message): EvidenceUploadFormState => ({
     status: 'error',
-    message: NETWORK_ERROR_MESSAGE,
+    message,
     values: valuesOf(formData),
   }),
 );

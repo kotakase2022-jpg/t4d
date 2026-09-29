@@ -93,6 +93,7 @@ export async function SettingsTab({
               mode="edit"
               action={updateProjectAction}
               projectId={project.id}
+              baseUpdatedAt={project.updatedAt}
               initial={{
                 name: project.name,
                 reportingEntity: project.reportingEntity,
@@ -231,6 +232,7 @@ function FrameworkSettings({
             <FrameworkConditionsForm
               projectId={projectId}
               projectFrameworkId={pfId}
+              baseUpdatedAt={f.projectFramework.updatedAt}
               fields={f.conditionFields.map((field) => {
                 const value = f.projectFramework.conditions[field.key];
                 return {

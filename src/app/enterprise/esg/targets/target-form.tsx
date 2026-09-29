@@ -4,19 +4,19 @@ import { useActionState } from 'react';
 import { AlertTriangle, Target } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { registerKpiTargetAction } from '../actions';
 import { INITIAL_KPI_TARGET_FORM_STATE, type KpiTargetFormState } from '../target-form-state';
 
 /** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、入力を残す */
 const registerAction = withNetworkFallback(
   registerKpiTargetAction,
-  (previous, formData): KpiTargetFormState => {
+  (previous, formData, message): KpiTargetFormState => {
     const values: Record<string, string> = {};
     for (const [key, value] of formData.entries()) {
       if (typeof value === 'string' && !key.startsWith('$ACTION')) values[key] = value;
     }
-    return { attempt: previous.attempt + 1, message: NETWORK_ERROR_MESSAGE, values };
+    return { attempt: previous.attempt + 1, message, values };
   },
 );
 

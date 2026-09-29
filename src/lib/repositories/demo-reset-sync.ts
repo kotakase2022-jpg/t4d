@@ -33,6 +33,25 @@ export const DISCLOSURE_DEMO_RESET_TABLES = [
 
 export type DisclosureDemoResetTable = (typeof DISCLOSURE_DEMO_RESET_TABLES)[number];
 
+/**
+ * 「数値データも戻す」を選んだときに戻す表（Data Point と版・承認の道筋・検証結果・標準 CSV の取込）。
+ * 承認の記録（approvals）は Data Point を対象にした行だけを戻す（開示回答の承認は別の領域）。
+ * 実演の 3 手目（標準 CSV）・8 手目（数値の訂正）の結果が残ると、次のリハーサルの再確認・取込の
+ * プレビューが初期状態と変わるため（指示書 §14.2「デモ開始時に初期状態を再現できる」）
+ */
+export const DATA_DEMO_RESET_TABLES = [
+  'dataPoints',
+  'dataPointVersions',
+  'dataPointApprovalSteps',
+  'validations',
+  'quantitativeImportBatches',
+] as const satisfies readonly TableName[];
+
+/** 数値データのリセットで戻す承認の記録か */
+export function isDataPointApproval(row: { targetType?: string | null }): boolean {
+  return row.targetType === 'data_point';
+}
+
 /** 原稿の AI 下書き（ai_runs の featureType）。ai_runs は共有の表なので、この種類の行だけを戻す */
 export const DISCLOSURE_AI_FEATURE: AiFeatureType = 'disclosureBlockDraft';
 
@@ -77,7 +96,23 @@ export function restoreDisclosureDemoTables(
   target: FixtureDb,
   pristine: FixtureDb,
   organizationId: string,
+  options: { includeDataPoints?: boolean } = {},
 ): void {
+  if (options.includeDataPoints) {
+    for (const table of DATA_DEMO_RESET_TABLES) {
+      restoreTable(
+        target[table] as unknown as OrgRow[],
+        pristine[table] as unknown as OrgRow[],
+        organizationId,
+      );
+    }
+    restoreTable(
+      target.approvals as unknown as OrgRow[],
+      pristine.approvals as unknown as OrgRow[],
+      organizationId,
+      (row) => isDataPointApproval(row as unknown as { targetType?: string }),
+    );
+  }
   for (const table of DISCLOSURE_DEMO_RESET_TABLES) {
     restoreTable(
       target[table] as unknown as OrgRow[],
@@ -108,6 +143,8 @@ export function restoreDisclosureDemoTables(
 export interface DemoResetMark {
   organizationId: string;
   epoch: string;
+  /** 数値データ（DATA_DEMO_RESET_TABLES）も戻したリセットか */
+  includesDataPoints?: boolean;
 }
 
 const EPOCH_PATTERN = /^(\d{13})-([A-Za-z0-9]{1,40})$/;
@@ -142,13 +179,33 @@ export function isNewerDemoReset(
   return mark.epoch > against;
 }
 
+/** インスタンス間の時計のずれとして許す幅 */
+export const DEMO_RESET_MAX_FUTURE_MS = 5 * 60 * 1000;
+
+/**
+ * 印の時刻がありうる範囲か。印は署名の無い Cookie で、遠い未来の時刻を名乗る印を一度でも反映すると、
+ * 以後の本物の印（Date.now() の時刻）がすべて「古い」と見なされ、そのインスタンスはリセットを
+ * 反映しなくなる。現在時刻より先（時計のずれの幅を超えるもの）は受け付けない
+ */
+export function isPlausibleDemoResetMark(mark: DemoResetMark, now: number = Date.now()): boolean {
+  const time = demoResetEpochTime(mark.epoch);
+  return time !== null && time <= now + DEMO_RESET_MAX_FUTURE_MS;
+}
+
+/** 数値データも戻したリセットの印の末尾 */
+const DATA_SCOPE_SUFFIX = ':data';
+
 export function encodeDemoResetMark(mark: DemoResetMark): string {
-  return `${mark.organizationId}:${mark.epoch}`;
+  return `${mark.organizationId}:${mark.epoch}${mark.includesDataPoints ? DATA_SCOPE_SUFFIX : ''}`;
 }
 
 export function decodeDemoResetMark(raw: string | null | undefined): DemoResetMark | null {
   if (!raw) return null;
-  const match = /^([0-9a-f-]{36}):([A-Za-z0-9._-]{1,64})$/i.exec(raw);
+  const match = /^([0-9a-f-]{36}):([A-Za-z0-9._-]{1,64}?)(:data)?$/i.exec(raw);
   if (!match || !match[1] || !match[2]) return null;
-  return { organizationId: match[1], epoch: match[2] };
+  return {
+    organizationId: match[1],
+    epoch: match[2],
+    ...(match[3] ? { includesDataPoints: true } : {}),
+  };
 }

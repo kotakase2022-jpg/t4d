@@ -2921,6 +2921,112 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
   });
 
   // ------------------------------------------------------------------
+  // 0043: SECURITY DEFINER のトリガから別の組織の行を読ませない（自己監査 第 3 回 SEC-5）
+  // ------------------------------------------------------------------
+
+  describe('0043: トリガの結果・例外から別の組織の行の有無・状態を読ませない', () => {
+    const ORG_B = ORG_IDS.soten;
+    const errorOf = async (run: () => Promise<unknown>): Promise<string> => {
+      try {
+        await run();
+        return 'ok';
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+
+    /** 企業 B の開示の節と版（企業 B の管理者が自分の組織で判断を記録するための行） */
+    async function orgBBlock(): Promise<{ block: string; version: string }> {
+      const project = await one(
+        `insert into disclosure_projects
+           (organization_id, reporting_period_id, name, period_start, period_end, purposes)
+         values ($1, $2, 'RLS 企業 B', '2026-04-01', '2027-03-31', '{ssbj_statutory}')
+         returning id`,
+        [ORG_B, PERIOD_IDS.sotenFy2026],
+      );
+      await h.asSuperuser(
+        `insert into project_frameworks (organization_id, project_id, framework_version_id, purpose)
+         values ($1, $2, $3, 'ssbj_statutory')`,
+        [ORG_B, project, id('framework')],
+      );
+      const block = await one(
+        `insert into disclosure_blocks
+           (organization_id, project_id, framework_version_id, section_key, title)
+         values ($1, $2, $3, 'governance-b', 'ガバナンス（B）') returning id`,
+        [ORG_B, project, id('framework')],
+      );
+      const version = await one(
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, content_hash, created_by)
+         values ($1, $2, 1, $3::jsonb, 'hash-b-v1', $4) returning id`,
+        [ORG_B, block, BODY, ENT_B_ADMIN],
+      );
+      return { block, version };
+    }
+
+    it('再確認の判断の「新しい版が承認済みか」は、別の組織の承認済みの版でも false（存在しない版と同じ）', async () => {
+      const { block, version } = await orgBBlock();
+      const [foreignApproved] = await h.asSuperuser<{ id: string }>(
+        `select id from data_point_versions where organization_id = $1 and status = 'approved'
+          order by id limit 1`,
+        [ORG_A],
+      );
+      expect(foreignApproved?.id).toBeTruthy();
+      const insert = (newRef: string) =>
+        h.asUser<{ new_ref_approved: boolean }>(
+          ENT_B_ADMIN,
+          `insert into recheck_decisions
+             (organization_id, block_id, block_version_id, ref_kind, old_ref_id, new_ref_id,
+              decision, reason, decided_by)
+           values ($1, $2, $3, 'metric', $4, $5, 'keep_old', '確認', $6)
+           returning new_ref_approved`,
+          [ORG_B, block, version, id('dataPointVersion'), newRef, ENT_B_ADMIN],
+        );
+      const foreign = await insert(foreignApproved!.id);
+      const missing = await insert('00000000-0000-4000-8000-00000000abcd');
+      expect(foreign[0]?.new_ref_approved).toBe(false);
+      expect(missing[0]?.new_ref_approved).toBe(false);
+    });
+
+    it('権限の無い組織への依頼は、プロジェクトの有無にかかわらず同じ例外で断る', async () => {
+      const insertAs = (project: string) => () =>
+        h.asUser(
+          ENT_B_ADMIN,
+          `insert into review_requests
+             (organization_id, project_id, target_id, target_version_id, requested_by,
+              policy_version, policy)
+           values ($1, $2, $3, $4, $5, 'sod-3role-v1', '{}'::jsonb) returning id`,
+          [ORG_A, project, id('block.main'), id('version.main'), ENT_B_ADMIN],
+        );
+      const existing = await errorOf(insertAs(id('project')));
+      const missing = await errorOf(insertAs('00000000-0000-4000-8000-00000000abce'));
+      expect(existing).not.toBe('ok');
+      expect(existing).toBe(missing);
+    });
+
+    it('別の組織の依頼への記録は、存在しない依頼と同じ例外で断り、依頼の状態を載せない', async () => {
+      const { version } = await orgBBlock();
+      const record = (request: string) => () =>
+        h.asUser(ENT_B_ADMIN, EVENT_SQL, [
+          ORG_B,
+          request,
+          'returned',
+          'review',
+          ENT_B_ADMIN,
+          version,
+          '理由',
+          'p1',
+          null,
+        ]);
+      const foreign = await errorOf(record(id('request.main')));
+      const missing = await errorOf(record('00000000-0000-4000-8000-00000000abcf'));
+      expect(foreign).toMatch(/T4D_REVIEW_REQUEST_NOT_FOUND/);
+      expect(foreign).toBe(missing);
+      expect(foreign).not.toMatch(/reviewed|open|approved|returned（|依頼: /);
+    });
+  });
+
+  // ------------------------------------------------------------------
   // 本人名義・テナント整合（親と子の organization_id）
   // ------------------------------------------------------------------
 

@@ -22,7 +22,9 @@ export async function resetDisclosureDemoAction(formData: FormData): Promise<voi
   }
 
   await withUserFacingError('/enterprise/dashboard', async () => {
-    const result = await resetDisclosureDemoData(db, ctx);
+    const result = await resetDisclosureDemoData(db, ctx, {
+      includeDataPoints: formData.get('includeDataPoints') === 'on',
+    });
     // メニュー（ヘッダーのプロジェクト表示）も含めて読み直す
     revalidatePath('/enterprise', 'layout');
     redirect(

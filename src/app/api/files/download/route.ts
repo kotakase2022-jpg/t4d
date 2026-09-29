@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { getSession } from '@/lib/auth/session';
+import { can } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
 import { getDb } from '@/lib/repositories';
 import { getStorageAdapter } from '@/lib/storage';
@@ -43,6 +44,11 @@ export async function GET(request: Request) {
   // Demo Mode の DbClient に行レベルの防御は無いので、ここで所有者を明示的に確認する
   // （bucket 一致だけでは他テナントのファイルが通ってしまう）。
   if (version.organizationId !== session.context.workspace.organizationId) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  }
+  // 署名付きリンクの発行（canReadEvidence）と同じく、資料の閲覧権限が要る。
+  // 登録だけの権限の人には、存在の有無を区別しない 404 を返す
+  if (!can(session.context, 'enterprise.evidence.read')) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 

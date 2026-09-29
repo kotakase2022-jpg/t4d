@@ -62,21 +62,25 @@ describe('ヘッダーのプロジェクト表示', () => {
     expect(screen.queryByTestId('header-project-context')).toBeNull();
   });
 
-  it('プロジェクトの画面では名前・対象範囲・期間を出す', () => {
+  it('プロジェクトの画面では名前と対象範囲を出し、同じ年度なら期間を重ねて出さない', () => {
     pathname = '/enterprise/disclosure-projects/p-2026/blocks/b-1';
     renderContext('fy2026', 'FY2026');
     const link = screen.getByRole('link', { name: /FY2026 統合開示/ });
     expect(link).toHaveAttribute('href', '/enterprise/disclosure-projects/p-2026');
     expect(link).toHaveTextContent('範囲 青海テクノロジー株式会社及び連結子会社');
-    expect(link).toHaveTextContent('2026-04-01〜2027-03-31');
+    // 期間はヘッダー左の報告期間表示と同じなので、プロジェクト側では繰り返さない
+    expect(link).not.toHaveTextContent('2026-04-01〜2027-03-31');
     expect(screen.queryByRole('note')).toBeNull();
   });
 
-  it('ヘッダーの報告期間と年度が違えば明示する', () => {
+  it('ヘッダーの報告期間と年度が違えば期間ごと明示する', () => {
     pathname = '/enterprise/disclosure-projects/p-2026';
     renderContext('fy2025', 'FY2025');
     expect(screen.getByRole('note')).toHaveTextContent(
       'FY2026 を表示中（選択中の報告期間は FY2025）',
+    );
+    expect(screen.getByRole('link', { name: /FY2026 統合開示/ })).toHaveTextContent(
+      '2026-04-01〜2027-03-31',
     );
   });
 });

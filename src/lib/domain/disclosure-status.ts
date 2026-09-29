@@ -570,12 +570,30 @@ export function validateReturn(input: {
  * 依頼は判断の版を固定する（§10.1）ため、最終承認とレポートの確定で確かめ直す（§10.3）。
  * 判断は追記専用で、基準の現在の判断（project_frameworks.current_decision_id）が依頼の固定した判断に
  * 含まれていなければ、依頼の後に確定し直したことになる。
+ *
+ * ただし、依頼の時点で判断がまだ無く（候補・確認待ちのまま準備していた）、その後の**最初の**判断で
+ * 「適用」「任意適用」と確定したときは変更に数えない。新しいプロジェクトは判断なしで始まり、
+ * 判断より先に節を承認するのが通常の流れで、最初の確定は準備の前提（開示する）を確かめただけだから。
+ * 判断の行を読めない（Demo Mode で別インスタンスが作った判断など）ときは、変更として扱う（安全側）。
  */
 export function applicabilityDecisionChangedSince(
   request: { decisionIds: readonly Uuid[] },
   currentDecisionId: Uuid | null,
+  currentDecision?: {
+    decisionNo: number;
+    applicabilityStatus: ApplicabilityStatus;
+  } | null,
 ): boolean {
-  return currentDecisionId !== null && !request.decisionIds.includes(currentDecisionId);
+  if (currentDecisionId === null || request.decisionIds.includes(currentDecisionId)) return false;
+  if (
+    currentDecision &&
+    currentDecision.decisionNo === 1 &&
+    (currentDecision.applicabilityStatus === 'applicable' ||
+      currentDecision.applicabilityStatus === 'voluntary')
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /** review_events.idempotency_key（依頼 ID＋段階＋対象版）。二重押下で同じ判断を 2 回記録しない */

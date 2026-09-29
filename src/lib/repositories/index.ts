@@ -16,8 +16,12 @@ export async function getDb(): Promise<DbClient> {
     // Demo Mode の状態はプロセスのメモリにしか無い（known-limitations D-3）。
     // Vercel で別インスタンスに当たっても直前の操作が消えないよう、
     // Cookie に控えた変更を Fixture へ再適用してから返す。
-    const { readDemoEdits, applyDemoEdits } = await import('./demo-persistence');
+    const { readDemoEdits, applyDemoEdits, ensureDemoResetBaseline } =
+      await import('./demo-persistence');
     const { getDemoDb } = await import('@/lib/fixtures/store');
+    // リセットの基準時刻は、メモリが Cookie の操作を受け取り始める前に決める。これより後のリセットの印は、
+    // このインスタンスのメモリに入った操作より新しいので反映が要る
+    ensureDemoResetBaseline();
     // 別のインスタンスで行った開示デモのリセットは、ここでは反映しない。印は署名の無い Cookie で、
     // ログイン前に反映すると、誰でも任意の組織のデモ状態を消せてしまう（applyPendingDemoResetFor）
     const edits = await readDemoEdits();
@@ -51,7 +55,9 @@ export async function applyPendingDemoResetFor(ctx: AuthorizationContext): Promi
   const { getDemoDb, createFixtureDb } = await import('@/lib/fixtures/store');
   const { restoreDisclosureDemoTables } = await import('./demo-reset-sync');
   const db = getDemoDb();
-  restoreDisclosureDemoTables(db, pristineFixture(createFixtureDb), reset.organizationId);
+  restoreDisclosureDemoTables(db, pristineFixture(createFixtureDb), reset.organizationId, {
+    includeDataPoints: reset.includesDataPoints === true,
+  });
   const edits = await readDemoEdits();
   if (edits.length > 0) applyDemoEdits(db, edits);
   markDemoResetApplied(reset);

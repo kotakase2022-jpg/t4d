@@ -4,7 +4,7 @@ import * as React from 'react';
 import { AlertTriangle, Ban, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import type { RecheckDecisionKind, RecheckRefKind } from '@/types/domain';
 import { decideRecheckFormAction, type RecheckFormState } from '../../actions';
 
@@ -22,10 +22,10 @@ const INITIAL: RecheckFormState = { status: 'idle', decision: null, message: nul
 /** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、書いた理由を残す */
 const action = withNetworkFallback(
   decideRecheckFormAction,
-  (_previous, formData): RecheckFormState => ({
+  (_previous, formData, message): RecheckFormState => ({
     status: 'error',
     decision: String(formData.get('decision') ?? '') as RecheckDecisionKind,
-    message: NETWORK_ERROR_MESSAGE,
+    message,
     reason: String(formData.get('reason') ?? ''),
   }),
 );

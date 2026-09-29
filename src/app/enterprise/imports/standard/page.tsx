@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
+import { AVAILABILITY_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import { formatJst } from '@/lib/format/datetime';
 import {
   MAX_STANDARD_CSV_BYTES,
@@ -39,7 +40,10 @@ const COLUMN_NOTES: Record<StandardColumn, { required: string; note: string }> =
   value_kind: { required: '任意', note: 'actual／estimate／target（実績／推計／目標）' },
   availability_status: {
     required: '値か値の有無のどちらか',
-    note: 'value_present／not_entered／not_obtained／not_applicable／not_calculated',
+    // 記号だけでは 未入力・未取得・対象外・未算定 を区別できないため、意味を添える（A07）
+    note: (Object.entries(AVAILABILITY_STATUS_LABELS) as Array<[string, string]>)
+      .map(([code, label]) => `${code}（${label}）`)
+      .join('／'),
   },
   absence_reason: { required: '未取得・対象外・未算定は必須', note: '値が無い理由' },
   methodology_code: { required: '任意', note: '算定方法' },

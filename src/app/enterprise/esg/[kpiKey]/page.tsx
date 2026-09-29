@@ -172,9 +172,9 @@ export default async function KpiDetailPage({
             {!card.current || card.current.contributions.length === 0 ? (
               <p className="px-3 py-3 text-[12px] text-ink-muted">この年度のデータはありません。</p>
             ) : (
-              <div className="t4d-scroll-x">
+              <div className="max-h-[70vh] overflow-auto">
                 <Table>
-                  <THead>
+                  <THead className="sticky top-0 z-10 bg-surface">
                     <TR>
                       <TH>組織・拠点</TH>
                       <TH>連結の扱い</TH>

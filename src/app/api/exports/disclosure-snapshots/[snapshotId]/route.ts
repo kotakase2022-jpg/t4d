@@ -4,11 +4,16 @@ import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { contentDisposition } from '@/lib/exports';
 import { getDb } from '@/lib/repositories';
+import { isUuid } from '@/lib/validation/uuid';
 import {
   exportReportSnapshot,
   parseExportAudience,
   parseExportFormat,
 } from '@/lib/services/disclosure-export';
+
+/** 出力するスナップショットが見つからないときの説明（存在の有無・所属は区別しない） */
+const SNAPSHOT_UNAVAILABLE_MESSAGE =
+  'スナップショットが見つからないため出力できませんでした。デモ環境ではスナップショットをサーバーのメモリにだけ保持するため、別のサーバーでは見つからないことがあります。一覧を開き直し、無ければ作成し直してから出力してください。';
 
 /**
  * 開示レポートのスナップショットからの出力（DOCX 原稿 / XLSX 対応表 / 定量 CSV）。
@@ -56,6 +61,16 @@ export async function GET(request: Request, context: { params: Promise<{ snapsho
     });
   } catch (error) {
     if (error instanceof NotFoundError) {
+      // 画面の出力リンク（project 付き）からなら、出力タブへ戻して理由を示す（JSON の 404 を
+      // ダウンロードとして見せない）。デモではスナップショットがサーバーのメモリにだけあり、一覧を描いた
+      // サーバーと出力を受けたサーバーが違うと見つからない。他テナントの ID と同じ文言にする（A29）
+      const project = url.searchParams.get('project');
+      if (project && isUuid(project)) {
+        const back = new URL(`/enterprise/disclosure-projects/${project}`, url.origin);
+        back.searchParams.set('tab', 'outputs');
+        back.searchParams.set('outputError', SNAPSHOT_UNAVAILABLE_MESSAGE);
+        return NextResponse.redirect(back, 303);
+      }
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
     if (error instanceof AuthorizationError) {

@@ -76,6 +76,15 @@ export default async function KpiTargetsPage({
 
   const saved = one(query.saved);
   const savedVersion = one(query.version);
+  // 保存の知らせは内部のキー（scope1_reduce_2030 など）ではなく、指標・目標年・向きの表示名で示す
+  const savedHistory = saved ? histories.find((h) => h.targetKey === saved) : undefined;
+  const savedLabel = savedHistory?.versions[0]
+    ? kpiTargetLabel({
+        metricName: savedHistory.metric?.name ?? null,
+        targetYear: savedHistory.versions[0].targetYear,
+        direction: savedHistory.versions[0].direction,
+      })
+    : '目標';
 
   return (
     <>
@@ -97,7 +106,7 @@ export default async function KpiTargetsPage({
               className="flex items-center gap-1.5 rounded-t4d border border-success/40 bg-success-soft px-3 py-1.5 text-[12px] text-ink"
             >
               <CheckCircle2 className="size-3.5 text-success" aria-hidden="true" />
-              目標 {saved} の版 {savedVersion ?? '—'} を登録しました。
+              {savedLabel}の版 {savedVersion ?? '—'} を登録しました。
             </p>
           )}
           {histories.length === 0 ? (
@@ -135,8 +144,10 @@ export default async function KpiTargetsPage({
                     <THead>
                       <TR>
                         <TH align="right">版</TH>
-                        <TH>基準</TH>
-                        <TH>目標</TH>
+                        <TH align="right">基準年</TH>
+                        <TH align="right">基準値</TH>
+                        <TH align="right">目標年</TH>
+                        <TH align="right">目標値</TH>
                         <TH>範囲</TH>
                         <TH>区分</TH>
                         <TH>責任者</TH>
@@ -148,14 +159,20 @@ export default async function KpiTargetsPage({
                       {history.versions.map((t) => (
                         <TR key={t.id} className="align-top">
                           <TD align="right">{t.versionNo}</TD>
-                          <TD className="text-[12px]">
-                            {t.baseYear !== null && t.baseValue !== null
-                              ? `${t.baseYear} 年 ${formatNumber(t.baseValue)}`
+                          {/* 数値は右寄せ・単位併記（§4.2）。基準値にも単位を付ける（原単位の目標で読み違えない） */}
+                          <TD align="right" className="tnum text-[12px]">
+                            {t.baseYear !== null ? `${t.baseYear} 年` : '—'}
+                          </TD>
+                          <TD align="right" className="tnum text-[12px]">
+                            {t.baseValue !== null
+                              ? `${formatNumber(t.baseValue)} ${history.metric?.unit ?? ''}`.trim()
                               : '—'}
                           </TD>
-                          <TD className="text-[12px]">
-                            {t.targetYear} 年 {formatNumber(t.targetValue)}{' '}
-                            {history.metric?.unit ?? ''}
+                          <TD align="right" className="tnum text-[12px]">
+                            {t.targetYear} 年
+                          </TD>
+                          <TD align="right" className="tnum text-[12px]">
+                            {`${formatNumber(t.targetValue)} ${history.metric?.unit ?? ''}`.trim()}
                           </TD>
                           <TD className="text-[12px]">
                             {t.boundary}

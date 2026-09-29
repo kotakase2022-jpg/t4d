@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getDb } from '@/lib/repositories';
-import { readOwnedFileBytes } from '@/lib/storage';
+import { readEvidenceFileBytes } from '@/lib/storage';
 
 /**
  * Evidence の画面内表示用に実体を同一オリジンで返す（EVID-P0-002）。
  *
  * - ダウンロードではなく inline 表示（CSP が同一オリジン iframe / img のみ許可のため、
  *   Supabase Mode でも Signed URL ではなくサーバー経由で返す）。
- * - 認可は `readOwnedFileBytes`（自組織の所有ファイルのみ。Demo Mode では
- *   これが唯一の防御なので、URL 直打ちでも他社ファイルは 404）。
+ * - 認可は `readEvidenceFileBytes`（自組織の所有ファイルで、資料の閲覧権限がある人のみ。
+ *   Demo Mode ではこれが唯一の防御なので、URL 直打ちでも他社ファイル・権限外は 404）。
  * - 表示を許すのは画像と PDF だけ。それ以外（HTML 等）は inline にすると
  *   XSS の持ち込み口になるため拒否する。
  */
@@ -30,7 +30,8 @@ export async function GET(request: Request) {
   if (!fileVersionId) return NextResponse.json({ error: 'bad_request' }, { status: 400 });
 
   const db = await getDb();
-  const stored = await readOwnedFileBytes(db, session.context, fileVersionId);
+  // 資料の閲覧権限が無い人（登録だけの取引先の入力担当など）にも、他社・削除済みと同じ 404 を返す
+  const stored = await readEvidenceFileBytes(db, session.context, fileVersionId);
   if (!stored) {
     return NextResponse.json(
       {

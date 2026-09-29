@@ -14,8 +14,10 @@ import { getBlockEditorData, type BlockEditorData } from '@/lib/services/disclos
 import { reviewActionsFor, type ReviewActionState } from '@/lib/services/disclosure-review';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { ParagraphDiff } from '@/lib/domain/disclosure-block';
+import type { BlockParagraph } from '@/types/domain';
 import { BlockStatusBadge, FreshnessBadge } from '../status-badges';
 import { BlockEditor } from './block-editor';
+import { paragraphLabelOf } from './editor-model';
 import { ReviewPanel } from './review-panel';
 
 export const metadata = { title: '原稿編集' };
@@ -49,15 +51,17 @@ export default async function BlockEditorPage({
   let actions: ReviewActionState | null = null;
   let reviewParagraphs: Array<{ id: string; label: string }> = [];
   let reviewDiff: ParagraphDiff[] | null = null;
+  let reviewTargetParagraphs: BlockParagraph[] = [];
   if (data.activeRequest) {
     const request = await db.findById('reviewRequests', data.activeRequest.id);
     if (request) {
       actions = await reviewActionsFor(db, ctx, request);
       const target = await db.findById('disclosureBlockVersions', request.targetVersionId);
       if (target) {
+        reviewTargetParagraphs = target.body.paragraphs;
         reviewParagraphs = target.body.paragraphs.map((p) => ({
           id: p.id,
-          label: `段落 ${p.id}: ${paragraphText(p).slice(0, 30)}`,
+          label: `${paragraphLabelOf(target.body.paragraphs, p.id)}: ${paragraphText(p).slice(0, 30)}`,
         }));
         const base = target.baseVersionId
           ? await db.findById('disclosureBlockVersions', target.baseVersionId)
@@ -65,6 +69,14 @@ export default async function BlockEditorPage({
         reviewDiff = diffParagraphs(base?.body ?? null, target.body);
       }
     }
+  }
+
+  // 段落の表示名（審査中の版を優先し、無ければ現在の本文での位置）。内部の段落 ID は画面に出さない
+  const paragraphNames: Record<string, string> = Object.fromEntries(
+    data.body.paragraphs.map((p) => [p.id, paragraphLabelOf(data.body.paragraphs, p.id)]),
+  );
+  for (const p of reviewTargetParagraphs) {
+    paragraphNames[p.id] = paragraphLabelOf(reviewTargetParagraphs, p.id);
   }
 
   const reference = describeReferenceDate();
@@ -146,6 +158,7 @@ export default async function BlockEditorPage({
           request={data.activeRequest}
           actions={actions}
           paragraphs={reviewParagraphs}
+          paragraphNames={paragraphNames}
           diff={reviewDiff}
           history={data.reviewHistory}
         />

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
+import { can } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
 import { findDisclosureDocumentBytes } from '@/lib/fixtures/disclosure-documents';
 import { contentHash, fid } from '@/lib/fixtures/ids';
@@ -317,8 +318,11 @@ export async function canReadEvidence(
   version: { id: Uuid; organizationId: Uuid },
   engagementId: Uuid | null,
 ): Promise<boolean> {
-  // 自組織の原本
-  if (version.organizationId === ctx.workspace.organizationId) return true;
+  // 自組織の原本。資料の閲覧権限が要る（登録だけの権限＝取引先の入力担当には中身を渡さない。
+  // 資料の一覧・画面・AI の根拠と同じ規則。§13 資料の ACL）
+  if (version.organizationId === ctx.workspace.organizationId) {
+    return can(ctx, 'enterprise.evidence.read');
+  }
 
   // ここから先は監査法人がクライアントの Evidence を読む経路だけを許す
   if (ctx.workspace.organizationType !== 'assurance_firm') return false;
@@ -406,6 +410,19 @@ export async function createEvidenceSignedUrl(
   });
 
   return { url, expiresAt };
+}
+
+/**
+ * 資料（Evidence）の実体を画面内表示のために読み出す。自組織の資料で、かつ資料の閲覧権限を持つ人だけ。
+ * 権限が無いときも「見つからない」と同じ null を返す（存在を区別させない）
+ */
+export async function readEvidenceFileBytes(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  fileVersionId: Uuid,
+): Promise<{ bytes: Uint8Array; fileName: string; mimeType: string } | null> {
+  if (!can(ctx, 'enterprise.evidence.read')) return null;
+  return readOwnedFileBytes(db, ctx, fileVersionId);
 }
 
 /**

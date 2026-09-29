@@ -45,6 +45,8 @@ export interface RightPaneProps {
   canSelectForAi: boolean;
   onInsert: (inline: RefInline, label: string) => void;
   onJump: (paragraphId: string) => void;
+  /** 段落の表示名（本文の中の位置。内部の段落 ID は出さない） */
+  paragraphLabel: (paragraphId: string) => string;
   paragraphOptions: Array<{ id: string; label: string }>;
   tab: PaneTab;
   onTabChange: (tab: PaneTab) => void;
@@ -80,7 +82,15 @@ function AiCheckbox({
   );
 }
 
-function JumpLinks({ ids, onJump }: { ids: string[]; onJump: (id: string) => void }) {
+function JumpLinks({
+  ids,
+  onJump,
+  label,
+}: {
+  ids: string[];
+  onJump: (id: string) => void;
+  label: (id: string) => string;
+}) {
   if (ids.length === 0) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-1 text-[11px] text-ink-muted">
@@ -92,7 +102,7 @@ function JumpLinks({ ids, onJump }: { ids: string[]; onJump: (id: string) => voi
           onClick={() => onJump(id)}
           className="rounded-t4d px-1 text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
         >
-          段落 {id}
+          {label(id)}
         </button>
       ))}
     </span>
@@ -216,6 +226,7 @@ function EvidenceTab({
   canSelectForAi,
   onInsert,
   onJump,
+  paragraphLabel,
 }: RightPaneProps) {
   const narratives = [...data.narratives].sort(
     (a, b) => Number(b.paragraphIds.length > 0) - Number(a.paragraphIds.length > 0),
@@ -268,7 +279,7 @@ function EvidenceTab({
                   <p className="mt-1 text-ink-muted">{n.notQuantifiedNote}</p>
                 )}
                 <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <JumpLinks ids={n.paragraphIds} onJump={onJump} />
+                  <JumpLinks ids={n.paragraphIds} onJump={onJump} label={paragraphLabel} />
                   {canEdit && (
                     <Button
                       type="button"
@@ -340,7 +351,7 @@ function EvidenceTab({
                 </p>
               )}
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <JumpLinks ids={a.paragraphIds} onJump={onJump} />
+                <JumpLinks ids={a.paragraphIds} onJump={onJump} label={paragraphLabel} />
                 {canEdit && !a.fileDeleted && (
                   <Button
                     type="button"
@@ -393,6 +404,7 @@ function MetricsTab({
   canSelectForAi,
   onInsert,
   onJump,
+  paragraphLabel,
 }: RightPaneProps) {
   const [query, setQuery] = React.useState('');
   const q = query.trim();
@@ -442,7 +454,7 @@ function MetricsTab({
                 <p className="mt-1 text-ink-muted">変更理由: {m.current.changeReason}</p>
               )}
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <JumpLinks ids={m.paragraphIds} onJump={onJump} />
+                <JumpLinks ids={m.paragraphIds} onJump={onJump} label={paragraphLabel} />
                 {m.stale && (
                   <Link
                     href={recheckHref}
@@ -474,13 +486,18 @@ function MetricsTab({
         <ul className="divide-y divide-line rounded-t4d border border-line">
           {candidates.slice(0, 60).map((c) => (
             <li key={c.key} className="flex flex-wrap items-center gap-2 p-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-ink">{c.metricName}</div>
-                <div className="truncate text-[11px] text-ink-muted">
+              {/*
+                指標名と組織・範囲は 1 行を占めて折り返す（切り詰めない）。狭い根拠パネルで
+                「Scope2 排出量（マーケット基準）」と「（ロケーション基準）」が同じ「Scope2 排出量…」に
+                見えて、どちらを挿入するか分からなくなっていた（§4.2・A08）
+              */}
+              <div className="min-w-0 basis-full">
+                <div className="break-words text-ink">{c.metricName}</div>
+                <div className="break-words text-[11px] text-ink-muted">
                   {c.unitName}・{c.boundary}・版 {c.versionNo}
                 </div>
               </div>
-              <span className="tnum text-right text-ink">{c.display}</span>
+              <span className="tnum ml-auto text-right text-ink">{c.display}</span>
               <Badge tone={c.approved ? 'success' : 'warning'}>
                 {c.approved ? (
                   <CheckCircle2 className="size-3" aria-hidden="true" />
@@ -526,7 +543,7 @@ function MetricsTab({
 // 前年（本文の差分 ／ 前提の差分）
 // ----------------------------------------------------------------------
 
-function PriorTab({ data, onJump }: RightPaneProps) {
+function PriorTab({ data, onJump, paragraphLabel }: RightPaneProps) {
   const [view, setView] = React.useState<'text' | 'meta'>('text');
   const prior = data.priorYear;
   if (!prior) {
@@ -573,7 +590,7 @@ function PriorTab({ data, onJump }: RightPaneProps) {
           {prior.paragraphDiff.map((d) => (
             <li key={`${d.kind}-${d.paragraphId}`} className="rounded-t4d border border-line p-2">
               <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-ink-muted">
-                <span>段落 {d.paragraphId}</span>
+                <span>{d.kind === 'removed' ? '前年の段落' : paragraphLabel(d.paragraphId)}</span>
                 <Badge
                   tone={
                     d.kind === 'unchanged'
@@ -673,7 +690,14 @@ function PriorTab({ data, onJump }: RightPaneProps) {
 export const COMMENT_NETWORK_ERROR_MESSAGE =
   'サーバーに接続できませんでした。入力したコメントは残っています。通信を確認して、もう一度押してください。';
 
-function CommentsTab({ data, projectId, onJump, paragraphOptions, onAnnounce }: RightPaneProps) {
+function CommentsTab({
+  data,
+  projectId,
+  onJump,
+  paragraphLabel,
+  paragraphOptions,
+  onAnnounce,
+}: RightPaneProps) {
   const router = useRouter();
   const canComment = data.permissions.canWrite || data.permissions.canApprove;
   const [body, setBody] = React.useState('');
@@ -771,7 +795,7 @@ function CommentsTab({ data, projectId, onJump, paragraphOptions, onAnnounce }: 
                     onClick={() => onJump(c.paragraphId as string)}
                     className="text-[11px] text-brand-700 underline-offset-2 hover:underline"
                   >
-                    段落 {c.paragraphId}
+                    {paragraphLabel(c.paragraphId)}
                   </button>
                 )}
                 <span className="text-[11px] text-ink-muted">

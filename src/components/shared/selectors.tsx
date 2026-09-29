@@ -45,7 +45,7 @@ export function WorkspaceSelector({
 
   if (choices.length <= 1) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink">
+      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] font-medium text-ink">
         <Building2 className="size-3.5 text-ink-muted" aria-hidden="true" />
         {current.organizationName}
         <span className="text-[11px] text-ink-muted">（{typeLabel}）</span>
@@ -55,7 +55,7 @@ export function WorkspaceSelector({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-t4d px-2 py-1 text-[13px] font-medium text-ink hover:bg-brand-50">
+      <DropdownMenuTrigger className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t4d px-2 py-1 text-[13px] font-medium text-ink hover:bg-brand-50">
         <Building2 className="size-3.5 text-ink-muted" aria-hidden="true" />
         {current.organizationName}
         <span className="text-[11px] text-ink-muted">（{typeLabel}）</span>

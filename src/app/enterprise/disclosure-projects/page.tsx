@@ -86,9 +86,9 @@ export default async function DisclosureProjectsPage({
               }
             />
           ) : (
-            <div className="t4d-scroll-x">
+            <div className="max-h-[70vh] overflow-auto">
               <Table>
-                <THead>
+                <THead className="sticky top-0 z-10 bg-surface">
                   <TR>
                     <TH>プロジェクト</TH>
                     <TH>報告期間</TH>

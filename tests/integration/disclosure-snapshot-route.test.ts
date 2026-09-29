@@ -91,6 +91,32 @@ describe('スナップショット出力の Route Handler', () => {
     expect(fixture.exportArtifacts).toHaveLength(0);
   });
 
+  it('F5（永続化）: 画面の出力リンク（project 付き）で見つからなければ、出力タブへ戻して理由を示す', async () => {
+    const project = IDS.projects.fy2026;
+    // デモで別のサーバーに当たった（このサーバーのメモリに無い）場合と、他テナントの ID で同じ結果
+    const missing = await call(
+      '00000000-0000-4000-8000-000000000000',
+      `format=csv&audience=internal&project=${project}`,
+    );
+    state.ctx = ctxFor('other-enterprise-admin@demo.local', ['enterprise_admin'], ORG_IDS.soten);
+    const other = await call(snapshotId, `format=csv&audience=internal&project=${project}`);
+    for (const response of [missing, other]) {
+      expect(response.status).toBe(303);
+      const location = new URL(response.headers.get('Location') ?? '');
+      expect(location.pathname).toBe(`/enterprise/disclosure-projects/${project}`);
+      expect(location.searchParams.get('tab')).toBe('outputs');
+      expect(location.searchParams.get('outputError')).toContain('見つからない');
+    }
+    expect(missing.headers.get('Location')).toBe(other.headers.get('Location'));
+    // project が UUID でなければ戻り先に使わない（外部への転送に使わせない）
+    state.ctx = manager();
+    const forged = await call(
+      '00000000-0000-4000-8000-000000000000',
+      'format=csv&audience=internal&project=https://evil.example',
+    );
+    expect(forged.status).toBe(404);
+  });
+
   it('監査法人のワークスペースからは存在も示さない（404）', async () => {
     state.ctx = ctxFor(
       'assurance-manager@demo.local',

@@ -4,7 +4,8 @@ import { Download, Eye, FileText, Highlighter, Lock, PenLine, Tag } from 'lucide
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { DocumentPreview } from '@/components/shared/document-preview';
-import { EmptyState } from '@/components/shared/states';
+import { ScanStatusBadge } from '@/components/shared/scan-status-badge';
+import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,6 +14,7 @@ import { can } from '@/lib/authorization/can';
 import { fileTypeLabel } from '@/lib/domain/evidence-limits';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
 import { parseUploadedFile } from '@/lib/imports/parsers';
+import { isDisclosureFirstEnabled } from '@/lib/services/feature-settings';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import {
   CONFIDENTIALITY_LABELS,
@@ -20,10 +22,14 @@ import {
   listAnchorUsagesForFile,
   usagePurposeLabel,
 } from '@/lib/services/source-anchor';
-import { readOwnedFileBytes } from '@/lib/storage';
+import { readEvidenceFileBytes } from '@/lib/storage';
+import { evidenceTitles } from '../titles';
 import { ManualExcerptForm } from './manual-excerpt-form';
 
-export const metadata = { title: '資料・証跡の表示' };
+export async function generateMetadata() {
+  // 開示優先モードが OFF の組織は、メニュー・一覧と同じ従来の画面名（A39）
+  return { title: (await evidenceTitles()).viewer };
+}
 
 /**
  * Evidence Viewer（EVID-P0-002）。
@@ -46,9 +52,35 @@ export default async function EvidenceViewerPage({
   const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const { db, ctx } = shell;
+  const disclosureFirst = await isDisclosureFirstEnabled(db, ctx);
+  const listLabel = disclosureFirst ? '資料・証跡' : 'Evidence';
+
+  // 資料の中身（抽出テキスト・実体・紐付け）は資料の閲覧権限が要る。登録だけの権限（取引先の入力担当）
+  // には、所有組織が同じでも見せない（実体の API・署名付きリンクと同じ規則。§13 資料の ACL）
+  if (!can(ctx, 'enterprise.evidence.read')) {
+    return (
+      <>
+        <PageHeader
+          title={disclosureFirst ? '資料・証跡の表示' : 'Evidence Viewer'}
+          breadcrumbs={[
+            { label: '企業ワークスペース' },
+            { label: listLabel, href: '/enterprise/evidence' },
+          ]}
+        />
+        <div className="p-4">
+          <Card>
+            <PermissionDeniedState description="資料の内容の閲覧には、資料の閲覧権限が必要です。" />
+          </Card>
+        </div>
+      </>
+    );
+  }
 
   const file = await db.findById('files', fileId);
   if (!file || file.deletedAt || file.organizationId !== ctx.workspace.organizationId) notFound();
+  // 開示優先の機能（利用目的・手動抜粋・引用の利用先）は、ON の組織か、定性情報の資料として
+  // 登録した資料（利用目的あり）だけに出す。OFF の組織の証憑は拡張前の画面のまま（REG-2）
+  const full = disclosureFirst || file.usagePurpose !== null;
 
   const versions = await db.select('fileVersions', {
     where: { fileId: file.id },
@@ -86,7 +118,7 @@ export default async function EvidenceViewerPage({
   );
 
   // 実体の取得（無ければ Fragment 表示へフォールバック）
-  const stored = await readOwnedFileBytes(db, ctx, current.id);
+  const stored = await readEvidenceFileBytes(db, ctx, current.id);
   const isImage = stored ? stored.mimeType.startsWith('image/') : false;
   const isPdf = stored ? stored.mimeType === 'application/pdf' : false;
   // .txt は表のことも自由記述のこともあり、拡張子だけでは決まらない。
@@ -113,7 +145,7 @@ export default async function EvidenceViewerPage({
   const pdfPages = [...new Set(links.map((l) => l.page).filter((p): p is number => p !== null))];
 
   // 引用の利用先（定性情報・原稿）の逆引きと、手動抜粋の可否
-  const anchorUsages = await listAnchorUsagesForFile(db, ctx, file.id);
+  const anchorUsages = full ? await listAnchorUsagesForFile(db, ctx, file.id) : [];
   const canWriteEvidence = can(ctx, 'enterprise.evidence.write');
   // 引用の利用先（定性情報・原稿の題名）は開示の内容。開示の閲覧権限が無い人には欄ごと出さない
   const canReadDisclosure = can(ctx, 'enterprise.disclosure.read');
@@ -147,16 +179,18 @@ export default async function EvidenceViewerPage({
               <Lock className="size-3" aria-hidden="true" />
               {CONFIDENTIALITY_LABELS[file.confidentiality]}
             </Badge>
-            <Badge tone={file.usagePurpose === 'current_fact' ? 'success' : 'neutral'}>
-              <Tag className="size-3" aria-hidden="true" />
-              利用目的: {usagePurposeLabel(file.usagePurpose)}
-            </Badge>
+            {full && (
+              <Badge tone={file.usagePurpose === 'current_fact' ? 'success' : 'neutral'}>
+                <Tag className="size-3" aria-hidden="true" />
+                利用目的: {usagePurposeLabel(file.usagePurpose)}
+              </Badge>
+            )}
             <span>版 {current.versionNo}</span>
           </span>
         }
         breadcrumbs={[
           { label: '企業ワークスペース' },
-          { label: '資料・証跡', href: '/enterprise/evidence' },
+          { label: listLabel, href: '/enterprise/evidence' },
           { label: file.originalName },
         ]}
         actions={
@@ -316,6 +350,7 @@ export default async function EvidenceViewerPage({
             </Card>
           )}
 
+          {/* 抽出した内容は資料そのものの情報なので、開示優先モードの ON/OFF によらず示す */}
           <Card id="extracted" className="scroll-mt-4">
             <SectionTitle
               title={`引用できる箇所（抽出 ${extractedCount} ／ 手動抜粋 ${manualCount}）`}
@@ -323,7 +358,9 @@ export default async function EvidenceViewerPage({
             {fragments.length === 0 ? (
               <p className="px-3 pb-3 text-[12px] text-ink-muted">
                 テキストを抽出できた箇所がありません（抽出の成功としては扱っていません）。
-                引用に使う箇所は、下の「手動抜粋を登録」で文言を写して登録してください。
+                {full && canWriteEvidence
+                  ? '引用に使う箇所は、下の「手動抜粋を登録」で文言を写して登録してください。'
+                  : ''}
               </p>
             ) : (
               <ol className="max-h-[420px] divide-y divide-line overflow-y-auto">
@@ -345,7 +382,7 @@ export default async function EvidenceViewerPage({
             )}
           </Card>
 
-          {canWriteEvidence && (
+          {full && canWriteEvidence && (
             <Card id="manual-excerpt" className="scroll-mt-4">
               <SectionTitle title="手動抜粋を登録" />
               <ManualExcerptForm fileId={file.id} />
@@ -368,22 +405,26 @@ export default async function EvidenceViewerPage({
                   {shell.periods.find((p) => p.id === file.reportingPeriodId)?.code ?? '—'}
                 </dd>
               </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-ink-muted">版</dt>
-                <dd className="text-right text-ink">{file.editionLabel ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-ink-muted">発行日</dt>
-                <dd className="text-ink">{formatJstDate(file.issuedOn)}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-ink-muted">利用目的</dt>
-                <dd className="text-ink">{usagePurposeLabel(file.usagePurpose)}</dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-ink-muted">機密区分</dt>
-                <dd className="text-ink">{CONFIDENTIALITY_LABELS[file.confidentiality]}</dd>
-              </div>
+              {full && (
+                <>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-ink-muted">版</dt>
+                    <dd className="text-right text-ink">{file.editionLabel ?? '—'}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-ink-muted">発行日</dt>
+                    <dd className="text-ink">{formatJstDate(file.issuedOn)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-ink-muted">利用目的</dt>
+                    <dd className="text-ink">{usagePurposeLabel(file.usagePurpose)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-ink-muted">機密区分</dt>
+                    <dd className="text-ink">{CONFIDENTIALITY_LABELS[file.confidentiality]}</dd>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between gap-2">
                 <dt className="text-ink-muted">サイズ</dt>
                 <dd className="tnum text-ink">{Math.round(current.sizeBytes / 1024)} KB</dd>
@@ -398,9 +439,11 @@ export default async function EvidenceViewerPage({
                 <dt className="text-ink-muted">登録日時</dt>
                 <dd className="text-ink">{formatJst(current.createdAt)}</dd>
               </div>
-              <div className="flex justify-between gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <dt className="text-ink-muted">ウイルススキャン</dt>
-                <dd className="text-ink">{file.scanStatus}</dd>
+                <dd>
+                  <ScanStatusBadge status={file.scanStatus} />
+                </dd>
               </div>
             </dl>
           </Card>
@@ -438,7 +481,7 @@ export default async function EvidenceViewerPage({
             )}
           </Card>
 
-          {canReadDisclosure && (
+          {full && canReadDisclosure && (
             <Card>
               <SectionTitle title={`引用の利用先（${anchorUsages.length} 箇所）`} />
               {anchorUsages.length === 0 ? (

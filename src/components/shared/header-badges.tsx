@@ -15,7 +15,15 @@ export function ReferenceDateBadge({ label }: { label: string }) {
       title="デモでは、期限・超過の判定をこの日を「今日」として計算しています（閲覧日とは異なります）。"
     >
       <CalendarClock className="size-3" aria-hidden="true" />
-      {label}
+      {/* 1600px 未満では「デモ」を読み上げだけにして幅を詰める（ヘッダーの開示プロジェクトの表示を潰さない） */}
+      {label.startsWith('デモ') ? (
+        <>
+          <span className="max-[1599px]:sr-only">デモ</span>
+          {label.slice(2)}
+        </>
+      ) : (
+        label
+      )}
     </Badge>
   );
 }

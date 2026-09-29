@@ -4,7 +4,7 @@ import * as React from 'react';
 import { AlertTriangle, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import {
   createBlockFormAction,
   type CreateBlockFormState,
@@ -32,9 +32,9 @@ function valuesOf(formData: FormData): CreateBlockFormValues {
 
 const action = withNetworkFallback(
   createBlockFormAction,
-  (_previous, formData): CreateBlockFormState => ({
+  (_previous, formData, message): CreateBlockFormState => ({
     status: 'error',
-    message: NETWORK_ERROR_MESSAGE,
+    message,
     values: valuesOf(formData),
   }),
 );

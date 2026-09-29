@@ -13,6 +13,7 @@ import {
   hasBodyContent,
   paragraphText,
   plainTextOf,
+  workingBodyInEffect,
   type ParagraphDiff,
 } from '@/lib/domain/disclosure-block';
 import {
@@ -28,6 +29,7 @@ import {
   REVIEW_EVENT_TYPE_LABELS,
   REVIEW_REQUEST_STATUS_LABELS,
   REVIEW_STAGE_LABELS,
+  applicabilityDecisionChangedSince,
   evaluateBlockBlockers,
   hasUnresolvedRequiredInfo,
   isChangedAfterApproval,
@@ -119,11 +121,12 @@ export class BlockConflictError extends ValidationError {
  * （Demo Mode では作業本文がインスタンスのメモリにしか無く、古い自分の本文で誤検知するため）。
  */
 export function isForeignWorkingBody(
-  block: Pick<DisclosureBlock, 'workingBody' | 'workingSavedAt' | 'workingUpdatedBy'>,
+  block: Pick<DisclosureBlock, 'status' | 'workingBody' | 'workingSavedAt' | 'workingUpdatedBy'>,
   actorId: Uuid,
   knownWorkingSavedAt: IsoDateTime | null | undefined,
 ): boolean {
-  if (!block.workingBody) return false;
+  // レビュー中・承認済みの節に残った作業本文は画面に出さない（workingBodyInEffect）ため、競合にも数えない
+  if (!workingBodyInEffect(block)) return false;
   const writer = block.workingUpdatedBy ?? null;
   if (writer === null || writer === actorId) return false;
   return (block.workingSavedAt ?? null) !== (knownWorkingSavedAt ?? null);
@@ -323,6 +326,7 @@ export async function currentVersionBody(
 /**
  * 作業中の本文。自動保存が現在の版を土台にしていればそれを、無ければ現在の版の本文を返す。
  * 自動保存の土台が現在の版と違う（別の人が版を保存した）場合も作業本文は捨てない（画面が競合として扱う）。
+ * レビュー中・承認済みの節は、作業本文が残っていても現在の版（審査・承認した版）を返す。
  */
 export async function editingBodyOf(
   db: DbClient,
@@ -330,7 +334,7 @@ export async function editingBodyOf(
   block: DisclosureBlock,
 ): Promise<{ body: BlockBody; fromWorking: boolean; version: DisclosureBlockVersion | null }> {
   const current = await currentVersionBody(db, ctx, block);
-  if (block.workingBody) {
+  if (workingBodyInEffect(block)) {
     return { body: block.workingBody, fromWorking: true, version: current.version };
   }
   return { body: current.body, fromWorking: false, version: current.version };
@@ -881,6 +885,90 @@ export async function scopeRecheckNeeded(
 export const SCOPE_RECHECK_MESSAGE =
   '報告範囲（報告主体・期間・対象範囲）の変更より前に承認された節です。範囲の変更を踏まえて本文を確認し、再承認を受けてください。';
 
+export const APPLICABILITY_RECHECK_MESSAGE =
+  '最終承認の後に適用判断が更新されました。更新後の判断で本文を確認し、再承認を受けてください。';
+
+/**
+ * 承認済みの版が、節の基準の適用判断を確定し直す前の依頼で承認されたか（§10.1・§10.3）。
+ * 判断の比較規則は domain の applicabilityDecisionChangedSince（確定前の検査・最終承認と同じ）。
+ */
+export async function applicabilityRecheckNeeded(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  block: Pick<DisclosureBlock, 'id' | 'approvedVersionId' | 'projectId' | 'frameworkVersionId'>,
+): Promise<boolean> {
+  if (!block.approvedVersionId) return false;
+  const organizationId = ctx.workspace.organizationId;
+  const [pf] = await db.select('projectFrameworks', {
+    where: {
+      organizationId,
+      projectId: block.projectId,
+      frameworkVersionId: block.frameworkVersionId,
+    },
+  });
+  if (!pf?.currentDecisionId) return false;
+  const requests = await db.select('reviewRequests', {
+    where: {
+      organizationId,
+      targetType: 'disclosure_block',
+      targetId: block.id,
+      targetVersionId: block.approvedVersionId,
+      status: 'approved',
+    },
+  });
+  if (requests.length === 0) return false;
+  const decision = await db.findById('projectFrameworkDecisions', pf.currentDecisionId);
+  const current = decision && decision.organizationId === organizationId ? decision : null;
+  return requests.every((r) => applicabilityDecisionChangedSince(r, pf.currentDecisionId, current));
+}
+
+/**
+ * 翻訳版が、翻訳元の現在の版より前に作った版のままか（翻訳の要確認）。
+ * 原稿の画面・確定前の検査と同じく、版を作った時刻で比べる。翻訳元の修正を翻訳へ黙って反映しない。
+ * 翻訳を見直して変える必要が無くても、同じ本文で版を作り直せば「翻訳元の版 N を確認した」記録になる。
+ */
+export async function translationRecheckNeeded(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  block: Pick<DisclosureBlock, 'translationOfBlockId' | 'currentVersionId'>,
+  currentVersion: Pick<DisclosureBlockVersion, 'createdAt'> | null,
+): Promise<boolean> {
+  if (!block.translationOfBlockId) return false;
+  const source = await db.findById('disclosureBlocks', block.translationOfBlockId);
+  if (
+    !source ||
+    source.organizationId !== ctx.workspace.organizationId ||
+    source.deletedAt ||
+    !source.currentVersionId
+  ) {
+    return false;
+  }
+  const sourceVersion = await db.findById('disclosureBlockVersions', source.currentVersionId);
+  if (!sourceVersion) return false;
+  // 確定前の検査（report-snapshot.ts の translation_stale）と同じ向きの比較にする
+  return !currentVersion || currentVersion.createdAt < sourceVersion.createdAt;
+}
+
+/**
+ * 本文を変えずに版を作り直してよいか。承認済みの節の範囲・適用判断の再確認と、
+ * 翻訳元の修正に対する翻訳の再確認（承認前・承認後とも）に限る
+ */
+async function recheckWithoutTextChangeAllowed(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  block: DisclosureBlock,
+  action: 'revise_after_approval' | 'save_version',
+  currentVersion: DisclosureBlockVersion,
+): Promise<boolean> {
+  if (await translationRecheckNeeded(db, ctx, block, currentVersion)) return true;
+  if (action !== 'revise_after_approval') return false;
+  const project = await loadProject(db, ctx, block.projectId);
+  return (
+    (await scopeRecheckNeeded(db, ctx, block, project)) ||
+    (await applicabilityRecheckNeeded(db, ctx, block))
+  );
+}
+
 export async function saveBlockVersion(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -932,12 +1020,12 @@ export async function saveBlockVersion(
     throw new ValidationError('本文が空のため、版を作れません。');
   }
   if (current.version && current.version.contentHash === contentHashOf(body)) {
-    // 報告範囲の変更後の再確認だけは、本文が同じでも新しい版として再承認に回せる
-    // （本文を変えずに「範囲の変更を確認した」ことを承認の記録として残すため）
-    const project = await loadProject(db, ctx, block.projectId);
-    const scopeOnly =
-      action === 'revise_after_approval' && (await scopeRecheckNeeded(db, ctx, block, project));
-    if (!scopeOnly) throw new ValidationError('前の版から本文が変わっていません。');
+    // 上流の前提（報告範囲・適用判断・翻訳元）の変更後の再確認は、本文が同じでも新しい版として
+    // 再承認に回せる（本文を変えずに「変更を確認した」ことを承認の記録として残すため。
+    // これが無いと、確定を止める再確認は無意味な文言の変更でしか解消できない）
+    if (!(await recheckWithoutTextChangeAllowed(db, ctx, block, action, current.version))) {
+      throw new ValidationError('前の版から本文が変わっていません。');
+    }
   }
 
   const issues = await validateBodyRefs(db, ctx, block.id, body);
@@ -1365,6 +1453,8 @@ export interface BlockEditorData {
     workingUpdatedByOtherName: string | null;
     /** 報告範囲の変更より前に承認された（再確認・再承認が必要） */
     scopeRecheckNeeded: boolean;
+    /** 適用判断を確定し直す前に承認された（再確認・再承認が必要。本文を変えずに版を作れる） */
+    applicabilityRecheckNeeded: boolean;
   };
   framework: {
     versionId: Uuid;
@@ -1949,14 +2039,9 @@ export async function getBlockEditorData(
   const translationOf = block.translationOfBlockId
     ? siblingsRaw.find((b) => b.id === block.translationOfBlockId)
     : undefined;
-  // 翻訳元が後から修正されていれば「翻訳の要確認」（元の修正を翻訳へ黙って反映しない）
-  const translationSource = translationOf?.currentVersionId
-    ? await db.findById('disclosureBlockVersions', translationOf.currentVersionId)
-    : null;
-  const translationNeedsCheck = Boolean(
-    translationSource &&
-    (!editing.version || translationSource.createdAt >= editing.version.createdAt),
-  );
+  // 翻訳元が後から修正されていれば「翻訳の要確認」（元の修正を翻訳へ黙って反映しない）。
+  // 版の保存（本文が同じでも作り直せる条件）と同じ関数で判定する
+  const translationNeedsCheck = await translationRecheckNeeded(db, ctx, block, editing.version);
 
   const siblings: EditorSibling[] = [];
   for (const sibling of siblingsRaw) {
@@ -1998,12 +2083,15 @@ export async function getBlockEditorData(
       currentVersionId: block.currentVersionId,
       approvedVersionId: block.approvedVersionId,
       submittedVersionId: block.submittedVersionId,
-      workingSavedAt: block.workingBody ? block.workingSavedAt : null,
+      workingSavedAt: workingBodyInEffect(block) ? block.workingSavedAt : null,
       workingUpdatedByOtherName:
-        block.workingBody && block.workingUpdatedBy && block.workingUpdatedBy !== ctx.userId
+        workingBodyInEffect(block) &&
+        block.workingUpdatedBy &&
+        block.workingUpdatedBy !== ctx.userId
           ? nameOf(members, block.workingUpdatedBy)
           : null,
       scopeRecheckNeeded: await scopeRecheckNeeded(db, ctx, block, project),
+      applicabilityRecheckNeeded: await applicabilityRecheckNeeded(db, ctx, block),
     },
     framework: {
       versionId: block.frameworkVersionId,

@@ -6,7 +6,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, FileText, Loader2, Save } fro
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
-import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
+import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { cn } from '@/lib/utils';
 import type { ProjectFormState, ProjectFormValues } from '../actions';
 
@@ -53,6 +53,8 @@ export interface ProjectFormProps {
   languages: OptionItem[];
   statuses?: OptionItem[];
   fieldLabels: Record<string, string>;
+  /** 編集の土台にしたプロジェクトの更新時刻（競合の検出） */
+  baseUpdatedAt?: string;
 }
 
 const INITIAL_STATE: ProjectFormState = {
@@ -131,7 +133,11 @@ const selectClass =
   'mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px] focus-visible:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 aria-[invalid=true]:border-danger';
 
 /** 通信そのものが失敗したとき（接続断・502）。入力値を残してエラーとして返す */
-function networkFailureState(_previous: ProjectFormState, formData: FormData): ProjectFormState {
+function networkFailureState(
+  _previous: ProjectFormState,
+  formData: FormData,
+  message: string,
+): ProjectFormState {
   const values: Record<string, string | string[]> = {};
   for (const key of new Set(formData.keys())) {
     if (key.startsWith('$ACTION')) continue;
@@ -141,7 +147,7 @@ function networkFailureState(_previous: ProjectFormState, formData: FormData): P
         ? all
         : (all[0] ?? '');
   }
-  return { ...INITIAL_STATE, status: 'error', message: NETWORK_ERROR_MESSAGE, values };
+  return { ...INITIAL_STATE, status: 'error', message, values };
 }
 
 export function ProjectForm(props: ProjectFormProps) {
@@ -160,6 +166,22 @@ export function ProjectForm(props: ProjectFormProps) {
     many(values, 'purposes'),
   );
   const statusRef = React.useRef<HTMLParagraphElement>(null);
+  /** 段階の見出し（次へ・戻るで段階を移したら、その見出しへフォーカスを移す） */
+  const legendRefs = React.useRef<Partial<Record<1 | 2 | 3, HTMLLegendElement | null>>>({});
+  const movedByUser = React.useRef(false);
+  /**
+   * 段階を移す。押した「次へ」「戻る」は段階が変わると消えるため、フォーカスが body へ落ちていた
+   * （キーボード・読み上げの利用者が位置を失う。A37）。移した先の段階の見出しへフォーカスを移す
+   */
+  const goToStep = (next: 1 | 2 | 3) => {
+    movedByUser.current = true;
+    setStep(next);
+  };
+  React.useEffect(() => {
+    if (!isCreate || !movedByUser.current) return;
+    movedByUser.current = false;
+    legendRefs.current[step]?.focus();
+  }, [step, isCreate]);
 
   // サーバーの検証でエラーが返ったら、最初にエラーがある段階へ戻して読み上げる
   React.useEffect(() => {
@@ -181,6 +203,14 @@ export function ProjectForm(props: ProjectFormProps) {
   return (
     <form key={formKey} action={formAction} className="space-y-3" noValidate>
       {props.projectId && <input type="hidden" name="projectId" value={props.projectId} />}
+      {/* 画面が読み込んだ時点の更新時刻。別の人の保存を黙って上書きしない（競合を見た後は最新の時刻） */}
+      {!isCreate && (state.baseUpdatedAt ?? props.baseUpdatedAt) && (
+        <input
+          type="hidden"
+          name="baseUpdatedAt"
+          value={state.baseUpdatedAt ?? props.baseUpdatedAt}
+        />
+      )}
 
       {isCreate && (
         <ol className="flex flex-wrap items-center gap-2 text-[12px]" aria-label="作成の段階">
@@ -188,7 +218,7 @@ export function ProjectForm(props: ProjectFormProps) {
             <li key={s.no}>
               <button
                 type="button"
-                onClick={() => setStep(s.no)}
+                onClick={() => goToStep(s.no)}
                 aria-current={step === s.no ? 'step' : undefined}
                 className={cn(
                   'rounded-t4d border px-2 py-1',
@@ -210,17 +240,18 @@ export function ProjectForm(props: ProjectFormProps) {
       <p
         ref={statusRef}
         tabIndex={-1}
-        role={state.status === 'error' ? 'alert' : 'status'}
+        role={state.status === 'error' || state.status === 'conflict' ? 'alert' : 'status'}
         aria-live="polite"
         className={cn(
           'text-[12px]',
           state.message ? 'rounded-t4d border px-3 py-1.5' : 'sr-only',
-          state.status === 'error' && 'border-danger/40 bg-danger-soft text-ink',
+          (state.status === 'error' || state.status === 'conflict') &&
+            'border-danger/40 bg-danger-soft text-ink',
           state.status === 'needs_confirmation' && 'border-warning/40 bg-warning-soft text-ink',
           state.status === 'unchanged' && 'border-line bg-surface-muted text-ink',
         )}
       >
-        {state.status === 'error' && (
+        {(state.status === 'error' || state.status === 'conflict') && (
           <AlertTriangle className="mr-1 inline size-3.5 text-danger" aria-hidden="true" />
         )}
         {state.message ?? ''}
@@ -228,7 +259,15 @@ export function ProjectForm(props: ProjectFormProps) {
 
       {/* 段階 1: 報告主体と期間 */}
       <fieldset hidden={stepHidden(1)} className="space-y-2">
-        <legend className="text-[13px] font-semibold text-ink">1. 報告主体と期間</legend>
+        <legend
+          ref={(el) => {
+            legendRefs.current[1] = el;
+          }}
+          tabIndex={-1}
+          className="text-[13px] font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+        >
+          1. 報告主体と期間
+        </legend>
         <div className="grid gap-2 md:grid-cols-2">
           <div>
             <Label htmlFor="pf-name" required>
@@ -388,7 +427,15 @@ export function ProjectForm(props: ProjectFormProps) {
       {/* 段階 2: 対応する制度と基準（新規作成のみ。版は作成時に固定し、以後は設定タブで新しい版を追加する） */}
       {isCreate && (
         <fieldset hidden={stepHidden(2)} className="space-y-2">
-          <legend className="text-[13px] font-semibold text-ink">2. 対応する制度と基準</legend>
+          <legend
+            ref={(el) => {
+              legendRefs.current[2] = el;
+            }}
+            tabIndex={-1}
+            className="text-[13px] font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+          >
+            2. 対応する制度と基準
+          </legend>
           <p className="text-[12px] text-ink-muted">
             複数選べます。基準ごとに使う版を固定し、適用条件と判断は基準ごとに持ちます。
             ここでは「保存して準備を始める」までで、適用判断の確定は作成後の「設定」タブで行います。
@@ -484,7 +531,13 @@ export function ProjectForm(props: ProjectFormProps) {
 
       {/* 段階 3: 報告範囲と承認 */}
       <fieldset hidden={stepHidden(3)} className="space-y-2">
-        <legend className="text-[13px] font-semibold text-ink">
+        <legend
+          ref={(el) => {
+            legendRefs.current[3] = el;
+          }}
+          tabIndex={-1}
+          className="text-[13px] font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+        >
           {isCreate ? '3. 報告範囲と承認' : '報告範囲と承認'}
         </legend>
         <div className="grid gap-2 md:grid-cols-2">
@@ -592,6 +645,60 @@ export function ProjectForm(props: ProjectFormProps) {
         </div>
       </fieldset>
 
+      {state.status === 'conflict' && state.conflictFields && (
+        <section
+          aria-labelledby="conflict-title"
+          className="space-y-2 rounded-t4d border border-danger/40 bg-danger-soft/40 p-3"
+          data-testid="project-conflict"
+        >
+          <h3
+            id="conflict-title"
+            className="flex items-center gap-1.5 text-[13px] font-semibold text-ink"
+          >
+            <AlertTriangle className="size-4 text-danger" aria-hidden="true" />
+            競合: 保存すると最新の値を上書きする項目
+          </h3>
+          <div className="t4d-scroll-x">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-left text-ink-muted">
+                  <th scope="col" className="py-1 pr-2 font-medium">
+                    項目
+                  </th>
+                  <th scope="col" className="py-1 pr-2 font-medium">
+                    最新の値（保存済み）
+                  </th>
+                  <th scope="col" className="py-1 font-medium">
+                    あなたの入力
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.conflictFields.map((f) => (
+                  <tr key={f.key} className="border-t border-line align-top">
+                    <th scope="row" className="py-1 pr-2 text-left font-medium text-ink">
+                      {f.label}
+                    </th>
+                    <td className="py-1 pr-2 text-ink">{f.current}</td>
+                    <td className="py-1 text-ink">{f.yours}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {props.projectId && (
+            <p className="text-[12px]">
+              <a
+                href={`/enterprise/disclosure-projects/${props.projectId}?tab=settings`}
+                className="text-brand-800 underline"
+              >
+                最新の値を読み込む（この画面の入力は破棄されます）
+              </a>
+            </p>
+          )}
+        </section>
+      )}
+
       {state.status === 'needs_confirmation' && state.impact && (
         <section
           aria-labelledby="impact-title"
@@ -666,7 +773,7 @@ export function ProjectForm(props: ProjectFormProps) {
         {isCreate && step > 1 && (
           <Button
             variant="outline"
-            onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2) : s))}
+            onClick={() => goToStep(step > 1 ? ((step - 1) as 1 | 2) : step)}
           >
             <ChevronLeft aria-hidden="true" />
             戻る
@@ -675,7 +782,7 @@ export function ProjectForm(props: ProjectFormProps) {
         {isCreate && step < 3 && (
           <Button
             variant="secondary"
-            onClick={() => setStep((s) => (s < 3 ? ((s + 1) as 2 | 3) : s))}
+            onClick={() => goToStep(step < 3 ? ((step + 1) as 2 | 3) : step)}
           >
             次へ
             <ChevronRight aria-hidden="true" />
@@ -704,7 +811,11 @@ export function ProjectForm(props: ProjectFormProps) {
               ) : (
                 <Save aria-hidden="true" />
               )}
-              {isCreate ? '保存して準備を始める' : '変更を保存'}
+              {isCreate
+                ? '保存して準備を始める'
+                : state.status === 'conflict'
+                  ? 'このまま上書き保存'
+                  : '変更を保存'}
             </Button>
           ))}
         {pending && (

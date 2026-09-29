@@ -24,7 +24,10 @@ import {
 } from '@/lib/domain/disclosure-status';
 import { assessNarrativeFields, notQuantifiedNote } from '@/lib/domain/narrative-template';
 import { ValidationError } from '@/lib/errors/user-facing';
-import { SCOPE_RECHECK_MESSAGE } from '@/lib/services/disclosure-block';
+import {
+  APPLICABILITY_RECHECK_MESSAGE,
+  SCOPE_RECHECK_MESSAGE,
+} from '@/lib/services/disclosure-block';
 import type { DbClient, Row, TableName, Where } from '@/lib/repositories/types';
 import { isUuid } from '@/lib/validation/uuid';
 import type {
@@ -94,6 +97,11 @@ export interface SnapshotFramework extends ReportSnapshotFramework {
   reportingEntity: string;
   periodStart: IsoDate;
   periodEnd: IsoDate;
+  /**
+   * 固定時点の報告範囲の改訂番号（disclosure_projects.scope_revision）。後から範囲を変えたことを
+   * 「上流の変更」として示すために持つ。この項目より前に作ったスナップショットでは null
+   */
+  scopeRevision: number | null;
 }
 
 export interface SnapshotRequirement {
@@ -150,6 +158,12 @@ export interface SnapshotBlock extends ReportSnapshotBlock {
   issues: SnapshotIssue[];
   /** 未解決の社内コメント（社内確認用の出力だけに出す） */
   internalComments: SnapshotComment[];
+  /**
+   * 固定時点で非公開だった資料のうち、この節の本文（地の文・定性情報の引用文）に名前が現れるもの。
+   * 対外用の出力で伏せる名前を固定し、後から資料を登録・区分変更しても再出力の本文を変えない（§10.3）。
+   * この項目より前に作ったスナップショットでは null（出力時の資料一覧から集める）
+   */
+  maskedFileNames: string[] | null;
 }
 
 export interface SnapshotMetricValue extends ReportSnapshotMetricValue {
@@ -274,6 +288,7 @@ export function asSnapshotDetail(row: ReportSnapshot): ReportSnapshotDetail {
       reportingEntity: str(f.reportingEntity),
       periodStart: str(f.periodStart),
       periodEnd: str(f.periodEnd),
+      scopeRevision: num(f.scopeRevision),
     }),
   );
   const blocks = arr<Partial<SnapshotBlock>>(row.blocks).map((b): SnapshotBlock => ({
@@ -297,6 +312,9 @@ export function asSnapshotDetail(row: ReportSnapshot): ReportSnapshotDetail {
     requirements: arr<SnapshotRequirement>(b.requirements),
     issues: arr<SnapshotIssue>(b.issues),
     internalComments: arr<SnapshotComment>(b.internalComments),
+    maskedFileNames: Array.isArray(b.maskedFileNames)
+      ? b.maskedFileNames.filter((n): n is string => typeof n === 'string')
+      : null,
   }));
   const metricValues = arr<Partial<SnapshotMetricValue>>(row.metricValues).map(
     (m): SnapshotMetricValue => ({
@@ -494,6 +512,14 @@ async function assemble(
   );
   const versionById = new Map(versionRows.map((v) => [v.id, v]));
   const frameworkById = new Map<Uuid, DisclosureFramework>(frameworkRows.map((f) => [f.id, f]));
+  // 基準の現在の適用判断（依頼の後に判断が変わったかを、最終承認と同じ規則で見るため）
+  const currentDecisions = await selectByIds(
+    db,
+    'projectFrameworkDecisions',
+    projectFrameworks.flatMap((pf) => (pf.currentDecisionId ? [pf.currentDecisionId] : [])),
+    { organizationId },
+  );
+  const decisionById = new Map(currentDecisions.map((d) => [d.id, d]));
 
   // --- 節 ---------------------------------------------------------------------
   const allBlocks = await db.select('disclosureBlocks', {
@@ -610,7 +636,7 @@ async function assemble(
       { organizationId },
     ),
   ]);
-  const [files, currentDpVersions] = await Promise.all([
+  const [files, currentDpVersions, organizationFiles] = await Promise.all([
     selectByIds(
       db,
       'files',
@@ -624,7 +650,18 @@ async function assemble(
       dataPoints.flatMap((d) => (d.currentVersionId ? [d.currentVersionId] : [])),
       { organizationId },
     ),
+    // 対外用の出力で伏せる資料名を固定するため、固定時点の非公開資料の名前を集める
+    db.select('files', { where: { organizationId } }),
   ]);
+  const nonPublicNames = [
+    ...new Set(
+      organizationFiles
+        .filter((f) => f.confidentiality !== 'public')
+        .map((f) => f.originalName.trim())
+        // 短すぎる名前で本文の普通の語を伏せない（出力の externalMaskedNames と同じ下限）
+        .filter((n) => n.length >= 3),
+    ),
+  ].sort();
   const [metrics, units, periods] = await Promise.all([
     selectByIds(
       db,
@@ -791,6 +828,7 @@ async function assemble(
       reportingEntity: project.reportingEntity,
       periodStart: project.periodStart,
       periodEnd: project.periodEnd,
+      scopeRevision: project.scopeRevision ?? 0,
     });
 
     // 法定・任意適用の基準は、適用判断が確定していなければ確定させない。
@@ -860,13 +898,15 @@ async function assemble(
       if (
         pf &&
         approvedIn.length > 0 &&
-        approvedIn.every((r) => applicabilityDecisionChangedSince(r, pf.currentDecisionId))
+        approvedIn.every((r) =>
+          applicabilityDecisionChangedSince(
+            r,
+            pf.currentDecisionId,
+            pf.currentDecisionId ? (decisionById.get(pf.currentDecisionId) ?? null) : null,
+          ),
+        )
       ) {
-        issues.push({
-          code: 'applicability_changed',
-          message:
-            '最終承認の後に適用判断が更新されました。更新後の判断で本文を確認し、再承認を受けてください。',
-        });
+        issues.push({ code: 'applicability_changed', message: APPLICABILITY_RECHECK_MESSAGE });
       }
     }
     // 確定で承認済みの版が無い節は「未承認」だけを示す（本文の有無は承認済みの版の話ではない）
@@ -1047,6 +1087,7 @@ async function assemble(
           body: c.body,
           createdAt: c.createdAt,
         })),
+      maskedFileNames: namesMentionedIn(body, nonPublicNames),
     });
   }
 
@@ -1080,7 +1121,7 @@ async function assemble(
     if (entry.versionCreatedAt < sourceEntry.versionCreatedAt) {
       entry.issues.push({
         code: 'translation_stale',
-        message: `翻訳元「${sourceEntry.title}」の版 ${sourceEntry.versionNo ?? '—'} より前の版を訳したままです。翻訳を見直して再承認してください。`,
+        message: `翻訳元「${sourceEntry.title}」の版 ${sourceEntry.versionNo ?? '—'} より前の版を訳したままです。翻訳を見直し、版として保存して再承認してください（直す必要が無ければ本文を変えずに版を作れます）。`,
       });
     }
   }
@@ -1126,6 +1167,19 @@ async function assemble(
     draftStandardPrep: frameworks.some((f) => f.draftStandardPrep),
     versionWriters,
   };
+}
+
+/** 本文（地の文・定性情報の引用文）に現れる名前。出典印（cite）は出力側で別に伏せる */
+function namesMentionedIn(body: BlockBody, names: readonly string[]): string[] {
+  if (names.length === 0) return [];
+  const text = body.paragraphs
+    .flatMap((p) =>
+      p.children.map((inline) =>
+        inline.t === 'text' ? inline.text : inline.t === 'narrative' ? inline.quote : '',
+      ),
+    )
+    .join('\n');
+  return names.filter((name) => text.includes(name));
 }
 
 function dedupeIssues(issues: SnapshotIssue[]): SnapshotIssue[] {
@@ -1328,7 +1382,7 @@ export async function confirmReport(
 // ======================================================================
 
 export interface UpstreamChange {
-  kind: 'metric' | 'narrative' | 'block' | 'decision';
+  kind: 'metric' | 'narrative' | 'block' | 'decision' | 'scope';
   label: string;
   detail: string;
 }
@@ -1343,7 +1397,7 @@ export async function detectUpstreamChanges(
   snapshot: ReportSnapshotDetail,
 ): Promise<UpstreamChange[]> {
   const organizationId = ctx.workspace.organizationId;
-  const [dataPoints, narrativeVersions, blocks, projectFrameworks] = await Promise.all([
+  const [dataPoints, narrativeVersions, blocks, projectFrameworks, project] = await Promise.all([
     selectByIds(
       db,
       'dataPoints',
@@ -1358,6 +1412,7 @@ export async function detectUpstreamChanges(
       { organizationId },
     ),
     db.select('projectFrameworks', { where: { organizationId, projectId: snapshot.projectId } }),
+    db.findById('disclosureProjects', snapshot.projectId),
   ]);
   const narrativeRecords = await selectByIds(
     db,
@@ -1375,6 +1430,27 @@ export async function detectUpstreamChanges(
   const dpVersionById = new Map(currentDpVersions.map((v) => [v.id, v]));
 
   const changes: UpstreamChange[] = [];
+  // 報告範囲（報告主体・期間・対象範囲）: 固定した改訂番号より後に範囲を変えた。
+  // 改訂番号を持たない古いスナップショットは、表紙に固定した報告主体・期間と比べる
+  if (project && project.organizationId === organizationId) {
+    const fixed = snapshot.frameworkVersions[0];
+    const revisionChanged = snapshot.frameworkVersions.some(
+      (f) => f.scopeRevision !== null && f.scopeRevision < (project.scopeRevision ?? 0),
+    );
+    const fieldsChanged =
+      fixed !== undefined &&
+      fixed.scopeRevision === null &&
+      (fixed.reportingEntity !== project.reportingEntity ||
+        fixed.periodStart !== project.periodStart ||
+        fixed.periodEnd !== project.periodEnd);
+    if (revisionChanged || fieldsChanged) {
+      changes.push({
+        kind: 'scope',
+        label: '報告範囲',
+        detail: '固定した後に報告範囲（報告主体・期間・対象範囲）が変更されています',
+      });
+    }
+  }
   for (const mv of snapshot.metricValues) {
     const dp = dpById.get(mv.dataPointId);
     if (!dp || dp.currentVersionId === null || dp.currentVersionId === mv.dataPointVersionId) {
@@ -1477,12 +1553,16 @@ export interface OrganizationSnapshotOption {
   createdAt: IsoDateTime;
 }
 
-/** 組織のスナップショットの選択肢（ESG 経営の照合モード用） */
+/**
+ * 組織のスナップショットの選択肢（ESG 経営の照合モード用）。プロジェクト名・スナップショットの
+ * 一覧は開示の情報なので、プロジェクトの出力タブ（listProjectSnapshots）と同じく開示の閲覧権限を求める
+ */
 export async function listOrganizationSnapshots(
   db: DbClient,
   ctx: AuthorizationContext,
 ): Promise<OrganizationSnapshotOption[]> {
   assertEnterpriseWorkspace(ctx);
+  assertCan(ctx, 'enterprise.disclosure.read');
   const organizationId = ctx.workspace.organizationId;
   const [rows, projects] = await Promise.all([
     db.select('reportSnapshots', {
@@ -1503,6 +1583,16 @@ export async function listOrganizationSnapshots(
     label: row.label,
     createdAt: row.createdAt,
   }));
+}
+
+/**
+ * スナップショットに固定した「対外用で伏せる資料名」。固定する前に作ったスナップショットでは null
+ * （出力時の資料一覧から集めるしかない）
+ */
+export function frozenMaskedFileNames(snapshot: ReportSnapshotDetail): string[] | null {
+  if (snapshot.blocks.length === 0) return [];
+  if (snapshot.blocks.some((b) => b.maskedFileNames === null)) return null;
+  return [...new Set(snapshot.blocks.flatMap((b) => b.maskedFileNames ?? []))];
 }
 
 /** 表示用: 基準の収録状況の注記（要求事項が未収録の草案など） */

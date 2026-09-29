@@ -1,5 +1,12 @@
 import { notFound } from 'next/navigation';
-import { AlertTriangle, CheckCircle2, CircleDot, CornerDownRight, History } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleDot,
+  CornerDownRight,
+  History,
+  Tag,
+} from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
@@ -86,7 +93,10 @@ export default async function NarrativeDetailPage({
         ]}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <Badge tone="neutral">{NARRATIVE_THEME_LABELS[record.theme]}</Badge>
+            <Badge tone="neutral">
+              <Tag className="size-3" aria-hidden="true" />
+              {NARRATIVE_THEME_LABELS[record.theme]}
+            </Badge>
             <NarrativeStatusBadge status={record.status} />
             {data.isCandidate && <CandidateBadge />}
             <span>

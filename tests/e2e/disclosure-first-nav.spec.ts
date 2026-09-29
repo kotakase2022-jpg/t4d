@@ -58,21 +58,58 @@ async function tabUntil(
   throw new Error(`Tab を ${max} 回押しても目的の要素にフォーカスが届かない`);
 }
 
-/** いまフォーカスのある要素が、キーボード操作のフォーカスとして目に見える */
+/**
+ * いまフォーカスのある要素が、キーボード操作のフォーカスとして目に見える。
+ * 枠があるだけでなく、枠の色が白い背景に対して 3:1 以上のコントラストを持つこと
+ * （WCAG 1.4.11。以前は ring-brand-100（約 1.1:1）の枠でも「見える」と判定していた）。
+ * transition-colors のボタンは枠の色が 150ms かけて変わるため、落ち着くまで待って測る
+ */
 async function expectVisibleFocus(page: Page): Promise<void> {
-  const state = await page.evaluate(() => {
-    const el = document.activeElement as HTMLElement;
-    const style = getComputedStyle(el);
-    const rect = el.getBoundingClientRect();
-    return {
-      focusVisible: el.matches(':focus-visible'),
-      outline: style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0,
-      ring: style.boxShadow !== 'none',
-      onScreen: rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight,
-    };
-  });
+  const measure = () =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const style = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      const luminance = (rgb: number[]) => {
+        const [r, g, b] = rgb.map((v) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+      };
+      /** 白い背景に対するコントラスト比（色を読めなければ 0） */
+      const contrastOnWhite = (color: string) => {
+        const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(color);
+        if (!m) return 0;
+        if (m[4] !== undefined && Number(m[4]) === 0) return 0;
+        return 1.05 / (luminance([Number(m[1]), Number(m[2]), Number(m[3])]) + 0.05);
+      };
+      const outlineVisible = style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0;
+      const shadowColors =
+        style.boxShadow === 'none' ? [] : (style.boxShadow.match(/rgba?\([^)]*\)/g) ?? []);
+      return {
+        focusVisible: el.matches(':focus-visible'),
+        outline: outlineVisible && contrastOnWhite(style.outlineColor) >= 3,
+        ring: shadowColors.some((c) => contrastOnWhite(c) >= 3),
+        onScreen: rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight,
+      };
+    });
+  await expect
+    .poll(
+      async () => {
+        const s = await measure();
+        return s.outline || s.ring;
+      },
+      { timeout: 2_000 },
+    )
+    .toBe(true)
+    .catch(() => undefined);
+  const state = await measure();
   expect(state.focusVisible, 'キーボードのフォーカスとして扱われていない').toBe(true);
-  expect(state.outline || state.ring, 'フォーカスの枠（outline / ring）が消えている').toBe(true);
+  expect(
+    state.outline || state.ring,
+    'フォーカスの枠（outline / ring）が消えているか、背景とのコントラストが 3:1 未満',
+  ).toBe(true);
   expect(state.onScreen, 'フォーカスのある要素が画面外にある').toBe(true);
 }
 
@@ -141,6 +178,16 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
     await expect(page.locator('#t4d-main')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   }
+
+  // 従来の Evidence 画面は拡張前の入力項目・列のまま（開示優先の入力・列・入口を出さない。REG-F7）
+  await page.goto('/enterprise/evidence');
+  await expect(page.getByRole('heading', { level: 1, name: 'Evidence' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '定性情報の資料として登録する' })).toHaveCount(0);
+  for (const name of ['usagePurpose', 'editionLabel', 'issuedOn', 'confidentiality']) {
+    await expect(page.locator(`[name="${name}"]`), name).toHaveCount(0);
+  }
+  await expect(page.getByRole('columnheader', { name: 'スキャン' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '利用目的' })).toHaveCount(0);
 });
 
 test('A37: キーボードだけで 一覧 → プロジェクト → 原稿 → 根拠 → レビュー依頼 まで辿れ、フォーカスが見える', async ({
@@ -172,7 +219,7 @@ test('A37: キーボードだけで 一覧 → プロジェクト → 原稿 →
   await expectVisibleFocus(page);
   await page.keyboard.press('Enter');
   await page.waitForURL(new RegExp(`${RISK_PATH}$`));
-  await expect(page.getByRole('main', { name: '本文' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '本文' })).toBeVisible();
 
   // 根拠パネル: Tab で選択中のタブ（根拠資料）に入り、矢印キーで関連数値へ切り替える
   await tabUntil(page, (el) => el.role === 'tab' && el.text === '根拠資料');
@@ -209,6 +256,14 @@ test('A37: 開示プロジェクトの一覧・原稿一覧・原稿編集に重
       (v) => v.impact === 'critical' || v.impact === 'serious',
     );
     expect(serious, `${path}\n${serious.map((v) => `${v.id}: ${v.help}`).join('\n')}`).toEqual([]);
+    // 主要な領域（main）は 1 つだけで入れ子にしない（best-practice のため上のタグには含まれない。UX-08）
+    const landmarks = await new AxeBuilder({ page })
+      .withRules(['landmark-no-duplicate-main', 'landmark-main-is-top-level', 'landmark-one-main'])
+      .analyze();
+    expect(
+      landmarks.violations.map((v) => `${v.id}: ${v.help}`),
+      path,
+    ).toEqual([]);
   }
 });
 
@@ -219,7 +274,7 @@ test('A38: 1366×768 で本文・主 CTA・状態が読め、1366px でも狭い
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto(RISK_PATH);
 
-  const body = page.getByRole('main', { name: '本文' });
+  const body = page.getByRole('region', { name: '本文' });
   const pane = page.getByRole('complementary', { name: '根拠パネル' });
   await expect(body).toBeVisible();
   await expect(body.locator('textarea').first()).toBeInViewport();

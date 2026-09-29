@@ -1868,6 +1868,10 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
           },
         ),
       );
+      // 最終承認はレビュー完了の状態の依頼にだけ記録できる（0042）。アプリと同じ順で状態を進める
+      await h.asSuperuser(`update review_requests set status = 'reviewed' where id = $1`, [
+        id('request.byApprover'),
+      ]);
       // 検見川は依頼者でも版の作成者でもないのでトリガは通るが、approve 権限が無い
       await expect(
         h.asUser(
@@ -1891,6 +1895,10 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
         ),
       );
       expect(completed).toHaveLength(1);
+      // アプリと同じく、記録の後に依頼を「レビュー完了」へ進める（0042 は状態に合う判断だけを受け付ける）
+      await h.asUser(APPROVER, `update review_requests set status = 'reviewed' where id = $1`, [
+        id('request.sameActor'),
+      ]);
       await expect(
         h.asUser(
           APPROVER,
@@ -1921,6 +1929,9 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
         }),
       );
       expect(reviewed).toHaveLength(1);
+      await h.asUser(REVIEWER, `update review_requests set status = 'reviewed' where id = $1`, [
+        id('request.main'),
+      ]);
       const approved = await h.asUser(
         APPROVER,
         EVENT_SQL,
@@ -1932,9 +1943,19 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
     });
 
     it('同じ判断を 2 回記録できない（冪等キー）', async () => {
+      // 利用者の 2 回目は、依頼が既にレビュー完了のため状態の検査（0042）で先に止まる
       await expect(
         h.asUser(
           REVIEWER,
+          EVENT_SQL,
+          eventParams('request.main', 'review_completed', 'review', REVIEWER, 'version.main', {
+            key: `${id('request.main')}:review:${id('version.main')}`,
+          }),
+        ),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+      // 状態の検査を受けない Service Role でも、冪等キーの一意制約で 2 回目は入らない
+      await expect(
+        h.asSuperuser(
           EVENT_SQL,
           eventParams('request.main', 'review_completed', 'review', REVIEWER, 'version.main', {
             key: `${id('request.main')}:review:${id('version.main')}`,
@@ -1991,19 +2012,38 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
     });
 
     it('承認権限だけを持つ人は依頼を「承認済み」にでき、終わった依頼は再開できない', async () => {
-      // レビュー完了の段階を飛ばして「承認済み」にはできない（0041）
+      // レビュー完了の段階を飛ばして「承認済み」にはできない（0041）。レビュー待ちの依頼で確かめる
+      const block = await one(
+        `insert into disclosure_blocks
+           (organization_id, project_id, framework_version_id, section_key, title)
+         values ($1, $2, $3, 'governance-open', 'ガバナンス（open）') returning id`,
+        [ORG_A, id('project'), id('framework')],
+      );
+      const version = await one(
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, content_hash, created_by)
+         values ($1, $2, 1, $3::jsonb, 'hash-open-v1', $4) returning id`,
+        [ORG_A, block, BODY, AUTHOR],
+      );
+      const openRequest = await one(
+        `insert into review_requests
+           (organization_id, project_id, target_id, target_version_id, requested_by,
+            policy_version, policy)
+         values ($1, $2, $3, $4, $5, 'sod-3role-v1', '{"version": "sod-3role-v1"}'::jsonb)
+         returning id`,
+        [ORG_A, id('project'), block, version, AUTHOR],
+      );
       await expect(
         h.asUser(APPROVE_ONLY, `update review_requests set status = 'approved' where id = $1`, [
-          id('request.main'),
+          openRequest,
         ]),
       ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
-      // 第 1 段の完了記録（検見川）と最終承認の記録（承）があるので、記録どおりに状態を進められる
-      const reviewed = await h.asUser(
-        REVIEWER,
-        `update review_requests set status = 'reviewed' where id = $1 returning id`,
+      // 第 1 段の完了記録（検見川）でレビュー完了になり、最終承認の記録（承）があるので承認済みへ進められる
+      const [main] = await h.asSuperuser<{ status: string }>(
+        'select status from review_requests where id = $1',
         [id('request.main')],
       );
-      expect(reviewed).toHaveLength(1);
+      expect(main?.status).toBe('reviewed');
       const rows = await h.asUser(
         APPROVE_ONLY,
         `update review_requests set status = 'approved' where id = $1 returning id`,
@@ -2452,6 +2492,431 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
       // 指定の最終承認者は、DB と一致する内容で作れる
       const rows = await insertApproved(APPROVER, 92);
       expect(rows).toHaveLength(1);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 0042: 指名・依頼の状態・書いた人の引き継ぎ・範囲の改訂番号・再確認の前提
+  // （自己監査 第 2 回 INV-1 / INV-2 / INV-3 / F1・F2（セキュリティ））
+  // ------------------------------------------------------------------
+
+  describe('0042: 指名・依頼の状態・書いた人の引き継ぎ・範囲の改訂番号', () => {
+    /** 節・版（作成者 author）・依頼（指名つき）を作る。依頼は Service Role で「レビュー待ち」として作る */
+    async function blockWithRequest(
+      key: string,
+      options: { author?: string; project?: string } = {},
+    ): Promise<{ block: string; version: string; request: string }> {
+      const project = options.project ?? id('project');
+      const block = await one(
+        `insert into disclosure_blocks
+           (organization_id, project_id, framework_version_id, section_key, title)
+         values ($1, $2, $3, $4, $5) returning id`,
+        [ORG_A, project, id('framework'), `governance-${key}`, `ガバナンス（${key}）`],
+      );
+      const version = await one(
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, content_hash, created_by)
+         values ($1, $2, 1, $3::jsonb, $4, $5) returning id`,
+        [ORG_A, block, BODY, `hash-${key}-v1`, options.author ?? AUTHOR],
+      );
+      await h.asSuperuser(
+        `update disclosure_blocks
+            set current_version_id = $1, submitted_version_id = $1, status = 'review_requested'
+          where id = $2`,
+        [version, block],
+      );
+      const request = await one(
+        `insert into review_requests
+           (organization_id, project_id, target_id, target_version_id, requested_by,
+            reviewer_user_id, approver_user_id, policy_version, policy)
+         values ($1, $2, $3, $4, $5, $6, $7, 'sod-3role-v1', '{"version": "sod-3role-v1"}'::jsonb)
+         returning id`,
+        [ORG_A, project, block, version, AUTHOR, REVIEWER, APPROVER],
+      );
+      ids[`block.${key}`] = block;
+      ids[`version.${key}`] = version;
+      ids[`request.${key}`] = request;
+      return { block, version, request };
+    }
+
+    async function requestStatus(request: string): Promise<string | undefined> {
+      const [row] = await h.asSuperuser<{ status: string }>(
+        'select status from review_requests where id = $1',
+        [request],
+      );
+      return row?.status;
+    }
+
+    it('指名されていない人はレビュー完了・最終承認・差戻しを記録できない（F1・INV-3）', async () => {
+      const { request } = await blockWithRequest('designated');
+      // 管理者（書込権限あり・依頼者でも作成者でもない）は、指名されたレビュー担当ではない
+      await expect(
+        h.asUser(
+          ADMIN,
+          EVENT_SQL,
+          eventParams(
+            'request.designated',
+            'review_completed',
+            'review',
+            ADMIN,
+            'version.designated',
+          ),
+        ),
+      ).rejects.toThrow(/T4D_NOT_DESIGNATED/);
+      await expect(
+        h.asUser(
+          ADMIN,
+          EVENT_SQL,
+          eventParams('request.designated', 'returned', 'review', ADMIN, 'version.designated', {
+            reason: '指名外の差戻し',
+            paragraphId: 'p1',
+          }),
+        ),
+      ).rejects.toThrow(/T4D_NOT_DESIGNATED/);
+      // 指名されたレビュー担当（検見川）は記録でき、依頼をレビュー完了へ進められる
+      await h.asUser(
+        REVIEWER,
+        EVENT_SQL,
+        eventParams(
+          'request.designated',
+          'review_completed',
+          'review',
+          REVIEWER,
+          'version.designated',
+        ),
+      );
+      await h.asUser(REVIEWER, `update review_requests set status = 'reviewed' where id = $1`, [
+        request,
+      ]);
+      // 承認権限だけを持つ人（依頼者・作成者・レビュー完了者のどれでもない）は、指名された最終承認者ではない
+      await expect(
+        h.asUser(
+          APPROVE_ONLY,
+          EVENT_SQL,
+          eventParams(
+            'request.designated',
+            'approved',
+            'final',
+            APPROVE_ONLY,
+            'version.designated',
+          ),
+        ),
+      ).rejects.toThrow(/T4D_NOT_DESIGNATED/);
+      // Service Role でも指名は外れない
+      await expect(
+        h.asSuperuser(
+          EVENT_SQL,
+          eventParams(
+            'request.designated',
+            'approved',
+            'final',
+            APPROVE_ONLY,
+            'version.designated',
+          ),
+        ),
+      ).rejects.toThrow(/T4D_NOT_DESIGNATED/);
+      // 記録が入らないので、依頼も承認済みにできない
+      await expect(
+        h.asUser(APPROVE_ONLY, `update review_requests set status = 'approved' where id = $1`, [
+          request,
+        ]),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+      expect(await requestStatus(request)).toBe('reviewed');
+    });
+
+    it('差し戻して終わった依頼には承認を足せず、節も確定版も承認済みにできない（INV-3）', async () => {
+      const { block, version, request } = await blockWithRequest('returned');
+      await h.asUser(
+        REVIEWER,
+        EVENT_SQL,
+        eventParams('request.returned', 'review_completed', 'review', REVIEWER, 'version.returned'),
+      );
+      await h.asUser(REVIEWER, `update review_requests set status = 'reviewed' where id = $1`, [
+        request,
+      ]);
+      // 最終承認者が差し戻す（依頼は終わる）
+      await h.asUser(
+        APPROVER,
+        EVENT_SQL,
+        eventParams('request.returned', 'returned', 'final', APPROVER, 'version.returned', {
+          reason: '根拠の版を確認してください',
+          paragraphId: 'p1',
+          key: `${request}:final:${version}`,
+        }),
+      );
+      await h.asUser(APPROVER, `update review_requests set status = 'returned' where id = $1`, [
+        request,
+      ]);
+      // 指名された最終承認者でも、終わった依頼には承認を記録できない（冪等キーを変えても）
+      await expect(
+        h.asUser(
+          APPROVER,
+          EVENT_SQL,
+          eventParams('request.returned', 'approved', 'final', APPROVER, 'version.returned', {
+            key: 'another-key',
+          }),
+        ),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+      // レビュー待ちでない依頼にレビュー完了を足すこともできない
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams(
+            'request.returned',
+            'review_completed',
+            'review',
+            REVIEWER,
+            'version.returned',
+            { key: 'another-review-key' },
+          ),
+        ),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+
+      // Service Role が承認の記録を足してしまっても、依頼が承認で終わっていない版は承認済みにできない
+      await h.asSuperuser(
+        EVENT_SQL,
+        eventParams('request.returned', 'approved', 'final', APPROVER, 'version.returned', {
+          key: 'service-role-key',
+        }),
+      );
+      await expect(
+        h.asUser(
+          APPROVER,
+          `update disclosure_blocks set status = 'approved', approved_version_id = $2 where id = $1`,
+          [block, version],
+        ),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+      // 節の状態を Service Role で書き換えても、確定版には含められない
+      await h.asSuperuser(
+        `update disclosure_blocks set status = 'approved', approved_version_id = $2 where id = $1`,
+        [block, version],
+      );
+      await expect(
+        h.asUser(
+          APPROVER,
+          `insert into report_snapshots
+             (organization_id, project_id, snapshot_kind, snapshot_no, blocks, content_hash, created_by)
+           select $1, $2, 'approved', 95, jsonb_build_array(jsonb_build_object(
+                    'blockId', b.id, 'versionId', v.id, 'body', v.body,
+                    'contentHash', v.content_hash, 'versionCreatedBy', v.created_by,
+                    'isApprovedVersion', true)), 'x', $4
+             from disclosure_blocks b join disclosure_block_versions v on v.id = b.approved_version_id
+            where b.id = $3`,
+          [ORG_A, id('project'), block, APPROVER],
+        ),
+      ).rejects.toThrow(/最終承認で終わった依頼/);
+    });
+
+    it('依頼の取下げは依頼者か節の担当者だけが記録できる', async () => {
+      const { request } = await blockWithRequest('withdraw');
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams('request.withdraw', 'withdrawn', 'request', REVIEWER, 'version.withdraw'),
+        ),
+      ).rejects.toThrow(/T4D_SOD/);
+      const rows = await h.asUser(
+        AUTHOR,
+        EVENT_SQL,
+        eventParams('request.withdraw', 'withdrawn', 'request', AUTHOR, 'version.withdraw'),
+      );
+      expect(rows).toHaveLength(1);
+      expect(await requestStatus(request)).toBe('open');
+    });
+
+    it('版を追記すると、節の現在の版を書いた人を引き継ぐ（土台を名乗らなくても。INV-2）', async () => {
+      const { block } = await blockWithRequest('inherit', { author: APPROVER });
+      // 海野が土台（base_version_id）を渡さずに次の版を作る。承が書いた版を土台にしたことは DB が補う
+      const [next] = await h.asUser<{ contributor_user_ids: string[] }>(
+        AUTHOR,
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, content_hash, created_by)
+         values ($1, $2, 2, $3::jsonb, 'hash-inherit-v2', $4) returning contributor_user_ids`,
+        [ORG_A, block, BODY, AUTHOR],
+      );
+      expect(next?.contributor_user_ids).toEqual([APPROVER]);
+    });
+
+    it('報告範囲の改訂番号は範囲を変えたときだけ 1 増え、直接は書き換えられない（F2）', async () => {
+      const scopeProject = await one(
+        `insert into disclosure_projects
+           (organization_id, reporting_period_id, name, period_start, period_end, purposes)
+         values ($1, $2, 'RLS 範囲テスト', '2026-04-01', '2027-03-31', '{ssbj_statutory}')
+         returning id`,
+        [ORG_A, PERIOD_IDS.fy2026],
+      );
+      const revision = async () => {
+        const [row] = await h.asSuperuser<{ scope_revision: number }>(
+          'select scope_revision from disclosure_projects where id = $1',
+          [scopeProject],
+        );
+        return row?.scope_revision;
+      };
+      await h.asUser(
+        AUTHOR,
+        `update disclosure_projects set scope_ghg_boundary_note = '単体で集計する' where id = $1`,
+        [scopeProject],
+      );
+      expect(await revision()).toBe(1);
+      // 下げて再確認を外すことはできない（書込権限者でも、Service Role でも）
+      await h.asUser(AUTHOR, 'update disclosure_projects set scope_revision = 0 where id = $1', [
+        scopeProject,
+      ]);
+      await h.asSuperuser('update disclosure_projects set scope_revision = 0 where id = $1', [
+        scopeProject,
+      ]);
+      expect(await revision()).toBe(1);
+      // 範囲以外の項目の変更では上がらない。範囲と一緒に番号を飛ばすこともできない
+      await h.asUser(AUTHOR, `update disclosure_projects set name = '名称変更' where id = $1`, [
+        scopeProject,
+      ]);
+      expect(await revision()).toBe(1);
+      await h.asUser(
+        AUTHOR,
+        `update disclosure_projects set period_end = '2027-03-30', scope_revision = 99 where id = $1`,
+        [scopeProject],
+      );
+      expect(await revision()).toBe(2);
+    });
+
+    it('利用者はレビュー依頼を「レビュー待ち」でしか作れず、範囲の改訂番号は DB が写す（F2）', async () => {
+      const block = await one(
+        `insert into disclosure_blocks
+           (organization_id, project_id, framework_version_id, section_key, title)
+         values ($1, $2, $3, 'governance-forged', 'ガバナンス（forged）') returning id`,
+        [ORG_A, id('project'), id('framework')],
+      );
+      const version = await one(
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, content_hash, created_by)
+         values ($1, $2, 1, $3::jsonb, 'hash-forged-v1', $4) returning id`,
+        [ORG_A, block, BODY, AUTHOR],
+      );
+      const insert = (status: string) =>
+        h.asUser<{ status: string; project_scope_revision: number }>(
+          AUTHOR,
+          `insert into review_requests
+             (organization_id, project_id, target_id, target_version_id, requested_by,
+              policy_version, policy, status, project_scope_revision)
+           values ($1, $2, $3, $4, $5, 'sod-3role-v1', '{}'::jsonb, $6, 99)
+           returning status, project_scope_revision`,
+          [ORG_A, id('project'), block, version, AUTHOR, status],
+        );
+      await expect(insert('approved')).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+      const [created] = await insert('open');
+      expect(created?.status).toBe('open');
+      const [project] = await h.asSuperuser<{ scope_revision: number }>(
+        'select scope_revision from disclosure_projects where id = $1',
+        [id('project')],
+      );
+      expect(created?.project_scope_revision).toBe(project?.scope_revision);
+      expect(created?.project_scope_revision).not.toBe(99);
+    });
+
+    it('依頼の後に範囲を変えた依頼は最終承認を記録できない（F2）', async () => {
+      const scopeProject = await one(
+        `insert into disclosure_projects
+           (organization_id, reporting_period_id, name, period_start, period_end, purposes)
+         values ($1, $2, 'RLS 範囲テスト（承認）', '2026-04-01', '2027-03-31', '{ssbj_statutory}')
+         returning id`,
+        [ORG_A, PERIOD_IDS.fy2026],
+      );
+      await h.asSuperuser(
+        `insert into project_frameworks (organization_id, project_id, framework_version_id, purpose)
+         values ($1, $2, $3, 'ssbj_statutory')`,
+        [ORG_A, scopeProject, id('framework')],
+      );
+      const { request } = await blockWithRequest('scope', { project: scopeProject });
+      await h.asUser(
+        REVIEWER,
+        EVENT_SQL,
+        eventParams('request.scope', 'review_completed', 'review', REVIEWER, 'version.scope'),
+      );
+      await h.asUser(REVIEWER, `update review_requests set status = 'reviewed' where id = $1`, [
+        request,
+      ]);
+      await h.asUser(
+        AUTHOR,
+        `update disclosure_projects set scope_org_note = '子会社を除く' where id = $1`,
+        [scopeProject],
+      );
+      await expect(
+        h.asUser(
+          APPROVER,
+          EVENT_SQL,
+          eventParams('request.scope', 'approved', 'final', APPROVER, 'version.scope'),
+        ),
+      ).rejects.toThrow(/T4D_SCOPE_CHANGED/);
+    });
+
+    it('範囲の変更より前の依頼でしか承認されていない版は、確定版に含められない（F2）', async () => {
+      const project = DISCLOSURE_FIRST_IDS.projects.fy2025;
+      const insertApproved = (no: number) =>
+        h.asUser(
+          APPROVER,
+          `insert into report_snapshots
+             (organization_id, project_id, snapshot_kind, snapshot_no, blocks, content_hash, created_by)
+           select $1, $2, 'approved', $4, jsonb_agg(jsonb_build_object(
+                    'blockId', b.id, 'versionId', v.id, 'body', v.body,
+                    'contentHash', v.content_hash, 'versionCreatedBy', v.created_by,
+                    'isApprovedVersion', true)), 'x', $3
+             from disclosure_blocks b
+             join disclosure_block_versions v on v.id = b.approved_version_id
+            where b.project_id = $2
+           returning id`,
+          [ORG_A, project, APPROVER, no],
+        );
+      // 変更前は確定できる（空振りでないことの確認）
+      expect(await insertApproved(96)).toHaveLength(1);
+      await h.asUser(
+        AUTHOR,
+        `update disclosure_projects set reporting_entity = '青海テクノロジー（連結）' where id = $1`,
+        [project],
+      );
+      await expect(insertApproved(97)).rejects.toThrow(/報告範囲の変更より前/);
+    });
+
+    it('再確認の判断に「新しい版が承認済みだったか」を DB が書く（申告を信用しない。INV-1）', async () => {
+      const [approved] = await h.asSuperuser<{ id: string }>(
+        `select id from data_point_versions where organization_id = $1 and status = 'approved'
+          order by id limit 1`,
+        [ORG_A],
+      );
+      const [unapproved] = await h.asSuperuser<{ id: string }>(
+        `select v.id from data_point_versions v join data_points d on d.id = v.data_point_id
+          where v.organization_id = $1 and v.status <> 'approved'
+            and not (d.status = 'approved' and d.current_version_id = v.id)
+            and not exists (select 1 from approvals a
+                             where a.target_type = 'data_point' and a.target_version_id = v.id
+                               and a.decision = 'approved')
+          order by v.id limit 1`,
+        [ORG_A],
+      );
+      expect(approved?.id).toBeTruthy();
+      expect(unapproved?.id).toBeTruthy();
+      const insert = (newRef: string, claimed: boolean) =>
+        h.asUser<{ new_ref_approved: boolean }>(
+          AUTHOR,
+          `insert into recheck_decisions
+             (organization_id, block_id, block_version_id, ref_kind, old_ref_id, new_ref_id,
+              decision, reason, decided_by, new_ref_approved)
+           values ($1, $2, $3, 'metric', $4, $5, 'keep_old', '端数処理のみ', $6, $7)
+           returning new_ref_approved`,
+          [
+            ORG_A,
+            id('block.main'),
+            id('version.main'),
+            id('dataPointVersion'),
+            newRef,
+            AUTHOR,
+            claimed,
+          ],
+        );
+      // 未承認の新版を「承認済みだった」と申告しても false で残る（承認後に維持が無効になる）
+      expect((await insert(unapproved!.id, true))[0]?.new_ref_approved).toBe(false);
+      expect((await insert(approved!.id, false))[0]?.new_ref_approved).toBe(true);
     });
   });
 

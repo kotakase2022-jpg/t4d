@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { LinkPending } from '@/components/shared/link-pending';
 import { ArrowRight, ChartLine } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader } from '@/components/shared/page-header';
@@ -83,13 +84,14 @@ export default async function EnterpriseDashboardPage({
                 aria-current={tab === key ? 'page' : undefined}
                 className={cn(
                   '-mb-px inline-block border-b-2 px-2.5 py-1.5 text-[13px] transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600',
                   tab === key
                     ? 'border-brand-700 font-medium text-brand-800'
                     : 'border-transparent text-ink-muted hover:text-ink',
                 )}
               >
                 {label}
+                <LinkPending />
               </Link>
             </li>
           ))}

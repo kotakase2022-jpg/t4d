@@ -260,8 +260,11 @@ export default async function SsbjPage({
           ))}
         </ul>
         <p className="text-[11px] leading-relaxed text-ink-muted">
-          件数の母集団:
-          「全要求事項」は、このマスターに収録している要求事項の件数です（対象外・重要性なしを含む）。
+          件数の母集団: 「全要求事項」は、設定で適用する基準の要求事項 {overview.counts.total}{' '}
+          件です（対象外・重要性なしを含む）。
+          {overview.masterTotal !== overview.counts.total
+            ? ` マスターの収録は計 ${overview.masterTotal} 項目で、設定で適用しない基準の ${overview.masterTotal - overview.counts.total} 項目は数えていません。`
+            : ''}
           {overview.coverageNote
             ? ` 収録範囲: ${overview.coverageNote}。基準のすべての条項ではありません。`
             : ' 収録範囲が一部の場合、基準のすべての条項ではありません。'}

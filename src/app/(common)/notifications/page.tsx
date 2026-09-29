@@ -68,7 +68,10 @@ export default async function NotificationsPage() {
                         <span className="text-[13px] font-medium text-ink">{n.title}</span>
                         {!n.readAt && <Badge tone="danger">未読</Badge>}
                       </div>
-                      <p className="mt-0.5 text-[12px] text-ink-muted">{n.body}</p>
+                      {/* 別のサーバーから持ち回した通知は本文を持たない（題名とリンクで用件が分かる） */}
+                      {n.body ? (
+                        <p className="mt-0.5 text-[12px] text-ink-muted">{n.body}</p>
+                      ) : null}
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-[11px] text-ink-muted">{formatJst(n.createdAt)}</div>

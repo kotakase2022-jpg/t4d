@@ -131,14 +131,17 @@ function safeFileName(fileName: string): string {
 }
 
 /**
- * 表示用の名前（一覧・紐付けの選択肢に出す）。パスと制御文字だけを除き、記号は変えない
+ * 表示用の名前（一覧・紐付けの選択肢に出す）。パスと制御文字を除き、記号は基本的に変えない
  * （【】や # を _ に置き換えると、利用者が付けた名前と一覧の表示が食い違う）。
+ * 半角の引用符（"）だけは全角（＂）にする。ダウンロードの Content-Disposition で引用を閉じ、
+ * 別のファイル名・拡張子を注入する手口に使えるため（contentDisposition でも無害化する）。
  * 保存キーは storeNewFile（buildStorageKey）が別に安全な形へ変える
  */
-function displayFileName(fileName: string): string {
+export function displayFileName(fileName: string): string {
   return fileName
     .replace(/^.*[\\/]/, '')
     .replace(/\p{Cc}/gu, '')
+    .replace(/"/g, '＂')
     .trim()
     .slice(0, 200);
 }

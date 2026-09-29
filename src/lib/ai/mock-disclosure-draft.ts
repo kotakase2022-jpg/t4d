@@ -48,7 +48,14 @@ export interface DraftSourceInput {
   /** 前年の節・整える段落の段落 ID */
   paragraphId?: string | null;
   /** 数値（metric_version）の表示用文字列（例: 1,190.9 t-CO2e）と名前 */
-  metric?: { name: string; display: string; boundary: string; approved: boolean } | null;
+  metric?: {
+    name: string;
+    display: string;
+    boundary: string;
+    approved: boolean;
+    /** 値の区分。推計は display に「（推計）」が入る。目標は当年度の根拠として渡されない */
+    valueKind?: 'actual' | 'estimate' | 'target';
+  } | null;
   /** 定性情報の未記入のテンプレート項目（ラベル） */
   missingFields?: string[];
   /** 定性情報の版が根拠にした引用位置のうち、入力にも含まれているもの */
@@ -303,6 +310,11 @@ function draftFromSources(input: DraftInvocationInput): DisclosureBlockDraftOutp
       reason: '数値が承認されていません。',
       nextCheck: '数値の承認を依頼してください。',
     });
+  }
+  for (const s of current) {
+    if (s.kind === 'metric_version' && s.metric?.valueKind === 'estimate') {
+      warnings.push(`推計の数値を含みます（本文では推計と明記しています）: ${s.label}`);
+    }
   }
   const priorLike = nonGrounding.filter((s) => s.usage !== 'unapproved');
   if (priorLike.length > 0) {

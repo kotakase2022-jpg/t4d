@@ -487,6 +487,63 @@ export async function decideRecheckFormAction(
   );
 }
 
+/** 節の追加フォームの入力値（失敗しても消さない） */
+export interface CreateBlockFormValues {
+  frameworkVersionId: string;
+  language: string;
+  title: string;
+  sectionKey: string;
+  translationOfBlockId: string;
+}
+
+export interface CreateBlockFormState {
+  status: 'idle' | 'error';
+  message: string | null;
+  values: CreateBlockFormValues | null;
+}
+
+/**
+ * 節を追加する（フォームの状態を返す版）。キーの形式違い・重複などで断られたときは
+ * リダイレクトせず、入力した値と理由を返す（リダイレクトすると題名・キー・翻訳元が消えていた）
+ */
+export async function createBlockFormAction(
+  _previous: CreateBlockFormState,
+  formData: FormData,
+): Promise<CreateBlockFormState> {
+  const projectId = safeId(field(formData, 'projectId'));
+  const values: CreateBlockFormValues = {
+    frameworkVersionId: field(formData, 'frameworkVersionId'),
+    language: field(formData, 'language'),
+    title: field(formData, 'title'),
+    sectionKey: field(formData, 'sectionKey'),
+    translationOfBlockId: field(formData, 'translationOfBlockId'),
+  };
+  let created: string;
+  try {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const block = await createBlock(db, ctx, {
+      projectId,
+      frameworkVersionId: safeId(values.frameworkVersionId),
+      sectionKey: values.sectionKey,
+      title: values.title,
+      language: values.language === 'en' ? 'en' : 'ja',
+      translationOfBlockId: safeId(values.translationOfBlockId) || null,
+    });
+    created = block.id;
+  } catch (error) {
+    if (isUserFacingError(error)) return { status: 'error', message: error.message, values };
+    console.error('[create block]', error);
+    return {
+      status: 'error',
+      message: '節を追加できませんでした。時間をおいて再試行してください。',
+      values,
+    };
+  }
+  revalidatePath(projectPath(projectId));
+  redirect(`${blockPath(projectId, created)}?flash=blockCreated`);
+}
+
 export async function createBlockAction(formData: FormData): Promise<void> {
   const projectId = safeId(field(formData, 'projectId'));
   const back = `${projectPath(projectId)}?tab=manuscripts`;

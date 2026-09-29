@@ -52,7 +52,7 @@ function standardCsv(value: string): Buffer {
   return Buffer.concat([bom, Buffer.from(`${rows.join('\n')}\n`, 'utf-8')]);
 }
 
-const editorBody = (page: Page) => page.getByRole('main', { name: '本文' });
+const editorBody = (page: Page) => page.getByRole('region', { name: '本文' });
 const rightPane = (page: Page) => page.getByRole('complementary', { name: '根拠パネル' });
 
 async function gotoBlock(page: Page, blockId: string): Promise<void> {

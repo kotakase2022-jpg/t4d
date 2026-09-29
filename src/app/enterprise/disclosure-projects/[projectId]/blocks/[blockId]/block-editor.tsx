@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { LinkPending } from '@/components/shared/link-pending';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -745,7 +746,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
             <button
               type="button"
               onClick={() => void flush()}
-              className="ml-1 rounded-t4d px-1 text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+              className="ml-1 rounded-t4d px-1 text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
             >
               再試行
             </button>
@@ -993,7 +994,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
                   <Link
                     href={`/enterprise/disclosure-projects/${projectId}/blocks/${s.id}`}
                     aria-current={current ? 'page' : undefined}
-                    className={`block rounded-t4d px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
+                    className={`block rounded-t4d px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 ${
                       current
                         ? 'bg-brand-100 font-medium text-brand-900'
                         : 'text-ink hover:bg-brand-50'
@@ -1002,6 +1003,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
                     <span className="block truncate">
                       {s.title}
                       {s.language === 'en' ? '（英語）' : ''}
+                      <LinkPending />
                     </span>
                     <span className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-ink-muted">
                       <span>{s.statusLabel}</span>
@@ -1025,8 +1027,8 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
           </ol>
         </nav>
 
-        {/* 中央: 本文 */}
-        <main aria-label="本文" className="min-w-0 space-y-3 p-3">
+        {/* 中央: 本文。AppShell が既に <main id="t4d-main"> を持つため、ここは名前付きの領域にする（main を入れ子にしない） */}
+        <section aria-label="本文" className="min-w-0 space-y-3 p-3">
           <AiPanel
             projectId={projectId}
             blockId={blockId}
@@ -1102,7 +1104,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
                   key={p.id}
                   id={`para-${p.id}`}
                   tabIndex={-1}
-                  className="rounded-t4d-lg border border-line bg-surface p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+                  className="rounded-t4d-lg border border-line bg-surface p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
                 >
                   <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
                     <label htmlFor={inputId} className="inline-flex items-center gap-1">
@@ -1235,7 +1237,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
               末尾に段落を追加
             </Button>
           )}
-        </main>
+        </section>
 
         {/* 右: 根拠（狭い画面ではドロワー） */}
         <aside
@@ -1243,7 +1245,9 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
           aria-label="根拠パネル"
           className={`${paneOpen ? 'fixed inset-y-0 right-0 z-40 flex w-[min(420px,100vw)] shadow-xl' : 'hidden'} flex-col border-l border-line bg-surface ${
             paneDocked
-              ? 'min-[1366px]:sticky min-[1366px]:top-0 min-[1366px]:z-auto min-[1366px]:flex min-[1366px]:max-h-screen min-[1366px]:self-start min-[1366px]:w-auto min-[1366px]:shadow-none'
+              ? // 高さはスクロール領域（画面 − ヘッダー 48px）から、下に固定した「本文の状態」の帯（約 44px）を除いた分。
+                // 画面の高さ（100vh）にすると、下端が帯の裏とスクロール領域の外に隠れていた
+                'min-[1366px]:sticky min-[1366px]:top-0 min-[1366px]:z-auto min-[1366px]:flex min-[1366px]:max-h-[calc(100vh-48px-2.75rem)] min-[1366px]:self-start min-[1366px]:w-auto min-[1366px]:shadow-none'
               : 'min-[1366px]:hidden'
           }`}
           ref={asideRef}
@@ -1258,7 +1262,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
               type="button"
               onClick={closePane}
               aria-label="根拠パネルを閉じる"
-              className="rounded-t4d p-1 text-ink-muted hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+              className="rounded-t4d p-1 text-ink-muted hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
             >
               <X className="size-4" aria-hidden="true" />
             </button>
@@ -1299,7 +1303,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
       <div
         role="toolbar"
         aria-label="本文の状態"
-        className="sticky bottom-0 z-20 flex flex-wrap items-center gap-1.5 border-t border-line bg-surface px-3 py-1.5 text-[12px]"
+        className="sticky bottom-0 z-20 flex min-h-[2.75rem] flex-wrap items-center gap-1.5 border-t border-line bg-surface px-3 py-1.5 text-[12px]"
       >
         {statusItems.map(({ key, label }) => {
           const item = data.statusBar[key];
@@ -1310,7 +1314,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
               onClick={() => cycleStatus(key)}
               disabled={item.count === 0}
               aria-label={`${label} ${item.count} 件${item.count > 0 ? '。押すと該当する段落へ移動します' : ''}`}
-              className={`inline-flex items-center gap-1 rounded-t4d border px-2 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-default ${
+              className={`inline-flex items-center gap-1 rounded-t4d border px-2 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 disabled:cursor-default ${
                 item.count > 0
                   ? 'border-warning/40 bg-warning-soft text-ink hover:bg-warning-soft/70'
                   : 'border-line text-ink-muted'

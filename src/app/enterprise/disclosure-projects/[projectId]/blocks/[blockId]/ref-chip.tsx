@@ -190,7 +190,7 @@ export function RefChip({
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="inline-flex max-w-full items-center gap-1 rounded-t4d border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-[12px] text-brand-900 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+          className="inline-flex max-w-full items-center gap-1 rounded-t4d border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-[12px] text-brand-900 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
           aria-label={`${token} ${label}${flag ? `（${flag}）` : ''} の詳細を開く`}
         >
           <span className="font-mono text-[10px] text-ink-muted">{token}</span>
@@ -222,7 +222,7 @@ export function RefChip({
             </span>
             <Popover.Close
               aria-label="詳細を閉じる"
-              className="rounded-t4d p-0.5 text-ink-muted hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+              className="rounded-t4d p-0.5 text-ink-muted hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
             >
               <X className="size-3.5" aria-hidden="true" />
             </Popover.Close>

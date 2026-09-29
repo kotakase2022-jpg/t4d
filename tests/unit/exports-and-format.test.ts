@@ -83,6 +83,27 @@ describe('Content-Disposition', () => {
     // ASCII フォールバックも持つ
     expect(header).toMatch(/filename="[\x20-\x7e]+"/);
   });
+
+  // F6（自己監査 第 2 回）: 資料名に引用符・セミコロンを入れて、別の名前・拡張子を注入させない
+  it('ファイル名の引用符で引用を閉じ、filename* などの引数を注入できない', () => {
+    const forged = `report"; filename*=UTF-8''invoice.html; x=".pdf`;
+    const header = contentDisposition(forged);
+    // 引数は filename と filename* の 2 つだけ（引用の外に ; で区切られた引数が増えない）
+    const outsideQuotes = header.replace(/"[^"]*"/g, '""');
+    expect(outsideQuotes.split(';').map((part) => part.trim().split('=')[0])).toEqual([
+      'attachment',
+      'filename',
+      'filename*',
+    ]);
+    expect(outsideQuotes.match(/filename\*=/g)).toHaveLength(1);
+    // filename* の値は RFC 5987 の文字だけ（' は区切り以外に現れない）
+    const marker = "; filename*=UTF-8''";
+    const star = header.slice(header.lastIndexOf(marker) + marker.length);
+    expect(star).toMatch(/^[A-Za-z0-9%\-._~]+$/);
+    expect(decodeURIComponent(star)).toBe(forged);
+    // ASCII の代替名に引用符・バックスラッシュが残らない
+    expect(contentDisposition('a\\b"c.pdf')).toContain('filename="a_b_c.pdf"');
+  });
 });
 
 describe('日時フォーマット（Asia/Tokyo 固定・DB は UTC）', () => {

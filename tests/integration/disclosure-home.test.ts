@@ -12,6 +12,7 @@ import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { listProjectBlocks } from '@/lib/services/disclosure-block';
 import { getProject, summarizeProject } from '@/lib/services/disclosure-project';
+import { assessNarrativeFields } from '@/lib/domain/narrative-template';
 import { decideRecheck } from '@/lib/services/disclosure-recheck';
 import {
   blockHref,
@@ -416,7 +417,8 @@ describe('進捗は分母を明示する（率にまとめない）', () => {
       decided: false,
       inScope: false,
       applicabilityLabel: '適用候補',
-      legalStatusLabel: '草案',
+      // 「草案」だけでなく、プロジェクト画面・出力の表紙と同じ「公開草案に基づく準備」と示す（§8.1）
+      legalStatusLabel: '公開草案に基づく準備',
       coverageStatusLabel: '要求事項は未収録',
       itemCount: 0,
       blockCount: 1,
@@ -483,7 +485,7 @@ describe('ヘッダーのプロジェクト表示', () => {
 });
 
 describe('定性情報の未記入の数え方', () => {
-  it('財務的影響: 影響額があれば「示さない理由」は不要。定量化しない理由があれば影響額・算定方法は未記入に数えない（スナップショットと同じ規則）', () => {
+  it('財務的影響: 影響額があれば「示さない理由」は不要。影響額が無ければ理由があっても影響額は未確定のまま（スナップショットと同じ規則）', () => {
     expect(
       unresolvedNarrativeFields('financial_impact', {
         relatedRisk: 'x',
@@ -500,7 +502,16 @@ describe('定性情報の未記入の数え方', () => {
         estimationStatus: '評価中',
         noAmountReason: '評価中のため',
       }),
-    ).toEqual([]);
+    ).toEqual(['影響額', '算定方法・前提']);
+    // 理由は不足情報の代わりではなく、横に並べて示す
+    expect(
+      assessNarrativeFields('financial_impact', {
+        relatedRisk: 'x',
+        impactDescription: 'x',
+        estimationStatus: '評価中',
+        noAmountReason: '評価中のため',
+      }).notQuantifiedReason,
+    ).toBe('評価中のため');
     // どちらも無ければ、影響額・算定方法・示さない理由のすべてが未記入
     expect(
       unresolvedNarrativeFields('financial_impact', {

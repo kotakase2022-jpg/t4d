@@ -8,11 +8,12 @@ import {
   DISCLOSURE_PURPOSE_LABELS,
   EVIDENCE_USAGE_PURPOSE_LABELS,
   FRAMEWORK_COVERAGE_STATUS_LABELS,
-  FRAMEWORK_LEGAL_STATUS_LABELS,
+  frameworkLegalLabel,
   REPORT_SNAPSHOT_KIND_LABELS,
   REVIEW_COMMENT_SEVERITY_LABELS,
   VALUE_KIND_LABELS,
 } from '@/lib/domain/disclosure-status';
+import { valueKindMarker } from '@/lib/domain/disclosure-block';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import type {
   ReportSnapshotDetail,
@@ -86,12 +87,20 @@ function isPublic(level: ConfidentialityLevel): boolean {
   return level === 'public';
 }
 
-/** 数値の表示（固定した版の値と単位）。値が無い版は状態を書き、0 として出さない */
-export function metricDisplay(mv: SnapshotMetricValue): string {
+/**
+ * 数値の表示（固定した版の値と単位）。値が無い版は状態を書き、0 として出さない。
+ * 本文では推計・目標の区分を添える（対外の本文で実績と読ませない。§7.1・§10.4）。
+ * 付表のように区分の列を別に持つ表では withKind: false で値だけを出す
+ */
+export function metricDisplay(
+  mv: SnapshotMetricValue,
+  options: { withKind?: boolean } = {},
+): string {
+  const marker = options.withKind === false ? '' : valueKindMarker(mv.valueKind);
   if (mv.availabilityStatus === 'value_present' && mv.value !== null) {
-    return `${formatNumber(mv.value)} ${mv.unitOfMeasure}`.trim();
+    return `${`${formatNumber(mv.value)} ${mv.unitOfMeasure}`.trim()}${marker}`;
   }
-  if (mv.textValue) return mv.textValue;
+  if (mv.textValue) return `${mv.textValue}${marker}`;
   return `（${AVAILABILITY_STATUS_LABELS[mv.availabilityStatus]}）`;
 }
 
@@ -247,8 +256,14 @@ export function statusLine(snapshot: ReportSnapshotDetail, framework: SnapshotFr
 export const NOT_SUBMISSION_NOTICE =
   'ファイル作成は提出ではありません（開示先への提出・公表を意味しません）。内容は T4D のスナップショットに固定した版から生成しています。';
 
+/** 表紙の「基準の位置付け」。草案は「公開草案に基づく準備」（画面と同じ文言。§8.1） */
 function legalStatusText(framework: SnapshotFramework): string {
-  return framework.legalStatus ? FRAMEWORK_LEGAL_STATUS_LABELS[framework.legalStatus] : '未確認';
+  return framework.legalStatus || framework.coverageStatus
+    ? frameworkLegalLabel({
+        legalStatus: framework.legalStatus,
+        coverageStatus: framework.coverageStatus,
+      })
+    : '未確認';
 }
 
 function coverageText(framework: SnapshotFramework): string {
@@ -449,7 +464,7 @@ export async function buildDisclosureDocx(
           mv.unitName,
           mv.periodStart && mv.periodEnd ? `${mv.periodStart}〜${mv.periodEnd}` : mv.periodCode,
           mv.boundary,
-          metricDisplay(mv),
+          metricDisplay(mv, { withKind: false }),
           VALUE_KIND_LABELS[mv.valueKind],
           `版 ${mv.versionNo}`,
         ]),

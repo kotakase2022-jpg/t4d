@@ -9,9 +9,12 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
+  Lock,
+  PenLine,
   Quote,
   Save,
   ShieldCheck,
+  Tag,
   X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -459,7 +462,12 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
                         )}
                         {a.usagePurposeLabel}
                       </Badge>
-                      {a.manual && <Badge tone="neutral">手動の抜粋</Badge>}
+                      {a.manual && (
+                        <Badge tone="neutral">
+                          <PenLine className="size-3" aria-hidden="true" />
+                          手動の抜粋
+                        </Badge>
+                      )}
                     </span>
                   </div>
                   {!disabled && (
@@ -841,9 +849,13 @@ function DocumentPane({
           {current && (
             <p className="flex flex-wrap gap-1 text-[11px] text-ink-muted">
               <Badge tone={current.usagePurposeLabel === '当年度の根拠' ? 'success' : 'warning'}>
+                <Tag className="size-3" aria-hidden="true" />
                 {current.usagePurposeLabel}
               </Badge>
-              <Badge tone="neutral">{current.confidentialityLabel}</Badge>
+              <Badge tone="neutral">
+                <Lock className="size-3" aria-hidden="true" />
+                {current.confidentialityLabel}
+              </Badge>
               <Link href={`/enterprise/evidence/${current.fileId}`} className="underline">
                 原文を開く
               </Link>
@@ -870,7 +882,12 @@ function DocumentPane({
               >
                 <p className="flex items-center gap-1 text-[11px] font-medium text-ink-muted">
                   {f.locationLabel}
-                  {f.manual && <Badge tone="neutral">手動の抜粋</Badge>}
+                  {f.manual && (
+                    <Badge tone="neutral">
+                      <PenLine className="size-3" aria-hidden="true" />
+                      手動の抜粋
+                    </Badge>
+                  )}
                 </p>
                 <p className="whitespace-pre-wrap text-ink">{f.text}</p>
                 {canCite &&

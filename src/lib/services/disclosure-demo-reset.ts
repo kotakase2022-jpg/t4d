@@ -5,7 +5,12 @@ import { assertCan, assertEnterpriseWorkspace } from '@/lib/authorization/can';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
-import { markDemoReset, removeDemoEditsFor } from '@/lib/repositories/demo-persistence';
+import {
+  clearDemoEviction,
+  markDemoReset,
+  removeDemoEditsWhere,
+} from '@/lib/repositories/demo-persistence';
+import type { DemoEdit } from '@/lib/repositories/demo-edit-codec';
 import {
   DISCLOSURE_AI_FEATURE,
   DISCLOSURE_DEMO_RESET_TABLES,
@@ -93,10 +98,25 @@ export async function resetDisclosureDemoData(
 
     const created = new Set(currentRows.filter((r) => !fixtureById.has(r.id)).map((r) => r.id));
     const touched = new Set<string>([...created, ...fixtureById.keys()]);
+    // このインスタンスのメモリにある行（どの組織の行でも）と、Fixture にある行（どの組織の行でも）
+    const inMemory = new Set(db.allRowIds(table));
+    const inPristine = new Set((pristine[table] as unknown as IdRow[]).map((r) => r.id));
+    /**
+     * Cookie から取り除く編集。メモリの行（touched）に加えて、この組織の名義の編集と、
+     * どこにも行が無い部分更新（このインスタンスが規則に合わず受け付けなかった編集の残り）も取り除く。
+     * 残すと、リセット後も毎回検査されては捨てられ、Cookie の容量だけを使い続ける
+     */
+    const shouldRemove = (edit: DemoEdit): boolean => {
+      if (edit.t !== table) return false;
+      if (touched.has(edit.id)) return true;
+      const owner = (edit.v as { organizationId?: unknown }).organizationId;
+      if (owner === organizationId) return true;
+      return owner === undefined && !inMemory.has(edit.id) && !inPristine.has(edit.id);
+    };
 
     // 先に Cookie の持ち回りから外しておく（戻す途中の追記で Cookie が溢れ、
     // 他の画面のデモ操作が押し出されるのを避ける）
-    await removeDemoEditsFor(table, touched);
+    await removeDemoEditsWhere(shouldRemove);
 
     const removed = created.size > 0 ? await db.hardDeleteDemoRows(table, created) : 0;
 
@@ -120,7 +140,7 @@ export async function resetDisclosureDemoData(
 
     // 戻した行の追記（update / insert が Cookie へ書いた分）も取り除く。
     // Fixture と同じ値なので持ち回る必要がない
-    await removeDemoEditsFor(table, touched);
+    await removeDemoEditsWhere(shouldRemove);
 
     byTable[table] = { removed, restored };
     removedRows += removed;
@@ -156,6 +176,8 @@ export async function resetDisclosureDemoData(
 
   // ほかのインスタンスにも同じリセットを反映させる（次のリクエストで Fixture の初期値へ戻す）
   await markDemoReset(organizationId);
+  // 開示の表の押し出しの知らせは、戻した今は意味を失う（ほかの表の押し出しの知らせは残す）
+  await clearDemoEviction(DISCLOSURE_DEMO_RESET_TABLES);
 
   await recordAuditEvent(db, ctx, {
     eventType: 'project_updated',

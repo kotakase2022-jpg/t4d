@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Download, FileText, Highlighter, Lock } from 'lucide-react';
+import { Download, Eye, FileText, Highlighter, Lock, PenLine, Tag } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { DocumentPreview } from '@/components/shared/document-preview';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { fileTypeLabel } from '@/lib/domain/evidence-limits';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
 import { parseUploadedFile } from '@/lib/imports/parsers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -129,7 +130,11 @@ export default async function EvidenceViewerPage({
         title={file.originalName}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <Badge tone="neutral">{file.mimeType}</Badge>
+            {/* MIME 型（application/vnd.openxmlformats-… など）は出さず、形式の名前で示す */}
+            <Badge tone="neutral" title={file.mimeType}>
+              <FileText className="size-3" aria-hidden="true" />
+              {fileTypeLabel(file.mimeType, file.originalName)}
+            </Badge>
             <Badge
               tone={
                 file.confidentiality === 'restricted'
@@ -143,9 +148,10 @@ export default async function EvidenceViewerPage({
               {CONFIDENTIALITY_LABELS[file.confidentiality]}
             </Badge>
             <Badge tone={file.usagePurpose === 'current_fact' ? 'success' : 'neutral'}>
+              <Tag className="size-3" aria-hidden="true" />
               利用目的: {usagePurposeLabel(file.usagePurpose)}
             </Badge>
-            <span>Version {current.versionNo}</span>
+            <span>版 {current.versionNo}</span>
           </span>
         }
         breadcrumbs={[
@@ -270,7 +276,7 @@ export default async function EvidenceViewerPage({
                 {highlightCells.size > 0 && (
                   <p className="flex items-center gap-1 px-1 py-1.5 text-[11px] text-ink-muted">
                     <Highlighter className="size-3" aria-hidden="true" />
-                    ハイライト = Evidence リンクで参照されているセル（
+                    ハイライト = 資料・証跡への紐付けで参照されているセル（
                     {[...highlightCells].join(', ')}）
                   </p>
                 )}
@@ -325,7 +331,12 @@ export default async function EvidenceViewerPage({
                   <li key={f.id} className="px-3 py-1.5 text-[12px]">
                     <p className="flex items-center gap-1 text-[11px] font-medium text-ink-muted">
                       {f.locator ?? `p.${f.page}`}
-                      {isManualExcerpt(f) && <Badge tone="neutral">手動の抜粋</Badge>}
+                      {isManualExcerpt(f) && (
+                        <Badge tone="neutral">
+                          <PenLine className="size-3" aria-hidden="true" />
+                          手動の抜粋
+                        </Badge>
+                      )}
                     </p>
                     <p className="line-clamp-3 whitespace-pre-wrap text-ink">{f.text}</p>
                   </li>
@@ -474,7 +485,7 @@ export default async function EvidenceViewerPage({
           )}
 
           <Card>
-            <SectionTitle title={`Version（${versions.length}）`} />
+            <SectionTitle title={`版の履歴（${versions.length}）`} />
             <ul className="divide-y divide-line">
               {versions.map((v) => (
                 <li
@@ -484,7 +495,12 @@ export default async function EvidenceViewerPage({
                   <span className="flex items-center gap-1.5">
                     <FileText className="size-3.5 text-ink-muted" aria-hidden="true" />v
                     {v.versionNo}
-                    {v.id === current.id && <Badge tone="brand">表示中</Badge>}
+                    {v.id === current.id && (
+                      <Badge tone="brand">
+                        <Eye className="size-3" aria-hidden="true" />
+                        表示中
+                      </Badge>
+                    )}
                   </span>
                   <span className="text-[11px] text-ink-muted">{formatJst(v.createdAt)}</span>
                 </li>

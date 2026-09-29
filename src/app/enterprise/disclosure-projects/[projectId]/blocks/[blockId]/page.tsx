@@ -125,7 +125,10 @@ export default async function BlockEditorPage({
           <p className="flex items-center gap-1 text-[12px] text-ink-muted">
             <Languages className="size-3.5" aria-hidden="true" />
             翻訳元: {data.block.translationOfTitle}
-            <Badge tone="neutral">翻訳版</Badge>
+            <Badge tone="neutral">
+              <Languages className="size-3" aria-hidden="true" />
+              翻訳版
+            </Badge>
             {data.block.translationNeedsCheck && (
               <Badge tone="warning">
                 <AlertTriangle className="size-3" aria-hidden="true" />

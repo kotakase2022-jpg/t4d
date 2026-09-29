@@ -99,10 +99,47 @@ export function restoreDisclosureDemoTables(
   );
 }
 
-/** リセットの印（Cookie の値）。組織と世代 */
+/**
+ * リセットの印（Cookie の値）。組織と世代。
+ * 世代は「リセットした時刻（ミリ秒・13 桁）-乱数」で、時刻の順に並ぶ。
+ * 乱数だけの世代では新旧を比べられず、別々にリセットした 2 つのブラウザの印が
+ * 同じインスタンスで交互に「未反映」と判定され、リクエストのたびに開示デモを戻し合っていた
+ */
 export interface DemoResetMark {
   organizationId: string;
   epoch: string;
+}
+
+const EPOCH_PATTERN = /^(\d{13})-([A-Za-z0-9]{1,40})$/;
+
+/** 新しい世代（時刻の順に並ぶ） */
+export function newDemoResetEpoch(now: number, random: string): string {
+  return `${String(Math.max(0, Math.floor(now))).padStart(13, '0')}-${random.replace(/[^A-Za-z0-9]/g, '').slice(0, 40) || '0'}`;
+}
+
+/** 世代の時刻。時刻を持たない世代（以前の形式）は null */
+export function demoResetEpochTime(epoch: string): number | null {
+  const match = EPOCH_PATTERN.exec(epoch);
+  return match?.[1] ? Number(match[1]) : null;
+}
+
+/**
+ * 印がこのインスタンスで反映済みの世代より新しいか。
+ * 以前の形式（時刻なし）の印は比べられないため反映しない（戻し合いを起こさない）。
+ * 反映済みの世代が無いときは、インスタンスの起動時点（baselineEpoch）と比べる。
+ * 起動より前のリセットは、起動時のメモリ（Fixture の初期値）に既に含まれている
+ */
+export function isNewerDemoReset(
+  mark: DemoResetMark,
+  appliedEpoch: string | undefined,
+  baselineEpoch: string,
+): boolean {
+  if (demoResetEpochTime(mark.epoch) === null) return false;
+  const against = appliedEpoch ?? baselineEpoch;
+  const markTime = demoResetEpochTime(mark.epoch) ?? 0;
+  const againstTime = demoResetEpochTime(against) ?? 0;
+  if (markTime !== againstTime) return markTime > againstTime;
+  return mark.epoch > against;
 }
 
 export function encodeDemoResetMark(mark: DemoResetMark): string {

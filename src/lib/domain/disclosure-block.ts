@@ -7,16 +7,45 @@
  */
 
 import { contentHash } from '@/lib/fixtures/ids';
+import { formatNumber } from '@/lib/format/datetime';
 import type {
   BlockBody,
   BlockInline,
   BlockParagraph,
+  DataPointVersion,
   RecheckDecision,
   RecheckRefKind,
   Uuid,
+  ValueKind,
 } from '@/types/domain';
 
 export type { BlockBody, BlockInline, BlockParagraph } from '@/types/domain';
+
+/**
+ * 値の区分の注記。推計・目標の値を、本文・下書き・出力で実績と読ませない（指示書 §7.1・§10.4
+ * 「承認済みだから実績扱い」をしない）。実績には付けない（区分が無い以前の行も実績として扱う）
+ */
+export function valueKindMarker(valueKind: ValueKind | null | undefined): string {
+  if (valueKind === 'estimate') return '（推計）';
+  if (valueKind === 'target') return '（目標）';
+  return '';
+}
+
+/**
+ * 数値参照の表示用文字列。挿入時にこの値を本文へ写し、保存時に同じ規則で検証する
+ * （Service の metricDisplay・Fixture の metricInline・出力が同じ規則を使う）
+ */
+export function formatMetricDisplay(
+  version: Pick<DataPointVersion, 'value' | 'textValue' | 'unitOfMeasure'> & {
+    valueKind?: ValueKind | null;
+  },
+): string {
+  const marker = valueKindMarker(version.valueKind);
+  if (version.value !== null && !Number.isNaN(version.value)) {
+    return `${`${formatNumber(version.value)} ${version.unitOfMeasure}`.trim()}${marker}`;
+  }
+  return version.textValue ? `${version.textValue}${marker}` : '—';
+}
 
 /** 空の本文。段落を 1 つも持たない（空段落を置くと「本文あり」に見えてしまうため） */
 export function emptyBody(): BlockBody {
@@ -118,21 +147,46 @@ export function contentHashOf(body: BlockBody): string {
 export type RecheckDecisionFacts = Pick<
   RecheckDecision,
   'id' | 'blockId' | 'refKind' | 'oldRefId' | 'newRefId' | 'decision' | 'decidedAt'
->;
+> &
+  Partial<Pick<RecheckDecision, 'newRefApproved'>>;
+
+export interface RecheckTarget {
+  blockId: Uuid;
+  refKind: RecheckRefKind;
+  oldRefId: Uuid;
+  newRefId: Uuid;
+  /** 新しい版（newRefId）が今承認済み（定性情報は確定済み）か */
+  newApproved: boolean;
+}
 
 /**
- * 節が「旧版 → 現在の版」の組み合わせについて最後に下した再確認の判断。
+ * 判断の前提がまだ成り立っているか。
+ * 新しい版が未承認のときに下した「引用中の版を維持」は、その版が承認された時点で前提が崩れる
+ * （「訂正はまだ承認されていない」が維持の理由になりうるため）。改めて判断を求める。
+ * 判断の時点の承認状態が分からない行（0042 より前の行）も、承認済みの新版に対しては無効として扱う。
+ */
+export function isRecheckDecisionInForce(
+  decision: Pick<RecheckDecisionFacts, 'decision' | 'newRefApproved'>,
+  newApproved: boolean,
+): boolean {
+  if (decision.decision !== 'keep_old') return true;
+  return !newApproved || decision.newRefApproved === true;
+}
+
+/**
+ * 節が「旧版 → 現在の版」の組み合わせについて最後に下した、今も有効な再確認の判断。
  *
  * - 判断は節（block）単位で効く。判断した時点の節の版（block_version_id）には縛らない。
  *   同じ旧版を引用し続ける限り、その後に節の版を作り直しても判断は有効（判断の対象は
  *   本文の書きぶりではなく、どの版の数値・定性情報を引用するかだから）。
  * - 上流にさらに新しい版ができれば組み合わせが変わるので、改めて判断が要る。
+ * - 新しい版が未承認のときの「維持」は、その版が承認されたら無効（isRecheckDecisionInForce）。
  * - 同じ組み合わせに複数の判断があれば最後の判断が有効（維持の後に差戻しなら、維持は無効）。
  *   同時刻は id の小さい方を採る（画面・確定で並びが揺れないように）。
  */
 export function latestRecheckDecision<T extends RecheckDecisionFacts>(
   decisions: readonly T[],
-  target: { blockId: Uuid; refKind: RecheckRefKind; oldRefId: Uuid; newRefId: Uuid },
+  target: RecheckTarget,
 ): T | null {
   let latest: T | null = null;
   for (const d of decisions) {
@@ -140,7 +194,8 @@ export function latestRecheckDecision<T extends RecheckDecisionFacts>(
       d.blockId !== target.blockId ||
       d.refKind !== target.refKind ||
       d.oldRefId !== target.oldRefId ||
-      d.newRefId !== target.newRefId
+      d.newRefId !== target.newRefId ||
+      !isRecheckDecisionInForce(d, target.newApproved)
     ) {
       continue;
     }
@@ -158,7 +213,7 @@ export function latestRecheckDecision<T extends RecheckDecisionFacts>(
 /** 旧版の引用を理由付きで維持すると判断済みか（再確認済み。承認・確定を止めない） */
 export function isOldRefKept(
   decisions: readonly RecheckDecisionFacts[],
-  target: { blockId: Uuid; refKind: RecheckRefKind; oldRefId: Uuid; newRefId: Uuid },
+  target: RecheckTarget,
 ): boolean {
   return latestRecheckDecision(decisions, target)?.decision === 'keep_old';
 }

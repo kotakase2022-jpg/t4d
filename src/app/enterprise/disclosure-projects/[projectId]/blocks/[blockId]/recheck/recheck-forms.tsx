@@ -4,6 +4,7 @@ import * as React from 'react';
 import { AlertTriangle, Ban, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
+import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
 import type { RecheckDecisionKind, RecheckRefKind } from '@/types/domain';
 import { decideRecheckFormAction, type RecheckFormState } from '../../actions';
 
@@ -17,6 +18,17 @@ export interface RecheckFormsProps {
 }
 
 const INITIAL: RecheckFormState = { status: 'idle', decision: null, message: null, reason: '' };
+
+/** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、書いた理由を残す */
+const action = withNetworkFallback(
+  decideRecheckFormAction,
+  (_previous, formData): RecheckFormState => ({
+    status: 'error',
+    decision: String(formData.get('decision') ?? '') as RecheckDecisionKind,
+    message: NETWORK_ERROR_MESSAGE,
+    reason: String(formData.get('reason') ?? ''),
+  }),
+);
 
 const SPECS: Array<{
   decision: RecheckDecisionKind;
@@ -101,7 +113,7 @@ function DecisionForm({
   oldRefId: string;
   availability: { allowed: boolean; reason: string | null };
 }) {
-  const [state, formAction, pending] = React.useActionState(decideRecheckFormAction, INITIAL);
+  const [state, formAction, pending] = React.useActionState(action, INITIAL);
   // 入力は画面側で持つ（送信後にフォームが作り直されても、書いた理由を消さない）
   const [reason, setReason] = React.useState('');
   const inputId = `${spec.idPrefix}-${oldRefId}`;

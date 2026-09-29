@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ClipboardCheck, Inbox, ListTodo, Undo2 } from 'lucide-react';
-import { PbcStatusBadge, PriorityBadge } from '@/components/shared/badges';
+import { PbcStatusBadge, PriorityBadge, TaskStatusBadge } from '@/components/shared/badges';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { taskTargetTypeLabel } from '@/lib/domain/disclosure-status';
 import { describeReferenceDate } from '@/lib/clock';
 import { daysUntilJst, formatJst, formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { listMyReviewTasks } from '@/lib/services/disclosure-review';
@@ -98,42 +99,44 @@ export default async function WorkflowsPage({
                 icon={<ClipboardCheck className="size-5" aria-hidden="true" />}
               />
             ) : (
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>節</TH>
-                    <TH>プロジェクト</TH>
-                    <TH>あなたの段階</TH>
-                    <TH>審査する版</TH>
-                    <TH>依頼者</TH>
-                    <TH>依頼日時</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {myReviews.awaitingMe.map((item) => (
-                    <TR key={item.id}>
-                      <TD>
-                        <Link
-                          href={`/enterprise/disclosure-projects/${item.projectId}/blocks/${item.blockId}`}
-                          className="font-medium text-brand-700 underline-offset-2 hover:underline"
-                        >
-                          {item.blockTitle}
-                        </Link>
-                      </TD>
-                      <TD className="text-[12px] text-ink-muted">{item.projectName}</TD>
-                      <TD>
-                        <Badge tone={item.myStage === 'final' ? 'warning' : 'brand'}>
-                          <ClipboardCheck className="size-3" aria-hidden="true" />
-                          {item.myStage === 'final' ? '最終承認（社内）' : 'レビュー（第 1 段）'}
-                        </Badge>
-                      </TD>
-                      <TD className="tnum">版 {item.targetVersionNo ?? '—'}</TD>
-                      <TD>{item.requestedByName}</TD>
-                      <TD className="text-[12px]">{formatJst(item.createdAt)}</TD>
+              <div className="max-h-[60vh] overflow-auto">
+                <Table>
+                  <THead className="sticky top-0 z-10 bg-surface">
+                    <TR>
+                      <TH>節</TH>
+                      <TH>プロジェクト</TH>
+                      <TH>あなたの段階</TH>
+                      <TH>審査する版</TH>
+                      <TH>依頼者</TH>
+                      <TH>依頼日時</TH>
                     </TR>
-                  ))}
-                </TBody>
-              </Table>
+                  </THead>
+                  <TBody>
+                    {myReviews.awaitingMe.map((item) => (
+                      <TR key={item.id}>
+                        <TD>
+                          <Link
+                            href={`/enterprise/disclosure-projects/${item.projectId}/blocks/${item.blockId}`}
+                            className="font-medium text-brand-700 underline-offset-2 hover:underline"
+                          >
+                            {item.blockTitle}
+                          </Link>
+                        </TD>
+                        <TD className="text-[12px] text-ink-muted">{item.projectName}</TD>
+                        <TD>
+                          <Badge tone={item.myStage === 'final' ? 'warning' : 'brand'}>
+                            <ClipboardCheck className="size-3" aria-hidden="true" />
+                            {item.myStage === 'final' ? '最終承認（社内）' : 'レビュー（第 1 段）'}
+                          </Badge>
+                        </TD>
+                        <TD className="tnum">版 {item.targetVersionNo ?? '—'}</TD>
+                        <TD>{item.requestedByName}</TD>
+                        <TD className="text-[12px]">{formatJst(item.createdAt)}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </div>
             )}
             {myReviews.returnedToMe.length > 0 && (
               <div className="border-t border-line px-3 py-2">
@@ -176,49 +179,51 @@ export default async function WorkflowsPage({
               icon={<ListTodo className="size-5" aria-hidden="true" />}
             />
           ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>タスク</TH>
-                  <TH>対象</TH>
-                  <TH>優先度</TH>
-                  <TH>期限</TH>
-                  <TH>状態</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {visibleTasks.map((task) => {
-                  const remaining = daysUntilJst(task.dueDate, today);
-                  const overdue = isOverdue(task.dueDate, today);
-                  return (
-                    <TR key={task.id}>
-                      <TD>{task.title}</TD>
-                      <TD className="text-[11px] text-ink-muted">{task.targetType}</TD>
-                      <TD>
-                        <PriorityBadge priority={task.priority} />
-                      </TD>
-                      <TD>
-                        <span className={overdue ? 'font-medium text-danger' : ''}>
-                          {formatJstDate(task.dueDate)}
-                        </span>
-                        {remaining !== null && (
-                          <span className="ml-1 text-[11px] text-ink-muted">
-                            {overdue
-                              ? `（${Math.abs(remaining)} 日超過）`
-                              : `（あと ${remaining} 日）`}
+            <div className="max-h-[60vh] overflow-auto">
+              <Table>
+                <THead className="sticky top-0 z-10 bg-surface">
+                  <TR>
+                    <TH>タスク</TH>
+                    <TH>対象</TH>
+                    <TH>優先度</TH>
+                    <TH>期限</TH>
+                    <TH>状態</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {visibleTasks.map((task) => {
+                    const remaining = daysUntilJst(task.dueDate, today);
+                    const overdue = isOverdue(task.dueDate, today);
+                    return (
+                      <TR key={task.id}>
+                        <TD>{task.title}</TD>
+                        <TD className="text-[11px] text-ink-muted">
+                          {taskTargetTypeLabel(task.targetType)}
+                        </TD>
+                        <TD>
+                          <PriorityBadge priority={task.priority} />
+                        </TD>
+                        <TD>
+                          <span className={overdue ? 'font-medium text-danger' : ''}>
+                            {formatJstDate(task.dueDate)}
                           </span>
-                        )}
-                      </TD>
-                      <TD>
-                        <Badge tone={task.status === 'in_progress' ? 'brand' : 'neutral'}>
-                          {task.status}
-                        </Badge>
-                      </TD>
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
+                          {remaining !== null && (
+                            <span className="ml-1 text-[11px] text-ink-muted">
+                              {overdue
+                                ? `（${Math.abs(remaining)} 日超過）`
+                                : `（あと ${remaining} 日）`}
+                            </span>
+                          )}
+                        </TD>
+                        <TD>
+                          <TaskStatusBadge status={task.status} />
+                        </TD>
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </div>
           )}
         </Card>
 

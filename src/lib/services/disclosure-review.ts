@@ -9,6 +9,7 @@ import {
   REVIEW_EVENT_TYPE_LABELS,
   REVIEW_REQUEST_STATUS_LABELS,
   REVIEW_STAGE_LABELS,
+  applicabilityDecisionChangedSince,
   canCompleteReview,
   canFinalApprove,
   reviewEventIdempotencyKey,
@@ -24,6 +25,7 @@ import {
   CLEARED_WORKING_COLUMNS,
   currentVersionBody,
   evaluateBlockBlockersFor,
+  inheritedContributors,
   isForeignWorkingBody,
   loadBlock,
   loadBlockVersion,
@@ -33,6 +35,7 @@ import {
   parseBlockBody,
   sortReviewEvents,
   validateBodyRefs,
+  versionAuthors,
   VERSION_UNAVAILABLE_MESSAGE,
   BlockRefValidationError,
   type EditorMember,
@@ -373,11 +376,15 @@ export async function requestReview(
     if (issues.length > 0) throw new BlockRefValidationError(issues);
   }
   // 提出する版の本文を書いた人（作成者と自動保存した人）は、レビュー・最終承認に指名できない
+  // 新しい版を作る場合も、土台の版を書いた人を引き継ぐ（appendBlockVersion と同じ規則）
   const writers = new Set<Uuid>(
     needsNewVersion
-      ? [ctx.userId, ...(block.workingContributorIds ?? [])]
+      ? [
+          ctx.userId,
+          ...inheritedContributors(block, current.version ? [current.version] : [], ctx.userId),
+        ]
       : current.version
-        ? [current.version.createdBy, ...(current.version.contributorUserIds ?? [])]
+        ? versionAuthors(current.version)
         : [],
   );
   if (reviewerUserId && writers.has(reviewerUserId)) {
@@ -758,6 +765,27 @@ export async function finalApprove(
         code: 'scope_changed',
         message:
           'レビュー依頼の後に報告範囲（報告主体・期間・対象範囲）が変更されました。差し戻して、変更後の範囲で本文を確認してください。',
+      },
+    ]);
+  }
+  // 依頼の後に節の基準の適用判断を確定し直したなら、その判断で本文を見直してから承認する
+  // （依頼は判断の版を固定する §10.1。最終承認で確かめ直す §10.3）
+  const [projectFramework] = await db.select('projectFrameworks', {
+    where: {
+      organizationId: ctx.workspace.organizationId,
+      projectId: block.projectId,
+      frameworkVersionId: block.frameworkVersionId,
+    },
+  });
+  if (
+    projectFramework &&
+    applicabilityDecisionChangedSince(request, projectFramework.currentDecisionId)
+  ) {
+    throw new ReviewBlockedError([
+      {
+        code: 'applicability_changed',
+        message:
+          'レビュー依頼の後に適用判断が更新されました。差し戻して、更新後の適用判断で本文を確認してください。',
       },
     ]);
   }

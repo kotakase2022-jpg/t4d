@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookText, FilePlus2, History, Search, Quote } from 'lucide-react';
+import { BookText, FilePlus2, History, Quote, Search, Tag } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -155,9 +155,9 @@ export default async function NarrativesPage({
               icon={<BookText className="size-5" aria-hidden="true" />}
             />
           ) : (
-            <div className="t4d-scroll-x">
+            <div className="t4d-scroll-x max-h-[70vh] overflow-y-auto">
               <Table>
-                <THead>
+                <THead className="sticky top-0 z-10 bg-surface">
                   <TR>
                     <TH>題名</TH>
                     <TH>年度・対象範囲</TH>
@@ -196,6 +196,7 @@ export default async function NarrativesPage({
                             )}
                             {row.record.tags.map((t) => (
                               <Badge key={t} tone="outline">
+                                <Tag className="size-3" aria-hidden="true" />
                                 {t}
                               </Badge>
                             ))}

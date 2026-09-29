@@ -341,6 +341,11 @@ export interface MetricAggregate {
    * 画面は 0 ではなく「未入力」と表示する（W0 O4）
    */
   valueCount: number;
+  /**
+   * 連結値に入った当年の実績値の行数（連結係数が 0 より大きい拠点の行だけ）。
+   * 持分法・連結対象外の拠点にしか値が無い年度は 0 で、連結値は 0 ではなく「未入力」になる
+   */
+  consolidatedValueCount: number;
   /** 全拠点の単純合計（係数・控除前） */
   simpleSum: number;
   /** 連結係数（持分）適用後 */
@@ -427,6 +432,10 @@ export async function computeConsolidatedAggregation(
     // 未入力・対象外などの行は足さない（`?? 0` で 0 として足していた。W0 O4）
     const rows = current.filter((dp) => dp.metricId === metric.id && isCountedInTotals(dp));
     const actual = sumValues(rows, 'actual');
+    const consolidatedValueCount = sumValues(
+      rows.filter((dp) => factorOf(dp) > 0),
+      'actual',
+    ).valueCount;
     const simpleSum = actual.total ?? 0;
     const ownershipAdjusted = sumValues(rows, 'actual', factorOf).total ?? 0;
 
@@ -521,6 +530,7 @@ export async function computeConsolidatedAggregation(
     results.push({
       metric,
       valueCount: actual.valueCount,
+      consolidatedValueCount,
       simpleSum: round2(simpleSum),
       ownershipAdjusted: round2(ownershipAdjusted),
       intercompanyEliminated: round2(intercompanyEliminated),
@@ -561,7 +571,9 @@ export function consolidatedTrendSeries(
 ): TrendPoint[] {
   return trend.map((entry) => {
     const agg = entry.metrics.find((m) => m.metric.code === code) ?? null;
-    const hasValue = agg !== null && (agg.valueCount > 0 || agg.estimates.length > 0);
+    // 連結値に入る値（連結対象の拠点の実績か推計）が無ければ値なし。持分法・対象外の拠点の値だけでは
+    // 連結値は 0 になるが、それは「0 を集計した」のではない
+    const hasValue = agg !== null && (agg.consolidatedValueCount > 0 || agg.estimates.length > 0);
     return {
       period: entry.period,
       metric: agg?.metric ?? null,
@@ -588,12 +600,19 @@ export async function loadConsolidatedTrend(
 ): Promise<ConsolidatedTrendEntry[]> {
   const organizationId = ctx.workspace.organizationId;
 
-  const [metrics, approved] = await Promise.all([
+  const [metrics, approved, units] = await Promise.all([
     db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),
     db.select('dataPoints', {
       where: { organizationId, status: 'approved', deletedAt: { isNull: true } },
     }),
+    db.select('units', { where: { organizationId, deletedAt: { isNull: true } } }),
   ]);
+  const unitById = new Map(units.map((u) => [u.id, u]));
+  /** 連結値に入る拠点の行か（持分法・連結対象外の拠点の値だけでは連結の実績にならない） */
+  const consolidates = (dp: DataPoint) => {
+    const unit = unitById.get(dp.unitId);
+    return unit ? consolidationFactor(unit) > 0 : true;
+  };
   const metricIds = new Set(
     metricCodes
       .map((code) => metrics.find((m) => m.code === code)?.id)
@@ -602,7 +621,7 @@ export async function loadConsolidatedTrend(
   // 値の無い行（未入力・対象外など）しか無い年度は「実績あり」に数えない
   const periodsWithData = new Set(
     approved
-      .filter((dp) => metricIds.has(dp.metricId) && hasUsableValue(dp))
+      .filter((dp) => metricIds.has(dp.metricId) && hasUsableValue(dp) && consolidates(dp))
       .map((dp) => dp.reportingPeriodId),
   );
 

@@ -33,6 +33,11 @@ export interface DemoEdit {
   id: string;
   /** 変更後の列（部分） */
   v: Record<string, unknown>;
+  /**
+   * 追記した順番（大きいほど新しい）。チャンクへは空きのあるところへ詰めるため、
+   * 読んだ順が追記の順と一致しない。押し出す順（古いものから）を保つのに使う
+   */
+  n?: number;
 }
 
 /**
@@ -221,6 +226,10 @@ const APPEND_ONLY_TABLES: ReadonlySet<string> = new Set([
   'reviewEvents',
   'recheckDecisions',
   'kpiTargets',
+  // 数値の版と適用判断の記録も DB では追記専用（0014 data_point_versions_immutable・
+  // 0035 project_framework_decisions_immutable）。Cookie から承認済みの版の値を書き換えさせない
+  'dataPointVersions',
+  'projectFrameworkDecisions',
 ]);
 
 /**
@@ -291,17 +300,33 @@ export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
     if (rest.length === pending.length) break;
     pending = rest;
   }
+  // 最後まで受け付けられなかった節の編集: レビューの状態だけが依頼と合わない（依頼の編集が
+  // Cookie から押し出された等）なら、状態を下書きに戻して他の変更（現在の版・題名・担当）は残す。
+  // 状態を残すと「レビュー依頼中」なのに取り下げる依頼が無く、節を編集できなくなる
+  for (const edit of pending) {
+    if (edit.t === 'disclosureBlocks') applyOne(db, edit, [], { lenientBlockStatus: true });
+  }
+}
+
+interface ApplyOptions {
+  /** 節のレビュー状態が依頼と合わないとき、編集を捨てずに状態を下書きへ戻して受け付ける */
+  lenientBlockStatus?: boolean;
 }
 
 /** 1 件を適用する。規則に合わず受け付けなかったら false */
-function applyOne(db: FixtureDb, edit: DemoEdit, pendingRequests: readonly DemoEdit[]): boolean {
+function applyOne(
+  db: FixtureDb,
+  edit: DemoEdit,
+  pendingRequests: readonly DemoEdit[],
+  options: ApplyOptions = {},
+): boolean {
   const rows = db[edit.t as TableName] as unknown as Array<Record<string, unknown>> | undefined;
   if (!Array.isArray(rows)) return true;
   const index = rows.findIndex((r) => r.id === edit.id);
   const row = index === -1 ? undefined : rows[index];
   if (!row && !('id' in edit.v)) return true;
   const next = normalizeLegacyRow(edit.t, row ? { ...row, ...edit.v } : { ...edit.v });
-  if (!acceptEdit(db, edit.t, row, next, pendingRequests)) return false;
+  if (!acceptEdit(db, edit.t, row, next, pendingRequests, options)) return false;
   if (row) {
     rows[index] = next;
   } else {
@@ -360,27 +385,90 @@ function hasEvent(
   );
 }
 
+/**
+ * 記録を受け付けられる依頼の状態（0042 の t4d.enforce_review_event と同じ規則）。
+ *
+ * 依頼の行がこのインスタンスに既にあれば、記録の前の状態を見る（状態は記録の後にしか進まない）。
+ * まだ無い（別インスタンスで作られ、Cookie の依頼の編集だけがある）場合、編集は最新の状態に
+ * まとめられているため、記録の後に到達しうる状態かを見る。差し戻して終わった依頼に承認を足すなど、
+ * 起こりえない組み合わせを受け付けない
+ */
+function requestStatusAllows(
+  event: Pick<ReviewEvent, 'eventType' | 'stage'>,
+  status: ReviewRequest['status'],
+  applied: boolean,
+): boolean {
+  if (applied) {
+    switch (event.eventType) {
+      case 'requested':
+      case 'review_completed':
+        return status === 'open';
+      case 'approved':
+        return status === 'reviewed';
+      case 'returned':
+        return event.stage === 'review' ? status === 'open' : status === 'reviewed';
+      case 'withdrawn':
+        return status === 'open' || status === 'reviewed';
+      default:
+        return false;
+    }
+  }
+  switch (event.eventType) {
+    case 'requested':
+      return true;
+    case 'review_completed':
+      return status !== 'open';
+    case 'approved':
+      return status === 'approved';
+    case 'returned':
+      return status === 'returned';
+    case 'withdrawn':
+      return status === 'withdrawn';
+    default:
+      return false;
+  }
+}
+
 function acceptReviewEvent(
   db: FixtureDb,
   event: ReviewEvent,
   pendingRequests: readonly DemoEdit[],
 ): boolean {
   // 依頼の行がまだ適用されていなければ、同じ Cookie の依頼の編集（依頼時点の内容は変わらない）を見る
+  const applied = db.reviewRequests.find((r) => r.id === event.reviewRequestId);
   const pending = pendingRequests.find((e) => e.id === event.reviewRequestId);
-  const request =
-    db.reviewRequests.find((r) => r.id === event.reviewRequestId) ??
-    (pending ? (pending.v as unknown as ReviewRequest) : undefined);
+  const request = applied ?? (pending ? (pending.v as unknown as ReviewRequest) : undefined);
   if (!request || request.organizationId !== event.organizationId) return false;
   if (event.targetVersionId !== request.targetVersionId) return false;
+  if (!requestStatusAllows(event, request.status, applied !== undefined)) return false;
+  // 指名: レビュー担当・最終承認者を指名した依頼は、その人の判断だけを受け付ける
+  const reviewStage =
+    event.eventType === 'review_completed' ||
+    (event.eventType === 'returned' && event.stage === 'review');
+  const finalStage =
+    event.eventType === 'approved' || (event.eventType === 'returned' && event.stage === 'final');
+  if (reviewStage && request.reviewerUserId && request.reviewerUserId !== event.actorUserId) {
+    return false;
+  }
+  if (finalStage && request.approverUserId && request.approverUserId !== event.actorUserId) {
+    return false;
+  }
   const permissions = memberPermissions(db, event.organizationId, event.actorUserId);
   if (event.eventType === 'returned') {
     if (!event.reason?.trim() || !event.paragraphId?.trim()) return false;
-    return (
-      permissions.has('enterprise.disclosure.write') ||
-      permissions.has('enterprise.disclosure.approve')
-    );
+    if (event.actorUserId === request.requestedBy) return false;
+    return event.stage === 'review'
+      ? permissions.has('enterprise.disclosure.write')
+      : permissions.has('enterprise.disclosure.approve');
   }
-  if (event.eventType === 'requested' || event.eventType === 'withdrawn') {
+  if (event.eventType === 'withdrawn') {
+    const block = db.disclosureBlocks.find((b) => b.id === request.targetId);
+    if (event.actorUserId !== request.requestedBy && event.actorUserId !== block?.ownerUserId) {
+      return false;
+    }
+    return permissions.has('enterprise.disclosure.write');
+  }
+  if (event.eventType === 'requested') {
     return permissions.has('enterprise.disclosure.write');
   }
   // レビュー完了・最終承認: 依頼者・版の作成者・本文を書いた人ではないこと
@@ -460,6 +548,10 @@ function acceptReviewRequest(
     ) {
       return false;
     }
+    // 範囲の改訂番号はプロジェクトの番号を写したもの（0042 は DB が写す）。先の番号を名乗って
+    // 範囲の変更後の再確認を外させない
+    const project = db.disclosureProjects.find((p) => p.id === next.projectId);
+    if (!project || (next.projectScopeRevision ?? 0) > (project.scopeRevision ?? 0)) return false;
   }
   switch (next.status) {
     case 'open':
@@ -477,34 +569,68 @@ function acceptReviewRequest(
   }
 }
 
+/** 節の状態が求める依頼の状態（その依頼の対象版は submittedVersionId） */
+const BLOCK_REVIEW_REQUEST_STATUSES: Partial<
+  Record<DisclosureBlock['status'], ReadonlyArray<ReviewRequest['status']>>
+> = {
+  review_requested: ['open'],
+  approval_pending: ['reviewed'],
+  returned: ['returned'],
+};
+
+function hasRequestFor(
+  db: FixtureDb,
+  block: Pick<DisclosureBlock, 'id'>,
+  versionId: Uuid | null,
+  statuses: ReadonlyArray<ReviewRequest['status']>,
+  eventType?: ReviewEvent['eventType'],
+): boolean {
+  return db.reviewRequests.some(
+    (r) =>
+      r.targetId === block.id &&
+      r.targetVersionId === versionId &&
+      statuses.includes(r.status) &&
+      (eventType === undefined || hasEvent(db, r, eventType)),
+  );
+}
+
 function acceptBlock(
   db: FixtureDb,
   existing: DisclosureBlock | undefined,
   next: DisclosureBlock,
+  options: ApplyOptions,
 ): boolean {
   const before = existing ?? { status: 'draft', approvedVersionId: null };
   const approvalChanged =
     (next.approvedVersionId !== null && next.approvedVersionId !== before.approvedVersionId) ||
     (next.status === 'approved' && before.status !== 'approved');
   if (approvalChanged) {
-    const approvedVersionId = next.approvedVersionId;
-    if (!approvedVersionId) return false;
-    const recorded = db.reviewRequests.some(
-      (r) =>
-        r.targetId === next.id &&
-        r.targetVersionId === approvedVersionId &&
-        hasEvent(db, r, 'approved'),
-    );
-    if (!recorded) return false;
+    // 承認済みにできるのは、最終承認で終わった依頼（記録あり）の版だけ（0042 のトリガと同じ）。
+    // 差し戻して終わった依頼に承認の記録を足しても承認済みにはできない
+    if (
+      !next.approvedVersionId ||
+      !hasRequestFor(db, next, next.approvedVersionId, ['approved'], 'approved')
+    ) {
+      return false;
+    }
   }
-  if (next.status === 'approval_pending' && before.status !== 'approval_pending') {
-    const recorded = db.reviewRequests.some(
-      (r) =>
-        r.targetId === next.id &&
-        r.targetVersionId === next.submittedVersionId &&
-        hasEvent(db, r, 'review_completed'),
+  // レビュー中・差戻しの状態は、その状態の依頼があるときだけ（依頼が押し出されて無いまま
+  // 「レビュー依頼中」だけが残ると、取り下げる依頼が無く節を編集できなくなる）
+  const required = BLOCK_REVIEW_REQUEST_STATUSES[next.status];
+  if (required && next.status !== before.status) {
+    const recorded = hasRequestFor(
+      db,
+      next,
+      next.submittedVersionId,
+      required,
+      next.status === 'approval_pending' ? 'review_completed' : undefined,
     );
-    if (!recorded) return false;
+    if (!recorded) {
+      if (!options.lenientBlockStatus) return false;
+      // 承認済みの版（approvedVersionId）はそのまま残る。下書きは「承認後に修正中」と同じ状態
+      next.status = 'draft';
+      next.submittedVersionId = existing?.submittedVersionId ?? null;
+    }
   }
   return true;
 }
@@ -515,6 +641,7 @@ function acceptEdit(
   existing: Record<string, unknown> | undefined,
   next: Record<string, unknown>,
   pendingRequests: readonly DemoEdit[],
+  options: ApplyOptions = {},
 ): boolean {
   if (existing && APPEND_ONLY_TABLES.has(table)) return false;
   switch (table) {
@@ -526,11 +653,19 @@ function acceptEdit(
         existing as unknown as ReviewRequest | undefined,
         next as unknown as ReviewRequest,
       );
+    case 'disclosureProjects':
+      // 範囲の改訂番号は下げられない（0042 の t4d.guard_project_scope_revision と同じ）
+      return (
+        !existing ||
+        ((next as { scopeRevision?: number }).scopeRevision ?? 0) >=
+          ((existing as { scopeRevision?: number }).scopeRevision ?? 0)
+      );
     case 'disclosureBlocks':
       return acceptBlock(
         db,
         existing as unknown as DisclosureBlock | undefined,
         next as unknown as DisclosureBlock,
+        options,
       );
     default:
       return true;

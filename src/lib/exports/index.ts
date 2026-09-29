@@ -250,8 +250,20 @@ export const EXPORT_CONTENT_TYPES = {
 
 export type ExportFormat = keyof typeof EXPORT_CONTENT_TYPES;
 
-/** RFC 5987 に沿った Content-Disposition（日本語ファイル名対応）。 */
+/**
+ * RFC 5987 / 6266 に沿った Content-Disposition（日本語ファイル名対応）。
+ *
+ * ファイル名は利用者が付けた資料名から来る。引用符（"）やバックスラッシュをそのまま
+ * 引用文字列へ入れると、名前の中で引用が閉じて filename* などの別の引数を注入でき、
+ * 画面に出ている名前と違う名前・拡張子（.html / .exe など）で保存させられる。
+ * ASCII の代替名では引用を閉じる文字を _ に置き換え、filename* では RFC 5987 の
+ * attr-char に入らない記号（' ( ) * !）も % 符号化する
+ */
 export function contentDisposition(fileName: string): string {
-  const ascii = fileName.replace(/[^\x20-\x7e]/g, '_');
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(fileName).replace(
+    /['()*!]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }

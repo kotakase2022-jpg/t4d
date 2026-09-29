@@ -36,6 +36,7 @@ import type { Uuid } from '@/types/domain';
 function persistedColumns(table: TableName, row: unknown): Record<string, unknown> {
   const record = row as Record<string, unknown>;
   if (table === 'disclosureBlocks') return withoutWorkingBody(record);
+  if (isDisclosureReviewNotification(table, row)) return { ...record, body: '' };
   if (table !== 'aiRuns' || record.featureType !== 'importMapping') return record;
   return { ...record, outputJson: {} };
 }
@@ -51,11 +52,13 @@ function persistedColumns(table: TableName, row: unknown): Record<string, unknow
 const WORKING_COLUMNS = ['workingBody', 'workingBaseVersionId', 'workingSavedAt'] as const;
 
 /**
- * Cookie へ残さない行。レビューの通知（依頼・差戻し・承認の知らせ）は、レビューの状態そのもの
- * （依頼・記録・節）から画面が作れるため持ち回る価値が低く、1 件あたりが大きい。
- * 持ち回すと、デモの 1 回の流れで依頼・承認・取込の結果を Cookie から押し出していた
+ * 開示のレビューの通知（依頼・差戻し・承認の知らせ）。
+ *
+ * 以前は Cookie へ載せず、別インスタンスでは「レビュー担当へ通知しました」と表示したのに
+ * 通知が届いていなかった（ベルの件数も一覧も空）。本文（body）は長く、題名とリンク（href）で
+ * 用件が分かるため、本文だけを空にして持ち回す（1 件あたりの容量を抑え、他の操作を押し出さない）
  */
-function skipsCookie(table: TableName, row: unknown): boolean {
+function isDisclosureReviewNotification(table: TableName, row: unknown): boolean {
   if (table !== 'notifications') return false;
   const record = row as { category?: string; href?: string };
   return (
@@ -115,7 +118,6 @@ export class DemoDbClient implements DbClient {
     if (isPersistedTable(table)) {
       for (const row of cloned) {
         const record = row as unknown as { id?: string };
-        if (skipsCookie(table, row)) continue;
         if (record.id) {
           await appendDemoEdit(table, record.id, persistedColumns(table, row));
         }
@@ -142,6 +144,13 @@ export class DemoDbClient implements DbClient {
 
   async softDelete<K extends TableName>(table: K, id: Uuid, at: string): Promise<void> {
     await this.update(table, id, { deletedAt: at } as unknown as Partial<Row<K>>);
+  }
+
+  /** デモリセット専用: メモリにある行の ID（組織を問わない）。Cookie に残った孤立した編集の判定に使う */
+  allRowIds(table: TableName): string[] {
+    return (this.table(table) as unknown as Array<{ id?: string }>).flatMap((r) =>
+      r.id ? [r.id] : [],
+    );
   }
 
   /**

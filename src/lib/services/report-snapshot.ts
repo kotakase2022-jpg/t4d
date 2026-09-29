@@ -17,6 +17,8 @@ import {
   DISCLOSURE_LANGUAGE_LABELS,
   FRAMEWORK_COVERAGE_STATUS_LABELS,
   REPORT_SNAPSHOT_KIND_LABELS,
+  VALUE_KIND_LABELS,
+  applicabilityDecisionChangedSince,
   evaluateBlockBlockers,
   type BlockBlockerCode,
 } from '@/lib/domain/disclosure-status';
@@ -108,6 +110,8 @@ export type SnapshotIssueCode =
   | 'metric_not_approved'
   | 'metric_value_absent'
   | 'metric_missing'
+  /** 推計・目標の数値を引用している（止めない注意。本文・出力では区分を添える） */
+  | 'metric_not_actual'
   | 'stale_narrative_refs'
   | 'narrative_missing_fields'
   /** 財務的影響を定量化しない理由（不足ではなく、理由そのものを示す注意） */
@@ -606,12 +610,21 @@ async function assemble(
       { organizationId },
     ),
   ]);
-  const files = await selectByIds(
-    db,
-    'files',
-    fileVersions.map((v) => v.fileId),
-    { organizationId },
-  );
+  const [files, currentDpVersions] = await Promise.all([
+    selectByIds(
+      db,
+      'files',
+      fileVersions.map((v) => v.fileId),
+      { organizationId },
+    ),
+    // 引用した数値の現在の版（再確認の「維持」が、新しい版の承認より前の判断かを見るため）
+    selectByIds(
+      db,
+      'dataPointVersions',
+      dataPoints.flatMap((d) => (d.currentVersionId ? [d.currentVersionId] : [])),
+      { organizationId },
+    ),
+  ]);
   const [metrics, units, periods] = await Promise.all([
     selectByIds(
       db,
@@ -646,6 +659,14 @@ async function assemble(
   const approvedVersionIds = new Set(
     approvals.map((a) => a.targetVersionId).filter((id): id is Uuid => id !== null),
   );
+
+  const currentDpVersionById = new Map(currentDpVersions.map((v) => [v.id, v]));
+  /** Data Point の現在の版が承認済みか（disclosure-block.ts の isVersionApproved と同じ規則） */
+  const currentVersionApproved = (dp: DataPoint): boolean => {
+    if (!dp.currentVersionId) return false;
+    if (dp.status === 'approved' || approvedVersionIds.has(dp.currentVersionId)) return true;
+    return currentDpVersionById.get(dp.currentVersionId)?.status === 'approved';
+  };
 
   // --- 数値の写し ---------------------------------------------------------------
   const versionApproved = (v: DataPointVersion): boolean => {
@@ -834,6 +855,19 @@ async function assemble(
       if ((project.scopeRevision ?? 0) > 0 && revision < (project.scopeRevision ?? 0)) {
         issues.push({ code: 'scope_changed', message: SCOPE_RECHECK_MESSAGE });
       }
+      // 承認した依頼が固定した適用判断の後に、節の基準の判断を確定し直した（§10.1・§10.3）
+      const pf = projectFrameworks.find((p) => p.frameworkVersionId === block.frameworkVersionId);
+      if (
+        pf &&
+        approvedIn.length > 0 &&
+        approvedIn.every((r) => applicabilityDecisionChangedSince(r, pf.currentDecisionId))
+      ) {
+        issues.push({
+          code: 'applicability_changed',
+          message:
+            '最終承認の後に適用判断が更新されました。更新後の判断で本文を確認し、再承認を受けてください。',
+        });
+      }
     }
     // 確定で承認済みの版が無い節は「未承認」だけを示す（本文の有無は承認済みの版の話ではない）
     const evaluateBody = version !== null || kind === 'review_draft';
@@ -841,10 +875,16 @@ async function assemble(
     // 引用した数値・定性情報の再確認。原稿編集・レビュー依頼（disclosure-recheck.ts）と
     // 同じ規則（domain/disclosure-block.ts の isOldRefKept）で判定する: 節単位で、
     // その組み合わせの最後の判断が「引用中の版を維持」なら再確認済み
-    const keptOld = (refKind: 'metric' | 'narrative', oldRefId: Uuid, newRefId: Uuid | null) =>
+    // 新しい版が未承認のときの「維持」は、その版が承認されたら無効（原稿画面と同じ）
+    const keptOld = (
+      refKind: 'metric' | 'narrative',
+      oldRefId: Uuid,
+      newRefId: Uuid | null,
+      newApproved: boolean,
+    ) =>
       version !== null &&
       newRefId !== null &&
-      isOldRefKept(rechecks, { blockId: block.id, refKind, oldRefId, newRefId });
+      isOldRefKept(rechecks, { blockId: block.id, refKind, oldRefId, newRefId, newApproved });
 
     const metricRefs = body.paragraphs.flatMap((p) =>
       p.children.flatMap((inline) => {
@@ -856,7 +896,12 @@ async function assemble(
           {
             dataPointId: inline.dataPointId,
             dataPointVersionId: inline.dataPointVersionId,
-            currentVersionId: keptOld('metric', inline.dataPointVersionId, current)
+            currentVersionId: keptOld(
+              'metric',
+              inline.dataPointVersionId,
+              current,
+              dp ? currentVersionApproved(dp) : false,
+            )
               ? inline.dataPointVersionId
               : current,
             label: mv ? formatMetricLabel(mv) : undefined,
@@ -901,6 +946,12 @@ async function assemble(
           message: `引用した数値が承認済みではありません（${formatMetricLabel(mv)} 版 ${mv.versionNo}）。`,
         });
       }
+      if (mv.valueKind === 'estimate' || mv.valueKind === 'target') {
+        issues.push({
+          code: 'metric_not_actual',
+          message: `${VALUE_KIND_LABELS[mv.valueKind]}の数値を引用しています（${formatMetricLabel(mv)} 版 ${mv.versionNo}）。本文・出力では「${VALUE_KIND_LABELS[mv.valueKind]}」と添えて表示します。`,
+        });
+      }
       if (mv.availabilityStatus !== 'value_present') {
         issues.push({
           code: 'metric_value_absent',
@@ -918,7 +969,12 @@ async function assemble(
           if (
             record.currentVersionId !== null &&
             record.currentVersionId !== nv.id &&
-            !keptOld('narrative', nv.id, record.currentVersionId)
+            !keptOld(
+              'narrative',
+              nv.id,
+              record.currentVersionId,
+              record.confirmedVersionId === record.currentVersionId,
+            )
           ) {
             issues.push({
               code: 'stale_narrative_refs',
@@ -1034,6 +1090,7 @@ async function assemble(
   const INFO_ONLY: ReadonlySet<SnapshotIssueCode> = new Set([
     'narrative_missing_fields',
     'narrative_not_quantified',
+    'metric_not_actual',
   ]);
   for (const block of snapshotBlocks) {
     for (const issue of block.issues) {

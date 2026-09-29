@@ -5,17 +5,22 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
+  Asterisk,
   BarChart3,
   CheckCircle2,
+  CircleDashed,
   CircleDot,
   Equal,
   FileText,
+  Hash,
+  History,
   Lock,
   MessageSquare,
   Minus,
   PencilLine,
   Plus,
   Quote,
+  Tag,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -85,7 +90,7 @@ function JumpLinks({ ids, onJump }: { ids: string[]; onJump: (id: string) => voi
           key={id}
           type="button"
           onClick={() => onJump(id)}
-          className="rounded-t4d px-1 text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+          className="rounded-t4d px-1 text-brand-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
         >
           段落 {id}
         </button>
@@ -169,10 +174,16 @@ function RequirementsTab({ data, selected, onToggleSelect, canSelectForAi }: Rig
             <li key={r.id} className="rounded-t4d border border-line p-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 <Badge tone="outline" className="font-mono">
+                  <Hash className="size-3" aria-hidden="true" />
                   {r.code}
                 </Badge>
                 <span className="text-ink-muted">{r.section}</span>
                 <Badge tone={r.required ? 'brand' : 'neutral'}>
+                  {r.required ? (
+                    <Asterisk className="size-3" aria-hidden="true" />
+                  ) : (
+                    <CircleDashed className="size-3" aria-hidden="true" />
+                  )}
                   {r.required ? '必須' : '任意'}
                 </Badge>
               </div>
@@ -226,7 +237,9 @@ function EvidenceTab({
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Quote className="size-3.5 text-brand-700" aria-hidden="true" />
                   <span className="font-medium text-ink">{n.title}</span>
-                  <Badge tone="outline">版 {n.versionNo}</Badge>
+                  <Badge tone="outline">
+                    <History className="size-3" aria-hidden="true" />版 {n.versionNo}
+                  </Badge>
                   <Badge tone={n.confirmed ? 'success' : 'warning'}>
                     {n.confirmed ? (
                       <CheckCircle2 className="size-3" aria-hidden="true" />
@@ -307,6 +320,7 @@ function EvidenceTab({
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                 <Badge tone={a.usagePurpose === 'current_fact' ? 'brand' : 'neutral'}>
+                  <Tag className="size-3" aria-hidden="true" />
                   {a.usageLabel}
                 </Badge>
                 {a.fileDeleted && (
@@ -543,7 +557,7 @@ function PriorTab({ data, onJump }: RightPaneProps) {
             type="button"
             aria-pressed={view === key}
             onClick={() => setView(key)}
-            className={`px-2 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
+            className={`px-2 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 ${
               view === key
                 ? 'bg-brand-100 font-medium text-brand-900'
                 : 'text-ink-muted hover:bg-brand-50'
@@ -655,6 +669,10 @@ function PriorTab({ data, onJump }: RightPaneProps) {
 // コメント（版・段落に紐付く）
 // ----------------------------------------------------------------------
 
+/** コメントの送信・解決で通信そのものが失敗したとき。入力は残り、もう一度押せる */
+export const COMMENT_NETWORK_ERROR_MESSAGE =
+  'サーバーに接続できませんでした。入力したコメントは残っています。通信を確認して、もう一度押してください。';
+
 function CommentsTab({ data, projectId, onJump, paragraphOptions, onAnnounce }: RightPaneProps) {
   const router = useRouter();
   const canComment = data.permissions.canWrite || data.permissions.canApprove;
@@ -667,43 +685,56 @@ function CommentsTab({ data, projectId, onJump, paragraphOptions, onAnnounce }: 
   const comments = [...data.comments].sort((a, b) => Number(a.resolved) - Number(b.resolved));
   const canPostOnVersion = Boolean(data.block.currentVersionId || data.block.submittedVersionId);
 
+  // 通信そのものが失敗しても（接続断・5xx）ボタンを押せないまま止めない。入力したコメントは残す
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setPending(true);
     setError(null);
-    const result = await addReviewCommentAction({
-      projectId,
-      blockId: data.block.id,
-      paragraphId: paragraphId || null,
-      body,
-      severity,
-    });
-    setPending(false);
-    if (result.status === 'error') {
-      setError(result.message);
-      return;
+    try {
+      const result = await addReviewCommentAction({
+        projectId,
+        blockId: data.block.id,
+        paragraphId: paragraphId || null,
+        body,
+        severity,
+      });
+      if (result.status === 'error') {
+        setError(result.message);
+        return;
+      }
+      setBody('');
+      onAnnounce('コメントを追加しました。');
+      router.refresh();
+    } catch {
+      setError(COMMENT_NETWORK_ERROR_MESSAGE);
+      onAnnounce(COMMENT_NETWORK_ERROR_MESSAGE);
+    } finally {
+      setPending(false);
     }
-    setBody('');
-    onAnnounce('コメントを追加しました。');
-    router.refresh();
   };
 
   const resolve = async (commentId: string) => {
     setPending(true);
     setError(null);
-    const result = await resolveReviewCommentAction({
-      projectId,
-      blockId: data.block.id,
-      commentId,
-      note: notes[commentId] ?? '',
-    });
-    setPending(false);
-    if (result.status === 'error') {
-      setError(result.message);
-      return;
+    try {
+      const result = await resolveReviewCommentAction({
+        projectId,
+        blockId: data.block.id,
+        commentId,
+        note: notes[commentId] ?? '',
+      });
+      if (result.status === 'error') {
+        setError(result.message);
+        return;
+      }
+      onAnnounce('コメントを解決済みにしました。');
+      router.refresh();
+    } catch {
+      setError(COMMENT_NETWORK_ERROR_MESSAGE);
+      onAnnounce(COMMENT_NETWORK_ERROR_MESSAGE);
+    } finally {
+      setPending(false);
     }
-    onAnnounce('コメントを解決済みにしました。');
-    router.refresh();
   };
 
   return (
@@ -798,7 +829,7 @@ function CommentsTab({ data, projectId, onJump, paragraphOptions, onAnnounce }: 
                   <select
                     value={paragraphId}
                     onChange={(e) => setParagraphId(e.target.value)}
-                    className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
+                    className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
                   >
                     <option value="">節全体</option>
                     {paragraphOptions.map((p) => (
@@ -813,7 +844,7 @@ function CommentsTab({ data, projectId, onJump, paragraphOptions, onAnnounce }: 
                   <select
                     value={severity}
                     onChange={(e) => setSeverity(e.target.value === 'major' ? 'major' : 'info')}
-                    className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
+                    className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
                   >
                     <option value="info">参考</option>
                     <option value="major">要対応（解決するまで承認できません）</option>

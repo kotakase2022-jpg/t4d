@@ -11,7 +11,13 @@ import {
  * （report-snapshot.ts）が同じこの関数を使う。
  */
 
-const target = { blockId: 'b1', refKind: 'metric' as const, oldRefId: 'v1', newRefId: 'v2' };
+const target = {
+  blockId: 'b1',
+  refKind: 'metric' as const,
+  oldRefId: 'v1',
+  newRefId: 'v2',
+  newApproved: true,
+};
 
 function decision(
   id: string,
@@ -19,7 +25,15 @@ function decision(
   decidedAt: string,
   overrides: Partial<RecheckDecisionFacts> = {},
 ): RecheckDecisionFacts {
-  return { id, ...target, decision: decisionKind, decidedAt, ...overrides };
+  const { newApproved, ...keys } = target;
+  return {
+    id,
+    ...keys,
+    decision: decisionKind,
+    decidedAt,
+    newRefApproved: newApproved,
+    ...overrides,
+  };
 }
 
 describe('再確認の判断', () => {
@@ -63,5 +77,41 @@ describe('再確認の判断', () => {
       decision('d1', 'keep_old', '2026-08-01T00:00:00Z'),
     ];
     expect(latestRecheckDecision(decisions, target)?.id).toBe('d1');
+  });
+
+  // INV-1: 新しい版が未承認のときの「維持」は、その版が承認されたら前提が崩れる
+  it('新しい版が未承認のときに維持した判断は、その版が承認されると無効になる', () => {
+    const decisions = [
+      decision('d1', 'keep_old', '2026-08-01T00:00:00Z', { newRefApproved: false }),
+    ];
+    // まだ未承認: 維持は有効
+    expect(isOldRefKept(decisions, { ...target, newApproved: false })).toBe(true);
+    // 承認された: 維持は無効（再確認を求める）
+    expect(isOldRefKept(decisions, { ...target, newApproved: true })).toBe(false);
+    expect(latestRecheckDecision(decisions, { ...target, newApproved: true })).toBeNull();
+  });
+
+  it('新しい版が承認済みのときに維持した判断は、そのまま有効', () => {
+    const decisions = [
+      decision('d1', 'keep_old', '2026-08-01T00:00:00Z', { newRefApproved: true }),
+    ];
+    expect(isOldRefKept(decisions, { ...target, newApproved: true })).toBe(true);
+  });
+
+  it('判断の時点の承認状態が分からない維持（0042 より前の行）は、承認済みの新版には効かない', () => {
+    const legacy = [
+      decision('d1', 'keep_old', '2026-08-01T00:00:00Z', { newRefApproved: undefined }),
+    ];
+    expect(isOldRefKept(legacy, { ...target, newApproved: true })).toBe(false);
+    expect(isOldRefKept(legacy, { ...target, newApproved: false })).toBe(true);
+  });
+
+  it('無効になった維持の前の判断が、最後の有効な判断として残る', () => {
+    const decisions = [
+      decision('d1', 'return_to_owner', '2026-08-01T00:00:00Z'),
+      decision('d2', 'keep_old', '2026-08-02T00:00:00Z', { newRefApproved: false }),
+    ];
+    expect(latestRecheckDecision(decisions, { ...target, newApproved: true })?.id).toBe('d1');
+    expect(latestRecheckDecision(decisions, { ...target, newApproved: false })?.id).toBe('d2');
   });
 });

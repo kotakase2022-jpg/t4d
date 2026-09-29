@@ -2492,3 +2492,75 @@ AI 下書きは MockAIProvider（決定論的）での動作確認であり、�
 - 旧 `decideRecheckAction` / `addManualExcerptAction` はフォーム版へ移した後も互換のため残している。
 - ORCH-4 の E2E は FY2025 の SSBJ 評価行をデモのメモリに作る（再起動で消える）。
 - Cookie でレビューの記録が押し出された後の依頼・承認は、別インスタンスでは規則を満たせず適用されない。
+
+## 2026-09-29 開示優先モード 自己監査 第 2 回の指摘 38 件への対応（単独の修正担当）
+
+4 観点（不変条件・セキュリティ・回帰の正直さ・UX/a11y・永続化）の検証済み指摘を、重い順に根本原因から直した。
+ID が観点ごとに重なる（F1〜F6 が 3 組）ため、下表では観点を添える。期待値は緩めていない
+（前回の修正で逆転させた財務的影響の 3 件のテストは、元の厳しい期待値へ戻した）。commit・push・deploy はしていない。
+
+**スキーマ**: `supabase/migrations/0042_disclosure_review_designation.sql`（列 1 つの追加とトリガ関数の追加・差し替えのみ。
+ロールバック方針は `docs/known-limitations.md` §6「0042 のロールバック」）。`domain.ts` に `RecheckDecision.newRefApproved`。
+新しい表は無い（`table-names.ts` の変更なし）。`pnpm seed:generate` は差分なし。
+
+| ID                               | 内容                                                                                                                                                       | 結果                                     |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| INV-1                            | 新版が未承認のときの「維持」は、新版の承認で無効（`recheck_decisions.new_ref_approved` を DB が INSERT 時に計算。原稿・ホーム・確定が同じ `isOldRefKept`） | fixed                                    |
+| INV-2                            | 版を追記するとき、土台の版と節の現在の版の作成者・書いた人を引き継ぐ（`inheritedContributors`・DB トリガも同じ）                                           | fixed                                    |
+| INV-3 / F1（セキュリティ）       | DB: 記録は指名したレビュー担当・最終承認者だけ・依頼の状態に合うときだけ。節の承認・確定版は「承認で終わった依頼」の版だけ。Demo の Cookie も同じ規則      | fixed（RLS テスト追加）                  |
+| INV-4                            | 依頼・承認の後に適用判断を確定し直したら、最終承認と確定を止める（`applicability_changed`）                                                                | fixed                                    |
+| INV-5                            | 推計・目標の数値は本文・AI 下書き・DOCX で区分を添える。目標は AI の当年度の根拠から外す。確定前検査に注意（止めない）                                     | fixed                                    |
+| INV-6                            | 持分法・対象外の拠点の値だけの年度の連結値は 0 でなく「未入力」（`consolidatedValueCount`）                                                                | fixed                                    |
+| INV-7                            | Cookie から数値の版・適用判断の既存行を書き換えさせない（追記専用）                                                                                        | fixed                                    |
+| F2（セキュリティ）               | 範囲の改訂番号は DB が決める（下げられない）。利用者の依頼は「レビュー待ち」でだけ作れ、改訂番号は DB が写す。範囲変更後の承認・確定を DB でも拒否         | fixed（RLS テスト追加）                  |
+| F3（セキュリティ）/ F2（永続化） | リセットの印はログイン後、印の組織で開示の編集権限を持つ利用者のときだけ反映（`applyPendingDemoResetFor`）                                                 | fixed                                    |
+| F4（セキュリティ）/ F1（永続化） | リセットの世代を「時刻-乱数」にし、反映済みより新しい印だけを反映（戻し合いをしない）                                                                      | fixed                                    |
+| F5（セキュリティ）               | 自動保存・AI 採用で、別組織の行と存在しない行を同じ結果・同じ文言で断る（新しく入れた参照だけ）。AI 実行も同じ文言                                         | fixed                                    |
+| F6（セキュリティ）               | Content-Disposition で引用符・バックスラッシュを無害化し、filename* を RFC 5987 の文字だけにする。資料名の `"` は全角へ                                    | fixed                                    |
+| F1（回帰）                       | 財務的影響は理由があっても影響額が無ければ不足情報（§6.6・§8.3）。理由は横に示す                                                                           | fixed（逆転したテスト 3 件を元に戻した） |
+| F2（回帰）/ F4（永続化）         | 押し出しの知らせは表の名前を持ち、リセット・ログアウトで消える。取込の行どうしでは知らせない                                                               | fixed                                    |
+| F3（回帰）                       | SSBJ の「全要求事項」の説明を、設定で適用する基準の件数とマスターの収録件数に分けて示す                                                                    | fixed                                    |
+| F4（回帰）                       | 開示のレビューの通知を本文なしで Cookie に載せ、別インスタンスでも届く                                                                                     | fixed                                    |
+| F5（回帰）                       | ホームの進捗表・DOCX の表紙も「公開草案に基づく準備」（`frameworkLegalLabel` に 1 本化）                                                                   | fixed                                    |
+| F6（回帰）                       | OFF の組織の Evidence 画面は拡張前の入力項目・列（スキャン・Bucket）。定性情報の入口を出さない                                                             | fixed（E2E に追加）                      |
+| UX-01                            | コメントの送信・解決が通信で失敗してもボタンを戻し、理由を示す                                                                                             | fixed                                    |
+| UX-02                            | タスク・承認の状態・対象を日本語のラベル＋アイコンで                                                                                                       | fixed                                    |
+| UX-03                            | 見えないフォーカスリング（brand-100 / brand-300）を brand-600 へ。E2E の判定にコントラスト 3:1 を追加                                                      | fixed                                    |
+| UX-04                            | 節を追加・適用判断を確定のフォームは、断られても入力を残す。節のキーに pattern                                                                             | fixed                                    |
+| UX-05                            | 資料の登録・レビューの操作に送信中の表示（二度押し防止）。登録が断られてもメタデータを残す                                                                 | fixed                                    |
+| UX-06                            | 再確認の画面で根拠失効の次にすることと、段落へのリンクを示す                                                                                               | fixed                                    |
+| UX-07                            | 1366px 以上の根拠パネルの高さをスクロール領域と状態の帯に合わせる                                                                                          | fixed                                    |
+| UX-08                            | 原稿の本文を `<main>` の入れ子から `<section aria-label="本文">` へ（axe の landmark 規則を E2E に追加）                                                   | fixed                                    |
+| UX-09                            | 開示優先モードの画面のバッジにアイコン（静的検査のテストを追加）                                                                                           | fixed                                    |
+| UX-10                            | タブ・目次のリンクに「読込中」の表示（`useLinkStatus`。loading.tsx は S-11 のため置かない）                                                                | fixed                                    |
+| UX-11                            | 資料の画面の MIME 型・Version・Evidence の表記を日本語へ                                                                                                   | fixed                                    |
+| UX-12                            | 原稿・レビュー・定性情報・タスクの表の列見出しを固定                                                                                                       | fixed                                    |
+| UX-13                            | useActionState のフォームを通信失敗で壊さない（`withNetworkFallback`。プロジェクト・KPI 目標のフォームにも）                                               | fixed                                    |
+| F3（永続化）                     | Cookie のチャンクを first-fit で詰める（実演の流れで取込の数値を押し出さない）                                                                             | fixed                                    |
+| F5（永続化）                     | 依頼が押し出された「レビュー依頼中」の節は、状態だけ下書きへ戻して他の変更は戻す                                                                           | fixed                                    |
+| F6（永続化）                     | リセットで、受け付けなかった開示の編集（孤立した記録）も Cookie から取り除く                                                                               | fixed                                    |
+
+**追加・変更したテスト**: `tests/integration/self-audit-2-integrity.test.ts`（12）・`self-audit-2-demo-persistence.test.ts`（18。
+`next/headers` を差し替えて実際の Cookie の容量・押し出し・リセットの印を確かめる。実演の流れの再生を含む）・
+`tests/unit/self-audit-2-ui.test.tsx`（10）・`tests/unit/recheck-decision.test.ts`（4 追加）・`exports-and-format.test.ts`（1 追加）・
+`ssbj-settings.test.ts`（1 追加）・`tests/rls/tenant-isolation.test.ts`（0042 の 9 件）。
+既存の RLS テストのうち 0042 の状態の検査に当たる 5 件は、アプリと同じ順（記録 → 依頼の状態を進める）へ前提を直した
+（期待するエラー・結果は変えていない。冪等キーの検査は Service Role で一意制約を確かめ、利用者は状態の検査で止まることも確かめる）。
+E2E: `disclosure-first-nav`（フォーカスのコントラスト・landmark・OFF の Evidence 画面）・`zz-disclosure-project` /
+`mentions-evidence`（本文の領域の role・資料の画面の表記の変更に追従）。
+
+**テスト結果**（2026-09-29 ローカル。E2E は `E2E_PORT=3217`、ほかの重い処理と並走させず単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` 合格。`pnpm check:rls` 100 テーブル・228 ポリシーで合格。
+- `pnpm test` 100 ファイル・1170 件合格、`pnpm test:rls` 2 ファイル・245 件合格。
+- E2E: まず `zz-disclosure-project`・`disclosure-first-nav` の 13 件を実行し、強めたフォーカスの判定で 1 件が落ちた。
+  原因は `transition-colors` のボタンで枠の色が 150ms かけて白から青へ変わる途中を測っていたこと（実装の不具合ではない）。
+  判定を「落ち着くまで最大 2 秒待ってから測る」に直し、同じ 5 件が合格。その後の全件: **282 件すべて合格・9.4 分**（retries 0）。
+
+**未解決・次作業**
+
+- UX-09 は開示優先モードの画面（開示プロジェクト・定性情報・資料の画面・タスク）に限った。従来画面（SSBJ・CDP・データなど）にも
+  アイコンの無いバッジが約 80 件ある（`tests/unit/self-audit-2-ui.test.tsx` の静的検査を広げれば一覧できる）。
+- 旧 `uploadEvidenceDocumentAction` / `createBlockAction` / `confirmApplicabilityAction` はフォーム版へ移した後も互換のため残している。
+- リセットの印は、閲覧だけの利用者が先に届いたインスタンスでは反映しない（編集権限のある利用者のリクエストで反映する）。
+- 0042 より前の「維持」の判断は、新しい版が承認済みなら無効として扱う（再判断が要る）。本番 Supabase には未適用。

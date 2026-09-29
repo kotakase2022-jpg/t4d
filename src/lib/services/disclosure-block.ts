@@ -9,6 +9,7 @@ import {
   detectHandwrittenNumbers,
   diffParagraphs,
   emptyBody,
+  formatMetricDisplay,
   hasBodyContent,
   paragraphText,
   plainTextOf,
@@ -40,7 +41,6 @@ import {
 } from '@/lib/domain/narrative-template';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
-import { formatNumber } from '@/lib/format/datetime';
 import { listMembers } from '@/lib/services/identity';
 import { computeBlockFreshness, type BlockFreshness } from '@/lib/services/disclosure-recheck';
 import type { DbClient } from '@/lib/repositories/types';
@@ -340,14 +340,16 @@ export async function editingBodyOf(
 // 数値参照の表示・承認状態
 // ======================================================================
 
-/** 数値参照の表示用文字列。挿入時にこの値を本文へ写す（Fixture の metricInline と同じ規則） */
+/**
+ * 数値参照の表示用文字列。挿入時にこの値を本文へ写す（Fixture の metricInline と同じ規則）。
+ * 推計・目標の値には区分を添える（本文で実績と読ませない）
+ */
 export function metricDisplay(
-  version: Pick<DataPointVersion, 'value' | 'textValue' | 'unitOfMeasure'>,
+  version: Pick<DataPointVersion, 'value' | 'textValue' | 'unitOfMeasure'> & {
+    valueKind?: DataPointVersion['valueKind'] | null;
+  },
 ): string {
-  if (version.value !== null && !Number.isNaN(version.value)) {
-    return `${formatNumber(version.value)} ${version.unitOfMeasure}`.trim();
-  }
-  return version.textValue ?? '—';
+  return formatMetricDisplay(version);
 }
 
 /**
@@ -392,53 +394,84 @@ export const AI_RUN_UNAVAILABLE_MESSAGE =
   'AI 候補の実行記録をこのサーバーで読み込めません（デモ環境では、別のサーバーで記録した実行を参照できない場合があります）。段落はそのまま残っています。時間をおいて保存し直すか、段落を手で書き直してください。';
 
 /**
- * 別組織の行を指す参照（作業本文の自動保存・AI 候補の採用で使う）。
+ * 作業本文に新しく入れた参照のうち、この組織の行として読めないもの（自動保存・AI 候補の採用で使う）。
  *
- * 自動保存は業務上の版ではないため、存在しない版（Demo Mode で別のサーバーが作った版など）までは
- * 止めない（止めると入力中の本文を保存できなくなる）。ただし別組織の行は、保存すると
- * 鮮度の判定・原稿一覧・ホームが他社の資料名や指標名を表示してしまう（A29）ため、ここで拒否する。
+ * 別組織の行と、存在しない行は**同じ結果・同じ文言**で断る。別組織の行だけを断ると、
+ * Demo Mode（findById が全テナントの行を返す）では「他社にその ID の行があるか」を
+ * 応答の違いから調べられてしまう（A29）。Supabase Mode では RLS で他社の行が見えず、
+ * もともと両者は区別できない。
+ *
+ * 既に現在の版・作業本文にある参照は調べ直さない（入れた時点で確かめている）。
+ * 新しく入れた参照は、画面がこのサーバーで読める行から挿入したものに限られる。
+ * デモ環境で別のサーバーが作った行を挿入した直後に限り、ここで一度断られることがあるため、
+ * 本文を残したまま保存し直せる旨を示す。
  */
-export async function findForeignRefs(
+export const UNRESOLVABLE_REF_MESSAGE =
+  '引用先のデータをこのサーバーで読み込めません（別の組織のデータ、またはデモ環境で別のサーバーに保存したデータは引用できません）。本文はそのまま残っています。時間をおいて保存し直すか、引用を挿入し直してください。';
+
+export async function findUnresolvableRefs(
   db: DbClient,
   ctx: AuthorizationContext,
   body: BlockBody,
+  knownBodies: ReadonlyArray<BlockBody | null | undefined>,
 ): Promise<RefValidationIssue[]> {
   const organizationId = ctx.workspace.organizationId;
   const issues: RefValidationIssue[] = [];
-  const foreign = (row: { organizationId: Uuid } | null) =>
-    row !== null && row.organizationId !== organizationId;
+  const own = (row: { organizationId: Uuid } | null) =>
+    row !== null && row.organizationId === organizationId;
+  const known = new Set<string>();
+  for (const b of knownBodies) {
+    if (!b) continue;
+    for (const paragraph of b.paragraphs) {
+      if (paragraph.aiRunId) known.add(`ai_run:${paragraph.aiRunId}`);
+      for (const inline of paragraph.children) {
+        if (inline.t === 'metric')
+          known.add(`metric:${inline.dataPointVersionId}:${inline.dataPointId}`);
+        else if (inline.t === 'narrative') known.add(`narrative:${inline.narrativeVersionId}`);
+        else if (inline.t === 'cite') known.add(`cite:${inline.sourceAnchorId}`);
+      }
+    }
+  }
   const seen = new Set<string>();
   for (const paragraph of body.paragraphs) {
-    const push = (kind: RefValidationIssue['kind'], refId: string) => {
-      const key = `${kind}:${refId}`;
-      if (seen.has(key)) return;
+    const check = async (
+      kind: RefValidationIssue['kind'],
+      key: string,
+      refId: string,
+      resolvable: () => Promise<boolean>,
+    ) => {
+      if (known.has(key) || seen.has(key)) return;
       seen.add(key);
-      issues.push({
-        paragraphId: paragraph.id,
-        kind,
-        refId,
-        message: '別の組織のデータは引用できません。',
-      });
+      if (await resolvable()) return;
+      issues.push({ paragraphId: paragraph.id, kind, refId, message: UNRESOLVABLE_REF_MESSAGE });
     };
-    if (paragraph.aiRunId && foreign(await db.findById('aiRuns', paragraph.aiRunId))) {
-      push('ai_run', paragraph.aiRunId);
+    if (paragraph.aiRunId) {
+      const runId = paragraph.aiRunId;
+      await check('ai_run', `ai_run:${runId}`, runId, async () =>
+        own(await db.findById('aiRuns', runId)),
+      );
     }
     for (const inline of paragraph.children) {
       if (inline.t === 'metric') {
-        if (
-          foreign(await db.findById('dataPointVersions', inline.dataPointVersionId)) ||
-          foreign(await db.findById('dataPoints', inline.dataPointId))
-        ) {
-          push('metric', inline.dataPointVersionId);
-        }
+        await check(
+          'metric',
+          `metric:${inline.dataPointVersionId}:${inline.dataPointId}`,
+          inline.dataPointVersionId,
+          async () =>
+            own(await db.findById('dataPointVersions', inline.dataPointVersionId)) &&
+            own(await db.findById('dataPoints', inline.dataPointId)),
+        );
       } else if (inline.t === 'narrative') {
-        if (foreign(await db.findById('narrativeVersions', inline.narrativeVersionId))) {
-          push('narrative', inline.narrativeVersionId);
-        }
+        await check(
+          'narrative',
+          `narrative:${inline.narrativeVersionId}`,
+          inline.narrativeVersionId,
+          async () => own(await db.findById('narrativeVersions', inline.narrativeVersionId)),
+        );
       } else if (inline.t === 'cite') {
-        if (foreign(await db.findById('sourceAnchors', inline.sourceAnchorId))) {
-          push('cite', inline.sourceAnchorId);
-        }
+        await check('cite', `cite:${inline.sourceAnchorId}`, inline.sourceAnchorId, async () =>
+          own(await db.findById('sourceAnchors', inline.sourceAnchorId)),
+        );
       }
     }
   }
@@ -463,9 +496,10 @@ export async function validateBodyRefs(
     if (paragraph.aiRunId) {
       const runId = paragraph.aiRunId;
       const run = await cached(`run:${runId}`, () => db.findById('aiRuns', runId));
-      if (!run) {
+      if (!run || run.organizationId !== organizationId) {
         // 見つからないだけ（Demo Mode で別のサーバーが記録した実行・Cookie から押し出された実行）を
-        // 改ざんと同じ文言で責めない。保存は止めるが、理由と取れる手を示す
+        // 改ざんと同じ文言で責めない。保存は止めるが、理由と取れる手を示す。
+        // 別組織の実行も同じ文言にする（文言の違いから他社の実行の有無を調べさせない。A29）
         issues.push({
           paragraphId: paragraph.id,
           kind: 'ai_run',
@@ -473,7 +507,6 @@ export async function validateBodyRefs(
           message: AI_RUN_UNAVAILABLE_MESSAGE,
         });
       } else if (
-        run.organizationId !== organizationId ||
         run.featureType !== 'disclosureBlockDraft' ||
         !run.inputReferenceIds.includes(`block:${blockId}`)
       ) {
@@ -566,6 +599,30 @@ export interface AppendVersionOptions {
   baseVersionId: Uuid | null;
 }
 
+/** 版の本文を書いた人（作成者と、自動保存・前の版から引き継いだ人） */
+export function versionAuthors(
+  version: Pick<DisclosureBlockVersion, 'createdBy' | 'contributorUserIds'>,
+): Uuid[] {
+  return [version.createdBy, ...(version.contributorUserIds ?? [])];
+}
+
+/**
+ * 新しい版の本文を書いた人（作成者を除く）。
+ * 節の作業本文を自動保存した人に加えて、土台にした版（と節の現在の版）の作成者・書いた人を引き継ぐ。
+ * 引き継がないと、承認者が書いた段落を別の人が 1 文字直した版（再確認の「新しい版を採用」を含む）で
+ * 承認者の記録が消え、承認者が自分の段落を最終承認できてしまう。
+ * DB のトリガ t4d.merge_block_version_contributors（0042）も同じ規則で補う。
+ */
+export function inheritedContributors(
+  block: Pick<DisclosureBlock, 'workingContributorIds'>,
+  baseVersions: ReadonlyArray<Pick<DisclosureBlockVersion, 'createdBy' | 'contributorUserIds'>>,
+  creatorId: Uuid,
+): Uuid[] {
+  return [
+    ...new Set([...(block.workingContributorIds ?? []), ...baseVersions.flatMap(versionAuthors)]),
+  ].filter((id) => id !== creatorId);
+}
+
 /** 版を 1 行追記する。節のポインタは呼び出し側が更新する（版を先に作る順序を守るため） */
 export async function appendBlockVersion(
   db: DbClient,
@@ -601,10 +658,12 @@ export async function appendBlockVersion(
     contentHash: contentHashOf(body),
     createdAt: now,
     createdBy: ctx.userId,
-    // 作業本文を自動保存した人（作成者以外）を版に残す。職務分離では作成者と同じ扱いにする
-    // （DB のトリガ t4d.merge_block_version_contributors も同じ規則で補う）
-    contributorUserIds: [...new Set(block.workingContributorIds ?? [])].filter(
-      (id) => id !== ctx.userId,
+    // 作業本文を自動保存した人と、土台の版を書いた人（作成者以外）を版に残す。
+    // 職務分離では作成者と同じ扱いにする（DB のトリガ t4d.merge_block_version_contributors も同じ規則で補う）
+    contributorUserIds: inheritedContributors(
+      block,
+      existing.filter((v) => v.id === options.baseVersionId || v.id === block.currentVersionId),
+      ctx.userId,
     ),
   };
   await db.insert('disclosureBlockVersions', [version]);
@@ -736,9 +795,13 @@ export async function autosaveWorkingBody(
   if (block.currentVersionId && !(await currentVersionBody(db, ctx, block)).version) {
     throw new NotFoundError(VERSION_UNAVAILABLE_MESSAGE);
   }
-  // 別組織の行を指す参照は、作業本文にも入れない（鮮度・一覧の表示から他社の情報が漏れる）
-  const foreign = await findForeignRefs(db, ctx, body);
-  if (foreign.length > 0) throw new BlockRefValidationError(foreign);
+  // 読めない参照（別組織・存在しない行）は作業本文にも入れない（鮮度・一覧の表示から他社の情報が漏れる）。
+  // 別組織と存在しないを同じ結果にする（A29）
+  const unresolvable = await findUnresolvableRefs(db, ctx, body, [
+    (await currentVersionBody(db, ctx, block)).version?.body,
+    block.workingBody,
+  ]);
+  if (unresolvable.length > 0) throw new BlockRefValidationError(unresolvable);
 
   if ((input.baseVersionId ?? null) !== (block.currentVersionId ?? null)) {
     const current = await currentVersionBody(db, ctx, block);

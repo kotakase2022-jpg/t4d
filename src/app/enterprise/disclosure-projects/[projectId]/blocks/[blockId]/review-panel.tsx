@@ -1,6 +1,6 @@
 import { ClipboardCheck, History, Info } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
+import { SubmitButton } from '@/components/ui/submit-button';
 import type { ParagraphDiff } from '@/lib/domain/disclosure-block';
 import { reviewPolicyLabel } from '@/lib/domain/disclosure-status';
 import { formatJst } from '@/lib/format/datetime';
@@ -120,9 +120,10 @@ export function ReviewPanel({
                       ? '引用した数値・定性情報がまだ有効かを、承認の直前にサーバーで確かめ直します。'
                       : '未解決の要対応コメントがあるとレビューを完了できません。'}
                   </p>
-                  <Button type="submit" size="sm">
+                  {/* 送信中は押せなくし、処理中と分かる表示にする（二度押しで同じ判断を送らない） */}
+                  <SubmitButton size="sm" pendingLabel={actions.canApprove ? '承認中…' : '完了中…'}>
                     {actions.canApprove ? '最終承認する（社内承認）' : 'レビューを完了する'}
-                  </Button>
+                  </SubmitButton>
                 </form>
               )}
               {actions.canReturn && (
@@ -137,7 +138,7 @@ export function ReviewPanel({
                       name="paragraphId"
                       required
                       defaultValue=""
-                      className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
+                      className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
                     >
                       <option value="" disabled>
                         段落を選択
@@ -153,9 +154,9 @@ export function ReviewPanel({
                     差戻しの理由（必須）
                   </label>
                   <Textarea id="return-reason" name="reason" rows={2} required />
-                  <Button type="submit" size="sm" variant="outline">
+                  <SubmitButton size="sm" variant="outline" pendingLabel="差戻し中…">
                     差し戻す
-                  </Button>
+                  </SubmitButton>
                 </form>
               )}
               {actions.canWithdraw && (
@@ -168,9 +169,9 @@ export function ReviewPanel({
                     依頼を取り下げて編集に戻る（理由は任意）
                   </label>
                   <Textarea id="withdraw-reason" name="reason" rows={1} />
-                  <Button type="submit" size="sm" variant="ghost">
+                  <SubmitButton size="sm" variant="ghost" pendingLabel="取下げ中…">
                     依頼を取り下げる
-                  </Button>
+                  </SubmitButton>
                 </form>
               )}
               {actions.reasons.length > 0 && !actions.canComplete && !actions.canApprove && (

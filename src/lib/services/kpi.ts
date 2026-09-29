@@ -557,7 +557,7 @@ async function metricPeriodState(
     // 推計・目標だけの年度が「0」として確定値に見えてしまう）
     approvedValue =
       approvedWithValue.length > 0 &&
-      (aggregate?.valueCount ?? 0) > 0 &&
+      (aggregate?.consolidatedValueCount ?? 0) > 0 &&
       typeof consolidated === 'number'
         ? consolidated
         : null;

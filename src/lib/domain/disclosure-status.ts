@@ -216,6 +216,41 @@ export const FRAMEWORK_LEGAL_STATUS_LABELS: Record<FrameworkLegalStatus, string>
   sample: 'サンプル（架空）',
 };
 
+/** タスクの対象の種類（tasks.target_type）の表示。知らない値は内部名を出さず「その他」にする */
+const TASK_TARGET_TYPE_LABELS: Readonly<Record<string, string>> = {
+  data_point: 'データ',
+  evidence: '資料・証跡',
+  disclosure_response: '開示回答',
+  disclosure_block: '開示原稿',
+  pbc_request: '資料依頼（PBC）',
+  ingestion_job: 'データ取込',
+  engagement: '保証案件',
+  collection_campaign: '収集キャンペーン',
+};
+
+export function taskTargetTypeLabel(targetType: string | null | undefined): string {
+  return (targetType && TASK_TARGET_TYPE_LABELS[targetType]) || 'その他';
+}
+
+/**
+ * 基準の版の位置付けの表示（開示ホーム・プロジェクト・出力の表紙が同じ文言を使う）。
+ * 草案は「公開草案に基づく準備」、架空の縮小マスターは「サンプル（架空）」と必ず表示し、
+ * 「草案」だけの表示で正式な基準と見誤らせない（指示書 §8.1・§14.3）
+ */
+export function frameworkLegalLabel(version: {
+  legalStatus: FrameworkLegalStatus | null;
+  coverageStatus?: FrameworkCoverageStatus | null;
+  isFixture?: boolean;
+}): string {
+  const legal = version.legalStatus;
+  if (legal === 'sample' || version.coverageStatus === 'sample' || version.isFixture) {
+    return 'サンプル（架空）';
+  }
+  if (legal === 'draft') return '公開草案に基づく準備';
+  if (legal) return FRAMEWORK_LEGAL_STATUS_LABELS[legal];
+  return '法的位置付け未登録';
+}
+
 export const FRAMEWORK_COVERAGE_STATUS_LABELS: Record<FrameworkCoverageStatus, string> = {
   full_for_scope: '対象範囲を全件収録',
   partial: '一部のみ収録',
@@ -530,6 +565,19 @@ export function validateReturn(input: {
   return { ok: true };
 }
 
+/**
+ * 依頼が固定した適用判断（review_requests.decision_ids）の後に、節の基準の判断が更新されたか。
+ * 依頼は判断の版を固定する（§10.1）ため、最終承認とレポートの確定で確かめ直す（§10.3）。
+ * 判断は追記専用で、基準の現在の判断（project_frameworks.current_decision_id）が依頼の固定した判断に
+ * 含まれていなければ、依頼の後に確定し直したことになる。
+ */
+export function applicabilityDecisionChangedSince(
+  request: { decisionIds: readonly Uuid[] },
+  currentDecisionId: Uuid | null,
+): boolean {
+  return currentDecisionId !== null && !request.decisionIds.includes(currentDecisionId);
+}
+
 /** review_events.idempotency_key（依頼 ID＋段階＋対象版）。二重押下で同じ判断を 2 回記録しない */
 export function reviewEventIdempotencyKey(
   reviewRequestId: Uuid,
@@ -551,6 +599,8 @@ export const BLOCK_BLOCKER_CODES = [
   'applicability_not_assessed',
   /** 依頼・承認の後に報告範囲（報告主体・期間・対象範囲）が変わった */
   'scope_changed',
+  /** 依頼・承認の後に、節の基準の適用判断が更新された */
+  'applicability_changed',
 ] as const;
 export type BlockBlockerCode = (typeof BLOCK_BLOCKER_CODES)[number];
 

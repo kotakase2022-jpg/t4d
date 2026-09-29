@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { LinkPending } from '@/components/shared/link-pending';
 import { notFound } from 'next/navigation';
 import { CalendarRange, Info } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
@@ -128,6 +129,7 @@ export default async function DisclosureProjectPage({
                 )}
               >
                 {t.label}
+                <LinkPending />
               </Link>
             </li>
           ))}

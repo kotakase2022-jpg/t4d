@@ -1,6 +1,8 @@
 import 'server-only';
 
+import { can } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
+import type { AuthorizationContext } from '@/types/domain';
 import { DemoDbClient } from './demo-client';
 import { SupabaseDbClient } from './supabase-client';
 import type { DbClient } from './types';
@@ -14,27 +16,46 @@ export async function getDb(): Promise<DbClient> {
     // Demo Mode の状態はプロセスのメモリにしか無い（known-limitations D-3）。
     // Vercel で別インスタンスに当たっても直前の操作が消えないよう、
     // Cookie に控えた変更を Fixture へ再適用してから返す。
-    const { readDemoEdits, applyDemoEdits, pendingDemoReset, markDemoResetApplied } =
-      await import('./demo-persistence');
-    const { getDemoDb, createFixtureDb } = await import('@/lib/fixtures/store');
-    // 別のインスタンスで開示デモをリセットしていれば、このインスタンスのメモリも同じ範囲を
-    // Fixture の初期値へ戻してから Cookie を適用する（リセット前の状態を見せ続けない）
-    const reset = await pendingDemoReset();
-    if (reset) {
-      const { restoreDisclosureDemoTables } = await import('./demo-reset-sync');
-      restoreDisclosureDemoTables(
-        getDemoDb(),
-        pristineFixture(createFixtureDb),
-        reset.organizationId,
-      );
-      markDemoResetApplied(reset);
-    }
+    const { readDemoEdits, applyDemoEdits } = await import('./demo-persistence');
+    const { getDemoDb } = await import('@/lib/fixtures/store');
+    // 別のインスタンスで行った開示デモのリセットは、ここでは反映しない。印は署名の無い Cookie で、
+    // ログイン前に反映すると、誰でも任意の組織のデモ状態を消せてしまう（applyPendingDemoResetFor）
     const edits = await readDemoEdits();
     if (edits.length > 0) applyDemoEdits(getDemoDb(), edits);
     return new DemoDbClient();
   }
   const { createSupabaseServerClient } = await import('@/lib/supabase/server');
   return new SupabaseDbClient(await createSupabaseServerClient());
+}
+
+/**
+ * 別のインスタンスで行った開示デモのリセットを、このインスタンスのメモリにも反映する（Demo Mode のみ）。
+ *
+ * 印（t4d.demo-reset）は署名の無い Cookie のため、ログインした利用者の組織が印の組織と同じで、
+ * その組織で開示の編集権限（リセットの操作と同じ enterprise.disclosure.write）を持つときだけ反映する。
+ * getSession が利用者を解決した後に呼ぶ。戻したあと、この利用者の Cookie の操作（リセット後の操作）を
+ * 改めて適用する（getDb が先に適用した分は、戻したときに消えるため）
+ */
+export async function applyPendingDemoResetFor(ctx: AuthorizationContext): Promise<boolean> {
+  if (getAppMode() !== 'demo') return false;
+  const { pendingDemoReset, markDemoResetApplied, readDemoEdits, applyDemoEdits } =
+    await import('./demo-persistence');
+  const reset = await pendingDemoReset();
+  if (!reset) return false;
+  if (
+    ctx.workspace.organizationId !== reset.organizationId ||
+    !can(ctx, 'enterprise.disclosure.write')
+  ) {
+    return false;
+  }
+  const { getDemoDb, createFixtureDb } = await import('@/lib/fixtures/store');
+  const { restoreDisclosureDemoTables } = await import('./demo-reset-sync');
+  const db = getDemoDb();
+  restoreDisclosureDemoTables(db, pristineFixture(createFixtureDb), reset.organizationId);
+  const edits = await readDemoEdits();
+  if (edits.length > 0) applyDemoEdits(db, edits);
+  markDemoResetApplied(reset);
+  return true;
 }
 
 /** リセットの反映に使う Fixture の初期値（書き換えない。行は写してから使う） */

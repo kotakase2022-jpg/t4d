@@ -1,8 +1,7 @@
-import { AlertTriangle, Info, Lock } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, Lock } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { permissionsFor } from '@/lib/authorization/can';
 import { getReferenceDate } from '@/lib/clock';
@@ -24,12 +23,9 @@ import {
   type ProjectFrameworkView,
 } from '@/lib/services/disclosure-project';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { ApplicabilityDecisionForm } from './applicability-decision-form';
 import { DISCLOSURE_LANGUAGES, DISCLOSURE_PROJECT_STATUSES } from '@/types/domain';
-import {
-  attachFrameworkVersionAction,
-  confirmApplicabilityAction,
-  updateProjectAction,
-} from '../../actions';
+import { attachFrameworkVersionAction, updateProjectAction } from '../../actions';
 import { ApplicabilityBadge, LegalStatusBadge } from '../../_components/framework-badges';
 import { ProjectForm } from '../../new/project-form';
 import { FrameworkConditionsForm } from './framework-conditions-form';
@@ -281,80 +277,16 @@ function FrameworkSettings({
             </p>
           )}
           {canWrite ? (
-            <form action={confirmApplicabilityAction} className="space-y-2">
-              <input type="hidden" name="projectId" value={projectId} />
-              <input type="hidden" name="projectFrameworkId" value={pfId} />
-              <div>
-                <label htmlFor={`st-${pfId}`} className="block text-[12px] text-ink">
-                  判断（必須）
-                </label>
-                <select
-                  id={`st-${pfId}`}
-                  name="applicabilityStatus"
-                  required
-                  defaultValue=""
-                  className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
-                >
-                  <option value="" disabled>
-                    選択してください
-                  </option>
-                  {DECISION_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {APPLICABILITY_STATUS_LABELS[s]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor={`reason-${pfId}`} className="block text-[12px] text-ink">
-                  判断の理由（必須）
-                </label>
-                <Textarea
-                  id={`reason-${pfId}`}
-                  name="reason"
-                  rows={3}
-                  required
-                  className="mt-0.5"
-                />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <label htmlFor={`rule-${pfId}`} className="block text-[12px] text-ink">
-                    参照した規則・版（必須）
-                  </label>
-                  <Input
-                    id={`rule-${pfId}`}
-                    name="ruleRef"
-                    required
-                    defaultValue={defaultRuleRef}
-                    className="mt-0.5"
-                  />
-                </div>
-                <div>
-                  <label htmlFor={`on-${pfId}`} className="block text-[12px] text-ink">
-                    規則を確認した日（必須）
-                  </label>
-                  <Input
-                    id={`on-${pfId}`}
-                    name="confirmedOn"
-                    type="date"
-                    required
-                    defaultValue={today}
-                    className="mt-0.5"
-                  />
-                </div>
-              </div>
-              <div>
-                <label htmlFor={`tr-${pfId}`} className="block text-[12px] text-ink">
-                  経過措置・早期適用（条件・対象条項・年度）
-                </label>
-                <Textarea id={`tr-${pfId}`} name="transitionalNote" rows={2} className="mt-0.5" />
-              </div>
-              <SubmitButton pendingLabel="確定中…">適用判断を確定</SubmitButton>
-              <p className="text-[11px] text-ink-muted">
-                判断者は操作したあなたとして記録されます。確定した判断は書き換えず、見直しは新しい判断として追記します。
-              </p>
-            </form>
+            <ApplicabilityDecisionForm
+              projectId={projectId}
+              projectFrameworkId={pfId}
+              statusOptions={DECISION_STATUSES.map((s) => ({
+                value: s,
+                label: APPLICABILITY_STATUS_LABELS[s],
+              }))}
+              defaultRuleRef={defaultRuleRef}
+              today={today}
+            />
           ) : null}
 
           <div>
@@ -372,6 +304,7 @@ function FrameworkSettings({
                     </span>
                     {d.id === f.projectFramework.currentDecisionId && (
                       <Badge tone="brand" className="ml-1">
+                        <CheckCircle2 className="size-3" aria-hidden="true" />
                         現在の判断
                       </Badge>
                     )}

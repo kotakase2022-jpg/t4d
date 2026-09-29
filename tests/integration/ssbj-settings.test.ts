@@ -7,7 +7,11 @@ import {
   assessMaterialityTopic,
   loadMateriality,
 } from '@/lib/services/materiality';
-import { loadSsbjHeadline, loadSsbjRequirementViews } from '@/lib/services/ssbj-gap';
+import {
+  loadSsbjHeadline,
+  loadSsbjOverview,
+  loadSsbjRequirementViews,
+} from '@/lib/services/ssbj-gap';
 import {
   confirmSsbjSettings,
   includedSectionPrefixes,
@@ -375,5 +379,15 @@ describe('適用する基準と評価対象の節', () => {
       valueChainNote: '',
     });
     expect(includedSectionPrefixes(saved)).toEqual(['気候', '実務対応']);
+  });
+});
+
+// F3（自己監査 第 2 回・回帰）: 全体状況の件数の母集団の説明と、実際の件数を食い違わせない
+describe('全体状況の「全要求事項」は、設定で適用する基準の件数', () => {
+  it('実務対応基準を適用しない設定では 129 件で、マスターの収録件数 133 と分けて返す', async () => {
+    await saveValidSettings();
+    const overview = (await loadSsbjOverview(db, manager(), period(), '出所'))!;
+    expect(overview.counts.total).toBe(129);
+    expect(overview.masterTotal).toBe(133);
   });
 });

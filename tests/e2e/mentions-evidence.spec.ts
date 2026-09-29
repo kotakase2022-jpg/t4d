@@ -92,8 +92,9 @@ test('Evidence Viewer: 画像が画面内に表示され、メタデータ・Ver
   await expect(img).toBeVisible();
   // メタデータと Version が同じ画面にある
   await expect(page.getByRole('heading', { name: 'メタデータ' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /Version（/ })).toBeVisible();
-  await expect(page.getByText('image/png').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: /版の履歴（/ })).toBeVisible();
+  // 形式は MIME 型ではなく名前で示す（UX-11）
+  await expect(page.getByText('画像（PNG）').first()).toBeVisible();
 });
 
 test('Evidence Viewer: PDF が画面内 iframe で表示される', async ({ page }) => {

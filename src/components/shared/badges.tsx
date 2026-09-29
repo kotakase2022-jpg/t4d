@@ -31,6 +31,7 @@ import type {
   Priority,
   ResponseStatus,
   ScopeInclusion,
+  TaskStatus,
   TestStatus,
   ValidationSeverity,
   ValueKind,
@@ -328,6 +329,26 @@ export function PbcStatusBadge({ status }: { status: PbcStatus }) {
   return (
     <Badge tone={s.tone}>
       <CircleDot className="size-3" aria-hidden="true" />
+      {s.label}
+    </Badge>
+  );
+}
+
+const TASK_STATUS_MAP: Record<TaskStatus, { label: string; tone: Tone; icon: typeof CircleDot }> = {
+  open: { label: '未着手', tone: 'neutral', icon: CircleDashed },
+  in_progress: { label: '対応中', tone: 'brand', icon: Loader2 },
+  blocked: { label: '保留（阻害あり）', tone: 'warning', icon: AlertTriangle },
+  done: { label: '完了', tone: 'success', icon: CircleCheck },
+  cancelled: { label: '取消', tone: 'neutral', icon: Ban },
+};
+
+/** タスクの状態（DB の値 open / in_progress をそのまま出さない。ラベル＋アイコン） */
+export function TaskStatusBadge({ status }: { status: TaskStatus }) {
+  const s = TASK_STATUS_MAP[status] ?? { label: '状態不明', tone: 'neutral', icon: CircleHelp };
+  const Icon = s.icon;
+  return (
+    <Badge tone={s.tone}>
+      <Icon className="size-3" aria-hidden="true" />
       {s.label}
     </Badge>
   );

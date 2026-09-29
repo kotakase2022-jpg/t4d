@@ -1,11 +1,10 @@
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, FileText, Info, MessageSquare, Plus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, Info, MessageSquare, User } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { AuthorizationError } from '@/lib/authorization/can';
 import { getReferenceDate } from '@/lib/clock';
@@ -18,7 +17,7 @@ import {
   type ManuscriptList,
 } from '@/lib/services/disclosure-block';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { createBlockAction } from '../blocks/actions';
+import { AddBlockForm } from './add-block-form';
 import { BlockStatusBadge, FreshnessBadge } from '../blocks/status-badges';
 
 function isFilter(value: unknown): value is ManuscriptFilter {
@@ -102,9 +101,10 @@ export async function ManuscriptsTab({
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="max-h-[70vh] overflow-auto">
+            {/* 長い一覧でも列見出しを固定する（縦にスクロールする枠の中で sticky にする） */}
             <Table>
-              <THead>
+              <THead className="sticky top-0 z-10 bg-surface">
                 <TR>
                   <TH>節</TH>
                   <TH>本文状態</TH>
@@ -205,6 +205,7 @@ export async function ManuscriptsTab({
                         {row.ownerName}
                         {row.ownerUserId === ctx.userId && (
                           <Badge tone="brand" className="ml-1">
+                            <User className="size-3" aria-hidden="true" />
                             自分
                           </Badge>
                         )}
@@ -230,77 +231,15 @@ export async function ManuscriptsTab({
 
       {list.canWrite && list.frameworks.length > 0 && (
         <Card>
-          <details className="p-3">
-            <summary className="flex cursor-pointer items-center gap-1 text-[13px] font-semibold text-ink">
-              <Plus className="size-4" aria-hidden="true" />
-              節を追加（新しい節・翻訳版）
-            </summary>
-            <form
-              action={createBlockAction}
-              className="mt-2 grid gap-2 text-[12px] min-[900px]:grid-cols-2"
-            >
-              <input type="hidden" name="projectId" value={projectId} />
-              <label className="text-ink">
-                基準の版
-                <select
-                  name="frameworkVersionId"
-                  required
-                  className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
-                >
-                  {list.frameworks.map((f) => (
-                    <option key={f.versionId} value={f.versionId}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-ink">
-                言語
-                <select
-                  name="language"
-                  defaultValue="ja"
-                  className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
-                >
-                  <option value="ja">日本語</option>
-                  <option value="en">英語</option>
-                </select>
-              </label>
-              <label htmlFor="new-block-title" className="text-ink">
-                題名
-                <Input id="new-block-title" name="title" required className="mt-0.5" />
-              </label>
-              <label htmlFor="new-block-key" className="text-ink">
-                節のキー（半角英小文字・数字・_・-）
-                <Input
-                  id="new-block-key"
-                  name="sectionKey"
-                  required
-                  maxLength={60}
-                  className="mt-0.5 font-mono"
-                />
-              </label>
-              <label className="text-ink min-[900px]:col-span-2">
-                翻訳元の節（翻訳版を作る場合）
-                <select
-                  name="translationOfBlockId"
-                  defaultValue=""
-                  className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
-                >
-                  <option value="">翻訳版ではない</option>
-                  {list.rows.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.title}（{row.languageLabel}）
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="min-[900px]:col-span-2">
-                <Button type="submit" size="sm" variant="outline">
-                  節を追加
-                </Button>
-              </div>
-            </form>
-          </details>
+          <AddBlockForm
+            projectId={projectId}
+            frameworks={list.frameworks.map((f) => ({ versionId: f.versionId, label: f.label }))}
+            rows={list.rows.map((row) => ({
+              id: row.id,
+              title: row.title,
+              languageLabel: row.languageLabel,
+            }))}
+          />
         </Card>
       )}
     </div>

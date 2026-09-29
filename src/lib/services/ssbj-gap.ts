@@ -102,6 +102,11 @@ export interface SsbjOverview {
    * 件数を「基準の全件」と誤解させないために画面へ出す。未設定は null
    */
   coverageNote: string | null;
+  /**
+   * マスターに収録している要求事項の件数（設定で適用しない基準を含む）。
+   * counts.total は適用する基準の件数で、設定次第で少なくなる（両者を取り違えて表示しない）
+   */
+  masterTotal: number;
   attribution: string;
   period: ReportingPeriod;
   /** 3 観点それぞれの整備度（%） */
@@ -171,6 +176,8 @@ async function loadSsbjItems(
   reportingPeriodId: Uuid,
 ): Promise<{
   items: DisclosureItem[];
+  /** 収録している要求事項の件数（適用しない基準を含む） */
+  masterCount: number;
   versionLabel: string;
   isFixture: boolean;
   coverageNote: string | null;
@@ -196,6 +203,7 @@ async function loadSsbjItems(
 
   return {
     items,
+    masterCount: all.length,
     versionLabel: current.label,
     isFixture: current.isFixture,
     coverageNote: current.coverageNote ?? null,
@@ -325,6 +333,7 @@ export async function loadSsbjRequirementViews(
   options: SsbjReferenceDateOption = {},
 ): Promise<{
   views: SsbjRequirementView[];
+  masterCount: number;
   versionLabel: string;
   isFixture: boolean;
   coverageNote: string | null;
@@ -387,6 +396,7 @@ export async function loadSsbjRequirementViews(
 
   return {
     views,
+    masterCount: master.masterCount,
     versionLabel: master.versionLabel,
     isFixture: master.isFixture,
     coverageNote: master.coverageNote,
@@ -673,7 +683,7 @@ export async function loadSsbjOverview(
 ): Promise<SsbjOverview | null> {
   const loaded = await loadSsbjRequirementViews(db, ctx, period, options);
   if (!loaded) return null;
-  const { views, versionLabel, isFixture, coverageNote } = loaded;
+  const { views, versionLabel, isFixture, coverageNote, masterCount } = loaded;
 
   // 対象外・重要性なしは整備度の分母から外す（対応する必要が無いため）
   const inScope = views.filter(isInScope);
@@ -745,6 +755,7 @@ export async function loadSsbjOverview(
     versionLabel,
     isFixture,
     coverageNote,
+    masterTotal: masterCount,
     attribution,
     period,
     disclosureRate: coverageRate(inScope.map((v) => v.assessment.disclosureStatus)),

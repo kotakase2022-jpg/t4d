@@ -24,6 +24,7 @@ import {
   canonicalJson,
   collectRefs,
   contentHashOf,
+  formatMetricDisplay,
   plainTextOf,
 } from '@/lib/domain/disclosure-block';
 import {
@@ -33,7 +34,6 @@ import {
   canFinalApprove,
   reviewEventIdempotencyKey,
 } from '@/lib/domain/disclosure-status';
-import { formatNumber } from '@/lib/format/datetime';
 import { SSBJ_MASTER_ITEMS } from '@/lib/frameworks/ssbj-2026';
 import { ORG_IDS, PERIOD_IDS, at, dataPointId, day, metricId, userId } from './dataset';
 import {
@@ -285,7 +285,8 @@ function metricInline(db: FixtureDb, dataPointIdValue: Uuid, versionNo: number):
     t: 'metric',
     dataPointId: dataPointIdValue,
     dataPointVersionId: version.id,
-    display: `${formatNumber(version.value)} ${version.unitOfMeasure}`,
+    // 画面で挿入したときと同じ規則（推計・目標には区分を添える）。保存時の検証と食い違わせない
+    display: formatMetricDisplay(version),
   };
 }
 

@@ -108,6 +108,11 @@ export async function logoutAction(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.delete(DEMO_USER_COOKIE);
   cookieStore.delete(WORKSPACE_COOKIE);
+  if (getAppMode() === 'demo') {
+    // 押し出しの知らせは次に使う人へ持ち越さない（ログアウト後も 8 時間出続けていた）
+    const { clearDemoEviction } = await import('@/lib/repositories/demo-persistence');
+    await clearDemoEviction();
+  }
 
   if (getAppMode() === 'supabase') {
     const { createSupabaseServerClient } = await import('@/lib/supabase/server');

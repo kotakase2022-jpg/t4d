@@ -6,7 +6,7 @@ import {
   DISCLOSURE_PROJECT_STATUS_LABELS,
   DISCLOSURE_PURPOSE_LABELS,
   FRAMEWORK_COVERAGE_STATUS_LABELS,
-  FRAMEWORK_LEGAL_STATUS_LABELS,
+  frameworkLegalLabel,
   canCompleteReview,
   canFinalApprove,
   evaluateBlockBlockers,
@@ -571,7 +571,10 @@ export async function loadDisclosureHome(
     ),
     selectByIds(db, 'narrativeVersions', allNarrativeVersionIds, organizationId),
   ]);
-  const [metrics, narrativeRecords] = await Promise.all([
+  const currentDpVersionIds = dataPoints.flatMap((d) =>
+    d.currentVersionId ? [d.currentVersionId] : [],
+  );
+  const [metrics, narrativeRecords, currentDpVersions, dpApprovals] = await Promise.all([
     selectByIds(
       db,
       'metrics',
@@ -584,8 +587,27 @@ export async function loadDisclosureHome(
       narrativeVersions.map((v) => v.narrativeRecordId),
       organizationId,
     ),
+    // 数値の現在の版が承認済みか（新しい版が未承認のときの「維持」は、承認されたら無効になるため）
+    selectByIds(db, 'dataPointVersions', currentDpVersionIds, organizationId),
+    currentDpVersionIds.length === 0
+      ? Promise.resolve([])
+      : db.select('approvals', {
+          where: {
+            organizationId,
+            targetType: 'data_point',
+            targetVersionId: { in: currentDpVersionIds },
+            decision: 'approved',
+          },
+        }),
   ]);
   const dataPointById = new Map(dataPoints.map((d) => [d.id, d]));
+  const approvedCurrentVersionIds = new Set<Uuid>([
+    ...dpApprovals.flatMap((a) => (a.targetVersionId ? [a.targetVersionId] : [])),
+    ...currentDpVersions.filter((v) => v.status === 'approved').map((v) => v.id),
+    ...dataPoints.flatMap((d) =>
+      d.status === 'approved' && d.currentVersionId ? [d.currentVersionId] : [],
+    ),
+  ]);
   const metricNameById = new Map(metrics.map((m) => [m.id, m.name]));
   const narrativeVersionById = new Map<Uuid, NarrativeVersion>(
     narrativeVersions.map((v) => [v.id, v]),
@@ -617,7 +639,8 @@ export async function loadDisclosureHome(
     refKind: 'metric' | 'narrative',
     oldRefId: Uuid,
     newRefId: Uuid,
-  ): boolean => isOldRefKept(rechecks, { blockId, refKind, oldRefId, newRefId });
+    newApproved: boolean,
+  ): boolean => isOldRefKept(rechecks, { blockId, refKind, oldRefId, newRefId, newApproved });
   /** 数値の現在の版。維持と判断済みなら引用中の版を現在の版として扱う */
   const effectiveMetricVersionOf = (
     blockId: Uuid,
@@ -625,7 +648,13 @@ export async function loadDisclosureHome(
   ): Uuid | null => {
     const current = dataPointById.get(n.dataPointId)?.currentVersionId ?? null;
     if (current === null || current === n.dataPointVersionId) return current;
-    return keptOld(blockId, 'metric', n.dataPointVersionId, current)
+    return keptOld(
+      blockId,
+      'metric',
+      n.dataPointVersionId,
+      current,
+      approvedCurrentVersionIds.has(current),
+    )
       ? n.dataPointVersionId
       : current;
   };
@@ -641,7 +670,13 @@ export async function loadDisclosureHome(
       return (
         record?.currentVersionId != null &&
         record.currentVersionId !== id &&
-        !keptOld(blockId, 'narrative', id, record.currentVersionId)
+        !keptOld(
+          blockId,
+          'narrative',
+          id,
+          record.currentVersionId,
+          record.confirmedVersionId === record.currentVersionId,
+        )
       );
     });
     if (staleMetrics.length === 0 && staleNarratives.length === 0) return null;
@@ -926,9 +961,8 @@ export async function loadDisclosureHome(
         projectFrameworkId: pf.id,
         frameworkVersionId: pf.frameworkVersionId,
         label: version?.label ?? '（基準の版が見つかりません）',
-        legalStatusLabel: version?.legalStatus
-          ? FRAMEWORK_LEGAL_STATUS_LABELS[version.legalStatus]
-          : null,
+        // 草案は「公開草案に基づく準備」と示す（プロジェクト画面・出力の表紙と同じ文言）
+        legalStatusLabel: version ? frameworkLegalLabel(version) : null,
         coverageStatusLabel: version?.coverageStatus
           ? FRAMEWORK_COVERAGE_STATUS_LABELS[version.coverageStatus]
           : null,

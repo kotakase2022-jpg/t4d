@@ -1707,6 +1707,11 @@ export interface RecheckDecision {
   reason: string;
   decidedBy: Uuid;
   decidedAt: IsoDateTime;
+  /**
+   * 判断した時点で新しい版が承認済み（定性情報は確定済み）だったか（0042）。
+   * false の「引用中の版を維持」は、新しい版が承認された時点で無効になる（前提が変わるため）
+   */
+  newRefApproved: boolean;
 }
 
 export const REPORT_SNAPSHOT_KINDS = ['review_draft', 'approved'] as const;

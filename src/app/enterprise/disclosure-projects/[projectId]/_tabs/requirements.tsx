@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { FileQuestion, FlaskConical, ListFilter } from 'lucide-react';
+import { ClipboardCheck, FileQuestion, FlaskConical, ListFilter } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -248,7 +248,10 @@ export async function RequirementsTab({
                         <TD className="whitespace-nowrap align-top text-[12px]">
                           {row.contentEvaluation.source === 'ai_candidate' ? (
                             <span title="AI の判定は候補です。担当者の確認で確定します。">
-                              <Badge tone="outline">{row.contentEvaluation.label}</Badge>
+                              <Badge tone="outline">
+                                <ClipboardCheck className="size-3" aria-hidden="true" />
+                                {row.contentEvaluation.label}
+                              </Badge>
                               <span className="block text-[11px] text-ink-muted">
                                 AI 候補・未確認
                               </span>

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { AlertTriangle, ArrowRight, CheckCircle2, History, Undo2 } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, History, Info, Tag, Undo2 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -9,7 +9,11 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { formatJst } from '@/lib/format/datetime';
-import { getRecheckView, type RecheckView } from '@/lib/services/disclosure-recheck';
+import {
+  EVIDENCE_NEXT_STEP,
+  getRecheckView,
+  type RecheckView,
+} from '@/lib/services/disclosure-recheck';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { BlockStatusBadge, FreshnessBadge } from '../../status-badges';
 import { RecheckForms } from './recheck-forms';
@@ -96,7 +100,10 @@ export default async function RecheckPage({
           view.items.map((item) => (
             <Card key={`${item.refKind}-${item.oldRefId}`} className="p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="outline">{item.refKindLabel}</Badge>
+                <Badge tone="outline">
+                  <Tag className="size-3" aria-hidden="true" />
+                  {item.refKindLabel}
+                </Badge>
                 <h2 className="text-[13px] font-semibold text-ink">{item.label}</h2>
                 {item.keptOld ? (
                   <Badge tone="neutral">
@@ -162,11 +169,29 @@ export default async function RecheckPage({
                       >
                         <span className="mr-1 font-mono text-[10px] text-ink-muted">{p.id}</span>
                         {p.text}
+                        <Link
+                          href={`${blockHref}#para-${p.id}`}
+                          className="ml-2 whitespace-nowrap text-[12px] text-brand-800 underline"
+                        >
+                          この段落を原稿で開く
+                        </Link>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
+
+              {item.refKind === 'evidence' && (
+                <p
+                  role="note"
+                  className="mt-2 flex items-start gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1.5 text-[12px] text-ink"
+                >
+                  <Info className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+                  <span>
+                    <span className="font-medium">次にすること:</span> {EVIDENCE_NEXT_STEP}
+                  </span>
+                </p>
+              )}
 
               {view.canDecide && item.refKind !== 'evidence' && (
                 <RecheckForms

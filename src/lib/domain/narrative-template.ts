@@ -64,8 +64,8 @@ export interface NarrativeFieldAssessment {
   /** 未記入の項目 */
   missing: NarrativeTemplateField[];
   /**
-   * 財務的影響を定量化しない理由（記載があるときだけ）。影響額・算定方法・前提の欠落の代わりに示す。
-   * 理由の記載は基準上の免除とは別であり、判断はレビュー・承認で人が行う（指示書 §6.6）
+   * 財務的影響を定量化しない理由（記載があるときだけ）。未確定の影響額・算定方法・前提と並べて示す。
+   * 理由の記載は基準上の免除とは別であり、判断はレビュー・承認で人が行う（指示書 §6.6・§8.3）
    */
   notQuantifiedReason: string | null;
 }
@@ -74,11 +74,12 @@ export interface NarrativeFieldAssessment {
  * テンプレートの項目を必須として判定する（開示ホーム・原稿一覧・スナップショットの不足情報が
  * すべてこの 1 か所を通る。以前は一覧とスナップショットで財務的影響の数え方が違っていた）。
  *
- * 財務的影響は「影響額（と算定方法・前提）」と「影響額を示さない理由」のどちらか一方で足りる組:
- *  - 影響額がある … 示さない理由は不要
- *  - 影響額が無く、定量化しない理由がある … 影響額・算定方法・前提は「未記入」ではない。
- *    代わりに理由そのものを notQuantifiedReason として示す（0 や仮の値で埋めない）
- *  - どちらも無い … 影響額・算定方法・前提・示さない理由をすべて未記入とする
+ * 財務的影響:
+ *  - 影響額がある … 示さない理由は不要（未記入に数えない）
+ *  - 影響額が無い … 影響額・算定方法・前提は、理由の記載があっても未確定のまま不足情報に残す。
+ *    理由は「要件を満たした」ことにはならない（理由だけで充足とみなす一律の免除は置かない。
+ *    指示書 §6.6・§8.3）。理由があれば notQuantifiedReason として不足情報の横に示す
+ *  - 影響額も理由も無い … 影響額・算定方法・前提・示さない理由をすべて未記入とする
  */
 export function assessNarrativeFields(
   theme: NarrativeTheme,
@@ -88,13 +89,8 @@ export function assessNarrativeFields(
   if (theme !== 'financial_impact') return { missing, notQuantifiedReason: null };
   const hasAmount = Boolean(fields.amount?.trim());
   const reason = fields.noAmountReason?.trim() || null;
-  const amountKeys = new Set(['amount', 'amountBasis']);
   return {
-    missing: missing.filter((f) => {
-      if (f.key === 'noAmountReason') return !hasAmount;
-      if (amountKeys.has(f.key)) return hasAmount || reason === null;
-      return true;
-    }),
+    missing: missing.filter((f) => f.key !== 'noAmountReason' || !hasAmount),
     notQuantifiedReason: hasAmount ? null : reason,
   };
 }

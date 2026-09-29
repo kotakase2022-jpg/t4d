@@ -321,6 +321,67 @@ export async function saveProjectFrameworkFormAction(
 }
 
 /** 「適用判断を確定」: 理由・参照規則・確認日を必須にして判断を追記する */
+/** 適用判断の確定フォームの入力値（失敗しても消さない） */
+export interface ApplicabilityDecisionValues {
+  applicabilityStatus: string;
+  reason: string;
+  ruleRef: string;
+  confirmedOn: string;
+  transitionalNote: string;
+}
+
+export interface ApplicabilityDecisionFormState {
+  status: 'idle' | 'error';
+  message: string | null;
+  values: ApplicabilityDecisionValues | null;
+}
+
+/**
+ * 適用判断を確定する（フォームの状態を返す版）。理由が空白だけ等で断られたときはリダイレクトせず、
+ * 入力した理由・経過措置の注記を返す（リダイレクトすると、書いた理由が消えていた）
+ */
+export async function confirmApplicabilityFormAction(
+  _previous: ApplicabilityDecisionFormState,
+  formData: FormData,
+): Promise<ApplicabilityDecisionFormState> {
+  const projectId = str(formData, 'projectId');
+  const projectFrameworkId = str(formData, 'projectFrameworkId');
+  const values: ApplicabilityDecisionValues = {
+    applicabilityStatus: str(formData, 'applicabilityStatus'),
+    reason: str(formData, 'reason'),
+    ruleRef: str(formData, 'ruleRef'),
+    confirmedOn: str(formData, 'confirmedOn'),
+    transitionalNote: str(formData, 'transitionalNote'),
+  };
+  let decisionNo: number;
+  try {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    // 区分の妥当性（未判定は確定できない等）は Service が検証する
+    const decision = await confirmApplicability(db, ctx, {
+      projectFrameworkId,
+      applicabilityStatus: values.applicabilityStatus as DecisionStatus,
+      reason: values.reason,
+      ruleRef: values.ruleRef,
+      confirmedOn: values.confirmedOn,
+      transitionalNote: strOrNull(formData, 'transitionalNote'),
+    });
+    decisionNo = decision.decisionNo;
+  } catch (error) {
+    if (isUserFacingError(error)) return { status: 'error', message: error.message, values };
+    console.error('[confirm applicability]', error);
+    return {
+      status: 'error',
+      message: '適用判断を確定できませんでした。時間をおいて再試行してください。',
+      values,
+    };
+  }
+  revalidatePath(`${BASE}/${projectId}`);
+  redirect(
+    `${settingsPath(projectId)}&flash=applicabilityConfirmed&no=${decisionNo}#pf-${projectFrameworkId}`,
+  );
+}
+
 export async function confirmApplicabilityAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();

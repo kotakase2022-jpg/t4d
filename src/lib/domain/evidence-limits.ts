@@ -5,3 +5,37 @@
 
 /** 手動抜粋の文言の最大文字数 */
 export const MANUAL_EXCERPT_MAX_LENGTH = 4000;
+
+/**
+ * 資料の形式の表示名。画面に MIME 型（application/vnd.openxmlformats-… など）をそのまま出さない。
+ * 分からない形式は拡張子を大文字で添える（それも無ければ「その他の形式」）
+ */
+export function fileTypeLabel(mimeType: string | null | undefined, fileName = ''): string {
+  const mime = (mimeType ?? '').toLowerCase();
+  const ext = (/\.([a-z0-9]{1,8})$/i.exec(fileName)?.[1] ?? '').toLowerCase();
+  if (mime === 'application/pdf' || ext === 'pdf') return 'PDF';
+  if (
+    mime.includes('wordprocessingml') ||
+    mime === 'application/msword' ||
+    ext === 'docx' ||
+    ext === 'doc'
+  ) {
+    return 'Word 文書';
+  }
+  if (
+    mime.includes('spreadsheetml') ||
+    mime === 'application/vnd.ms-excel' ||
+    ext === 'xlsx' ||
+    ext === 'xls'
+  ) {
+    return 'Excel ブック';
+  }
+  if (mime.includes('presentationml') || ext === 'pptx') return 'PowerPoint';
+  if (mime.includes('csv') || ext === 'csv') return 'CSV';
+  if (mime.startsWith('image/')) {
+    const kind = mime.slice('image/'.length).replace('jpeg', 'jpg').toUpperCase();
+    return `画像（${kind || ext.toUpperCase() || '形式不明'}）`;
+  }
+  if (mime.startsWith('text/') || ext === 'txt') return 'テキスト';
+  return ext ? `${ext.toUpperCase()} ファイル` : 'その他の形式';
+}

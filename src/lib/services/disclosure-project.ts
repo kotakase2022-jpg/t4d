@@ -8,7 +8,7 @@ import {
   BLOCK_STATUS_LABELS,
   DISCLOSURE_PURPOSE_LABELS,
   FRAMEWORK_COVERAGE_STATUS_LABELS,
-  FRAMEWORK_LEGAL_STATUS_LABELS,
+  frameworkLegalLabel,
   MATERIALITY_BASIS_LABELS,
 } from '@/lib/domain/disclosure-status';
 import { COVERAGE_LABEL } from '@/lib/domain/ssbj';
@@ -161,24 +161,15 @@ export interface FrameworkLegalView {
 export function describeFrameworkVersion(version: DisclosureFrameworkVersion): FrameworkLegalView {
   const legal = version.legalStatus;
   const isSample = legal === 'sample' || version.coverageStatus === 'sample' || version.isFixture;
-  let label: string;
-  let tone: LegalTone;
-  if (isSample) {
-    label = 'サンプル（架空）';
-    tone = 'neutral';
-  } else if (legal === 'draft') {
-    label = '公開草案に基づく準備';
-    tone = 'warning';
-  } else if (legal === 'superseded') {
-    label = FRAMEWORK_LEGAL_STATUS_LABELS.superseded;
-    tone = 'neutral';
-  } else if (legal) {
-    label = FRAMEWORK_LEGAL_STATUS_LABELS[legal];
-    tone = 'brand';
-  } else {
-    label = '法的位置付け未登録';
-    tone = 'neutral';
-  }
+  // 文言は開示ホーム・出力の表紙と同じ関数で作る（frameworkLegalLabel）
+  const label = frameworkLegalLabel(version);
+  const tone: LegalTone = isSample
+    ? 'neutral'
+    : legal === 'draft'
+      ? 'warning'
+      : legal === 'superseded' || !legal
+        ? 'neutral'
+        : 'brand';
   return {
     label,
     tone,

@@ -4,7 +4,7 @@ import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getAppMode } from '@/lib/config';
-import { getDb } from '@/lib/repositories';
+import { applyPendingDemoResetFor, getDb } from '@/lib/repositories';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -136,18 +136,18 @@ export const getSession = cache(async (): Promise<SessionInfo | null> => {
     unitScopeIds: selected.unitScopeIds,
   };
 
-  return {
-    profile,
-    workspaces,
-    context: {
-      userId: profile.id,
-      email: profile.email,
-      displayName: profile.displayName,
-      workspace,
-      engagementIds: await loadEngagementIds(db, profile.id, workspace),
-      demo: getAppMode() === 'demo',
-    },
+  const context: AuthorizationContext = {
+    userId: profile.id,
+    email: profile.email,
+    displayName: profile.displayName,
+    workspace,
+    engagementIds: await loadEngagementIds(db, profile.id, workspace),
+    demo: getAppMode() === 'demo',
   };
+  // 別インスタンスで行った開示デモのリセットは、利用者を解決してから反映する（組織・権限を確かめる）
+  if (context.demo) await applyPendingDemoResetFor(context);
+
+  return { profile, workspaces, context };
 });
 
 export type ResolvedSession = SessionInfo & { context: AuthorizationContext };

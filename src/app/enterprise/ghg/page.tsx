@@ -1,5 +1,13 @@
 import Link from 'next/link';
-import { CircleAlert, CircleCheck, Clock, Scale, Upload } from 'lucide-react';
+import {
+  AlertTriangle,
+  Calculator,
+  CircleAlert,
+  CircleCheck,
+  Clock,
+  Scale,
+  Upload,
+} from 'lucide-react';
 import {
   AggregationIncompleteBadge,
   AvailabilityBadge,
@@ -111,7 +119,7 @@ export default async function GhgPage() {
   const trendMetricCodes = GHG_CONSOLIDATION_CODES.filter((code) =>
     trend.some((entry) =>
       entry.metrics.some(
-        (m) => m.metric.code === code && (m.valueCount > 0 || m.estimates.length > 0),
+        (m) => m.metric.code === code && (m.consolidatedValueCount > 0 || m.estimates.length > 0),
       ),
     ),
   );
@@ -156,6 +164,8 @@ export default async function GhgPage() {
                 {consolidation.metrics.map((agg) => {
                   // 承認済みの値が 1 件も無い指標は 0 ではなく「未入力」と出す（W0 O4）
                   const noValue = agg.valueCount === 0;
+                  // 持分法・連結対象外の拠点にしか値が無ければ、連結値は 0 ではなく「未入力」
+                  const noConsolidated = agg.consolidatedValueCount === 0;
                   return (
                     <TR key={agg.metric.id}>
                       <TD className="font-medium">
@@ -166,7 +176,7 @@ export default async function GhgPage() {
                         {noValue ? '—' : formatNumber(agg.simpleSum)}
                       </TD>
                       <TD align="right" className="tnum">
-                        {noValue ? '—' : formatNumber(agg.ownershipAdjusted)}
+                        {noConsolidated ? '—' : formatNumber(agg.ownershipAdjusted)}
                       </TD>
                       <TD align="right" className="tnum">
                         {agg.intercompanyEliminated > 0
@@ -174,7 +184,7 @@ export default async function GhgPage() {
                           : '—'}
                       </TD>
                       <TD align="right" className="tnum font-semibold">
-                        {noValue ? (
+                        {noConsolidated ? (
                           <AvailabilityBadge status="not_entered" />
                         ) : (
                           formatNumber(agg.consolidated)
@@ -184,9 +194,12 @@ export default async function GhgPage() {
                         {agg.estimates.length > 0 ? (
                           <span>
                             {formatNumber(agg.consolidatedWithEstimates)}{' '}
-                            <Badge tone="warning">推計 {agg.estimates.length} 件</Badge>
+                            <Badge tone="warning">
+                              <Calculator className="size-3" aria-hidden="true" />
+                              推計 {agg.estimates.length} 件
+                            </Badge>
                           </span>
-                        ) : noValue ? (
+                        ) : noConsolidated ? (
                           '—'
                         ) : (
                           formatNumber(agg.consolidatedWithEstimates)
@@ -198,7 +211,9 @@ export default async function GhgPage() {
                             ? 'グループ内取引の二重計上を控除'
                             : noValue
                               ? '承認済みの値がありません（0 ではありません）'
-                              : '—')}
+                              : noConsolidated
+                                ? '連結対象の拠点に承認済みの値がありません（持分法・連結対象外の拠点の値は連結値に含めません）'
+                                : '—')}
                       </TD>
                     </TR>
                   );
@@ -287,7 +302,12 @@ export default async function GhgPage() {
                             </span>
                             {/* バーの軌道幅を全行で揃えるため、バッジ枠は常に確保する */}
                             <span className="w-16 shrink-0">
-                              {row.estimated && <Badge tone="warning">推計込み</Badge>}
+                              {row.estimated && (
+                                <Badge tone="warning">
+                                  <Calculator className="size-3" aria-hidden="true" />
+                                  推計込み
+                                </Badge>
+                              )}
                             </span>
                           </li>
                         );
@@ -724,7 +744,12 @@ export default async function GhgPage() {
         <Card className="overflow-hidden">
           <SectionTitle
             title={`排出係数マスター（${factors.length}）`}
-            action={<Badge tone="warning">架空値（実係数ではありません）</Badge>}
+            action={
+              <Badge tone="warning">
+                <AlertTriangle className="size-3" aria-hidden="true" />
+                架空値（実係数ではありません）
+              </Badge>
+            }
           />
           <Table>
             <THead>

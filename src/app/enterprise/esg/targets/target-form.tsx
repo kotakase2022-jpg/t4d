@@ -4,8 +4,21 @@ import { useActionState } from 'react';
 import { AlertTriangle, Target } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
+import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { registerKpiTargetAction } from '../actions';
-import { INITIAL_KPI_TARGET_FORM_STATE } from '../target-form-state';
+import { INITIAL_KPI_TARGET_FORM_STATE, type KpiTargetFormState } from '../target-form-state';
+
+/** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、入力を残す */
+const registerAction = withNetworkFallback(
+  registerKpiTargetAction,
+  (previous, formData): KpiTargetFormState => {
+    const values: Record<string, string> = {};
+    for (const [key, value] of formData.entries()) {
+      if (typeof value === 'string' && !key.startsWith('$ACTION')) values[key] = value;
+    }
+    return { attempt: previous.attempt + 1, message: NETWORK_ERROR_MESSAGE, values };
+  },
+);
 
 /**
  * KPI 目標の登録・改訂フォーム。
@@ -47,7 +60,7 @@ export function KpiTargetForm({
   /** 改訂中の目標（null は新規） */
   revising: { targetKey: string; versionNo: number } | null;
 }) {
-  const [state, action] = useActionState(registerKpiTargetAction, INITIAL_KPI_TARGET_FORM_STATE);
+  const [state, action] = useActionState(registerAction, INITIAL_KPI_TARGET_FORM_STATE);
   const v = (key: keyof TargetFormDefaults) => state.values[key] ?? defaults[key];
   const errorId = 'kpi-target-form-error';
 

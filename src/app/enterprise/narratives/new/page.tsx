@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { FileText, Info } from 'lucide-react';
+import { Calendar, FileText, Info, Quote, Tag } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -192,10 +192,19 @@ export default async function NewNarrativePage({
                         <Badge
                           tone={d.usagePurposeLabel === '当年度の根拠' ? 'success' : 'warning'}
                         >
+                          <Tag className="size-3" aria-hidden="true" />
                           {d.usagePurposeLabel}
                         </Badge>
-                        {d.periodCode && <Badge tone="neutral">{d.periodCode}</Badge>}
-                        <Badge tone="neutral">{d.fragmentCount} 箇所</Badge>
+                        {d.periodCode && (
+                          <Badge tone="neutral">
+                            <Calendar className="size-3" aria-hidden="true" />
+                            {d.periodCode}
+                          </Badge>
+                        )}
+                        <Badge tone="neutral">
+                          <Quote className="size-3" aria-hidden="true" />
+                          {d.fragmentCount} 箇所
+                        </Badge>
                       </span>
                     </Link>
                   </li>

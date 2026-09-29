@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ClipboardCheck, Info } from 'lucide-react';
+import { ClipboardCheck, Hourglass, Info } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -100,9 +100,9 @@ export async function ReviewsTab({
             icon={<ClipboardCheck className="size-5" aria-hidden="true" />}
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="max-h-[70vh] overflow-auto">
             <Table>
-              <THead>
+              <THead className="sticky top-0 z-10 bg-surface">
                 <TR>
                   <TH>節</TH>
                   <TH>審査する版</TH>
@@ -125,6 +125,7 @@ export async function ReviewsTab({
                       </Link>
                       {item.myStage && (
                         <Badge tone="brand" className="ml-1">
+                          <Hourglass className="size-3" aria-hidden="true" />
                           {item.myStage === 'review' ? 'あなたのレビュー待ち' : 'あなたの承認待ち'}
                         </Badge>
                       )}

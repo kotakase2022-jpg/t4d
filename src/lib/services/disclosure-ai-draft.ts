@@ -31,7 +31,7 @@ import {
   CONFLICT_MESSAGES,
   contributorsWith,
   editingBodyOf,
-  findForeignRefs,
+  findUnresolvableRefs,
   findPriorYearBlock,
   isForeignWorkingBody,
   isVersionApproved,
@@ -208,7 +208,7 @@ async function buildSources(
         periodLabel: periodLabel(version.reportingPeriodId),
         locator: null,
         text: version.body,
-        // 画面・スナップショットと同じ判定（財務的影響は定量化しない理由があれば影響額を不足に数えない）
+        // 画面・スナップショットと同じ判定（財務的影響は、定量化しない理由があっても影響額が無ければ不足）
         missingFields: assessNarrativeFields(record.theme, version.fields).missing.map(
           (f) => f.label,
         ),
@@ -255,6 +255,11 @@ async function buildSources(
         notes.push('値の無い数値（未入力・対象外など）は入力から外しました。');
         continue;
       }
+      // 目標の値は当年度の事実ではない。承認済みでも「当年度の根拠」として渡さない（§7.1・§10.4）
+      if (version.valueKind === 'target') {
+        notes.push('目標の値は当年度の実績の根拠にできないため、入力から外しました。');
+        continue;
+      }
       const metric = await db.findById('metrics', dp.metricId);
       const approved = isVersionApproved(
         version,
@@ -273,8 +278,15 @@ async function buildSources(
             : 'prior_year_text',
         periodLabel: periodLabel(dp.reportingPeriodId),
         locator: null,
+        // 表示には推計の区分が入る（例: 1,190.9 t-CO2e（推計））。下書きでも区分を落とさない
         text: `${name}: ${metricDisplay(version)}`,
-        metric: { name, display: metricDisplay(version), boundary: dp.boundary, approved },
+        metric: {
+          name,
+          display: metricDisplay(version),
+          boundary: dp.boundary,
+          approved,
+          valueKind: version.valueKind ?? 'actual',
+        },
       });
     } else if (selected.kind === 'requirement') {
       const item = await db.findById('disclosureItems', selected.id);
@@ -954,9 +966,12 @@ export async function adoptDraftParagraphs(
   const editing = await editingBodyOf(db, ctx, block);
   const working =
     input.workingBody === undefined ? editing.body : parseBlockBody(input.workingBody);
-  // 別組織の行を指す参照は、作業本文にも入れない（自動保存と同じ。A29）
-  const foreign = await findForeignRefs(db, ctx, working);
-  if (foreign.length > 0) throw new BlockRefValidationError(foreign);
+  // 読めない参照（別組織・存在しない行）は、作業本文にも入れない（自動保存と同じ。A29）
+  const unresolvable = await findUnresolvableRefs(db, ctx, working, [
+    editing.version?.body,
+    block.workingBody,
+  ]);
+  if (unresolvable.length > 0) throw new BlockRefValidationError(unresolvable);
   const decoded = decodeRun(run);
   // 同じ実行の候補を採用して変わった段落は、利用者の編集に数えない（続けて採用できるように）
   const conflict = decoded.paragraphHashes

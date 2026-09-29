@@ -6,6 +6,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, FileText, Loader2, Save } fro
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
+import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { cn } from '@/lib/utils';
 import type { ProjectFormState, ProjectFormValues } from '../actions';
 
@@ -129,8 +130,26 @@ function Label({
 const selectClass =
   'mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px] focus-visible:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 aria-[invalid=true]:border-danger';
 
+/** 通信そのものが失敗したとき（接続断・502）。入力値を残してエラーとして返す */
+function networkFailureState(_previous: ProjectFormState, formData: FormData): ProjectFormState {
+  const values: Record<string, string | string[]> = {};
+  for (const key of new Set(formData.keys())) {
+    if (key.startsWith('$ACTION')) continue;
+    const all = formData.getAll(key).map((v) => (typeof v === 'string' ? v : ''));
+    values[key] =
+      all.length > 1 || ['purposes', 'languages', 'includedUnitIds'].includes(key)
+        ? all
+        : (all[0] ?? '');
+  }
+  return { ...INITIAL_STATE, status: 'error', message: NETWORK_ERROR_MESSAGE, values };
+}
+
 export function ProjectForm(props: ProjectFormProps) {
-  const [state, formAction, pending] = useActionState(props.action, INITIAL_STATE);
+  const action = React.useMemo(
+    () => withNetworkFallback(props.action, networkFailureState),
+    [props.action],
+  );
+  const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
   const values = state.values ?? props.initial;
   const errors = state.fieldErrors;
   const isCreate = props.mode === 'create';

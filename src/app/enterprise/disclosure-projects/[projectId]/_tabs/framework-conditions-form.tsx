@@ -4,6 +4,7 @@ import * as React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
+import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { saveProjectFrameworkFormAction, type FrameworkConditionsFormState } from '../../actions';
 
 export interface ConditionFieldView {
@@ -22,6 +23,19 @@ const INITIAL: FrameworkConditionsFormState = {
   fieldErrors: {},
   values: {},
 };
+
+/** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、入力した条件を残す */
+const action = withNetworkFallback(
+  saveProjectFrameworkFormAction,
+  (_previous, formData): FrameworkConditionsFormState => {
+    const values: Record<string, string> = {};
+    for (const [key, value] of formData.entries()) {
+      if (typeof value !== 'string') continue;
+      if (key.startsWith('condition.') || key === 'preparationStatus') values[key] = value;
+    }
+    return { status: 'error', message: NETWORK_ERROR_MESSAGE, fieldErrors: {}, values };
+  },
+);
 
 /**
  * 適用条件（保存して準備を始める）。読めない値があっても、その回に入力した条件を消さず、
@@ -42,7 +56,7 @@ export function FrameworkConditionsForm({
   decidedStatusLabel: string;
   preparationStatus: 'candidate' | 'awaiting_confirmation';
 }) {
-  const [state, action] = React.useActionState(saveProjectFrameworkFormAction, INITIAL);
+  const [state, formAction] = React.useActionState(action, INITIAL);
   const errorId = `pf-error-${projectFrameworkId}`;
   // 失敗して戻ってきたら、送った値で入力欄を作り直す（key を変えて defaultValue を入れ替える）
   const attempt = state.status === 'error' ? JSON.stringify(state.values) : 'saved';
@@ -50,7 +64,7 @@ export function FrameworkConditionsForm({
     state.status === 'error' && name in state.values ? (state.values[name] ?? '') : saved;
 
   return (
-    <form action={action} className="space-y-2" key={attempt}>
+    <form action={formAction} className="space-y-2" key={attempt}>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="projectFrameworkId" value={projectFrameworkId} />
       {state.status === 'error' && state.message && (

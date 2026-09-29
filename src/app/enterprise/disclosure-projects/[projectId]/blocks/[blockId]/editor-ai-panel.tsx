@@ -2,7 +2,18 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Bot, CheckCircle2, Info, Loader2, RotateCcw, Sparkles } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bot,
+  CheckCircle2,
+  Heading,
+  Info,
+  Loader2,
+  Plus,
+  Replace,
+  RotateCcw,
+  Sparkles,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { changedSinceRun } from '@/lib/ai/draft-conflict';
@@ -364,7 +375,10 @@ function RunView({
           )}
           {run.stateLabel}
         </Badge>
-        <Badge tone="outline">{run.providerLabel}</Badge>
+        <Badge tone="outline">
+          <Bot className="size-3" aria-hidden="true" />
+          {run.providerLabel}
+        </Badge>
         <span className="text-ink-muted">{formatJst(run.metadata.startedAt)}</span>
       </div>
 
@@ -414,9 +428,19 @@ function RunView({
                     <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
                       <span>候補 {c.index + 1}</span>
                       <Badge tone={current !== null ? 'warning' : 'success'}>
+                        {current !== null ? (
+                          <Replace className="size-3" aria-hidden="true" />
+                        ) : (
+                          <Plus className="size-3" aria-hidden="true" />
+                        )}
                         {current !== null ? `段落 ${c.paragraphId} の置き換え案` : '新しい段落'}
                       </Badge>
-                      {c.kind === 'heading' && <Badge tone="neutral">見出し</Badge>}
+                      {c.kind === 'heading' && (
+                        <Badge tone="neutral">
+                          <Heading className="size-3" aria-hidden="true" />
+                          見出し
+                        </Badge>
+                      )}
                     </div>
                     {current !== null ? (
                       <DiffText segments={diffChars(current, c.text)} />

@@ -5,6 +5,7 @@ import { AlertTriangle, Quote } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { MANUAL_EXCERPT_MAX_LENGTH } from '@/lib/domain/evidence-limits';
+import { NETWORK_ERROR_MESSAGE, withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { addManualExcerptFormAction, type ManualExcerptFormState } from '../actions';
 
 const INITIAL: ManualExcerptFormState = {
@@ -13,12 +14,26 @@ const INITIAL: ManualExcerptFormState = {
   values: { page: '', locator: '', text: '' },
 };
 
+/** 通信そのものが失敗しても（接続断・502）エラー境界で画面ごと置き換えず、手で写した文言を残す */
+const action = withNetworkFallback(
+  addManualExcerptFormAction,
+  (_previous, formData): ManualExcerptFormState => ({
+    status: 'error',
+    message: NETWORK_ERROR_MESSAGE,
+    values: {
+      page: String(formData.get('page') ?? ''),
+      locator: String(formData.get('locator') ?? ''),
+      text: String(formData.get('text') ?? ''),
+    },
+  }),
+);
+
 /**
  * 手動抜粋の入力。上限の文字数を入力欄にも持たせ、残りの文字数を示す。
  * 保存に失敗しても、手で写した文言・ページ・位置は消さない（サーバーが入力値を返す）。
  */
 export function ManualExcerptForm({ fileId }: { fileId: string }) {
-  const [state, action] = React.useActionState(addManualExcerptFormAction, INITIAL);
+  const [state, formAction] = React.useActionState(action, INITIAL);
   const [text, setText] = React.useState('');
   const [page, setPage] = React.useState('');
   const [locator, setLocator] = React.useState('');
@@ -34,7 +49,7 @@ export function ManualExcerptForm({ fileId }: { fileId: string }) {
   const remaining = MANUAL_EXCERPT_MAX_LENGTH - text.length;
   const errorId = 'mx-error';
   return (
-    <form action={action} className="space-y-2 px-3 pb-3">
+    <form action={formAction} className="space-y-2 px-3 pb-3">
       <input type="hidden" name="fileId" value={fileId} />
       <p className="text-[12px] text-ink-muted">
         テキストを抽出できないページ（画像の PDF など）は、該当箇所の文言を手で写して登録します。

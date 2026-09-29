@@ -132,15 +132,13 @@ describe('レビュー用草稿のスナップショット', () => {
 
     const risk = byKey.get('risk_opportunity')!;
     expect(risk.issues.map((i) => i.code)).toContain('not_approved');
-    // 財務的影響は定量化しない理由があるため、影響額・算定方法は不足情報に数えず、理由そのものを示す
-    // （原稿一覧・開示ホームと同じ判定。以前はスナップショットだけ「影響額（未確定）」を不足に数えていた）
+    // 財務的影響の影響額は未確定（理由あり）として不足情報に出る。理由は不足情報の横に示す
+    // （原稿一覧・開示ホームと同じ判定。理由だけで要件を満たしたことにはしない: 指示書 §6.6・§8.3）
     expect(
       risk.issues.some(
-        (i) =>
-          i.code === 'narrative_missing_fields' &&
-          (i.message.includes('影響額') || i.message.includes('算定方法・前提')),
+        (i) => i.code === 'narrative_missing_fields' && i.message.includes('影響額'),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(risk.issues.find((i) => i.code === 'narrative_not_quantified')?.message).toContain(
       '影響額を定量化していない理由: 財務的影響額は評価中のため未確定',
     );
@@ -250,6 +248,8 @@ describe('レポートの確定', () => {
       reason: '値は同じで注記の訂正のみのため、引用中の版を維持する。',
       decidedBy: userId('reviewer@demo.local'),
       decidedAt: '2026-08-10T00:00:00.000Z',
+      // 訂正版（v2）は承認済み。承認済みの訂正を見たうえでの維持
+      newRefApproved: true,
     });
 
     const readiness = await evaluateReportReadiness(db, approver(), FY2026);
@@ -271,6 +271,8 @@ describe('レポートの確定', () => {
     const text = await docxText(docx.bytes);
     expect(text).toContain('草案基準による準備');
     expect(text).toContain('法定準拠の確定ではありません');
+    // 表紙の「基準の位置付け」も画面と同じ文言（「草案」だけにしない。§8.1）
+    expect(text).toMatch(/基準の位置付け\s*公開草案に基づく準備/);
     expect(text).toContain('要求事項は未収録');
   });
 });

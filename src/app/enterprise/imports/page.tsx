@@ -82,7 +82,7 @@ export default async function ImportsPage() {
               <Link
                 key={entry.href}
                 href={entry.href}
-                className="group flex items-start gap-3 rounded-t4d-lg border border-line bg-surface px-4 py-3 transition-colors hover:border-brand-300 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
+                className="group flex items-start gap-3 rounded-t4d-lg border border-line bg-surface px-4 py-3 transition-colors hover:border-brand-300 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
               >
                 <entry.Icon className="mt-0.5 size-5 shrink-0 text-brand-600" aria-hidden="true" />
                 <span className="min-w-0 flex-1">

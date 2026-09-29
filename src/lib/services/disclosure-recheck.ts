@@ -118,6 +118,13 @@ async function freshnessBody(
 const ALLOWED = { allowed: true, reason: null } as const;
 const denied = (reason: string) => ({ allowed: false, reason });
 
+/**
+ * 根拠失効（削除された資料・数値）の項目で次にすること。判断（採用・維持・差戻し）では解消できないため、
+ * 再確認の画面は判断のフォームの代わりにこの案内と、影響する段落へのリンクを出す
+ */
+export const EVIDENCE_NEXT_STEP =
+  '判断では解消できません。原稿を開き、影響する段落から失効した引用（出典印・数値）を外すか差し替えてから、版として保存してください。';
+
 /** 根拠失効（削除された資料・数値）の項目は、どの判断でも解消できない */
 const EVIDENCE_DECISIONS: FreshnessItem['decisions'] = {
   adopt_new: denied(
@@ -154,12 +161,14 @@ export async function computeBlockFreshness(
     where: { organizationId, blockId: block.id },
   });
   // レポートの確定（report-snapshot.ts）と同じ規則で判断を引く（domain/disclosure-block.ts）
-  const latestDecision = (kind: RecheckRefKind, oldId: Uuid, newId: Uuid) =>
+  // 新しい版が未承認のときの「維持」は、その版が承認されたら無効（isRecheckDecisionInForce）
+  const latestDecision = (kind: RecheckRefKind, oldId: Uuid, newId: Uuid, newApproved: boolean) =>
     latestRecheckDecision(decisions, {
       blockId: block.id,
       refKind: kind,
       oldRefId: oldId,
       newRefId: newId,
+      newApproved,
     });
 
   const items: FreshnessItem[] = [];
@@ -215,8 +224,8 @@ export async function computeBlockFreshness(
     }
     if (!dp.currentVersionId || dp.currentVersionId === version.id) continue;
     const current = await db.findById('dataPointVersions', dp.currentVersionId);
-    const decision = latestDecision('metric', version.id, dp.currentVersionId);
     const newApproved = current ? isVersionApproved(current, dp, approvedIds) : false;
+    const decision = latestDecision('metric', version.id, dp.currentVersionId, newApproved);
     items.push({
       decisions: {
         adopt_new: !current
@@ -278,7 +287,8 @@ export async function computeBlockFreshness(
     }
     if (!record.currentVersionId || record.currentVersionId === version.id) continue;
     const current = await db.findById('narrativeVersions', record.currentVersionId);
-    const decision = latestDecision('narrative', version.id, record.currentVersionId);
+    const newApproved = record.confirmedVersionId === record.currentVersionId;
+    const decision = latestDecision('narrative', version.id, record.currentVersionId, newApproved);
     items.push({
       decisions: {
         adopt_new: current ? ALLOWED : denied('新しい定性情報の版が見つかりません。'),
@@ -292,7 +302,7 @@ export async function computeBlockFreshness(
       oldDisplay: `版 ${version.versionNo}: ${version.body}`,
       newDisplay: current ? `版 ${current.versionNo}: ${current.body}` : null,
       changeReason: current?.changeReason ?? null,
-      newApproved: record.confirmedVersionId === record.currentVersionId,
+      newApproved,
       paragraphIds,
       keptOld: decision?.decision === 'keep_old' ? decision : null,
       returnedToOwner: decision?.decision === 'return_to_owner' ? decision : null,
@@ -635,6 +645,9 @@ export async function decideRecheck(
     reason: reason || '引用先の新しい版を採用',
     decidedBy: ctx.userId,
     decidedAt,
+    // 維持の前提（新しい版が承認済みだったか）を残す。未承認のときの維持は、承認された時点で無効になる
+    // （Supabase Mode では DB のトリガ t4d.set_recheck_new_ref_approved が同じ値を書く）
+    newRefApproved: item.newApproved,
   };
   await db.insert('recheckDecisions', [decision]);
   await recordAuditEvent(db, ctx, {

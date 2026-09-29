@@ -12,6 +12,7 @@ import {
   ListTodo,
   RotateCcw,
   Scale,
+  Tag,
 } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -164,6 +165,7 @@ export function DisclosureHomeView({
               <div className="mt-1 flex flex-wrap gap-1">
                 {project.purposeLabels.map((label) => (
                   <Badge key={label} tone="outline">
+                    <Tag className="size-3" aria-hidden="true" />
                     {label}
                   </Badge>
                 ))}
@@ -519,7 +521,7 @@ function UnitSubmissions({ home }: { home: DisclosureHome }) {
     <Card className="overflow-hidden">
       {/* 補助表示（指示書 §6.1「拠点の未提出一覧は折りたたんだ補助表示」）。既定は閉じる */}
       <details className="group">
-        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-[13px] font-semibold text-ink hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100">
+        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-[13px] font-semibold text-ink hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600">
           <span>
             拠点の未提出（補助表示）
             <span className="ml-1.5 text-[12px] font-normal text-ink-muted">

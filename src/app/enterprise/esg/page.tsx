@@ -101,12 +101,6 @@ function SnapshotComparisonView({ comparison }: { comparison: KpiSnapshotCompari
                   </THead>
                   <TBody>
                     {rows.map((row) => {
-                      const diff =
-                        row.latestApproved?.value !== null &&
-                        row.latestApproved?.value !== undefined &&
-                        row.snapshotValue !== null
-                          ? row.latestApproved.value - row.snapshotValue
-                          : null;
                       return (
                         <TR key={`${row.dataPointId}-${row.snapshotVersionNo}`}>
                           <TD className="text-[12px]">
@@ -137,12 +131,14 @@ function SnapshotComparisonView({ comparison }: { comparison: KpiSnapshotCompari
                           <TD align="right" className="text-[12px]">
                             {!row.differs ? (
                               <span className="text-ink-muted">同じ版</span>
-                            ) : diff === null ? (
+                            ) : row.unitMismatch ? (
+                              <span className="text-ink-muted">単位が異なるため差を出しません</span>
+                            ) : row.diff === null ? (
                               '—'
-                            ) : diff === 0 ? (
+                            ) : row.diff === 0 ? (
                               '値は同じ（版が異なる）'
                             ) : (
-                              signed(diff)
+                              `${signed(row.diff)} ${row.diffUnit ?? ''}`.trim()
                             )}
                           </TD>
                           <TD className="text-[12px]">

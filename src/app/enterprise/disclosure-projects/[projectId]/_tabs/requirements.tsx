@@ -219,7 +219,8 @@ export async function RequirementsTab({
                         <TD className="min-w-[240px] max-w-[360px] align-top text-[12px]">
                           {selected.frameworkKey === 'ssbj' ? (
                             <Link
-                              href={`/enterprise/disclosures/ssbj/requirements/${row.item.id}`}
+                              // プロジェクトの報告期間の評価を開く（ヘッダーで選んでいる期間ではなく）
+                              href={`/enterprise/disclosures/ssbj/requirements/${row.item.id}?period=${detail.project.reportingPeriodId}`}
                               className="text-brand-800 hover:underline"
                             >
                               {row.item.questionText}

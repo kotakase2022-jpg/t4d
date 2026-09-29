@@ -12,6 +12,7 @@ import { can } from '@/lib/authorization/can';
 import { describeReferenceDate } from '@/lib/clock';
 import { daysUntilJst, formatJst, formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { listMyReviewTasks } from '@/lib/services/disclosure-review';
+import { isDisclosureFirstEnabled } from '@/lib/services/feature-settings';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { respondPbcAction } from '../actions';
 import { ReviewRequestStatusBadge } from '../disclosure-projects/[projectId]/blocks/status-badges';
@@ -33,7 +34,7 @@ export default async function WorkflowsPage({
   const reference = describeReferenceDate();
   const today = reference.date;
 
-  const [tasks, pbcRequests, myReviews] = await Promise.all([
+  const [tasks, pbcRequests, myReviews, disclosureFirst] = await Promise.all([
     db.select('tasks', {
       where: { organizationId, status: { notIn: ['done', 'cancelled'] } },
       orderBy: { column: 'dueDate' },
@@ -44,7 +45,12 @@ export default async function WorkflowsPage({
       orderBy: { column: 'dueDate' },
     }),
     listMyReviewTasks(db, ctx),
+    isDisclosureFirstEnabled(db, ctx),
   ]);
+  // 開示優先モードが OFF の組織は従来の画面のまま。ただし自分の番のレビュー・差戻しがあれば
+  // （URL から開示の画面を使っている場合など）見落とさないよう出す（A39）
+  const showReviews =
+    disclosureFirst || myReviews.awaitingMe.length > 0 || myReviews.returnedToMe.length > 0;
 
   const responses =
     pbcRequests.length > 0
@@ -82,83 +88,85 @@ export default async function WorkflowsPage({
 
       <div className="space-y-3 p-4">
         {/* 自分のレビュー: 自分の段階にある開示本文のレビュー・最終承認（§4.1 タスク・承認） */}
-        <Card className="overflow-hidden">
-          <SectionTitle title={`自分のレビュー（${myReviews.awaitingMe.length}）`} />
-          {myReviews.awaitingMe.length === 0 ? (
-            <EmptyState
-              title="あなたの番のレビュー・承認はありません"
-              description="開示本文のレビュー担当・最終承認者に指定された依頼が、あなたの段階になるとここに並びます。"
-              icon={<ClipboardCheck className="size-5" aria-hidden="true" />}
-            />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>節</TH>
-                  <TH>プロジェクト</TH>
-                  <TH>あなたの段階</TH>
-                  <TH>審査する版</TH>
-                  <TH>依頼者</TH>
-                  <TH>依頼日時</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {myReviews.awaitingMe.map((item) => (
-                  <TR key={item.id}>
-                    <TD>
-                      <Link
-                        href={`/enterprise/disclosure-projects/${item.projectId}/blocks/${item.blockId}`}
-                        className="font-medium text-brand-700 underline-offset-2 hover:underline"
-                      >
-                        {item.blockTitle}
-                      </Link>
-                    </TD>
-                    <TD className="text-[12px] text-ink-muted">{item.projectName}</TD>
-                    <TD>
-                      <Badge tone={item.myStage === 'final' ? 'warning' : 'brand'}>
-                        <ClipboardCheck className="size-3" aria-hidden="true" />
-                        {item.myStage === 'final' ? '最終承認（社内）' : 'レビュー（第 1 段）'}
-                      </Badge>
-                    </TD>
-                    <TD className="tnum">版 {item.targetVersionNo ?? '—'}</TD>
-                    <TD>{item.requestedByName}</TD>
-                    <TD className="text-[12px]">{formatJst(item.createdAt)}</TD>
+        {showReviews && (
+          <Card className="overflow-hidden">
+            <SectionTitle title={`自分のレビュー（${myReviews.awaitingMe.length}）`} />
+            {myReviews.awaitingMe.length === 0 ? (
+              <EmptyState
+                title="あなたの番のレビュー・承認はありません"
+                description="開示本文のレビュー担当・最終承認者に指定された依頼が、あなたの段階になるとここに並びます。"
+                icon={<ClipboardCheck className="size-5" aria-hidden="true" />}
+              />
+            ) : (
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>節</TH>
+                    <TH>プロジェクト</TH>
+                    <TH>あなたの段階</TH>
+                    <TH>審査する版</TH>
+                    <TH>依頼者</TH>
+                    <TH>依頼日時</TH>
                   </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-          {myReviews.returnedToMe.length > 0 && (
-            <div className="border-t border-line px-3 py-2">
-              <h3 className="flex items-center gap-1 text-[12px] font-semibold text-ink">
-                <Undo2 className="size-3.5" aria-hidden="true" />
-                差し戻された依頼（{myReviews.returnedToMe.length}）
-              </h3>
-              <ul className="mt-1 space-y-1 text-[12px]">
-                {myReviews.returnedToMe.map((item) => {
-                  const returned = [...item.events].reverse().find((e) => e.label === '差戻し');
-                  return (
-                    <li key={item.id} className="flex flex-wrap items-center gap-1.5">
-                      <Link
-                        href={`/enterprise/disclosure-projects/${item.projectId}/blocks/${item.blockId}`}
-                        className="text-brand-700 underline-offset-2 hover:underline"
-                      >
-                        {item.blockTitle}（版 {item.targetVersionNo ?? '—'}）
-                      </Link>
-                      <ReviewRequestStatusBadge status={item.status} />
-                      {returned && (
-                        <span className="text-ink-muted">
-                          {returned.actorName}: {returned.reason}
-                          {returned.paragraphId ? `（段落 ${returned.paragraphId}）` : ''}
-                        </span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-        </Card>
+                </THead>
+                <TBody>
+                  {myReviews.awaitingMe.map((item) => (
+                    <TR key={item.id}>
+                      <TD>
+                        <Link
+                          href={`/enterprise/disclosure-projects/${item.projectId}/blocks/${item.blockId}`}
+                          className="font-medium text-brand-700 underline-offset-2 hover:underline"
+                        >
+                          {item.blockTitle}
+                        </Link>
+                      </TD>
+                      <TD className="text-[12px] text-ink-muted">{item.projectName}</TD>
+                      <TD>
+                        <Badge tone={item.myStage === 'final' ? 'warning' : 'brand'}>
+                          <ClipboardCheck className="size-3" aria-hidden="true" />
+                          {item.myStage === 'final' ? '最終承認（社内）' : 'レビュー（第 1 段）'}
+                        </Badge>
+                      </TD>
+                      <TD className="tnum">版 {item.targetVersionNo ?? '—'}</TD>
+                      <TD>{item.requestedByName}</TD>
+                      <TD className="text-[12px]">{formatJst(item.createdAt)}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+            {myReviews.returnedToMe.length > 0 && (
+              <div className="border-t border-line px-3 py-2">
+                <h3 className="flex items-center gap-1 text-[12px] font-semibold text-ink">
+                  <Undo2 className="size-3.5" aria-hidden="true" />
+                  差し戻された依頼（{myReviews.returnedToMe.length}）
+                </h3>
+                <ul className="mt-1 space-y-1 text-[12px]">
+                  {myReviews.returnedToMe.map((item) => {
+                    const returned = [...item.events].reverse().find((e) => e.label === '差戻し');
+                    return (
+                      <li key={item.id} className="flex flex-wrap items-center gap-1.5">
+                        <Link
+                          href={`/enterprise/disclosure-projects/${item.projectId}/blocks/${item.blockId}`}
+                          className="text-brand-700 underline-offset-2 hover:underline"
+                        >
+                          {item.blockTitle}（版 {item.targetVersionNo ?? '—'}）
+                        </Link>
+                        <ReviewRequestStatusBadge status={item.status} />
+                        {returned && (
+                          <span className="text-ink-muted">
+                            {returned.actorName}: {returned.reason}
+                            {returned.paragraphId ? `（段落 ${returned.paragraphId}）` : ''}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </Card>
+        )}
 
         <Card className="overflow-hidden">
           <SectionTitle title={`タスク（${visibleTasks.length}）`} />

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
-import { ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
+import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
 import {
   addManualExcerpt,
@@ -63,6 +63,50 @@ export async function uploadEvidenceDocumentAction(formData: FormData): Promise<
   // 抽出できなかった資料は、一覧に手動抜粋への案内を出す（登録した資料を指す）
   if (outcome?.status === 'needs_manual') params.set('file', fileId);
   redirect(`${back}${back.includes('?') ? '&' : '?'}${params.toString()}`);
+}
+
+export interface ManualExcerptFormState {
+  status: 'idle' | 'error';
+  message: string | null;
+  /** 入力した値（失敗しても手で写した文言を消さない） */
+  values: { page: string; locator: string; text: string };
+}
+
+/**
+ * 手動抜粋（フォームの状態を返す版）。失敗したときはリダイレクトせず、入力した値と理由を返す
+ * （リダイレクトするとフォームが作り直され、手で写した長い文言が消えていた）
+ */
+export async function addManualExcerptFormAction(
+  _previous: ManualExcerptFormState,
+  formData: FormData,
+): Promise<ManualExcerptFormState> {
+  const fileId = str(formData, 'fileId');
+  const values = {
+    page: str(formData, 'page'),
+    locator: str(formData, 'locator'),
+    text: str(formData, 'text'),
+  };
+  const back = `${BASE}/${fileId}`;
+  try {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const pageRaw = values.page.trim();
+    const page = pageRaw === '' ? null : Number(pageRaw);
+    if (page !== null && !Number.isInteger(page)) {
+      throw new ValidationError('ページは 1 以上の整数で入力してください。');
+    }
+    await addManualExcerpt(db, ctx, { fileId, page, locator: values.locator, text: values.text });
+  } catch (error) {
+    if (isUserFacingError(error)) return { status: 'error', message: error.message, values };
+    console.error('[manual excerpt]', error);
+    return {
+      status: 'error',
+      message: '保存に失敗しました。入力は残っています。時間をおいて再試行してください。',
+      values,
+    };
+  }
+  revalidatePath(back);
+  redirect(`${back}?flash=manualExcerptAdded#extracted`);
 }
 
 /** 手動抜粋（テキスト抽出できないページの代替）。抽出結果として残り、引用に使える */

@@ -203,6 +203,16 @@ export function StandardImport({
   const [validating, startValidate] = React.useTransition();
   const [committing, startCommit] = React.useTransition();
   const resultRef = React.useRef<HTMLDivElement>(null);
+  /** 検証の結果の読み上げ（件数とエラーの有無。画面の表示だけでは読み上げ環境で気付けない） */
+  const [announcement, setAnnouncement] = React.useState('');
+  /**
+   * 検証が終わった回数。結果は送信ボタンより下に出るため、フォーカスを結果の見出しへ移して
+   * キーボード・読み上げの利用者が結果（エラーの件数）から読み始められるようにする。
+   */
+  const [validatedCount, setValidatedCount] = React.useState(0);
+  React.useEffect(() => {
+    if (validatedCount > 0) document.getElementById('standard-summary-title')?.focus();
+  }, [validatedCount]);
 
   const committed = commitFeedback?.kind === 'success';
 
@@ -268,6 +278,11 @@ export function StandardImport({
           setMode('all');
           setConfirmExcluded(false);
           idempotencyKey.current = newKey();
+          const c = result.preview.counts;
+          setAnnouncement(
+            `検証しました（まだ登録していません）: 新規 ${c.new} 行／変更 ${c.changed} 行／変更なし ${c.unchanged} 行／エラー ${c.error} 行。`,
+          );
+          setValidatedCount((n) => n + 1);
         } else {
           setValidateFeedback({ kind: result.kind, message: result.message });
         }
@@ -350,6 +365,9 @@ export function StandardImport({
 
   return (
     <div className="space-y-3">
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
       <Card className="space-y-3 p-3">
         <StepIndicator current={currentStep} done={committed} />
 

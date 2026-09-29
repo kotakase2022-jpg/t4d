@@ -13,6 +13,7 @@ import { changedSinceRun, paragraphHashes } from '@/lib/ai/draft-conflict';
 import {
   DRAFT_SOURCE_USAGES,
   isGroundingUsage,
+  splitSentences,
   type DraftInvocationInput,
   type DraftSourceInput,
   type DraftSourceUsage,
@@ -21,13 +22,18 @@ import { recordAuditEvent } from '@/lib/audit/logger';
 import { AuthorizationError, assertCan, can, NotFoundError } from '@/lib/authorization/can';
 import { canonicalJson, contentHashOf, paragraphText } from '@/lib/domain/disclosure-block';
 import { transitionBlock } from '@/lib/domain/disclosure-status';
-import { missingTemplateFields } from '@/lib/domain/narrative-template';
+import { assessNarrativeFields } from '@/lib/domain/narrative-template';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid, stableHash } from '@/lib/fixtures/ids';
 import {
   approvedDataPointVersionIds,
+  BlockRefValidationError,
+  CONFLICT_MESSAGES,
+  contributorsWith,
   editingBodyOf,
+  findForeignRefs,
   findPriorYearBlock,
+  isForeignWorkingBody,
   isVersionApproved,
   loadBlock,
   loadProject,
@@ -202,7 +208,10 @@ async function buildSources(
         periodLabel: periodLabel(version.reportingPeriodId),
         locator: null,
         text: version.body,
-        missingFields: missingTemplateFields(record.theme, version.fields).map((f) => f.label),
+        // 画面・スナップショットと同じ判定（財務的影響は定量化しない理由があれば影響額を不足に数えない）
+        missingFields: assessNarrativeFields(record.theme, version.fields).missing.map(
+          (f) => f.label,
+        ),
         anchorIds: version.sourceAnchorIds,
       });
     } else if (selected.kind === 'source_anchor') {
@@ -390,6 +399,21 @@ function toChildren(
       return [{ t: 'narrative', narrativeVersionId: r.id, quote: body }, ...citesOf(refs)];
     }
   }
+  // 候補が定性情報の文を言い直しの中に含むなら、その文（連続する文のまとまり）を版を持った引用にする。
+  // 前置き・出典の注記だけが地の文になり、事実の部分は元の版を指し続ける
+  for (const r of refs) {
+    if (r.kind !== 'narrative_version') continue;
+    const body = resolver.narrativeBody(r.id);
+    const quote = body ? longestQuotedRun(body, text) : null;
+    if (!quote) continue;
+    const at = text.indexOf(quote);
+    const children: BlockInline[] = [];
+    if (at > 0) children.push({ t: 'text', text: text.slice(0, at) });
+    children.push({ t: 'narrative', narrativeVersionId: r.id, quote });
+    const rest = text.slice(at + quote.length);
+    if (rest) children.push({ t: 'text', text: rest });
+    return [...children, ...citesOf(refs)];
+  }
   // 数値の表示文字列が本文にあれば、版を持った参照に置き換える
   let children: BlockInline[] = [{ t: 'text', text }];
   for (const r of refs) {
@@ -422,6 +446,23 @@ function toChildren(
     children = next;
   }
   return [...children, ...citesOf(refs)];
+}
+
+/**
+ * 定性情報の本文の文のうち、候補の文にそのまま含まれる最長の連続部分（無ければ null）。
+ * 引用文は版の本文の一部でなければならない（validateBodyRefs と同じ条件）ので、本文にも含まれるものに限る
+ */
+export function longestQuotedRun(body: string, text: string): string | null {
+  const sentences = splitSentences(body);
+  let best: string | null = null;
+  for (let i = 0; i < sentences.length; i += 1) {
+    for (let j = i; j < sentences.length; j += 1) {
+      const run = sentences.slice(i, j + 1).join('');
+      if (!text.includes(run) || !body.includes(run)) break;
+      if (!best || run.length > best.length) best = run;
+    }
+  }
+  return best;
 }
 
 function citesOf(refs: DisclosureDraftSourceRef[]): BlockInline[] {
@@ -820,14 +861,12 @@ export async function generateBlockDraft(
     };
   }
 
-  // 同じ節の未確認の候補は、新しい候補に置き換わったものとして閉じる（採用済みの段落は本文に残る）
+  // 同じ節の未確認の候補は、新しい候補に置き換わったものとして閉じる（採用済みの段落は本文に残る）。
+  // 一部でも採用した実行は「採用」として閉じる（破棄と記録すると、承認済みの本文に入った段落の
+  // 出所が「破棄した AI 出力」になり、AI の記録と本文が食い違う）
   for (const old of await runsOfBlock(db, ctx, block.id)) {
     if (old.id === run.id || old.status !== 'succeeded') continue;
-    await db.update('aiRuns', old.id, {
-      status: 'rejected',
-      reviewedBy: ctx.userId,
-      rejectedAt: new Date().toISOString(),
-    });
+    await closeRun(db, ctx, old, wasAdopted(old, baseBody) ? 'accepted' : 'rejected');
   }
 
   return {
@@ -851,12 +890,26 @@ export interface AdoptDraftInput {
   baseVersionId: Uuid | null;
   /** 生成中に本文が変わっていても、差分を確認したうえで採用する（置き換えずに直後へ足す） */
   allowOnConflict?: boolean;
+  /** 画面が読み込んだ作業本文の保存時刻（別の人の自動保存を黙って上書きしない） */
+  knownWorkingSavedAt?: IsoDateTime | null;
 }
 
 export type AdoptDraftResult =
   | { status: 'applied'; body: BlockBody; savedAt: IsoDateTime; adopted: number }
   | { status: 'conflict'; body: BlockBody; message: string }
-  | { status: 'version_conflict'; currentVersionId: Uuid | null };
+  | { status: 'version_conflict'; currentVersionId: Uuid | null }
+  | { status: 'working_conflict'; body: BlockBody; message: string };
+
+/**
+ * 実行の候補を 1 つでも本文へ採用したか。
+ * 採用時に実行へ印（acceptedAt）を付けておき、本文（画面から送られたもの、無ければ作業本文）にも
+ * その実行の段落があれば採用とみなす。Demo Mode では作業本文が別のサーバーに無いことがあるため、
+ * 本文だけで判定すると、採用したのに「破棄」と記録してしまう
+ */
+function wasAdopted(run: Pick<AiRun, 'id' | 'acceptedAt'>, body: BlockBody | null): boolean {
+  if (run.acceptedAt) return true;
+  return Boolean(body?.paragraphs.some((p) => p.aiRunId === run.id));
+}
 
 function adoptedParagraphId(runId: Uuid, index: number): string {
   return `ai-${runId.slice(0, 8)}-${index}`;
@@ -888,9 +941,22 @@ export async function adoptDraftParagraphs(
     throw new ValidationError('破棄した候補・失敗した実行は採用できません。');
   }
 
+  if (
+    input.knownWorkingSavedAt !== undefined &&
+    isForeignWorkingBody(block, ctx.userId, input.knownWorkingSavedAt)
+  ) {
+    return {
+      status: 'working_conflict',
+      body: block.workingBody ?? { paragraphs: [] },
+      message: CONFLICT_MESSAGES.working,
+    };
+  }
   const editing = await editingBodyOf(db, ctx, block);
   const working =
     input.workingBody === undefined ? editing.body : parseBlockBody(input.workingBody);
+  // 別組織の行を指す参照は、作業本文にも入れない（自動保存と同じ。A29）
+  const foreign = await findForeignRefs(db, ctx, working);
+  if (foreign.length > 0) throw new BlockRefValidationError(foreign);
   const decoded = decodeRun(run);
   // 同じ実行の候補を採用して変わった段落は、利用者の編集に数えない（続けて採用できるように）
   const conflict = decoded.paragraphHashes
@@ -942,6 +1008,8 @@ export async function adoptDraftParagraphs(
     workingBody: body,
     workingBaseVersionId: block.currentVersionId,
     workingSavedAt: savedAt,
+    workingUpdatedBy: ctx.userId,
+    workingContributorIds: contributorsWith(block, ctx.userId),
     updatedAt: savedAt,
     updatedBy: ctx.userId,
   });
@@ -956,6 +1024,14 @@ export async function adoptDraftParagraphs(
   );
   if (allAdopted && run.status === 'succeeded' && can(ctx, 'enterprise.ai.run')) {
     await closeRun(db, ctx, run, 'accepted');
+  } else if (
+    adopted > 0 &&
+    run.status === 'succeeded' &&
+    !run.acceptedAt &&
+    can(ctx, 'enterprise.ai.run')
+  ) {
+    // 一部だけ採用した: 実行は確認中のまま、採用した事実を実行に残す（閉じるときに「破棄」にしない）
+    await db.update('aiRuns', run.id, { acceptedAt: savedAt, reviewedBy: ctx.userId });
   }
   return { status: 'applied', body, savedAt, adopted };
 }
@@ -984,13 +1060,19 @@ async function closeRun(
 }
 
 /**
- * 候補の確認を終える（残りを破棄する）。採用した段落が本文にあれば「採用」、無ければ「破棄」として記録する。
+ * 候補の確認を終える（残りを破棄する）。一部でも採用していれば「採用」、無ければ「破棄」として記録する。
  * ai_runs の更新は AI 実行権限が必要（0023 の RLS と同じ）。
  */
 export async function closeDraftRun(
   db: DbClient,
   ctx: AuthorizationContext,
-  input: { blockId: Uuid; runId: Uuid; discard?: boolean },
+  input: {
+    blockId: Uuid;
+    runId: Uuid;
+    discard?: boolean;
+    /** 画面で編集中の本文。省略時はサーバーの作業本文 */
+    workingBody?: unknown;
+  },
 ): Promise<'accepted' | 'rejected'> {
   assertCan(ctx, 'enterprise.disclosure.write');
   assertCan(ctx, 'enterprise.ai.run');
@@ -1007,9 +1089,13 @@ export async function closeDraftRun(
   if (run.status !== 'succeeded') {
     return run.status === 'accepted' ? 'accepted' : 'rejected';
   }
-  const editing = await editingBodyOf(db, ctx, block);
-  const used = editing.body.paragraphs.some((p) => p.aiRunId === run.id);
-  const decision = used && !input.discard ? 'accepted' : 'rejected';
+  const body =
+    input.workingBody === undefined
+      ? (await editingBodyOf(db, ctx, block)).body
+      : parseBlockBody(input.workingBody);
+  // 一度でも採用した実行は、残りを破棄しても「採用」として閉じる（本文にその実行の段落が残るため、
+  // 「破棄」と記録すると AI の記録と本文の出所が食い違う）。discard は残りの候補を捨てる意味
+  const decision = wasAdopted(run, body) ? 'accepted' : 'rejected';
   await closeRun(db, ctx, run, decision);
   return decision;
 }

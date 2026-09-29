@@ -1,19 +1,18 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { AlertTriangle, ArrowRight, CheckCircle2, History } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, History, Undo2 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/input';
 import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { formatJst } from '@/lib/format/datetime';
 import { getRecheckView, type RecheckView } from '@/lib/services/disclosure-recheck';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { decideRecheckAction } from '../../actions';
 import { BlockStatusBadge, FreshnessBadge } from '../../status-badges';
+import { RecheckForms } from './recheck-forms';
 
 export const metadata = { title: '引用先の再確認' };
 
@@ -116,7 +115,10 @@ export default async function RecheckPage({
                   </Badge>
                 )}
                 {item.returnedToOwner && !item.keptOld && (
-                  <Badge tone="neutral">担当者へ差戻し済み</Badge>
+                  <Badge tone="neutral">
+                    <Undo2 className="size-3" aria-hidden="true" />
+                    担当者へ差戻し済み
+                  </Badge>
                 )}
               </div>
 
@@ -167,73 +169,13 @@ export default async function RecheckPage({
               </div>
 
               {view.canDecide && item.refKind !== 'evidence' && (
-                <div className="mt-3 grid gap-2 min-[1100px]:grid-cols-3">
-                  <form
-                    action={decideRecheckAction}
-                    className="space-y-1 rounded-t4d border border-line p-2"
-                  >
-                    <input type="hidden" name="projectId" value={projectId} />
-                    <input type="hidden" name="blockId" value={blockId} />
-                    <input type="hidden" name="refKind" value={item.refKind} />
-                    <input type="hidden" name="oldRefId" value={item.oldRefId} />
-                    <input type="hidden" name="decision" value="adopt_new" />
-                    <p className="text-[12px] text-ink">
-                      新しい版で本文を書き換えた次の版を作ります（節は下書きに戻り、再レビューが必要です）。
-                    </p>
-                    <label htmlFor={`adopt-${item.oldRefId}`} className="sr-only">
-                      変更理由（任意）
-                    </label>
-                    <Textarea
-                      id={`adopt-${item.oldRefId}`}
-                      name="reason"
-                      rows={1}
-                      placeholder="変更理由（任意）"
-                    />
-                    <Button type="submit" size="sm">
-                      新しい版を採用
-                    </Button>
-                  </form>
-                  <form
-                    action={decideRecheckAction}
-                    className="space-y-1 rounded-t4d border border-line p-2"
-                  >
-                    <input type="hidden" name="projectId" value={projectId} />
-                    <input type="hidden" name="blockId" value={blockId} />
-                    <input type="hidden" name="refKind" value={item.refKind} />
-                    <input type="hidden" name="oldRefId" value={item.oldRefId} />
-                    <input type="hidden" name="decision" value="keep_old" />
-                    <label htmlFor={`keep-${item.oldRefId}`} className="block text-[12px] text-ink">
-                      引用中の版を維持する理由（必須）
-                    </label>
-                    <Textarea id={`keep-${item.oldRefId}`} name="reason" rows={2} required />
-                    <p className="text-[11px] text-ink-muted">
-                      承認された版に限り選べます。失効した資料・削除された数値には使えません。
-                    </p>
-                    <Button type="submit" size="sm" variant="outline">
-                      引用中の版を維持
-                    </Button>
-                  </form>
-                  <form
-                    action={decideRecheckAction}
-                    className="space-y-1 rounded-t4d border border-line p-2"
-                  >
-                    <input type="hidden" name="projectId" value={projectId} />
-                    <input type="hidden" name="blockId" value={blockId} />
-                    <input type="hidden" name="refKind" value={item.refKind} />
-                    <input type="hidden" name="oldRefId" value={item.oldRefId} />
-                    <input type="hidden" name="decision" value="return_to_owner" />
-                    <label
-                      htmlFor={`return-${item.oldRefId}`}
-                      className="block text-[12px] text-ink"
-                    >
-                      担当者へ差し戻す理由（必須）
-                    </label>
-                    <Textarea id={`return-${item.oldRefId}`} name="reason" rows={2} required />
-                    <Button type="submit" size="sm" variant="ghost">
-                      担当者へ差戻し
-                    </Button>
-                  </form>
-                </div>
+                <RecheckForms
+                  projectId={projectId}
+                  blockId={blockId}
+                  refKind={item.refKind}
+                  oldRefId={item.oldRefId}
+                  decisions={item.decisions}
+                />
               )}
             </Card>
           ))

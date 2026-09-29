@@ -5,9 +5,14 @@ import { assertCan, assertEnterpriseWorkspace } from '@/lib/authorization/can';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
-import { removeDemoEditsFor } from '@/lib/repositories/demo-persistence';
-import type { DbClient, Row, TableName } from '@/lib/repositories/types';
-import type { AiFeatureType, AuthorizationContext } from '@/types/domain';
+import { markDemoReset, removeDemoEditsFor } from '@/lib/repositories/demo-persistence';
+import {
+  DISCLOSURE_AI_FEATURE,
+  DISCLOSURE_DEMO_RESET_TABLES,
+  isDisclosureNotification,
+} from '@/lib/repositories/demo-reset-sync';
+import type { DbClient, Row } from '@/lib/repositories/types';
+import type { AuthorizationContext } from '@/types/domain';
 
 /**
  * 開示優先モードのデモを初期状態へ戻す（指示書 §14.2「明示したデモ領域だけに作用する」）。
@@ -18,37 +23,18 @@ import type { AiFeatureType, AuthorizationContext } from '@/types/domain';
  *  - Fixture の行が書き換えられていれば、Fixture の値へ戻す
  *  - Cookie の持ち回り（t4d.demo-edits）からも同じ行だけを取り除く（他の画面のデモ操作は残す）
  *
+ * 通知は、開示の画面（依頼・差戻し・再確認）を指すデモ中の通知だけを消す（消えた依頼・節を指し続けないため）。
  * 触らないもの（他の領域）: 数値データ（Data Point と版）・資料（files）・SSBJ の評価・
- * Scope3 の算定・通知・タスク・監査ログ・機能設定（開示優先モードの ON/OFF）。
+ * Scope3 の算定・そのほかの通知・タスク・監査ログ・機能設定（開示優先モードの ON/OFF）。
  * 機能設定を戻さないのは、リセットした瞬間にメニューとホームが従来の構成へ切り替わり、
  * 実演の途中で画面が変わってしまうため。
  *
  * Demo Mode 専用。Supabase Mode では実行を拒否する（追記専用の表を本番で巻き戻さない）。
  */
 
-/** リセットの対象の表（開示優先モードの表。organizationFeatureSettings は意図して含めない） */
-export const DISCLOSURE_DEMO_RESET_TABLES = [
-  'disclosureProjects',
-  'projectFrameworks',
-  'projectFrameworkDecisions',
-  'narrativeRecords',
-  'narrativeVersions',
-  'sourceAnchors',
-  'disclosureBlocks',
-  'disclosureBlockVersions',
-  'reviewRequests',
-  'reviewEvents',
-  'reviewComments',
-  'recheckDecisions',
-  'reportSnapshots',
-  'exportArtifacts',
-  'kpiTargets',
-] as const satisfies readonly TableName[];
-
-export type DisclosureDemoResetTable = (typeof DISCLOSURE_DEMO_RESET_TABLES)[number];
-
-/** 原稿の AI 下書き（ai_runs の featureType）。ai_runs は共有の表なので、この種類の行だけを消す */
-const DISCLOSURE_AI_FEATURE: AiFeatureType = 'disclosureBlockDraft';
+// 対象の表の一覧は、別インスタンスへの反映（demo-reset-sync.ts）と同じものを使う
+export { DISCLOSURE_DEMO_RESET_TABLES };
+export type { DisclosureDemoResetTable } from '@/lib/repositories/demo-reset-sync';
 
 export interface DisclosureDemoResetResult {
   /** デモ中に作られて削除した行 */
@@ -152,6 +138,24 @@ export async function resetDisclosureDemoData(
   const removedAiRuns = demoAiRuns.size > 0 ? await db.hardDeleteDemoRows('aiRuns', demoAiRuns) : 0;
   byTable.aiRuns = { removed: removedAiRuns, restored: 0 };
   removedRows += removedAiRuns;
+
+  // デモ中に届いた開示の通知（消した依頼・節を指すもの）。Fixture の通知は残す
+  const fixtureNotificationIds = new Set(pristine.notifications.map((n) => n.id));
+  const notifications = await db.select('notifications', { where: { organizationId } });
+  const demoNotifications = new Set(
+    notifications
+      .filter((n) => isDisclosureNotification(n) && !fixtureNotificationIds.has(n.id))
+      .map((n) => n.id),
+  );
+  const removedNotifications =
+    demoNotifications.size > 0
+      ? await db.hardDeleteDemoRows('notifications', demoNotifications)
+      : 0;
+  byTable.notifications = { removed: removedNotifications, restored: 0 };
+  removedRows += removedNotifications;
+
+  // ほかのインスタンスにも同じリセットを反映させる（次のリクエストで Fixture の初期値へ戻す）
+  await markDemoReset(organizationId);
 
   await recordAuditEvent(db, ctx, {
     eventType: 'project_updated',

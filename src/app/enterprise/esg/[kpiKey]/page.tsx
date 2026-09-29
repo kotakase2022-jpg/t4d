@@ -10,6 +10,7 @@ import {
   AVAILABILITY_STATUS_LABELS,
   NARRATIVE_STATUS_LABELS,
   NARRATIVE_THEME_LABELS,
+  kpiTargetLabel,
 } from '@/lib/domain/disclosure-status';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { isKpiKey, KPI_SPECS, loadKpiDetail } from '@/lib/services/kpi';
@@ -242,8 +243,12 @@ export default async function KpiDetailPage({
                   <li key={view.target.targetKey} className="px-3 py-2 text-[12px]">
                     <p className="text-ink">{targetText(view, unit)}</p>
                     <p className="text-[11px] text-ink-muted">
-                      {view.target.targetKey}・版 {view.target.versionNo}（全 {view.versionCount}{' '}
-                      版）
+                      {kpiTargetLabel({
+                        metricName: detail.card.metric?.name ?? null,
+                        targetYear: view.target.targetYear,
+                        direction: view.target.direction,
+                      })}
+                      ・版 {view.target.versionNo}（全 {view.versionCount} 版）
                       {view.ownerName ? `・責任者 ${view.ownerName}` : ''}
                     </p>
                     {!view.comparable && (

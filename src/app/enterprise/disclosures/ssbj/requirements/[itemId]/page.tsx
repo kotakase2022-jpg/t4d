@@ -91,7 +91,14 @@ export default async function SsbjRequirementDetailPage({
   const canWrite = can(shell.ctx, 'enterprise.disclosure.write');
   const canRunAi = can(shell.ctx, 'enterprise.ai.run');
 
-  const detail = await loadSsbjRequirementDetail(shell.db, shell.ctx, shell.currentPeriod, itemId);
+  // 開示プロジェクトの要求事項タブからは、プロジェクトの報告期間を ?period= で明示して開く。
+  // ヘッダーの期間と違えば、その旨を帯で示す（別の年度の評価を見ていると取り違えない）
+  const requestedPeriodId = typeof query.period === 'string' ? query.period : null;
+  const period =
+    (requestedPeriodId && shell.periods.find((p) => p.id === requestedPeriodId)) ||
+    shell.currentPeriod;
+  const periodDiffers = period.id !== shell.currentPeriod.id;
+  const detail = await loadSsbjRequirementDetail(shell.db, shell.ctx, period, itemId);
   if (!detail) notFound();
 
   const { view, metrics } = detail;
@@ -105,7 +112,7 @@ export default async function SsbjRequirementDetailPage({
         description={
           <span className="flex flex-wrap items-center gap-2">
             <span>
-              {AREA_LABEL[view.area]} ／ {item.section} ／ {shell.currentPeriod.label}
+              {AREA_LABEL[view.area]} ／ {item.section} ／ {period.label}
             </span>
             <Badge tone={a.applicability === 'applicable' ? 'neutral' : 'outline'}>
               {APPLICABILITY_LABEL[a.applicability]}
@@ -135,6 +142,23 @@ export default async function SsbjRequirementDetailPage({
 
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
+        {periodDiffers && (
+          <p
+            role="note"
+            className="flex flex-wrap items-center gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-[12px] text-ink"
+          >
+            <CircleAlert className="size-3.5 text-[#8a5d00]" aria-hidden="true" />
+            開示プロジェクトの報告期間（{period.label}
+            ）の評価を表示しています。ヘッダーで選んでいる期間（
+            {shell.currentPeriod.label}）とは異なります。
+            <Link
+              href={`/enterprise/disclosures/ssbj/requirements/${item.id}`}
+              className="text-brand-800 underline"
+            >
+              {shell.currentPeriod.label} の評価を開く
+            </Link>
+          </p>
+        )}
 
         {a.recheckReason && (
           <Card className="flex items-start gap-2 border-warning/40 p-3">
@@ -326,6 +350,7 @@ export default async function SsbjRequirementDetailPage({
               <form action={runSsbjGapAnalysisAction}>
                 <input type="hidden" name="assessmentId" value={a.id} />
                 <input type="hidden" name="itemId" value={item.id} />
+                <input type="hidden" name="periodId" value={period.id} />
                 <SubmitButton size="sm" variant="outline" pendingLabel="分析しています…">
                   <Bot aria-hidden="true" />
                   {a.aiStatus === null ? 'ギャップ分析を実行' : 'ギャップ分析をやり直す'}
@@ -374,6 +399,7 @@ export default async function SsbjRequirementDetailPage({
                 <form action={saveSsbjReviewAction} className="space-y-2.5">
                   <input type="hidden" name="assessmentId" value={a.id} />
                   <input type="hidden" name="itemId" value={item.id} />
+                  <input type="hidden" name="periodId" value={period.id} />
                   <fieldset className="space-y-1.5">
                     <legend className="text-[11px] text-ink-muted">確認の結果</legend>
                     <label className="flex items-center gap-1.5 text-[12px] text-ink">
@@ -510,6 +536,7 @@ export default async function SsbjRequirementDetailPage({
                 <form action={saveSsbjScopeAction} className="space-y-2.5 p-3">
                   <input type="hidden" name="assessmentId" value={a.id} />
                   <input type="hidden" name="itemId" value={item.id} />
+                  <input type="hidden" name="periodId" value={period.id} />
                   <div className="grid grid-cols-2 gap-2">
                     <label className="space-y-1">
                       <span className="block text-[11px] text-ink-muted">適用区分</span>
@@ -629,6 +656,7 @@ export default async function SsbjRequirementDetailPage({
             >
               <input type="hidden" name="assessmentId" value={a.id} />
               <input type="hidden" name="itemId" value={item.id} />
+              <input type="hidden" name="periodId" value={period.id} />
               <p className="text-[12px] font-semibold text-ink">このギャップを対応計画に追加する</p>
               <div className="grid grid-cols-4 gap-2">
                 <label className="space-y-1">

@@ -48,6 +48,16 @@ type ValueRow = Pick<DataPoint, 'value' | 'availabilityStatus' | 'valueKind'>;
  */
 const kindOf = (dp: ValueRow) => dp.valueKind ?? 'actual';
 
+/** 実績（value_kind = actual）として集計に使える値を持つ行か（推計・目標は実績に数えない） */
+export function isActualValue(dp: ValueRow): dp is ValueRow & { value: number } {
+  return hasUsableValue(dp) && kindOf(dp) === 'actual';
+}
+
+/** 行の区分（0039 より前の行は実績として読む） */
+export function valueKindOf(dp: ValueRow): NonNullable<ValueRow['valueKind']> {
+  return kindOf(dp);
+}
+
 /** 集計に使える値を持つ行か（値あり・数値あり・目標値ではない） */
 export function hasUsableValue(dp: ValueRow): dp is ValueRow & { value: number } {
   return (
@@ -310,6 +320,11 @@ export interface EstimatedEntry {
   unitName: string;
   value: number;
   basis: string;
+  /**
+   * 推計の出所。current_estimate … 当年に推計値（value_kind = estimate）として承認された値／
+   * prior_year … 当年のデータが無い拠点を前年の承認済み実績で補完した値。画面の説明を出所ごとに変える
+   */
+  source: 'current_estimate' | 'prior_year';
 }
 
 export interface ExcludedUnitEntry {
@@ -436,6 +451,7 @@ export async function computeConsolidatedAggregation(
         unitName: unitById.get(dp.unitId)?.name ?? '—',
         value: round2(dp.value * factorOf(dp)),
         basis: '当年の推計値（承認済み）',
+        source: 'current_estimate',
       });
     }
 
@@ -463,6 +479,7 @@ export async function computeConsolidatedAggregation(
         unitName: unit.name,
         value: round2(prevSum.total * consolidationFactor(unit)),
         basis: `前年（${previous?.code ?? '—'}）の承認済み値で補完`,
+        source: 'prior_year',
       });
     }
     const consolidatedWithEstimates = consolidated + estimates.reduce((sum, e) => sum + e.value, 0);
@@ -523,6 +540,35 @@ export interface ConsolidatedTrendEntry {
   period: ReportingPeriod;
   /** metricCodes の順に並ぶ（存在しない指標は除かれる） */
   metrics: MetricAggregate[];
+}
+
+export interface TrendPoint {
+  period: ReportingPeriod;
+  metric: MetricDefinition | null;
+  /**
+   * 推計込み連結値。その年度にこの指標の実績も推計も無ければ null（「0」として描かない）。
+   * 推移の年度は「どれかの指標に実績がある年度」で決まるため、指標ごとには値の無い年度が混ざる
+   */
+  value: number | null;
+  /** 推計を含む値か */
+  estimated: boolean;
+}
+
+/** 直近の推移の 1 指標分。値の無い年度は value = null（画面は「未入力」と示し、0 のバーを描かない） */
+export function consolidatedTrendSeries(
+  trend: readonly ConsolidatedTrendEntry[],
+  code: string,
+): TrendPoint[] {
+  return trend.map((entry) => {
+    const agg = entry.metrics.find((m) => m.metric.code === code) ?? null;
+    const hasValue = agg !== null && (agg.valueCount > 0 || agg.estimates.length > 0);
+    return {
+      period: entry.period,
+      metric: agg?.metric ?? null,
+      value: hasValue ? agg.consolidatedWithEstimates : null,
+      estimated: hasValue && agg.estimates.length > 0,
+    };
+  });
 }
 
 /**

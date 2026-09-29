@@ -118,11 +118,38 @@ function inlineText(
   }
 }
 
+/**
+ * 対外用で伏せる資料名（非公開の資料のファイル名）。出典印だけでなく、定性情報の引用文や地の文に
+ * 書かれたファイル名も伏せる（以前の「資料から候補」は定性情報の本文にファイル名を書いていた）
+ */
+export function externalMaskedNames(
+  snapshot: Pick<ReportSnapshotDetail, 'anchors'>,
+  extraNonPublicFileNames: readonly string[] = [],
+): string[] {
+  const names = [
+    ...snapshot.anchors.filter((a) => !isPublic(a.confidentiality)).map((a) => a.fileName),
+    ...extraNonPublicFileNames,
+  ]
+    .map((n) => n.trim())
+    // 短すぎる名前で本文の普通の語を伏せない
+    .filter((n) => n.length >= 3);
+  // 長い名前から置き換える（短い名前が長い名前の一部のとき、長い方を先に伏せる）
+  return [...new Set(names)].sort((a, b) => b.length - a.length);
+}
+
+function maskNames(text: string, names: readonly string[]): string {
+  let out = text;
+  for (const name of names) out = out.split(name).join('社内資料');
+  return out;
+}
+
 /** 節の本文を段落ごとの文字列にする（節名と同じ見出し段落は重ねて出さない） */
 export function renderBlockParagraphs(
   block: SnapshotBlock,
   snapshot: ReportSnapshotDetail,
   audience: ExportAudience,
+  /** 対外用で伏せる資料名（externalMaskedNames）。社内確認用では使わない */
+  maskedNames: readonly string[] = externalMaskedNames(snapshot),
 ): RenderedParagraph[] {
   return block.body.paragraphs
     .map((p) => {
@@ -137,7 +164,10 @@ export function renderBlockParagraphs(
         } else {
           previousCite = null;
         }
-        parts.push(text);
+        // 出典印以外（地の文・定性情報の引用文）に書かれた非公開資料の名前も、対外用では伏せる
+        parts.push(
+          audience === 'external' && inline.t !== 'cite' ? maskNames(text, maskedNames) : text,
+        );
       }
       return { paragraphId: p.id, kind: p.kind, text: parts.join('') };
     })
@@ -267,6 +297,8 @@ export function coverRows(
 export interface DocxBuildOptions {
   audience: ExportAudience;
   frameworkVersionId: Uuid;
+  /** スナップショットの引用位置以外で伏せる非公開資料の名前（出力時に DB から集める） */
+  nonPublicFileNames?: readonly string[];
 }
 
 export async function buildDisclosureDocx(
@@ -278,6 +310,7 @@ export async function buildDisclosureDocx(
   );
   if (!framework) throw new Error('スナップショットに含まれない基準です。');
   const { audience } = options;
+  const maskedNames = externalMaskedNames(snapshot, options.nonPublicFileNames ?? []);
 
   const {
     Document,
@@ -382,7 +415,7 @@ export async function buildDisclosureDocx(
         }),
       );
     }
-    const paragraphs = renderBlockParagraphs(block, snapshot, audience);
+    const paragraphs = renderBlockParagraphs(block, snapshot, audience, maskedNames);
     if (paragraphs.length === 0) {
       children.push(new Paragraph('（本文なし）'));
     }

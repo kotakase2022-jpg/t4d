@@ -15,6 +15,7 @@ import { COVERAGE_LABEL } from '@/lib/domain/ssbj';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { formatNumber } from '@/lib/format/datetime';
 import { listMembers, type MemberEntry } from '@/lib/services/identity';
+import { isUuid } from '@/lib/validation/uuid';
 import type { DbClient } from '@/lib/repositories/types';
 import {
   DISCLOSURE_LANGUAGES,
@@ -409,7 +410,7 @@ async function loadProjectRow(
   projectId: Uuid,
 ): Promise<DisclosureProject> {
   assertCanReadDisclosure(ctx);
-  const project = await db.findById('disclosureProjects', projectId);
+  const project = isUuid(projectId) ? await db.findById('disclosureProjects', projectId) : null;
   // 他テナント・削除済みは存在自体を伏せる
   if (!project || project.deletedAt || project.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('開示プロジェクトが見つかりません。');
@@ -754,6 +755,7 @@ export async function createProject(
     scopeValueChainNote: clean(input.scopeValueChainNote).slice(0, 2000),
     includedUnitIds,
     status: 'preparing',
+    scopeRevision: 0,
     createdAt: now,
     updatedAt: now,
     createdBy: ctx.userId,
@@ -944,7 +946,8 @@ export async function computeBlockImpact(
         blockId: block.id,
         blockTitle: block.title,
         kind: 'approved_version',
-        label: '承認済みの版（変更前の前提で承認されています）',
+        label:
+          '承認済みの版（変更前の前提で承認されています。変更後は「再確認が必要」になり、再承認するまでレポートを確定できません）',
       });
     }
     for (const request of requests.filter((r) => r.targetId === block.id)) {
@@ -954,8 +957,8 @@ export async function computeBlockImpact(
         kind: 'open_review',
         label:
           request.status === 'open'
-            ? 'レビュー依頼中（依頼時点の版・規則で判断されます）'
-            : 'レビュー完了・承認待ち（依頼時点の版・規則で判断されます）',
+            ? 'レビュー依頼中（変更後は最終承認できません。差し戻して変更後の範囲で確認してください）'
+            : 'レビュー完了・承認待ち（変更後は最終承認できません。差し戻して変更後の範囲で確認してください）',
       });
     }
   }
@@ -1072,6 +1075,9 @@ export async function updateProject(
 
   await db.update('disclosureProjects', projectId, {
     ...changed,
+    // 報告範囲・期間を変えたら改訂番号を上げる。これより前の依頼で承認された節は
+    // 「再確認が必要」になり、レポートの確定と依頼中の最終承認を止める（指示書 §10.3）
+    ...(scopeChanged ? { scopeRevision: (detail.project.scopeRevision ?? 0) + 1 } : {}),
     updatedAt: new Date().toISOString(),
     updatedBy: ctx.userId,
   });
@@ -1082,6 +1088,7 @@ export async function updateProject(
     afterSummary: `変更: ${changedFields.map((f) => PROJECT_FIELD_LABELS[f] ?? f).join('・')}`,
     metadata: {
       changedFields,
+      scopeRevised: scopeChanged,
       impactedBlocks: impact.blocks.length,
       impactedMetricRefs: impact.metricRefs.length,
       impactedApprovals: impact.approvals.length,
@@ -1568,7 +1575,14 @@ export interface RequirementRow {
   isSample: boolean;
   decision: RequirementDecision;
   contentEvaluation: ContentEvaluation;
-  blocks: Array<{ id: Uuid; title: string; status: BlockStatus; language: DisclosureLanguage }>;
+  blocks: Array<{
+    id: Uuid;
+    title: string;
+    status: BlockStatus;
+    language: DisclosureLanguage;
+    /** 翻訳版の節（要求事項の承認は元の節で数える） */
+    translation: boolean;
+  }>;
   manuscript: { status: BlockStatus | 'not_started'; label: string };
   evidence: { kind: EvidenceKind; label: string; count: number };
   metrics: { kind: MetricKind; label: string };
@@ -1583,7 +1597,9 @@ export interface RequirementSummary {
   total: number;
   /** 適用確定済み（重要と判断） */
   applicableConfirmed: number;
-  /** うち承認済みの原稿で扱われている */
+  /** うち原稿の節（翻訳版を除く）に割り当て済み */
+  assignedOfApplicable: number;
+  /** うち割り当てた原稿の節（翻訳版を除く）がすべて承認済み（開示ホームと同じ数え方） */
   approvedOfApplicable: number;
   /** 対象外・非重要と判断（理由・判断者あり） */
   excludedDecided: number;
@@ -1648,6 +1664,7 @@ export async function buildRequirementRows(
       summary: {
         total: 0,
         applicableConfirmed: 0,
+        assignedOfApplicable: 0,
         approvedOfApplicable: 0,
         excludedDecided: 0,
         notAssessed: 0,
@@ -1873,6 +1890,7 @@ export async function buildRequirementRows(
         title: b.title,
         status: b.status,
         language: b.language,
+        translation: b.translationOfBlockId !== null,
       })),
       manuscript,
       evidence,
@@ -1887,11 +1905,21 @@ export async function buildRequirementRows(
   return { framework, mode: 'rows', rows, summary: summarizeRequirements(rows) };
 }
 
+/**
+ * 要求事項が承認済みか: 割り当てた原稿の節（翻訳版を除く）が 1 つ以上あり、すべて承認済み。
+ * 開示ホームの「承認済み」と同じ規則（ホームも buildRequirementRows の行からこの判定で数える）
+ */
+export function isRequirementApproved(row: Pick<RequirementRow, 'blocks'>): boolean {
+  const originals = row.blocks.filter((b) => !b.translation);
+  return originals.length > 0 && originals.every((b) => b.status === 'approved');
+}
+
 export function summarizeRequirements(rows: readonly RequirementRow[]): RequirementSummary {
   const applicable = rows.filter((r) => r.decision.kind === 'material');
-  const approvedOfApplicable = applicable.filter((r) =>
-    r.blocks.some((b) => b.status === 'approved'),
+  const assignedOfApplicable = applicable.filter((r) =>
+    r.blocks.some((b) => !b.translation),
   ).length;
+  const approvedOfApplicable = applicable.filter(isRequirementApproved).length;
   const excludedDecided = rows.filter((r) => r.decision.excluded).length;
   const notAssessed = rows.filter((r) => r.decision.kind === 'not_assessed').length;
   const reasons: string[] = [];
@@ -1904,6 +1932,7 @@ export function summarizeRequirements(rows: readonly RequirementRow[]): Requirem
   return {
     total: rows.length,
     applicableConfirmed: applicable.length,
+    assignedOfApplicable,
     approvedOfApplicable,
     excludedDecided,
     notAssessed,

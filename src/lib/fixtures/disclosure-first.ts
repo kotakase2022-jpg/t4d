@@ -101,10 +101,14 @@ type FrameworkVersionMetadata = Pick<
 /**
  * SSBJ 2026-03-13 改正基準。一次資料（SSBJ の基準一覧）で確認した事実だけを書く。
  * 収録は一般・気候・実務対応の 133 項目で、ユニバーサル基準（適用）は収録していない。
+ *
+ * 位置付けは「公表済み」（SSBJ が公表した基準。任意適用はできる）。「採択済み（未発効）」は
+ * EU の委任規則の状態で、SSBJ の基準には当たらない。発効日（effectiveAt）は未確認のため null のまま
+ * （未確認のものを推測で埋めない: 0034）
  */
 export const SSBJ_2026_VERSION_METADATA: FrameworkVersionMetadata = {
   versionCode: 'ssbj-2026-03-13',
-  legalStatus: 'adopted',
+  legalStatus: 'promulgated',
   issuedAt: '2026-03-13',
   effectiveAt: null,
   jurisdiction: 'JP',
@@ -802,6 +806,7 @@ function seedProjects(db: FixtureDb): void {
       ...scope,
       includedUnitIds: [],
       status: 'closed',
+      scopeRevision: 0,
       deletedAt: null,
       ...audit(at(170), at(62), AUTHOR),
     },
@@ -824,6 +829,7 @@ function seedProjects(db: FixtureDb): void {
       ...scope,
       includedUnitIds: [],
       status: 'active',
+      scopeRevision: 0,
       deletedAt: null,
       ...audit(at(48), at(19), AUTHOR),
     },
@@ -950,6 +956,7 @@ function pushBlock(db: FixtureDb, spec: BlockSpec): void {
     contentHash: contentHashOf(spec.body),
     createdAt: spec.versionCreatedAt,
     createdBy: AUTHOR,
+    contributorUserIds: [],
   });
 
   const review = spec.review;
@@ -973,6 +980,8 @@ function pushBlock(db: FixtureDb, spec: BlockSpec): void {
     workingBody: null,
     workingBaseVersionId: null,
     workingSavedAt: null,
+    workingUpdatedBy: null,
+    workingContributorIds: [],
     deletedAt: null,
     ...(review
       ? audit(spec.createdAt, review.approvedAt, AUTHOR, APPROVER)
@@ -1014,6 +1023,7 @@ function pushBlock(db: FixtureDb, spec: BlockSpec): void {
     decisionIds: review.decisionIds,
     referencedVersions: refs,
     status: 'approved',
+    projectScopeRevision: 0,
     ...audit(review.requestedAt, review.approvedAt, AUTHOR, APPROVER),
   });
 
@@ -1321,6 +1331,8 @@ function seedKpiTargets(db: FixtureDb): void {
       direction: 'reduce',
       methodologyNote:
         'GHG プロトコルに基づき、連結の範囲で集計した Scope1 排出量の総量（架空の目標）。',
+      // 実績（Data Point の methodology）と同じ算定方法。一致しなければ達成率を出さない
+      actualMethodology: '実測値の集計',
       ownerUserId: AUTHOR,
       revisionReason: null,
       createdAt: at(60, 3),
@@ -1343,6 +1355,7 @@ function seedKpiTargets(db: FixtureDb): void {
       targetType: 'absolute',
       direction: 'reduce',
       methodologyNote: 'マーケット基準。国内拠点の購入電力等に伴う排出量（架空の目標）。',
+      actualMethodology: '実測値の集計',
       ownerUserId: AUTHOR,
       revisionReason: null,
       createdAt: at(60, 3),

@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { PERIOD_IDS } from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
 import { DEMO_USERS, loginAs } from './helpers';
 
@@ -10,7 +11,9 @@ import { DEMO_USERS, loginAs } from './helpers';
  *   既存の Scope3・データ取込・SSBJ ドラフトの画面も従来のメニューと URL のまま。
  * - A37: キーボードだけで 一覧 → プロジェクト → 原稿 → 根拠 → レビュー依頼 まで辿れ、フォーカスが見える。
  * - A38: 1366px で本文・主 CTA・状態が読め、ページ全体の横スクロールが出ない。
- *   それより狭い幅では根拠パネルがドロワーになり、閉じて本文の編集に戻れる。
+ *   1366px ちょうどでも根拠パネルを閉じて本文を広げて編集でき（開閉ボタンは aria-expanded を持ち、
+ *   閉じるとフォーカスが開閉ボタンへ戻る）、それより狭い幅では根拠パネルがドロワーになる。
+ * - 要求事項タブの SSBJ の要求事項は、プロジェクトの報告期間の評価を開く（ヘッダーの期間と違えば帯で示す）。
  *
  * 開示優先モードを ON にする一連の操作は zz-disclosure-project.spec.ts（最後に OFF へ戻す）。
  */
@@ -209,7 +212,7 @@ test('A37: 開示プロジェクトの一覧・原稿一覧・原稿編集に重
   }
 });
 
-test('A38: 1366×768 で本文・主 CTA・状態が読め、狭い幅では根拠パネルを閉じて編集に戻れる', async ({
+test('A38: 1366×768 で本文・主 CTA・状態が読め、1366px でも狭い幅でも根拠パネルを閉じて編集に戻れる', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
@@ -230,6 +233,32 @@ test('A38: 1366×768 で本文・主 CTA・状態が読め、狭い幅では根�
   await expect(pane).toBeVisible();
   await expectNoHorizontalScroll(page);
 
+  // 1366px ちょうどでも根拠パネルを閉じられる。閉じると本文が広がり、フォーカスは開閉ボタンへ戻る
+  const toggle = page.getByRole('button', { name: '根拠パネル', exact: true });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const widthWithPane = (await body.boundingBox())?.width ?? 0;
+  await pane.getByRole('button', { name: '根拠パネルを閉じる' }).click();
+  await expect(pane).toBeHidden();
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  const widthWithoutPane = (await body.boundingBox())?.width ?? 0;
+  expect(widthWithoutPane).toBeGreaterThan(widthWithPane + 200);
+  await expectNoHorizontalScroll(page);
+  // 閉じたまま本文を編集できる（入力はしない: この spec は状態を変えない）
+  const firstParagraph = body.locator('textarea').first();
+  await expect(firstParagraph).toBeEditable();
+  // 開閉ボタンでもう一度並べて表示できる
+  await toggle.click();
+  await expect(pane).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  // パネルの中で Esc を押しても閉じ、開閉ボタンへ戻る
+  await pane.getByRole('tab', { name: '根拠資料' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(pane).toBeHidden();
+  await expect(toggle).toBeFocused();
+  await toggle.click();
+  await expect(pane).toBeVisible();
+
   // 狭い幅（アプリの最小幅 1280px）: 根拠パネルはドロワー。開いて閉じ、本文の編集に戻れる
   await page.setViewportSize({ width: 1280, height: 720 });
   await expect(pane).toBeHidden();
@@ -249,4 +278,20 @@ test('A38: 1366×768 で本文・主 CTA・状態が読め、狭い幅では根�
   await expect(pane).toBeHidden();
   await expect(body.locator('textarea').first()).toBeEditable();
   await expect(page.getByRole('button', { name: 'レビュー依頼', exact: true })).toBeInViewport();
+});
+
+test('要求事項タブの SSBJ の要求事項は、プロジェクトの報告期間の評価を開く', async ({ page }) => {
+  await loginAs(page, DEMO_USERS.sustainability);
+  // FY2025 のプロジェクト（ヘッダーの期間は既定の FY2026）
+  await page.goto(`/enterprise/disclosure-projects/${IDS.projects.fy2025}?tab=requirements`);
+  const link = page
+    .locator('#t4d-main')
+    .locator('a[href*="/enterprise/disclosures/ssbj/requirements/"]')
+    .first();
+  await expect(link).toHaveAttribute('href', new RegExp(`period=${PERIOD_IDS.fy2025}`));
+  await link.click();
+  await page.waitForURL(new RegExp(`period=${PERIOD_IDS.fy2025}`));
+  const note = page.locator('#t4d-main').getByRole('note');
+  await expect(note).toContainText('開示プロジェクトの報告期間（2025年度');
+  await expect(note).toContainText('ヘッダーで選んでいる期間（2026年度');
 });

@@ -260,7 +260,11 @@ export default async function SsbjPage({
           ))}
         </ul>
         <p className="text-[11px] leading-relaxed text-ink-muted">
-          件数の母集団: 「全要求事項」は適用基準の全件（対象外・重要性なしを含む）。
+          件数の母集団:
+          「全要求事項」は、このマスターに収録している要求事項の件数です（対象外・重要性なしを含む）。
+          {overview.coverageNote
+            ? ` 収録範囲: ${overview.coverageNote}。基準のすべての条項ではありません。`
+            : ' 収録範囲が一部の場合、基準のすべての条項ではありません。'}
           対応済み〜未対応・確認待ち・優先度「高」は、評価対象（対象外・重要性なしを除く）で数えています。
         </p>
 

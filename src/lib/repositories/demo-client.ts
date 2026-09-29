@@ -50,6 +50,21 @@ function persistedColumns(table: TableName, row: unknown): Record<string, unknow
  */
 const WORKING_COLUMNS = ['workingBody', 'workingBaseVersionId', 'workingSavedAt'] as const;
 
+/**
+ * Cookie へ残さない行。レビューの通知（依頼・差戻し・承認の知らせ）は、レビューの状態そのもの
+ * （依頼・記録・節）から画面が作れるため持ち回る価値が低く、1 件あたりが大きい。
+ * 持ち回すと、デモの 1 回の流れで依頼・承認・取込の結果を Cookie から押し出していた
+ */
+function skipsCookie(table: TableName, row: unknown): boolean {
+  if (table !== 'notifications') return false;
+  const record = row as { category?: string; href?: string };
+  return (
+    record.category === 'review' &&
+    typeof record.href === 'string' &&
+    record.href.startsWith('/enterprise/disclosure-projects/')
+  );
+}
+
 function withoutWorkingBody(record: Record<string, unknown>): Record<string, unknown> {
   return { ...record, workingBody: null, workingBaseVersionId: null, workingSavedAt: null };
 }
@@ -100,6 +115,7 @@ export class DemoDbClient implements DbClient {
     if (isPersistedTable(table)) {
       for (const row of cloned) {
         const record = row as unknown as { id?: string };
+        if (skipsCookie(table, row)) continue;
         if (record.id) {
           await appendDemoEdit(table, record.id, persistedColumns(table, row));
         }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, ExternalLink, Info } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, FlaskConical, Info } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -319,7 +319,10 @@ export async function OverviewTab({
             )}
             {packageCheck.preparationOnly.length > 0 && (
               <p className="mt-1 text-[11px] text-ink-muted">
-                <Badge tone="warning">草案・サンプル</Badge>{' '}
+                <Badge tone="warning">
+                  <FlaskConical className="size-3" aria-hidden="true" />
+                  草案・サンプル
+                </Badge>{' '}
                 {packageCheck.preparationOnly.join('、')}
                 は準備としてのみ扱い、正式な準拠の完了とは表示しません。
               </p>

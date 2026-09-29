@@ -68,6 +68,14 @@ export function parseExportAudience(value: string | null | undefined): ExportAud
   return EXPORT_AUDIENCES.includes(value as ExportAudience) ? (value as ExportAudience) : null;
 }
 
+/** 組織の非公開の資料のファイル名（対外用の原稿で伏せる） */
+async function nonPublicFileNames(db: DbClient, ctx: AuthorizationContext): Promise<string[]> {
+  const files = await db.select('files', {
+    where: { organizationId: ctx.workspace.organizationId },
+  });
+  return files.filter((f) => f.confidentiality !== 'public').map((f) => f.originalName);
+}
+
 function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -112,6 +120,8 @@ export async function exportReportSnapshot(
     bytes = await buildDisclosureDocx(snapshot, {
       audience: request.audience,
       frameworkVersionId: framework.frameworkVersionId,
+      // 対外用は、本文に書かれた非公開資料の名前も伏せる（出典印の伏せ字と同じ扱い）
+      nonPublicFileNames: request.audience === 'external' ? await nonPublicFileNames(db, ctx) : [],
     });
   } else if (request.format === 'xlsx') {
     bytes = await buildMappingXlsx(snapshot);

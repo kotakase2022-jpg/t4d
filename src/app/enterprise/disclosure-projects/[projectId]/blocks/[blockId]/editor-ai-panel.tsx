@@ -23,11 +23,19 @@ export interface AiPanelProps {
   editable: boolean;
   selectedSources: Array<{ kind: SelectableSourceKind; id: string }>;
   getBody: () => BlockBody;
+  /** 画面が読み込んだ・最後に保存した作業本文の保存時刻（別の人の自動保存との競合の検出） */
+  getWorkingToken: () => string | null;
   baseVersionId: string | null;
   onBodyReplaced: (body: BlockBody, savedAt: string) => void;
+  /** ほかの人が自動保存した作業本文があり、採用を止めた */
+  onWorkingConflict: (body: BlockBody, message: string) => void;
   onAnnounce: (message: string) => void;
   paragraphText: (paragraphId: string) => string | null;
 }
+
+/** 通信そのものが失敗したとき（接続断・タイムアウト前の 5xx など）。手動の作業は続けられる */
+const NETWORK_ERROR_MESSAGE =
+  'サーバーに接続できませんでした（AI の処理が完了したかは分かりません）。手動での編集・保存・レビュー依頼はそのまま続けられます。画面を再読み込みすると結果を確認できます。';
 
 const OPERATIONS: Array<{ op: DisclosureDraftOperation; label: string; hint: string }> = [
   {
@@ -65,20 +73,33 @@ export function AiPanel(props: AiPanelProps) {
       ? '下書き・差戻しの節でだけ AI 下書きを使えます。'
       : null;
 
+  /** 通信が失敗したら「実行中」のまま止めず、失敗を示して操作できる状態へ戻す（A19） */
+  const failNetwork = () => {
+    setError(NETWORK_ERROR_MESSAGE);
+    props.onAnnounce(NETWORK_ERROR_MESSAGE);
+  };
+
   const generate = async (operation: DisclosureDraftOperation, regenerate = false) => {
     setPending(operation);
     setError(null);
     setConflictRun(null);
     props.onAnnounce('AI の下書き候補を作成しています…');
-    const result = await generateBlockDraftAction({
-      projectId: props.projectId,
-      blockId: props.blockId,
-      operation,
-      sources: operation === 'polish' ? [] : props.selectedSources,
-      workingBody: props.getBody(),
-      regenerate,
-    });
-    setPending(null);
+    let result: Awaited<ReturnType<typeof generateBlockDraftAction>>;
+    try {
+      result = await generateBlockDraftAction({
+        projectId: props.projectId,
+        blockId: props.blockId,
+        operation,
+        sources: operation === 'polish' ? [] : props.selectedSources,
+        workingBody: props.getBody(),
+        regenerate,
+      });
+    } catch {
+      failNetwork();
+      return;
+    } finally {
+      setPending(null);
+    }
     if (result.status !== 'succeeded') {
       // 失敗・タイムアウトの文面はサーバーが「手動で続けられる」旨まで付けて返す
       const message =
@@ -102,18 +123,31 @@ export function AiPanel(props: AiPanelProps) {
   const adopt = async (run: DraftRunView, indexes: number[], allowOnConflict = false) => {
     setPending('adopt');
     setError(null);
-    const result = await adoptDraftAction({
-      projectId: props.projectId,
-      blockId: props.blockId,
-      runId: run.runId,
-      candidateIndexes: indexes,
-      workingBody: props.getBody(),
-      baseVersionId: props.baseVersionId,
-      allowOnConflict,
-    });
-    setPending(null);
+    let result: Awaited<ReturnType<typeof adoptDraftAction>>;
+    try {
+      result = await adoptDraftAction({
+        projectId: props.projectId,
+        blockId: props.blockId,
+        runId: run.runId,
+        candidateIndexes: indexes,
+        workingBody: props.getBody(),
+        baseVersionId: props.baseVersionId,
+        allowOnConflict,
+        knownWorkingSavedAt: props.getWorkingToken(),
+      });
+    } catch {
+      failNetwork();
+      return;
+    } finally {
+      setPending(null);
+    }
     if (result.status === 'error') {
       setError(result.message);
+      return;
+    }
+    if (result.status === 'working_conflict') {
+      setError(result.message);
+      props.onWorkingConflict(result.body, result.message);
       return;
     }
     if (result.status === 'version_conflict') {
@@ -137,13 +171,22 @@ export function AiPanel(props: AiPanelProps) {
   const close = async (run: DraftRunView, discard: boolean) => {
     setPending('close');
     setError(null);
-    const result = await closeDraftRunAction({
-      projectId: props.projectId,
-      blockId: props.blockId,
-      runId: run.runId,
-      discard,
-    });
-    setPending(null);
+    let result: Awaited<ReturnType<typeof closeDraftRunAction>>;
+    try {
+      result = await closeDraftRunAction({
+        projectId: props.projectId,
+        blockId: props.blockId,
+        runId: run.runId,
+        discard,
+        // 採用した段落があるかは画面の本文で判定する（作業本文は別のサーバーに無いことがある）
+        workingBody: props.getBody(),
+      });
+    } catch {
+      failNetwork();
+      return;
+    } finally {
+      setPending(null);
+    }
     if (result.status === 'error') {
       setError(result.message);
       return;
@@ -151,7 +194,9 @@ export function AiPanel(props: AiPanelProps) {
     props.onAnnounce(
       result.decision === 'accepted'
         ? '候補の確認を終えました（採用した段落は本文に残ります）。'
-        : '候補を破棄しました。',
+        : discard
+          ? '候補を破棄しました。'
+          : '候補の確認を終えました（採用した段落はありません）。',
     );
     router.refresh();
   };

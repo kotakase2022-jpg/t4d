@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { AuthorizationError } from '@/lib/authorization/can';
-import { REVIEW_REQUEST_STATUS_LABELS } from '@/lib/domain/disclosure-status';
+import { REVIEW_REQUEST_STATUS_LABELS, reviewPolicyLabel } from '@/lib/domain/disclosure-status';
 import { formatJst } from '@/lib/format/datetime';
 import { listProjectReviews, type ReviewListItem } from '@/lib/services/disclosure-review';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -151,7 +151,7 @@ export async function ReviewsTab({
                           ))}
                         </ol>
                         <p className="mt-1 text-[11px] text-ink-muted">
-                          規則: {item.policyVersion}
+                          規則: {reviewPolicyLabel(item.policyVersion)}
                         </p>
                       </details>
                     </TD>

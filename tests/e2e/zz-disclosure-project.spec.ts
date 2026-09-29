@@ -92,6 +92,11 @@ async function importStandardCsv(
   await page.getByRole('button', { name: '検証する（まだ登録しません）' }).click();
   const diff = page.locator('section[aria-labelledby="standard-diff-title"]');
   await expect(diff).toBeVisible();
+  // UX-F14: 検証の結果（エラーの件数を含む）を読み上げ、フォーカスを結果の見出しへ移す
+  await expect(
+    page.getByRole('status').filter({ hasText: '検証しました（まだ登録していません）' }),
+  ).toContainText('エラー 0 行');
+  await expect(page.getByRole('heading', { name: '3. 検証' })).toBeFocused();
   const row = diff.locator('tbody tr').filter({ hasText: 'water' });
   await expect(row).toHaveCount(1);
   await expect(row.getByText('変更', { exact: true })).toBeVisible();

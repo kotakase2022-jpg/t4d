@@ -2,6 +2,7 @@ import { ClipboardCheck, History, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import type { ParagraphDiff } from '@/lib/domain/disclosure-block';
+import { reviewPolicyLabel } from '@/lib/domain/disclosure-status';
 import { formatJst } from '@/lib/format/datetime';
 import type { EditorReviewRequest } from '@/lib/services/disclosure-block';
 import type { ReviewActionState } from '@/lib/services/disclosure-review';
@@ -62,7 +63,7 @@ export function ReviewPanel({
             <ReviewRequestStatusBadge status={request.status} />
             <span className="text-[12px] text-ink-muted">
               依頼 {request.requestedByName} ／ レビュー {request.reviewerName} ／ 最終承認{' '}
-              {request.approverName} ／ 規則 {request.policyVersion}
+              {request.approverName} ／ 規則 {reviewPolicyLabel(request.policyVersion)}
             </span>
           </div>
           <p className="mt-1 flex items-start gap-1 text-[11px] text-ink-muted">

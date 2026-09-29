@@ -399,6 +399,13 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
               原稿の節に割り当て済み {progress.assignedItemCount} 項目（残り{' '}
               {Math.max(progress.confirmedItemCount - progress.assignedItemCount, 0)} 項目は未割当）
             </li>
+            {(progress.excludedItemCount > 0 || progress.notAssessedItemCount > 0) && (
+              <li>
+                分母に含めていない要求事項: 対象外・非重要と判断 {progress.excludedItemCount}{' '}
+                項目（理由・判断者あり）／要求事項ごとの適用が未判定 {progress.notAssessedItemCount}{' '}
+                項目
+              </li>
+            )}
             {progress.staleApprovedItemCount > 0 && (
               <li className="text-[#8a5d00]">
                 承認済みのうち {progress.staleApprovedItemCount}{' '}
@@ -406,7 +413,7 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
               </li>
             )}
             <li>
-              分母は、適用すると判断を確定した基準の要求事項すべて。承認済みは、その要求事項を割り当てた原稿の節がすべて承認済みのものです（率にはまとめません）。
+              分母は、適用すると判断を確定した基準の要求事項のうち、要求事項ごとの評価で「適用（重要）」と確定したもの（プロジェクトの概要・要求事項タブと同じ数）。承認済みは、その要求事項を割り当てた原稿の節がすべて承認済みのものです（率にはまとめません）。
             </li>
           </ul>
         </div>
@@ -439,7 +446,8 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
               <TH>基準・版</TH>
               <TH>位置付け</TH>
               <TH>適用判断</TH>
-              <TH align="right">要求事項</TH>
+              <TH align="right">要求事項（収録）</TH>
+              <TH align="right">適用確定済み</TH>
               <TH align="right">割当済み</TH>
               <TH align="right">承認済み</TH>
               <TH align="right">原稿の節</TH>
@@ -473,6 +481,14 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
                 </TD>
                 <TD align="right" className="tnum">
                   {row.itemCount}
+                </TD>
+                <TD align="right" className="tnum">
+                  {row.inScope ? row.confirmedItemCount : '—'}
+                  {row.inScope && row.excludedItemCount + row.notAssessedItemCount > 0 && (
+                    <div className="text-[11px] text-ink-muted">
+                      対象外・非重要 {row.excludedItemCount}／未判定 {row.notAssessedItemCount}
+                    </div>
+                  )}
                 </TD>
                 <TD align="right" className="tnum">
                   {row.assignedItemCount}

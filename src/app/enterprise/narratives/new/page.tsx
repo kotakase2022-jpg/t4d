@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { NARRATIVE_THEMES } from '@/types/domain';
 import { createNarrativeCandidateAction } from '../actions';
 import { NarrativeEditor } from '../_components/narrative-editor';
+import { FragmentPicker } from './fragment-picker';
 import type { DocumentPayload, FieldDef } from '../_components/types';
 
 export const metadata = { title: '定性情報の登録' };
@@ -218,35 +219,14 @@ export default async function NewNarrativePage({
                       」です。候補の本文でもその旨を示し、当年度の事実としては扱いません。
                     </p>
                   )}
-                  <fieldset>
-                    <legend className="text-[12px] font-medium text-ink">
-                      使う抜粋（1〜12 件）
-                    </legend>
-                    <ul className="mt-1 max-h-[50vh] space-y-1 overflow-y-auto">
-                      {selected.fragments.map((f) => (
-                        <li
-                          key={f.fragment.id}
-                          className="rounded-t4d border border-line px-2 py-1"
-                        >
-                          <label className="flex gap-2 text-[12px]">
-                            <input
-                              type="checkbox"
-                              name="fragmentIds"
-                              value={f.fragment.id}
-                              className="mt-0.5"
-                            />
-                            <span>
-                              <span className="block text-[11px] font-medium text-ink-muted">
-                                {f.locationLabel}
-                                {f.manual ? '（手動の抜粋）' : ''}
-                              </span>
-                              {f.fragment.text}
-                            </span>
-                          </label>
-                        </li>
-                      ))}
-                    </ul>
-                  </fieldset>
+                  <FragmentPicker
+                    fragments={selected.fragments.map((f) => ({
+                      id: f.fragment.id,
+                      locationLabel: f.locationLabel,
+                      manual: f.manual,
+                      text: f.fragment.text,
+                    }))}
+                  />
                   <div className="grid gap-2 md:grid-cols-3">
                     <div>
                       <label

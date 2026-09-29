@@ -20,13 +20,17 @@ import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import {
   appendBlockVersion,
+  BlockConflictError,
+  CLEARED_WORKING_COLUMNS,
   currentVersionBody,
   evaluateBlockBlockersFor,
+  isForeignWorkingBody,
   loadBlock,
   loadBlockVersion,
   loadMembers,
   loadProject,
   nameOf,
+  parseBlockBody,
   sortReviewEvents,
   validateBodyRefs,
   VERSION_UNAVAILABLE_MESSAGE,
@@ -34,6 +38,7 @@ import {
   type EditorMember,
 } from '@/lib/services/disclosure-block';
 import { computeBlockFreshness, unresolvedFreshnessItems } from '@/lib/services/disclosure-recheck';
+import { isUuid } from '@/lib/validation/uuid';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -82,7 +87,7 @@ async function loadRequest(
   requestId: Uuid,
 ): Promise<ReviewRequest> {
   assertCan(ctx, 'enterprise.disclosure.read');
-  const request = await db.findById('reviewRequests', requestId);
+  const request = isUuid(requestId) ? await db.findById('reviewRequests', requestId) : null;
   if (!request || request.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('レビュー依頼が見つかりません。');
   }
@@ -119,8 +124,8 @@ async function notify(
   title: string,
   body: string,
   href: string,
-): Promise<void> {
-  if (!userId || userId === ctx.userId) return;
+): Promise<boolean> {
+  if (!userId || userId === ctx.userId) return false;
   const now = new Date().toISOString();
   await db.insert('notifications', [
     {
@@ -135,6 +140,7 @@ async function notify(
       createdAt: now,
     },
   ]);
+  return true;
 }
 
 function blockHref(block: Pick<DisclosureBlock, 'id' | 'projectId'>): string {
@@ -211,6 +217,23 @@ function memberHas(
   return members.get(userId)?.permissions.includes(permission) ?? false;
 }
 
+/**
+ * 同じ依頼・同じ版でレビュー（第 1 段）を完了した人。状態（reviewed）ではなく記録から判定する
+ * （DB のトリガ t4d.enforce_review_event と同じく、記録の無い「レビュー完了」を最終承認に通さない）
+ */
+function reviewCompletedByOf(events: readonly ReviewEvent[], request: ReviewRequest): Uuid[] {
+  return events
+    .filter(
+      (e) => e.eventType === 'review_completed' && e.targetVersionId === request.targetVersionId,
+    )
+    .map((e) => e.actorUserId);
+}
+
+/** レビュー完了・最終承認の通知が届いたか（指名が未定なら通知していない） */
+export function notifiesNextStage(request: Pick<ReviewRequest, 'approverUserId'>, actorId: Uuid) {
+  return Boolean(request.approverUserId && request.approverUserId !== actorId);
+}
+
 // ======================================================================
 // レビュー依頼
 // ======================================================================
@@ -221,13 +244,31 @@ export interface RequestReviewInput {
   reviewerUserId?: Uuid | null;
   /** 省略時はプロジェクトの最終承認者 */
   approverUserId?: Uuid | null;
+  /**
+   * 画面で編集中の本文。渡されたらこれを提出する版にする（Demo Mode では自動保存の作業本文が
+   * インスタンスのメモリにしか無く、依頼を受けたサーバーに無いことがある。サーバーの作業本文を
+   * 頼ると、利用者が見ていない古い版を黙って提出してしまう）。省略時はサーバーの作業本文
+   */
+  body?: unknown;
+  /** body と組: 画面が編集を始めた版（現在の版と違えば競合） */
+  baseVersionId?: Uuid | null;
+  /** body と組: 画面が読み込んだ作業本文の保存時刻（別の人の自動保存との競合の検出） */
+  knownWorkingSavedAt?: IsoDateTime | null;
+}
+
+export interface RequestReviewResult {
+  request: ReviewRequest;
+  version: DisclosureBlockVersion;
+  createdVersion: boolean;
+  /** レビュー担当へ通知したか（レビュー担当が未定なら通知していない） */
+  notified: boolean;
 }
 
 export async function requestReview(
   db: DbClient,
   ctx: AuthorizationContext,
   input: RequestReviewInput,
-): Promise<{ request: ReviewRequest; version: DisclosureBlockVersion; createdVersion: boolean }> {
+): Promise<RequestReviewResult> {
   assertCan(ctx, 'enterprise.disclosure.write');
   const organizationId = ctx.workspace.organizationId;
   let block = await loadBlock(db, ctx, input.blockId);
@@ -247,7 +288,8 @@ export async function requestReview(
   if (active) {
     if (active.targetVersionId === block.submittedVersionId) {
       const version = await loadBlockVersion(db, ctx, active.targetVersionId);
-      return { request: active, version, createdVersion: false };
+      // 2 回目の押下では通知しない（1 回目で済んでいる）
+      return { request: active, version, createdVersion: false, notified: false };
     }
     throw new ValidationError('この節には進行中のレビュー依頼があります。');
   }
@@ -286,47 +328,88 @@ export async function requestReview(
     throw new ValidationError('レビュー担当と最終承認者は別の人にしてください（職務分離）。');
   }
 
-  // 提出する版を決める。作業本文が現在の版と違えば、依頼の前に版として保存する
+  // 提出する版を決める。提出する本文が現在の版と違えば、依頼の前に版として保存する
   const current = await currentVersionBody(db, ctx, block);
   if (block.currentVersionId && !current.version) {
     throw new NotFoundError(VERSION_UNAVAILABLE_MESSAGE);
   }
-  let version = current.version;
-  let createdVersion = false;
-  if (block.workingBody) {
-    if ((block.workingBaseVersionId ?? null) !== (block.currentVersionId ?? null)) {
-      throw new ValidationError(
-        '作業中の本文が古い版を土台にしています。原稿の画面で差分を確認してから依頼してください。',
+  let candidate: BlockBody | null = block.workingBody;
+  if (input.body !== undefined) {
+    candidate = parseBlockBody(input.body);
+    if ((input.baseVersionId ?? null) !== (block.currentVersionId ?? null)) {
+      throw new BlockConflictError(block.currentVersionId, current.body, candidate);
+    }
+    if (isForeignWorkingBody(block, ctx.userId, input.knownWorkingSavedAt)) {
+      // 別の人の自動保存を読み込まないまま依頼すると、その人の本文を黙って捨ててしまう
+      throw new BlockConflictError(
+        block.currentVersionId,
+        block.workingBody ?? current.body,
+        candidate,
+        'working',
       );
     }
-    if (!current.version || current.version.contentHash !== contentHashOf(block.workingBody)) {
-      if (!hasBodyContent(block.workingBody)) {
-        throw new ReviewBlockedError([{ code: 'no_body', message: '本文がありません。' }]);
-      }
-      const issues = await validateBodyRefs(db, ctx, block.id, block.workingBody);
-      if (issues.length > 0) throw new BlockRefValidationError(issues);
-      version = await appendBlockVersion(db, ctx, block, block.workingBody, {
-        changeReason: 'レビュー依頼時の版',
-        baseVersionId: block.currentVersionId,
-      });
-      createdVersion = true;
-      const now = new Date().toISOString();
-      block = await db.update('disclosureBlocks', block.id, {
-        currentVersionId: version.id,
-        workingBody: null,
-        workingBaseVersionId: null,
-        workingSavedAt: null,
-        updatedAt: now,
-        updatedBy: ctx.userId,
-      });
-    }
+  } else if (
+    block.workingBody &&
+    (block.workingBaseVersionId ?? null) !== (block.currentVersionId ?? null)
+  ) {
+    throw new ValidationError(
+      '作業中の本文が古い版を土台にしています。原稿の画面で差分を確認してから依頼してください。',
+    );
+  }
+  const needsNewVersion =
+    candidate !== null &&
+    (!current.version || current.version.contentHash !== contentHashOf(candidate));
+  const submittedBody = needsNewVersion ? candidate : (current.version?.body ?? null);
+  if (!submittedBody || !hasBodyContent(submittedBody)) {
+    throw new ReviewBlockedError([{ code: 'no_body', message: '本文がありません。' }]);
+  }
+
+  // 阻害条件・参照・職務分離はすべて、版を作る「前」に確かめる。
+  // 先に版を作ると、依頼を断っても業務上の版と監査の記録が残り、自動保存も消えてしまう
+  const blockers = await evaluateBlockBlockersFor(db, ctx, block, submittedBody);
+  if (blockers.length > 0) throw new ReviewBlockedError(blockers);
+  if (needsNewVersion) {
+    const issues = await validateBodyRefs(db, ctx, block.id, submittedBody);
+    if (issues.length > 0) throw new BlockRefValidationError(issues);
+  }
+  // 提出する版の本文を書いた人（作成者と自動保存した人）は、レビュー・最終承認に指名できない
+  const writers = new Set<Uuid>(
+    needsNewVersion
+      ? [ctx.userId, ...(block.workingContributorIds ?? [])]
+      : current.version
+        ? [current.version.createdBy, ...(current.version.contributorUserIds ?? [])]
+        : [],
+  );
+  if (reviewerUserId && writers.has(reviewerUserId)) {
+    throw new ValidationError(
+      'レビュー担当に指定した人は、この版の本文を書いています（自動保存を含む）。別の人を指定してください（職務分離）。',
+    );
+  }
+  if (approverUserId && writers.has(approverUserId)) {
+    throw new ValidationError(
+      '最終承認者に指定した人は、この版の本文を書いています（自動保存を含む）。別の人を指定してください（職務分離）。',
+    );
+  }
+
+  let version = current.version;
+  let createdVersion = false;
+  if (needsNewVersion) {
+    version = await appendBlockVersion(db, ctx, block, submittedBody, {
+      changeReason: 'レビュー依頼時の版',
+      baseVersionId: block.currentVersionId,
+    });
+    createdVersion = true;
+    const now = new Date().toISOString();
+    block = await db.update('disclosureBlocks', block.id, {
+      currentVersionId: version.id,
+      ...CLEARED_WORKING_COLUMNS,
+      updatedAt: now,
+      updatedBy: ctx.userId,
+    });
   }
   if (!version) {
     throw new ReviewBlockedError([{ code: 'no_body', message: '本文がありません。' }]);
   }
-
-  const blockers = await evaluateBlockBlockersFor(db, ctx, block, version.body);
-  if (blockers.length > 0) throw new ReviewBlockedError(blockers);
 
   // 依頼時点の適用判断の版と、本文が引用している版を固定する
   const projectFrameworks = await db.select('projectFrameworks', {
@@ -358,6 +441,8 @@ export async function requestReview(
       anchorIds: refs.anchorIds,
     },
     status: 'open',
+    // 依頼時点の報告範囲。後で範囲を変えたら、この依頼での承認は再確認の対象になる
+    projectScopeRevision: project.scopeRevision ?? 0,
     createdAt: now,
     updatedAt: now,
     createdBy: ctx.userId,
@@ -376,7 +461,7 @@ export async function requestReview(
     status: 'review_requested',
     submittedVersionId: version.id,
   });
-  await notify(
+  const notified = await notify(
     db,
     ctx,
     reviewerUserId ?? null,
@@ -391,7 +476,7 @@ export async function requestReview(
     afterSummary: `${block.title} 版 ${version.versionNo} のレビューを依頼`,
     metadata: { blockId: block.id, versionId: version.id, policyVersion: request.policyVersion },
   });
-  return { request, version, createdVersion };
+  return { request, version, createdVersion, notified };
 }
 
 // ======================================================================
@@ -417,6 +502,7 @@ export async function reviewActionsFor(
   const block = await loadBlock(db, ctx, request.targetId);
   const version = await db.findById('disclosureBlockVersions', request.targetVersionId);
   const author = version?.createdBy ?? null;
+  const contributors = version?.contributorUserIds ?? [];
   const stage =
     request.status === 'open' ? 'review' : request.status === 'reviewed' ? 'final' : null;
   const canWithdraw =
@@ -433,6 +519,7 @@ export async function reviewActionsFor(
       actorId: ctx.userId,
       request,
       targetVersionCreatedBy: author ?? '',
+      targetVersionContributors: contributors,
     });
     if (!can(ctx, 'enterprise.disclosure.write')) reasons.push('レビューの権限がありません。');
     else if (!assigned) reasons.push('この依頼のレビュー担当ではありません。');
@@ -447,9 +534,8 @@ export async function reviewActionsFor(
       actorId: ctx.userId,
       request,
       targetVersionCreatedBy: author ?? '',
-      reviewCompletedBy: events
-        .filter((e) => e.eventType === 'review_completed')
-        .map((e) => e.actorUserId),
+      targetVersionContributors: contributors,
+      reviewCompletedBy: reviewCompletedByOf(events, request),
     });
     if (!can(ctx, 'enterprise.disclosure.approve')) reasons.push('最終承認の権限がありません。');
     else if (!assigned) reasons.push('この依頼の最終承認者ではありません。');
@@ -563,6 +649,7 @@ export async function completeReview(
     actorId: ctx.userId,
     request,
     targetVersionCreatedBy: version.createdBy,
+    targetVersionContributors: version.contributorUserIds ?? [],
   });
   if (!sod.ok) {
     if (sod.code === 'request_not_open') throw new ValidationError(sod.reason);
@@ -654,13 +741,25 @@ export async function finalApprove(
     actorId: ctx.userId,
     request,
     targetVersionCreatedBy: version.createdBy,
-    reviewCompletedBy: events
-      .filter((e) => e.eventType === 'review_completed')
-      .map((e) => e.actorUserId),
+    targetVersionContributors: version.contributorUserIds ?? [],
+    reviewCompletedBy: reviewCompletedByOf(events, request),
   });
   if (!sod.ok) {
-    if (sod.code === 'request_not_reviewed') throw new ValidationError(sod.reason);
+    if (sod.code === 'request_not_reviewed' || sod.code === 'review_missing') {
+      throw new ValidationError(sod.reason);
+    }
     throw new AuthorizationError(sod.reason);
+  }
+  // 依頼の後に報告範囲を変えたなら、その範囲で本文を見直してから承認する（指示書 §10.3）
+  const project = await loadProject(db, ctx, block.projectId);
+  if ((request.projectScopeRevision ?? 0) < (project.scopeRevision ?? 0)) {
+    throw new ReviewBlockedError([
+      {
+        code: 'scope_changed',
+        message:
+          'レビュー依頼の後に報告範囲（報告主体・期間・対象範囲）が変更されました。差し戻して、変更後の範囲で本文を確認してください。',
+      },
+    ]);
   }
   const major = await unresolvedMajorComments(db, ctx, block.id);
   if (major.length > 0) {

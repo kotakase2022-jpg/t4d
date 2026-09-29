@@ -11,6 +11,7 @@ import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { EVIDENCE_USAGE_PURPOSE_LABELS } from '@/lib/domain/disclosure-status';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
+import { isDisclosureFirstEnabled } from '@/lib/services/feature-settings';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import {
   CONFIDENTIALITY_LABELS,
@@ -44,6 +45,9 @@ export default async function EvidencePage({
   const { db, ctx } = shell;
   const organizationId = ctx.workspace.organizationId;
   const qualitative = query.purpose === 'qualitative';
+  // 開示優先モードが OFF の組織は従来の画面名のまま（メニューの「Evidence」と食い違わせない。A39）
+  const disclosureFirst = await isDisclosureFirstEnabled(db, ctx);
+  const pageTitle = disclosureFirst ? '資料・証跡' : 'Evidence';
 
   const [allFiles, links] = await Promise.all([
     db.select('files', {
@@ -86,9 +90,9 @@ export default async function EvidencePage({
   return (
     <>
       <PageHeader
-        title="資料・証跡"
+        title={pageTitle}
         description="原本は非公開の保管領域に保存し、ダウンロードは短時間だけ有効な署名付きリンク経由です。閲覧・ダウンロードは監査ログへ記録されます。"
-        breadcrumbs={[{ label: '企業ワークスペース' }, { label: '資料・証跡' }]}
+        breadcrumbs={[{ label: '企業ワークスペース' }, { label: pageTitle }]}
       />
 
       <div className="space-y-3 p-4">
@@ -112,7 +116,13 @@ export default async function EvidencePage({
         {can(ctx, 'enterprise.evidence.write') && (
           <Card>
             <SectionTitle
-              title={qualitative ? '定性情報の資料を登録' : '資料・証跡を登録'}
+              title={
+                qualitative
+                  ? '定性情報の資料を登録'
+                  : disclosureFirst
+                    ? '資料・証跡を登録'
+                    : 'Evidence を登録'
+              }
               action={
                 qualitative ? (
                   <Link
@@ -142,14 +152,16 @@ export default async function EvidencePage({
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="sm:col-span-2">
                   <label htmlFor="ev-file" className="block text-[12px] text-ink-muted">
-                    ファイル（{EVIDENCE_EXTENSIONS.join(' ')}）
+                    {qualitative
+                      ? `ファイル（${EVIDENCE_EXTENSIONS.join(' ')}）`
+                      : 'ファイル（形式は問いません。本文を抽出できる形式は引用にも使えます）'}
                   </label>
                   <input
                     id="ev-file"
                     type="file"
                     name="file"
                     required
-                    accept={EVIDENCE_EXTENSIONS.join(',')}
+                    accept={qualitative ? EVIDENCE_EXTENSIONS.join(',') : undefined}
                     className="mt-0.5 block text-[12px] file:mr-2 file:rounded-t4d file:border file:border-line file:bg-surface file:px-2 file:py-1 file:text-[12px]"
                   />
                 </div>
@@ -262,11 +274,17 @@ export default async function EvidencePage({
 
         <Card className="overflow-hidden">
           <SectionTitle
-            title={`${qualitative ? '定性情報の資料' : '資料・証跡の一覧'}（${files.length}）`}
+            title={`${qualitative ? '定性情報の資料' : disclosureFirst ? '資料・証跡の一覧' : 'Evidence Library'}（${files.length}）`}
           />
           {files.length === 0 ? (
             <EmptyState
-              title={qualitative ? '定性情報の資料がありません' : '資料・証跡がありません'}
+              title={
+                qualitative
+                  ? '定性情報の資料がありません'
+                  : disclosureFirst
+                    ? '資料・証跡がありません'
+                    : 'Evidence がありません'
+              }
               icon={<FolderOpen className="size-5" aria-hidden="true" />}
             />
           ) : (

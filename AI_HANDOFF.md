@@ -2422,3 +2422,73 @@ AI 下書きは MockAIProvider（決定論的）での動作確認であり、�
   （デモの見え方の問題。E2E では 1 段落の採用だけを確かめている）。
 - Playwright の `page.request` は Secure 属性のセッション Cookie を http://127.0.0.1 へ送らないため、
   出力 API の再取得はブラウザ内の fetch で行っている。
+
+## 2026-09-29 開示優先モード 自己監査の指摘 55 件への対応（単独の修正担当。UX-F8 は ORCH-1 と同じ）
+
+6 観点（オーケストレーター・不変条件・セキュリティ・回帰の正直さ・UX/a11y・永続化/Supabase）の検証済み指摘を、
+重い順に根本原因から直した。期待値は緩めていない。commit・push・deploy はしていない。
+
+**スキーマ**: `supabase/migrations/0041_disclosure_review_integrity.sql`（列追加とトリガのみ・破壊的変更なし。
+ロールバック方針は `docs/known-limitations.md` §6）。`domain.ts`・Fixture・`seed.sql`（`pnpm seed:generate`）を更新。
+
+**指摘と結果**（fixed = 実装を直してテストを追加、skipped = 見送り）
+
+| ID               | 内容                                                                                     | 結果                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| ORCH-1 / UX-F8   | 1366px 以上でも根拠パネルを閉じられる（aria-expanded・Esc・フォーカス復帰）              | fixed（E2E A38 を 1366×768 で）                                               |
+| ORCH-2           | Mock の下書きが引用の丸写し → 根拠の事実だけで短い段落を組み立てる（決定論的）           | fixed                                                                         |
+| ORCH-3           | 財務的影響の「定量化しない理由」の扱いを 1 つの関数へ（ホーム・原稿一覧・確定前検査）    | fixed                                                                         |
+| ORCH-4           | 要求事項タブの SSBJ リンクはプロジェクトの期間で開き、ヘッダーの期間と違えば注記         | fixed（E2E 追加）                                                             |
+| INV-F1           | 推計・目標だけの承認行を実績 0 と表示しない                                              | fixed                                                                         |
+| INV-F2 / F3      | 自動保存した人・レビュー未完了の最終承認を職務分離で止める（アプリと DB トリガ）         | fixed                                                                         |
+| INV-F4           | GHG 3 年推移で値の無い年は「未入力」（0 の棒を描かない）                                 | fixed                                                                         |
+| INV-F5 / F6      | 確定前検査に翻訳の欠落・古さ、承認後の範囲変更（scope_revision）を追加                   | fixed                                                                         |
+| INV-F7           | 標準 CSV の target 行が同じキーの実績を置き換えない（エラー）                            | fixed                                                                         |
+| INV-F8           | 他人の自動保存を黙って上書きしない（working の競合）                                     | fixed                                                                         |
+| INV-F9           | 依頼が拒否されたら版を作らず自動保存も消さない                                           | fixed                                                                         |
+| INV-F10          | 一部採用した AI 実行を再生成時に rejected にしない                                       | fixed                                                                         |
+| INV-F11          | 目標との比較で算定方法の違いを見る                                                       | fixed                                                                         |
+| SEC-F1〜F3       | レビューの段階飛ばし・担当の差し替え・記録なしの承認・偽のスナップショットを DB で拒否   | fixed（RLS テスト 7 件）                                                      |
+| SEC-F4           | 自動保存本文の他テナント参照を拒否し、他組織の名称を出さない                             | fixed                                                                         |
+| SEC-F5           | 対外 DOCX で非公開資料のファイル名を伏せる                                               | fixed                                                                         |
+| SEC-F6 / F7      | 資料の断片は evidence.read、引用の利用先は disclosure.read を要求                        | fixed                                                                         |
+| SEC-F8           | Cookie から戻す依頼・記録・承認を DB と同じ規則で検査                                    | fixed                                                                         |
+| REG-F1           | 旧デプロイの Cookie の Data Point 行で画面が落ちない                                     | fixed                                                                         |
+| REG-F2           | 従来の Evidence アップロードの拡張子・ファイル名を元に戻す                               | fixed                                                                         |
+| REG-F3           | ホームの「適用確定済み」を対象外・重要性なしで水増ししない（概要タブと一致）             | fixed                                                                         |
+| REG-F4           | SSBJ 2026 を「公表済み」に（採択済みの誤表記）                                           | fixed                                                                         |
+| REG-F5           | OFF でも従来画面に開示用 Fixture の差が見える                                            | **skipped**（再確認の筋書きと SNAP-1 の整合のため。known-limitations に記載） |
+| REG-F6           | SSBJ 133 項目を「全件」と言わない                                                        | fixed                                                                         |
+| REG-F7           | OFF の組織の従来画面に開示優先 UI を出さない                                             | fixed                                                                         |
+| UX-F2 / F3 / F9  | 未保存の本文を残して遷移しない、通信失敗で「保存中」「実行中」のまま止まらない           | fixed                                                                         |
+| UX-F4〜F7        | 再確認・適用条件・資料からの候補・手入力の抜粋で、入力を消さずに理由を示す               | fixed                                                                         |
+| UX-F10           | 通知していないのに「通知しました」と言わない                                             | fixed                                                                         |
+| UX-F11           | 版の保存フォームを閉じたらフォーカスを戻す                                               | fixed                                                                         |
+| UX-F12 / F13     | 内部キーを出さない、状態バッジにアイコンを付ける                                         | fixed                                                                         |
+| UX-F14           | 標準 CSV の検証結果を読み上げ、結果の見出しへフォーカスを移す                            | fixed（E2E に追加）                                                           |
+| UX-F15           | ESG 比較の差に単位を付け、単位違いは差を出さない                                         | fixed                                                                         |
+| PER-F1           | 別インスタンスでの依頼は画面の本文から版を作る                                           | fixed                                                                         |
+| PER-F2 / F10     | リセットを他インスタンスへ伝え、開示の通知も消す                                         | fixed                                                                         |
+| PER-F3 / F7      | 機能設定を押し出さない、出力記録を Cookie に載せない、押し出しを表示                     | fixed                                                                         |
+| PER-F4 / F8 / F9 | 版が無いインスタンスでは「版が見つからない」と示す（最新扱い・矛盾・改ざん扱いにしない） | fixed                                                                         |
+| PER-F5           | 採用済みの AI 候補を閉じても rejected にしない                                           | fixed                                                                         |
+| PER-F6           | 定性情報の版 ID を版番号だけで決めない                                                   | fixed                                                                         |
+| PER-F11          | Supabase Mode で不正な ID は 500 ではなく「見つからない」                                | fixed                                                                         |
+
+**追加・変更したテスト**: `tests/integration/self-audit-review-integrity.test.ts`（20）・`self-audit-values.test.ts`（7）・
+`self-audit-demo-persistence.test.ts`（8）・`tests/unit/self-audit-ui.test.tsx`（6）・`tests/rls/tenant-isolation.test.ts`（0041 の 7）、
+既存の AI 下書き・ホーム・原稿・確定前検査・KPI・Fixture・Cookie のテストと E2E 2 spec に追記。
+
+**テスト結果**（2026-09-29 ローカル。E2E は `E2E_PORT=3217`、単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` 合格。`pnpm check:rls` 100 テーブル・228 ポリシーで合格。
+- `pnpm test` 97 ファイル・1124 件合格、`pnpm test:rls` 2 ファイル・236 件合格。
+- E2E: 関連 17 spec・107 件合格（2.2 分）。その後の UX-F14 の変更後に disclosure-first-nav・zz-disclosure-project の 13 件合格。
+  途中の失敗 1 件は新しく書いた ORCH-4 の E2E の期待値の誤り（期間名は「FY2025」でなく「2025年度」）で、同じ厳しさの文言へ直した。
+
+**未解決・次作業**
+
+- リセットの印は組織ごとに最新 1 件だけ。対外 DOCX で伏せるファイル名は出力時点の資料一覧から取る。
+- 旧 `decideRecheckAction` / `addManualExcerptAction` はフォーム版へ移した後も互換のため残している。
+- ORCH-4 の E2E は FY2025 の SSBJ 評価行をデモのメモリに作る（再起動で消える）。
+- Cookie でレビューの記録が押し出された後の依頼・承認は、別インスタンスでは規則を満たせず適用されない。

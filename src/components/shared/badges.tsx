@@ -102,30 +102,35 @@ export function AvailabilityBadge({
   status,
   reason,
 }: {
-  status: AvailabilityStatus;
+  /** 0039 より前の行（以前のデプロイの Cookie に残った行など）は状態を持たないことがある */
+  status: AvailabilityStatus | undefined;
   reason?: string | null;
 }) {
-  const s = AVAILABILITY_MAP[status];
+  // 状態の無い行は 0039 の backfill と同じく「値あり」として示す（画面を落とさない）
+  const known: AvailabilityStatus = status && status in AVAILABILITY_MAP ? status : 'value_present';
+  const s = AVAILABILITY_MAP[known];
   return (
     <Badge tone={s.tone} title={reason ?? undefined}>
       <s.Icon className="size-3" aria-hidden="true" />
-      {AVAILABILITY_STATUS_LABELS[status]}
+      {AVAILABILITY_STATUS_LABELS[known]}
     </Badge>
   );
 }
 
 /** 値の区分（実績／推計／目標）。推計・目標を実績と取り違えないために使う（§7.1） */
-export function ValueKindBadge({ kind }: { kind: ValueKind }) {
+export function ValueKindBadge({ kind }: { kind: ValueKind | undefined }) {
   const map: Record<ValueKind, { tone: Tone; Icon: typeof Check }> = {
     actual: { tone: 'neutral', Icon: Check },
     estimate: { tone: 'warning', Icon: CircleHelp },
     target: { tone: 'brand', Icon: Target },
   };
-  const s = map[kind];
+  // 区分の無い行（0039 より前）は backfill と同じく「実績」として示す
+  const known: ValueKind = kind && kind in map ? kind : 'actual';
+  const s = map[known];
   return (
     <Badge tone={s.tone}>
       <s.Icon className="size-3" aria-hidden="true" />
-      {VALUE_KIND_LABELS[kind]}
+      {VALUE_KIND_LABELS[known]}
     </Badge>
   );
 }

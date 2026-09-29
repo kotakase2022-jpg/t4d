@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { AlertTriangle, History } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDot, CornerDownRight, History } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
@@ -185,9 +185,24 @@ export default async function NarrativeDetailPage({
                   <History className="size-3.5 text-ink-muted" aria-hidden="true" />
                   <span className="font-medium">版 {v.version.versionNo}</span>
                   <span>{v.period?.code ?? '—'}</span>
-                  {v.isCurrent && <Badge tone="brand">現在の版</Badge>}
-                  {v.isConfirmed && <Badge tone="success">確認済みの版</Badge>}
-                  {v.version.carriedFromVersionId && <Badge tone="neutral">前年から引継ぎ</Badge>}
+                  {v.isCurrent && (
+                    <Badge tone="brand">
+                      <CircleDot className="size-3" aria-hidden="true" />
+                      現在の版
+                    </Badge>
+                  )}
+                  {v.isConfirmed && (
+                    <Badge tone="success">
+                      <CheckCircle2 className="size-3" aria-hidden="true" />
+                      確認済みの版
+                    </Badge>
+                  )}
+                  {v.version.carriedFromVersionId && (
+                    <Badge tone="neutral">
+                      <CornerDownRight className="size-3" aria-hidden="true" />
+                      前年から引継ぎ
+                    </Badge>
+                  )}
                   <span className="text-ink-muted">
                     {formatJst(v.version.createdAt)}・{v.createdByName ?? '—'}
                   </span>

@@ -147,11 +147,15 @@ describe('原稿編集の画面データ', () => {
         IDS.narrativeVersions.financialImpact,
       ]),
     );
-    // 財務的影響の定性情報は影響額が未記入（不足情報として見せる）
+    // 財務的影響の定性情報は影響額を定量化しない理由を持つ。影響額・算定方法は「未記入」ではなく、
+    // 理由そのものを示す（原稿一覧・スナップショットと同じ判定: domain/narrative-template.ts）
     const financial = data.narratives.find(
       (n) => n.versionId === IDS.narrativeVersions.financialImpact,
     );
-    expect(financial?.missingFieldLabels).toContain('影響額');
+    expect(financial?.missingFieldLabels).not.toContain('影響額');
+    expect(financial?.missingFieldLabels).not.toContain('算定方法・前提');
+    expect(financial?.notQuantifiedNote).toContain('影響額を定量化していない理由');
+    expect(financial?.notQuantifiedNote).toContain('評価中のため未確定');
     expect(data.comments).toHaveLength(1);
     expect(data.blockers).toEqual([]);
     expect(data.permissions.editable).toBe(true);

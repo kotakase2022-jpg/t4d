@@ -132,10 +132,22 @@ describe('レビュー用草稿のスナップショット', () => {
 
     const risk = byKey.get('risk_opportunity')!;
     expect(risk.issues.map((i) => i.code)).toContain('not_approved');
-    // 財務的影響の影響額は未確定（理由あり）として不足情報に出る
+    // 財務的影響は定量化しない理由があるため、影響額・算定方法は不足情報に数えず、理由そのものを示す
+    // （原稿一覧・開示ホームと同じ判定。以前はスナップショットだけ「影響額（未確定）」を不足に数えていた）
     expect(
       risk.issues.some(
-        (i) => i.code === 'narrative_missing_fields' && i.message.includes('影響額'),
+        (i) =>
+          i.code === 'narrative_missing_fields' &&
+          (i.message.includes('影響額') || i.message.includes('算定方法・前提')),
+      ),
+    ).toBe(false);
+    expect(risk.issues.find((i) => i.code === 'narrative_not_quantified')?.message).toContain(
+      '影響額を定量化していない理由: 財務的影響額は評価中のため未確定',
+    );
+    // 対応策が未記入の物理的リスクは、引き続き不足情報として出る
+    expect(
+      risk.issues.some(
+        (i) => i.code === 'narrative_missing_fields' && i.message.includes('対応策'),
       ),
     ).toBe(true);
 

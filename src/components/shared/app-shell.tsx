@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Bell } from 'lucide-react';
+import { AlertTriangle, Bell } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { logoutAction, selectWorkspaceAction } from '@/lib/auth/actions';
@@ -55,6 +55,11 @@ export interface AppShellProps {
   disclosureFirst?: boolean;
   /** 企業ワークスペースのみ: プロジェクトの画面でヘッダーに名前・対象範囲を出すための一覧 */
   projects?: AppShellProject[];
+  /**
+   * Demo Mode のみ: 操作の記録（Cookie）の容量が足りず、古い操作を押し出した。
+   * 別のサーバーではその操作が戻らないため、帯で知らせる
+   */
+  demoEditsEvicted?: boolean;
   /** Demo Mode のみ: 役割切替の候補（同じ組織の @demo.local 利用者）。空なら出さない */
   demoRoleChoices?: DemoRoleChoiceView[];
   /** 監査法人ワークスペースのみ */
@@ -120,6 +125,7 @@ export function AppShell({
   disclosureFirst = false,
   projects = [],
   demoRoleChoices = [],
+  demoEditsEvicted = false,
   engagements,
   unreadNotifications,
   children,
@@ -180,6 +186,15 @@ export function AppShell({
           )}
           {!isEnterprise && engagements && <EngagementSelector engagements={engagements} />}
           {ctx.demo && <DemoDataBadge />}
+          {ctx.demo && demoEditsEvicted && (
+            <Badge
+              tone="warning"
+              title="デモの操作の記録が容量を超えたため、古い操作から保持をやめました。別のサーバーで開くと、その操作は反映されていないことがあります。"
+            >
+              <AlertTriangle className="size-3" aria-hidden="true" />
+              古い操作の一部を保持できませんでした
+            </Badge>
+          )}
           {referenceLabel && <ReferenceDateBadge label={referenceLabel} />}
         </div>
 

@@ -7,7 +7,10 @@ import { ValidationError } from '@/lib/errors/user-facing';
 import {
   computeConsolidatedAggregation,
   consolidationFactor,
+  hasUsableValue,
+  isActualValue,
   isCountedInTotals,
+  valueKindOf,
   type ConsolidatedAggregation,
 } from '@/lib/services/aggregation';
 import { loadOwnedSnapshot, SNAPSHOT_KIND_DISPLAY } from '@/lib/services/report-snapshot';
@@ -264,10 +267,20 @@ function isIntensityMetric(metric: Pick<MetricDefinition, 'unit'>): boolean {
   return metric.unit.includes('/');
 }
 
-/** 目標と実績を同じ条件で比べられるか（A33: 境界・総量／原単位） */
+/**
+ * 目標と実績を同じ条件で比べられるか（A33: 境界・総量／原単位・算定方法。指示書 §6.11）。
+ * 算定方法は、目標に登録した「前提にした実績の算定方法」（actualMethodology）と、
+ * 実績に入った承認済みの行の算定方法（Data Point の methodology）をそのまま比べる。
+ * どちらかが未記載・拠点ごとに違う・一致しないなら達成率を出さない（推測で同じとみなさない）。
+ */
 export function targetComparability(
-  target: Pick<KpiTarget, 'boundary' | 'targetType'>,
-  actual: { boundary: string | null; metric: Pick<MetricDefinition, 'unit'> },
+  target: Pick<KpiTarget, 'boundary' | 'targetType' | 'actualMethodology'>,
+  actual: {
+    boundary: string | null;
+    metric: Pick<MetricDefinition, 'unit'>;
+    /** 実績に入った行の算定方法（未記載は null）。実績が無ければ空配列 */
+    methodologies: ReadonlyArray<string | null>;
+  },
 ): { comparable: boolean; reasons: string[] } {
   const reasons: string[] = [];
   const targetBoundary = target.boundary.trim();
@@ -282,7 +295,31 @@ export function targetComparability(
   } else if (target.targetType === 'absolute' && intensity) {
     reasons.push('目標は総量ですが、実績は原単位の指標です。');
   }
+  const targetMethod = target.actualMethodology?.trim() || null;
+  if (targetMethod === null) {
+    reasons.push('目標の前提にした実績の算定方法が登録されていません。');
+  } else if (actual.methodologies.length > 0) {
+    const methods = [...new Set(actual.methodologies.map((m) => m?.trim() || null))];
+    if (methods.includes(null)) {
+      reasons.push('実績の算定方法が記載されていない拠点があります。');
+    } else if (methods.length > 1) {
+      reasons.push(`拠点ごとに実績の算定方法が異なります（${methods.join('／')}）。`);
+    } else if (methods[0] !== targetMethod) {
+      reasons.push(
+        `目標の算定方法「${targetMethod}」と実績の算定方法「${methods[0]}」が異なります。`,
+      );
+    }
+  }
   return { comparable: reasons.length === 0, reasons };
+}
+
+/** 実績に入った（承認済み・連結対象・内部取引の明細以外の）行の算定方法 */
+function actualMethodologiesOf(state: MetricPeriodState | null): Array<string | null> {
+  if (!state) return [];
+  return state.contributions
+    .filter((c) => c.status === 'approved' && c.factor > 0 && c.boundary !== '内部取引')
+    .filter((c) => c.availabilityStatus === 'value_present')
+    .map((c) => c.methodology);
 }
 
 // ======================================================================
@@ -325,8 +362,16 @@ export interface MetricPeriodState {
   pendingUnits: Array<{ unitName: string; status: DataPointStatus }>;
   missingUnits: string[];
   notApplicableUnits: string[];
-  /** 前年値で補完できる拠点（実績には含めない） */
+  /** 承認済みだが値が推計（value_kind = estimate）の拠点。確定した実績には数えない */
+  estimateUnits: string[];
+  /** 承認済みだが値が目標値だけの拠点（実績が無い） */
+  targetOnlyUnits: string[];
+  /** 推計の件数（実績には含めない）。出所ごとに分けて説明する */
   estimateCount: number;
+  /** うち当年に推計値として承認された拠点 */
+  currentEstimateCount: number;
+  /** うち前年の承認済み実績で補完した拠点 */
+  priorYearFillCount: number;
   unapprovedCorrectionCount: number;
   /** 承認済みで集計に入った行の境界（例: 連結） */
   boundary: string | null;
@@ -453,6 +498,8 @@ async function metricPeriodState(
   const pendingUnits: Array<{ unitName: string; status: DataPointStatus }> = [];
   const missingUnits: string[] = [];
   const notApplicableUnits: string[] = [];
+  const estimateUnits: string[] = [];
+  const targetOnlyUnits: string[] = [];
   for (const unit of expectedUnits) {
     const unitRows = counted.filter((d) => d.unitId === unit.id);
     if (unitRows.length === 0) {
@@ -466,8 +513,22 @@ async function metricPeriodState(
     }
     if (unitRows.every((d) => d.availabilityStatus === 'not_applicable')) {
       notApplicableUnits.push(unit.name);
-    } else if (unitRows.some((d) => d.availabilityStatus === 'value_present')) {
+      continue;
+    }
+    // 実績の拠点に数えるのは、値のある行（対象外・目標値を除く）がすべて実績のときだけ。
+    // 承認済みでも推計・目標値は実績ではない（「承認済みだから実測扱い」にしない: 指示書 §10.4）
+    const valueRows = unitRows.filter(
+      (d) => d.availabilityStatus !== 'not_applicable' && valueKindOf(d) !== 'target',
+    );
+    if (valueRows.length > 0 && valueRows.every(isActualValue)) {
       approvedUnits.push(unit.name);
+    } else if (valueRows.some((d) => hasUsableValue(d) && valueKindOf(d) === 'estimate')) {
+      estimateUnits.push(unit.name);
+    } else if (
+      valueRows.length === 0 &&
+      unitRows.some((d) => d.availabilityStatus === 'value_present' && valueKindOf(d) === 'target')
+    ) {
+      targetOnlyUnits.push(unit.name);
     } else {
       // 承認済みでも値が無い（未取得・未算定）行は、確定した実績として数えない
       pendingUnits.push({ unitName: unit.name, status: 'approved' });
@@ -477,7 +538,7 @@ async function metricPeriodState(
   const approvedWithValue = counted.filter(
     (d) =>
       d.status === 'approved' &&
-      d.availabilityStatus === 'value_present' &&
+      isActualValue(d) &&
       consolidationFactor(
         unitById.get(d.unitId) ?? { consolidationMethod: 'full', ownershipPercent: 100 },
       ) > 0,
@@ -492,8 +553,14 @@ async function metricPeriodState(
   const hasRatioInputs = Boolean(metric.numeratorMetricCode && metric.denominatorMetricCode);
   if (metric.aggregationMethod === 'sum') {
     const consolidated = aggregate?.consolidated;
+    // 足した実績の行が 1 件も無ければ値なし（集計は実績だけを足し、無い分を 0 にするため、
+    // 推計・目標だけの年度が「0」として確定値に見えてしまう）
     approvedValue =
-      approvedWithValue.length > 0 && typeof consolidated === 'number' ? consolidated : null;
+      approvedWithValue.length > 0 &&
+      (aggregate?.valueCount ?? 0) > 0 &&
+      typeof consolidated === 'number'
+        ? consolidated
+        : null;
   } else if (hasRatioInputs) {
     const weighted = aggregate?.weightedAverage;
     approvedValue = typeof weighted === 'number' ? weighted : null;
@@ -545,14 +612,26 @@ async function metricPeriodState(
       expectedUnits.length > 0 &&
       pendingUnits.length === 0 &&
       missingUnits.length === 0 &&
+      estimateUnits.length === 0 &&
+      targetOnlyUnits.length === 0 &&
       approvedUnits.length + notApplicableUnits.length === expectedUnits.length,
     expectedUnitCount: expectedUnits.length,
     approvedUnits,
     pendingUnits,
     missingUnits,
     notApplicableUnits,
-    // 前年値での補完は合計の指標だけの話（比率に拠点値を足す補完はしない）
+    estimateUnits,
+    targetOnlyUnits,
+    // 推計（当年の推計値・前年値での補完）は合計の指標だけの話（比率に拠点値を足す補完はしない）
     estimateCount: metric.aggregationMethod === 'sum' ? (aggregate?.estimates.length ?? 0) : 0,
+    currentEstimateCount:
+      metric.aggregationMethod === 'sum'
+        ? (aggregate?.estimates.filter((e) => e.source === 'current_estimate').length ?? 0)
+        : 0,
+    priorYearFillCount:
+      metric.aggregationMethod === 'sum'
+        ? (aggregate?.estimates.filter((e) => e.source === 'prior_year').length ?? 0)
+        : 0,
     unapprovedCorrectionCount: contributions.filter((c) => c.unapprovedCorrection).length,
     boundary: boundaries.length === 0 ? null : boundaries.join('・'),
     contributions,
@@ -736,8 +815,18 @@ function describeState(state: MetricPeriodState | null): KpiDataState {
       `承認後の訂正で未承認の値 ${state.unapprovedCorrectionCount} 件は含めていません。`,
     );
   }
-  if (state.estimateCount > 0) {
-    details.push(`前年値での補完（推計）${state.estimateCount} 拠点は実績に含めていません。`);
+  if (state.currentEstimateCount > 0) {
+    details.push(
+      `当年の推計値 ${state.currentEstimateCount} 拠点（${state.estimateUnits.join('、') || '—'}）は実績に含めていません。`,
+    );
+  }
+  if (state.priorYearFillCount > 0) {
+    details.push(`前年値での補完（推計）${state.priorYearFillCount} 拠点は実績に含めていません。`);
+  }
+  if (state.targetOnlyUnits.length > 0) {
+    details.push(
+      `目標値だけで実績の無い拠点: ${state.targetOnlyUnits.join('、')}（実績に含めていません）`,
+    );
   }
   if (!state.computable) {
     return {
@@ -748,6 +837,18 @@ function describeState(state: MetricPeriodState | null): KpiDataState {
   }
   if (state.complete) {
     return { label: '確定（全拠点承認済み）', tone: 'success', details };
+  }
+  if (
+    state.estimateUnits.length > 0 &&
+    state.pendingUnits.length === 0 &&
+    state.missingUnits.length === 0 &&
+    state.targetOnlyUnits.length === 0
+  ) {
+    return {
+      label: `推計を含む（実績 ${state.approvedUnits.length + state.notApplicableUnits.length}/${state.expectedUnitCount} 拠点）`,
+      tone: 'warning',
+      details,
+    };
   }
   return {
     label: `集計中（承認済み ${state.approvedUnits.length + state.notApplicableUnits.length}/${state.expectedUnitCount} 拠点）`,
@@ -817,6 +918,7 @@ async function buildCard(
     const comparability = targetComparability(primary, {
       boundary: confirmed?.boundary ?? current?.boundary ?? null,
       metric,
+      methodologies: actualMethodologiesOf(confirmed ?? current),
     });
     target = {
       target: primary,
@@ -1162,6 +1264,7 @@ export async function loadKpiDetail(
       const comparability = targetComparability(latest, {
         boundary: card.confirmed?.boundary ?? card.current?.boundary ?? null,
         metric: kpiMetric,
+        methodologies: actualMethodologiesOf(card.confirmed ?? card.current),
       });
       targetViews.push({
         target: latest,
@@ -1191,6 +1294,15 @@ export interface KpiSnapshotRow {
   unitOfMeasure: string;
   latestApproved: { versionNo: number; value: number | null; unitOfMeasure: string } | null;
   differs: boolean;
+  /**
+   * 最新承認値 − スナップショットの値（単位が同じときだけ）。単位が違えば差を出さない
+   * （例: t-CO2e と千t-CO2e を引き算しない）
+   */
+  diff: number | null;
+  /** 差の単位（差を出したときだけ） */
+  diffUnit: string | null;
+  /** スナップショットの値と最新承認値の単位が違う */
+  unitMismatch: boolean;
   /** 固定した版の後に承認された版の変更理由 */
   reasons: string[];
 }
@@ -1253,7 +1365,12 @@ export async function loadKpiSnapshotComparison(
               .sort((a, b) => a.versionNo - b.versionNo)
               .map((v) => `版 ${v.versionNo}: ${v.changeReason}`)
           : [];
+      const sameUnit = latest !== null && latest.unitOfMeasure.trim() === mv.unitOfMeasure.trim();
       rows[key].push({
+        diff:
+          sameUnit && latest.value !== null && mv.value !== null ? latest.value - mv.value : null,
+        diffUnit: sameUnit ? mv.unitOfMeasure : null,
+        unitMismatch: latest !== null && !sameUnit,
         dataPointId: mv.dataPointId,
         metricCode: mv.metricCode,
         metricName: mv.metricName,
@@ -1306,6 +1423,8 @@ export interface KpiTargetInput {
   targetType: KpiTargetType;
   direction: KpiDirection;
   methodologyNote: string;
+  /** 目標が前提にした実績の算定方法（Data Point の算定方法と同じ表記）。未入力は null */
+  actualMethodology: string | null;
   ownerUserId: Uuid | null;
   revisionReason: string | null;
 }
@@ -1355,6 +1474,7 @@ export function parseKpiTargetForm(get: (key: string) => string): KpiTargetInput
     targetType: targetType as KpiTargetType,
     direction: direction as KpiDirection,
     methodologyNote: get('methodologyNote').trim(),
+    actualMethodology: get('actualMethodology').trim() || null,
     ownerUserId: get('ownerUserId').trim() || null,
     revisionReason: get('revisionReason').trim() || null,
   };
@@ -1451,6 +1571,7 @@ export async function registerKpiTarget(
     targetType: input.targetType,
     direction: input.direction,
     methodologyNote: input.methodologyNote,
+    actualMethodology: input.actualMethodology?.slice(0, 200) ?? null,
     ownerUserId: input.ownerUserId,
     revisionReason,
     createdAt: new Date().toISOString(),
@@ -1511,13 +1632,19 @@ export async function loadTargetFormOptions(
 ): Promise<{
   metrics: MetricDefinition[];
   members: Array<{ userId: Uuid; displayName: string }>;
+  /** 実績に登録されている算定方法の表記（目標の「前提にした実績の算定方法」の候補） */
+  methodologies: string[];
 }> {
   assertEnterpriseWorkspace(ctx);
   const organizationId = ctx.workspace.organizationId;
-  const [metrics, memberships] = await Promise.all([
+  const [metrics, memberships, dataPoints] = await Promise.all([
     db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),
     db.select('memberships', { where: { organizationId, status: 'active' } }),
+    db.select('dataPoints', { where: { organizationId, deletedAt: { isNull: true } } }),
   ]);
+  const methodologies = [
+    ...new Set(dataPoints.map((d) => d.methodology?.trim()).filter((m): m is string => Boolean(m))),
+  ].sort((a, b) => a.localeCompare(b, 'ja'));
   const profiles =
     memberships.length === 0
       ? []
@@ -1532,6 +1659,7 @@ export async function loadTargetFormOptions(
   });
   return {
     metrics: kpiFirst,
+    methodologies,
     members: profiles
       .map((p) => ({ userId: p.id, displayName: p.displayName }))
       .sort((a, b) => (a.displayName < b.displayName ? -1 : 1)),

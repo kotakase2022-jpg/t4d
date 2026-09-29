@@ -4,7 +4,11 @@ import { PageHeader } from '@/components/shared/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
-import { KPI_DIRECTION_LABELS, KPI_TARGET_TYPE_LABELS } from '@/lib/domain/disclosure-status';
+import {
+  KPI_DIRECTION_LABELS,
+  KPI_TARGET_TYPE_LABELS,
+  kpiTargetLabel,
+} from '@/lib/domain/disclosure-status';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { listKpiTargets, loadTargetFormOptions } from '@/lib/services/kpi';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -51,6 +55,7 @@ export default async function KpiTargetsPage({
         targetType: latest.targetType,
         direction: latest.direction,
         methodologyNote: latest.methodologyNote,
+        actualMethodology: latest.actualMethodology ?? '',
         ownerUserId: latest.ownerUserId ?? '',
       }
     : {
@@ -65,6 +70,7 @@ export default async function KpiTargetsPage({
         targetType: 'absolute',
         direction: 'reduce',
         methodologyNote: '',
+        actualMethodology: '',
         ownerUserId: '',
       };
 
@@ -105,9 +111,15 @@ export default async function KpiTargetsPage({
                   <CardTitle className="flex items-center gap-1.5">
                     <Target className="size-4 text-brand-600" aria-hidden="true" />
                     {history.metric?.name ?? '（指標不明）'}
-                    <span className="text-[11px] font-normal text-ink-muted">
-                      {history.targetKey}
-                    </span>
+                    {history.versions[0] && (
+                      <span className="text-[11px] font-normal text-ink-muted">
+                        {kpiTargetLabel({
+                          metricName: history.metric?.name ?? null,
+                          targetYear: history.versions[0].targetYear,
+                          direction: history.versions[0].direction,
+                        })}
+                      </span>
+                    )}
                   </CardTitle>
                   {canManage && (
                     <Link
@@ -180,7 +192,13 @@ export default async function KpiTargetsPage({
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>
-              {revisingHistory ? `目標を改訂（${revisingHistory.targetKey}）` : '目標を登録'}
+              {revisingHistory && revisingHistory.versions[0]
+                ? `目標を改訂（${kpiTargetLabel({
+                    metricName: revisingHistory.metric?.name ?? null,
+                    targetYear: revisingHistory.versions[0].targetYear,
+                    direction: revisingHistory.versions[0].direction,
+                  })}）`
+                : '目標を登録'}
             </CardTitle>
             {revisingHistory && (
               <Link
@@ -200,6 +218,7 @@ export default async function KpiTargetsPage({
                   label: `${m.name}（${m.unit}）`,
                 }))}
                 members={options.members}
+                methodologies={options.methodologies}
                 defaults={defaults}
                 revising={
                   revisingHistory && latest

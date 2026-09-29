@@ -16,6 +16,7 @@ import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { loadPeriodDataset } from '@/lib/services/enterprise-data';
 import {
   computeConsolidatedAggregation,
+  consolidatedTrendSeries,
   loadConsolidatedTrend,
   SCOPE3_CATEGORY_CODES,
   SCOPE3_TOTAL_CODE,
@@ -229,13 +230,11 @@ export default async function GhgPage() {
             </h3>
             <div className="grid grid-cols-3 gap-4">
               {trendMetricCodes.map((code) => {
-                const series = trend.flatMap((entry) => {
-                  const agg = entry.metrics.find((m) => m.metric.code === code);
-                  return agg ? [{ period: entry.period, agg }] : [];
-                });
-                const metric = series[series.length - 1]?.agg.metric;
+                // 値の無い年度（その指標だけ未入力）は value = null。0 のバーを描かず「未入力」と示す
+                const series = consolidatedTrendSeries(trend, code);
+                const metric = [...series].reverse().find((row) => row.metric)?.metric;
                 if (!metric) return null;
-                const max = Math.max(...series.map((row) => row.agg.consolidatedWithEstimates), 1);
+                const max = Math.max(...series.map((row) => row.value ?? 0), 1);
                 const YEAR_BAR_CLASSES = ['bg-brand-300', 'bg-brand-500', 'bg-brand-700'];
                 return (
                   <div key={code}>
@@ -247,11 +246,11 @@ export default async function GhgPage() {
                     </p>
                     <ul className="space-y-1">
                       {series.map((row, index) => {
-                        const value = row.agg.consolidatedWithEstimates;
-                        const prev =
-                          index > 0 ? series[index - 1]?.agg.consolidatedWithEstimates : null;
+                        const value = row.value;
+                        const prev = index > 0 ? (series[index - 1]?.value ?? null) : null;
+                        // 前年比は両年に値があるときだけ（未入力の年と比べない）
                         const yoy =
-                          prev && prev !== 0
+                          value !== null && prev !== null && prev !== 0
                             ? Math.round(((value - prev) / prev) * 1000) / 10
                             : null;
                         return (
@@ -260,14 +259,20 @@ export default async function GhgPage() {
                               {row.period.code}
                             </span>
                             <span className="h-2.5 w-full overflow-hidden rounded-full bg-surface-muted">
-                              <span
-                                aria-hidden="true"
-                                className={`block h-full rounded-full ${YEAR_BAR_CLASSES[index] ?? 'bg-brand-700'}`}
-                                style={{ width: `${Math.max((value / max) * 100, 2)}%` }}
-                              />
+                              {value !== null && (
+                                <span
+                                  aria-hidden="true"
+                                  className={`block h-full rounded-full ${YEAR_BAR_CLASSES[index] ?? 'bg-brand-700'}`}
+                                  style={{ width: `${Math.max((value / max) * 100, 2)}%` }}
+                                />
+                              )}
                             </span>
                             <span className="w-20 shrink-0 text-right text-[12px] tabular-nums text-ink">
-                              {formatNumber(value)}
+                              {value === null ? (
+                                <span className="text-ink-muted">未入力</span>
+                              ) : (
+                                formatNumber(value)
+                              )}
                             </span>
                             <span
                               className={`w-14 shrink-0 text-right text-[11px] tabular-nums ${
@@ -282,9 +287,7 @@ export default async function GhgPage() {
                             </span>
                             {/* バーの軌道幅を全行で揃えるため、バッジ枠は常に確保する */}
                             <span className="w-16 shrink-0">
-                              {row.agg.estimates.length > 0 && (
-                                <Badge tone="warning">推計込み</Badge>
-                              )}
+                              {row.estimated && <Badge tone="warning">推計込み</Badge>}
                             </span>
                           </li>
                         );

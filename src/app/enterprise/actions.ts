@@ -1512,12 +1512,22 @@ export async function confirmSsbjSettingsAction(formData: FormData): Promise<voi
   redirect('/enterprise/disclosures/ssbj?confirmed=1');
 }
 
+/**
+ * 要求事項の詳細へ戻る先。開示プロジェクトから期間を明示して開いた画面（?period=）なら、
+ * エラーで戻るときも同じ期間の評価を開く（ヘッダーの期間の評価へすり替えない）
+ */
+function ssbjItemBack(itemId: string, formData: FormData): string {
+  const periodId = String(formData.get('periodId') ?? '');
+  const base = `/enterprise/disclosures/ssbj/requirements/${itemId}`;
+  return /^[0-9a-f-]{36}$/i.test(periodId) ? `${base}?period=${periodId}` : base;
+}
+
 /** 手順 3: 対象判定・重要性判断 */
 export async function saveSsbjScopeAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const itemId = String(formData.get('itemId') ?? '');
-  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+  await withUserFacingError(ssbjItemBack(itemId, formData), async () => {
     await saveSsbjScope(db, ctx, {
       assessmentId: String(formData.get('assessmentId') ?? ''),
       applicability:
@@ -1537,7 +1547,7 @@ export async function runSsbjGapAnalysisAction(formData: FormData): Promise<void
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const itemId = String(formData.get('itemId') ?? '');
-  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+  await withUserFacingError(ssbjItemBack(itemId, formData), async () => {
     await runSsbjGapAnalysis(db, ctx, String(formData.get('assessmentId') ?? ''));
   });
   revalidateSsbj(itemId);
@@ -1565,7 +1575,7 @@ export async function saveSsbjReviewAction(formData: FormData): Promise<void> {
   const coverage = (name: string) =>
     String(formData.get(name) ?? 'unconfirmed') as
       'covered' | 'mostly_covered' | 'partial' | 'not_covered' | 'unconfirmed';
-  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+  await withUserFacingError(ssbjItemBack(itemId, formData), async () => {
     await saveSsbjReview(db, ctx, {
       assessmentId: String(formData.get('assessmentId') ?? ''),
       decision: formData.get('decision') === 'approve_ai' ? 'approve_ai' : 'modify',
@@ -1584,7 +1594,7 @@ export async function createSsbjActionPlanAction(formData: FormData): Promise<vo
   const db = await getDb();
   const itemId = String(formData.get('itemId') ?? '');
   const dueDate = String(formData.get('dueDate') ?? '');
-  await withUserFacingError(`/enterprise/disclosures/ssbj/requirements/${itemId}`, async () => {
+  await withUserFacingError(ssbjItemBack(itemId, formData), async () => {
     await createActionPlan(db, ctx, {
       assessmentId: String(formData.get('assessmentId') ?? ''),
       gapKind: String(formData.get('gapKind') ?? 'disclosure') as 'disclosure' | 'data' | 'process',

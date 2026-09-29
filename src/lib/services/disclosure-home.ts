@@ -19,6 +19,13 @@ import { unresolvedNarrativeFields } from '@/lib/domain/narrative-template';
 import { daysUntilJst } from '@/lib/format/datetime';
 import type { DbClient, Query, Row, TableName } from '@/lib/repositories/types';
 import type { ManuscriptFilter } from '@/lib/services/disclosure-block';
+import {
+  buildRequirementRows,
+  getProject,
+  isRequirementApproved,
+  summarizeRequirements,
+  type RequirementRow,
+} from '@/lib/services/disclosure-project';
 import type {
   ApplicabilityStatus,
   AuthorizationContext,
@@ -220,7 +227,13 @@ export interface FrameworkProgressRow {
   excluded: boolean;
   /** 収録している要求事項の数（未収録の基準は 0） */
   itemCount: number;
-  /** 原稿の節に割り当てた要求事項の数 */
+  /** 要求事項ごとの判断で「適用（重要）」と確定した数（分母）。適用すると判断した基準だけ */
+  confirmedItemCount: number;
+  /** 要求事項ごとに対象外・非重要と判断した数（理由・判断者あり。分母に含めない） */
+  excludedItemCount: number;
+  /** 要求事項ごとの判断が未判定の数（分母に含めず別に示す） */
+  notAssessedItemCount: number;
+  /** 適用（重要）のうち、原稿の節に割り当てた数 */
   assignedItemCount: number;
   approvedItemCount: number;
   /** 承認済みだが引用先に新しい版があり、再確認が必要な要求事項 */
@@ -229,12 +242,19 @@ export interface FrameworkProgressRow {
 }
 
 export interface HomeProgress {
-  /** 分母: 適用すると確定した基準の要求事項すべて */
+  /**
+   * 分母: 適用すると判断した基準の要求事項のうち、要求事項ごとの判断で「適用（重要）」と確定したもの
+   * （プロジェクトの概要・要求事項タブの「適用確定済み」と同じ数）
+   */
   confirmedItemCount: number;
   /** 分子: そのうち、割り当てた原稿の節がすべて承認済みの要求事項 */
   approvedItemCount: number;
   staleApprovedItemCount: number;
   assignedItemCount: number;
+  /** 要求事項ごとに対象外・非重要と判断したもの（分母に含めず別に示す） */
+  excludedItemCount: number;
+  /** 要求事項ごとの判断が未判定のもの（分母に含めず別に示す） */
+  notAssessedItemCount: number;
   /** 適用判断が確定していない基準の数（別枠で示す。分母から黙って外さない） */
   notAssessedCount: number;
   excludedFrameworkCount: number;
@@ -284,11 +304,18 @@ async function selectByIds<K extends TableName>(
   db: DbClient,
   table: K,
   ids: Iterable<string>,
+  /**
+   * 組織を持つ表では必ず渡す。本文の参照 ID は利用者が送った値のため、他社の行を引いて
+   * 指標名・定性情報の題名を表示しないようにする（A29。Supabase は RLS でも隠れるが Demo は隠れない）
+   */
+  organizationId?: string,
 ): Promise<Row<K>[]> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return [];
   // 対象の表はすべて id 列を持つ（Row<K> が総称のままでは id を型で確かめられないため変換する）
-  const query: Query<{ id: string }> = { where: { id: { in: unique } } };
+  const query: Query<{ id: string; organizationId?: string }> = {
+    where: organizationId ? { id: { in: unique }, organizationId } : { id: { in: unique } },
+  };
   return db.select(table, query as unknown as Query<Row<K>>);
 }
 
@@ -483,8 +510,9 @@ export async function loadDisclosureHome(
         db,
         'projectFrameworkDecisions',
         projectFrameworks.flatMap((pf) => (pf.currentDecisionId ? [pf.currentDecisionId] : [])),
+        organizationId,
       ),
-      selectByIds(db, 'disclosureBlockVersions', versionIds),
+      selectByIds(db, 'disclosureBlockVersions', versionIds, organizationId),
       requests.length === 0
         ? Promise.resolve([] as ReviewEvent[])
         : db.select('reviewEvents', {
@@ -539,19 +567,22 @@ export async function loadDisclosureHome(
       db,
       'dataPoints',
       allMetricNodes.map((n) => n.dataPointId),
+      organizationId,
     ),
-    selectByIds(db, 'narrativeVersions', allNarrativeVersionIds),
+    selectByIds(db, 'narrativeVersions', allNarrativeVersionIds, organizationId),
   ]);
   const [metrics, narrativeRecords] = await Promise.all([
     selectByIds(
       db,
       'metrics',
       dataPoints.map((d) => d.metricId),
+      organizationId,
     ),
     selectByIds(
       db,
       'narrativeRecords',
       narrativeVersions.map((v) => v.narrativeRecordId),
+      organizationId,
     ),
   ]);
   const dataPointById = new Map(dataPoints.map((d) => [d.id, d]));
@@ -858,7 +889,18 @@ export async function loadDisclosureHome(
   tasks.sort(compareTasks);
 
   // ---- 進捗（分母を明示） --------------------------------------------------
+  // 分母は要求事項ごとの適用判断（SSBJ 評価）で「適用（重要）」と確定したものだけ。
+  // 基準単位で「適用」と判断しても、要求事項ごとに対象外・非重要・未判定があるため、
+  // プロジェクトの概要・要求事項タブと同じ行（buildRequirementRows）から数える（件数を食い違わせない）
   const decisionById = new Map(decisions.map((d) => [d.id, d]));
+  const detail = await getProject(db, ctx, current.id);
+  const requirementRowsByPf = new Map<Uuid, RequirementRow[]>();
+  for (const view of detail.frameworks) {
+    const pf = view.projectFramework;
+    if (!isApplicabilityDecided(pf)) continue;
+    if (pf.applicabilityStatus !== 'applicable' && pf.applicabilityStatus !== 'voluntary') continue;
+    requirementRowsByPf.set(pf.id, (await buildRequirementRows(db, ctx, detail, view)).rows);
+  }
   const rows: FrameworkProgressRow[] = projectFrameworks
     .map((pf) => {
       const version = frameworkVersionById.get(pf.frameworkVersionId);
@@ -872,15 +914,13 @@ export async function loadDisclosureHome(
           e.block.frameworkVersionId === pf.frameworkVersionId &&
           e.block.translationOfBlockId === null,
       );
-      const assigned = new Set(fwBlocks.flatMap((e) => e.block.requirementItemIds));
-      let approved = 0;
+      const requirementRows = requirementRowsByPf.get(pf.id) ?? [];
+      const applicable = requirementRows.filter((r) => r.decision.kind === 'material');
+      const summary = summarizeRequirements(requirementRows);
       let staleApproved = 0;
-      for (const itemId of assigned) {
-        const covering = fwBlocks.filter((e) => e.block.requirementItemIds.includes(itemId));
-        if (covering.length > 0 && covering.every((e) => e.block.status === 'approved')) {
-          approved += 1;
-          if (covering.some((e) => e.approvedStaleMessage)) staleApproved += 1;
-        }
+      for (const row of applicable.filter(isRequirementApproved)) {
+        const covering = fwBlocks.filter((e) => e.block.requirementItemIds.includes(row.item.id));
+        if (covering.some((e) => e.approvedStaleMessage)) staleApproved += 1;
       }
       return {
         projectFrameworkId: pf.id,
@@ -901,8 +941,11 @@ export async function loadDisclosureHome(
         inScope,
         excluded: decided && pf.applicabilityStatus === 'not_applicable',
         itemCount: itemCountByVersion.get(pf.frameworkVersionId) ?? 0,
-        assignedItemCount: assigned.size,
-        approvedItemCount: approved,
+        confirmedItemCount: inScope ? summary.applicableConfirmed : 0,
+        excludedItemCount: inScope ? summary.excludedDecided : 0,
+        notAssessedItemCount: inScope ? summary.notAssessed : 0,
+        assignedItemCount: inScope ? summary.assignedOfApplicable : 0,
+        approvedItemCount: inScope ? summary.approvedOfApplicable : 0,
         staleApprovedItemCount: staleApproved,
         blockCount: fwBlocks.length,
       };
@@ -911,10 +954,12 @@ export async function loadDisclosureHome(
 
   const inScopeRows = rows.filter((r) => r.inScope);
   const progress: HomeProgress = {
-    confirmedItemCount: inScopeRows.reduce((sum, r) => sum + r.itemCount, 0),
+    confirmedItemCount: inScopeRows.reduce((sum, r) => sum + r.confirmedItemCount, 0),
     approvedItemCount: inScopeRows.reduce((sum, r) => sum + r.approvedItemCount, 0),
     staleApprovedItemCount: inScopeRows.reduce((sum, r) => sum + r.staleApprovedItemCount, 0),
     assignedItemCount: inScopeRows.reduce((sum, r) => sum + r.assignedItemCount, 0),
+    excludedItemCount: inScopeRows.reduce((sum, r) => sum + r.excludedItemCount, 0),
+    notAssessedItemCount: inScopeRows.reduce((sum, r) => sum + r.notAssessedItemCount, 0),
     notAssessedCount: rows.filter((r) => !r.decided).length,
     excludedFrameworkCount: rows.filter((r) => r.excluded).length,
     rows,

@@ -258,6 +258,68 @@ export async function saveProjectFrameworkAction(formData: FormData): Promise<vo
   redirect(`${back}&flash=frameworkSaved#pf-${projectFrameworkId}`);
 }
 
+export interface FrameworkConditionsFormState {
+  status: 'idle' | 'error';
+  message: string | null;
+  /** 項目ごとのエラー（name をキーにする。例: condition.euNetTurnoverLatestFy） */
+  fieldErrors: Record<string, string>;
+  /** 入力した値（失敗しても消さない） */
+  values: Record<string, string>;
+}
+
+/**
+ * 「保存して準備を始める」（フォームの状態を返す版）。入力を読めないときはリダイレクトせず、
+ * 入力した値と項目ごとの理由を返す（リダイレクトすると、その回に入力した条件がすべて保存前の値へ戻っていた）
+ */
+export async function saveProjectFrameworkFormAction(
+  _previous: FrameworkConditionsFormState,
+  formData: FormData,
+): Promise<FrameworkConditionsFormState> {
+  const projectId = str(formData, 'projectId');
+  const projectFrameworkId = str(formData, 'projectFrameworkId');
+  const values: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (
+      typeof value === 'string' &&
+      (key.startsWith('condition.') || key === 'preparationStatus')
+    ) {
+      values[key] = value;
+    }
+  }
+  try {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const detail = await getProject(db, ctx, projectId);
+    const view = detail.frameworks.find((f) => f.projectFramework.id === projectFrameworkId);
+    if (!view) throw new FieldValidationError({ projectFrameworkId: '基準が見つかりません。' });
+    const conditions = parseFrameworkConditions(view.frameworkKey, (key) => str(formData, key));
+    const statusRaw = str(formData, 'preparationStatus');
+    await saveProjectFramework(db, ctx, {
+      projectFrameworkId,
+      conditions,
+      preparationStatus: (PREPARATION_STATUSES as readonly string[]).includes(statusRaw)
+        ? (statusRaw as PreparationStatus)
+        : 'candidate',
+    });
+  } catch (error) {
+    if (error instanceof FieldValidationError) {
+      return { status: 'error', message: error.message, fieldErrors: error.fieldErrors, values };
+    }
+    if (isUserFacingError(error)) {
+      return { status: 'error', message: error.message, fieldErrors: {}, values };
+    }
+    console.error('[project framework]', error);
+    return {
+      status: 'error',
+      message: '保存に失敗しました。入力は残っています。時間をおいて再試行してください。',
+      fieldErrors: {},
+      values,
+    };
+  }
+  revalidatePath(`${BASE}/${projectId}`);
+  redirect(`${settingsPath(projectId)}&flash=frameworkSaved#pf-${projectFrameworkId}`);
+}
+
 /** 「適用判断を確定」: 理由・参照規則・確認日を必須にして判断を追記する */
 export async function confirmApplicabilityAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();

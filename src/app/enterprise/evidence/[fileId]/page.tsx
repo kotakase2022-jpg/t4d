@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Download, FileText, Highlighter, Lock, Quote } from 'lucide-react';
+import { Download, FileText, Highlighter, Lock } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { DocumentPreview } from '@/components/shared/document-preview';
@@ -8,8 +8,6 @@ import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Input, Textarea } from '@/components/ui/input';
-import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
@@ -22,7 +20,7 @@ import {
   usagePurposeLabel,
 } from '@/lib/services/source-anchor';
 import { readOwnedFileBytes } from '@/lib/storage';
-import { addManualExcerptAction } from '../actions';
+import { ManualExcerptForm } from './manual-excerpt-form';
 
 export const metadata = { title: '資料・証跡の表示' };
 
@@ -116,6 +114,8 @@ export default async function EvidenceViewerPage({
   // 引用の利用先（定性情報・原稿）の逆引きと、手動抜粋の可否
   const anchorUsages = await listAnchorUsagesForFile(db, ctx, file.id);
   const canWriteEvidence = can(ctx, 'enterprise.evidence.write');
+  // 引用の利用先（定性情報・原稿の題名）は開示の内容。開示の閲覧権限が無い人には欄ごと出さない
+  const canReadDisclosure = can(ctx, 'enterprise.disclosure.read');
   const manualCount = fragments.filter((f) => isManualExcerpt(f)).length;
   const extractedCount = fragments.length - manualCount;
 
@@ -337,50 +337,7 @@ export default async function EvidenceViewerPage({
           {canWriteEvidence && (
             <Card id="manual-excerpt" className="scroll-mt-4">
               <SectionTitle title="手動抜粋を登録" />
-              <form action={addManualExcerptAction} className="space-y-2 px-3 pb-3">
-                <input type="hidden" name="fileId" value={file.id} />
-                <p className="text-[12px] text-ink-muted">
-                  テキストを抽出できないページ（画像の PDF
-                  など）は、該当箇所の文言を手で写して登録します。 OCR
-                  は行いません。登録した抜粋は「手動の抜粋」として区別され、定性情報の根拠に引用できます。
-                </p>
-                <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)]">
-                  <div>
-                    <label htmlFor="mx-page" className="block text-[12px] text-ink">
-                      ページ
-                    </label>
-                    <Input
-                      id="mx-page"
-                      name="page"
-                      type="number"
-                      min={1}
-                      step={1}
-                      className="mt-0.5"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="mx-locator" className="block text-[12px] text-ink">
-                      位置（見出し・段落・表など）
-                    </label>
-                    <Input
-                      id="mx-locator"
-                      name="locator"
-                      placeholder="例: 第2章 2.1 第1段落／表3 の注記"
-                      className="mt-0.5"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="mx-text" className="block text-[12px] text-ink">
-                    抜粋する文言（必須）
-                  </label>
-                  <Textarea id="mx-text" name="text" rows={4} required className="mt-0.5" />
-                </div>
-                <SubmitButton size="sm" variant="outline" pendingLabel="保存中…">
-                  <Quote aria-hidden="true" />
-                  抜粋を追加
-                </SubmitButton>
-              </form>
+              <ManualExcerptForm fileId={file.id} />
             </Card>
           )}
         </div>
@@ -470,49 +427,51 @@ export default async function EvidenceViewerPage({
             )}
           </Card>
 
-          <Card>
-            <SectionTitle title={`引用の利用先（${anchorUsages.length} 箇所）`} />
-            {anchorUsages.length === 0 ? (
-              <p className="px-3 pb-3 text-[12px] text-ink-muted">
-                この資料を引用している定性情報・原稿はありません。
-              </p>
-            ) : (
-              <ul className="divide-y divide-line">
-                {anchorUsages.map((u) => (
-                  <li key={u.anchorId} className="px-3 py-1.5 text-[12px]">
-                    <p className="text-[11px] font-medium text-ink-muted">{u.locationLabel}</p>
-                    <p className="line-clamp-2 text-ink">「{u.quoteText}」</p>
-                    <ul className="mt-0.5 space-y-0.5 text-[11px]">
-                      {u.narratives.map((n) => (
-                        <li key={n.recordId}>
-                          定性情報:{' '}
-                          <Link
-                            href={`/enterprise/narratives/${n.recordId}`}
-                            className="text-brand-800 underline"
-                          >
-                            {n.title}
-                          </Link>
-                          （版 {n.versionNos.join('・')}）
-                        </li>
-                      ))}
-                      {u.blocks.map((b) => (
-                        <li key={b.blockId}>
-                          原稿:{' '}
-                          <Link
-                            href={`/enterprise/disclosure-projects/${b.projectId}/blocks/${b.blockId}`}
-                            className="text-brand-800 underline"
-                          >
-                            {b.title}
-                          </Link>
-                          （版 {b.versionNos.join('・')}）
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+          {canReadDisclosure && (
+            <Card>
+              <SectionTitle title={`引用の利用先（${anchorUsages.length} 箇所）`} />
+              {anchorUsages.length === 0 ? (
+                <p className="px-3 pb-3 text-[12px] text-ink-muted">
+                  この資料を引用している定性情報・原稿はありません。
+                </p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {anchorUsages.map((u) => (
+                    <li key={u.anchorId} className="px-3 py-1.5 text-[12px]">
+                      <p className="text-[11px] font-medium text-ink-muted">{u.locationLabel}</p>
+                      <p className="line-clamp-2 text-ink">「{u.quoteText}」</p>
+                      <ul className="mt-0.5 space-y-0.5 text-[11px]">
+                        {u.narratives.map((n) => (
+                          <li key={n.recordId}>
+                            定性情報:{' '}
+                            <Link
+                              href={`/enterprise/narratives/${n.recordId}`}
+                              className="text-brand-800 underline"
+                            >
+                              {n.title}
+                            </Link>
+                            （版 {n.versionNos.join('・')}）
+                          </li>
+                        ))}
+                        {u.blocks.map((b) => (
+                          <li key={b.blockId}>
+                            原稿:{' '}
+                            <Link
+                              href={`/enterprise/disclosure-projects/${b.projectId}/blocks/${b.blockId}`}
+                              className="text-brand-800 underline"
+                            >
+                              {b.title}
+                            </Link>
+                            （版 {b.versionNos.join('・')}）
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          )}
 
           <Card>
             <SectionTitle title={`Version（${versions.length}）`} />

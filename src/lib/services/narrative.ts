@@ -23,6 +23,7 @@ import {
   loadAnchorViews,
   type AnchorView,
 } from '@/lib/services/source-anchor';
+import { isUuid } from '@/lib/validation/uuid';
 import type { DbClient } from '@/lib/repositories/types';
 import {
   NARRATIVE_STATUSES,
@@ -375,7 +376,7 @@ async function loadRecord(
   ctx: AuthorizationContext,
   narrativeId: Uuid,
 ): Promise<NarrativeRecord> {
-  const record = await db.findById('narrativeRecords', narrativeId);
+  const record = isUuid(narrativeId) ? await db.findById('narrativeRecords', narrativeId) : null;
   if (!record || record.deletedAt || record.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('定性情報が見つかりません。');
   }
@@ -600,7 +601,10 @@ export async function saveNarrative(
 
   const versionNo = (versions[0]?.versionNo ?? 0) + 1;
   const version: NarrativeVersion = {
-    id: fid('narrative_version', `${record.id}/v${versionNo}`),
+    // 時刻を含める: Demo Mode では版がインスタンスのメモリにしか無く、別インスタンスで同じ版番号を
+    // 作りうる（リセット後・Cookie から押し出された後）。ID まで同じだと、持ち回したポインタが
+    // 別のインスタンスで別の本文を指してしまう（原稿の版 appendBlockVersion と同じ理由）
+    id: fid('narrative_version', `${record.id}/v${versionNo}/${new Date().toISOString()}`),
     organizationId: record.organizationId,
     narrativeRecordId: record.id,
     versionNo,
@@ -836,7 +840,9 @@ export async function createNarrativeCandidateFromFragments(
         `「${file.originalName}」は当年度の根拠として登録された資料ではありません。当年度の事実は別の資料で確認してください。`,
       );
     }
-    lines.push(`${purposeNote}「${quote}」（${file.originalName}／${place}）`);
+    // 資料のファイル名は本文に書かない。本文はそのまま原稿へ引用され、対外の原稿にも出るため
+    // （社内資料の名前を漏らさない。どの資料かは引用位置 sourceAnchorIds と出典印で示す）
+    lines.push(`${purposeNote}「${quote}」（${place}）`);
   }
 
   const created = await insertRecordWithVersion(db, ctx, {
@@ -884,7 +890,10 @@ export async function carryForwardNarrative(
   const versionNo = (versions[0]?.versionNo ?? 0) + 1;
   const scopeNote = source.scopeNote;
   const version: NarrativeVersion = {
-    id: fid('narrative_version', `${record.id}/v${versionNo}`),
+    // 時刻を含める: Demo Mode では版がインスタンスのメモリにしか無く、別インスタンスで同じ版番号を
+    // 作りうる（リセット後・Cookie から押し出された後）。ID まで同じだと、持ち回したポインタが
+    // 別のインスタンスで別の本文を指してしまう（原稿の版 appendBlockVersion と同じ理由）
+    id: fid('narrative_version', `${record.id}/v${versionNo}/${new Date().toISOString()}`),
     organizationId: record.organizationId,
     narrativeRecordId: record.id,
     versionNo,

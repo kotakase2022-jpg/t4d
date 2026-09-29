@@ -97,6 +97,11 @@ export interface SsbjAreaSummary {
 export interface SsbjOverview {
   versionLabel: string;
   isFixture: boolean;
+  /**
+   * 収録範囲の注記（例: 一般33・気候96・実務対応4 の計133項目。ユニバーサル基準は未収録）。
+   * 件数を「基準の全件」と誤解させないために画面へ出す。未設定は null
+   */
+  coverageNote: string | null;
   attribution: string;
   period: ReportingPeriod;
   /** 3 観点それぞれの整備度（%） */
@@ -164,7 +169,12 @@ async function loadSsbjItems(
   db: DbClient,
   organizationId: Uuid,
   reportingPeriodId: Uuid,
-): Promise<{ items: DisclosureItem[]; versionLabel: string; isFixture: boolean } | null> {
+): Promise<{
+  items: DisclosureItem[];
+  versionLabel: string;
+  isFixture: boolean;
+  coverageNote: string | null;
+} | null> {
   const frameworks = await db.select('frameworks', { where: { key: 'ssbj' }, limit: 1 });
   const framework = frameworks[0];
   if (!framework) return null;
@@ -184,7 +194,12 @@ async function loadSsbjItems(
     ? all.filter((item) => prefixes.some((prefix) => item.section.startsWith(prefix)))
     : all;
 
-  return { items, versionLabel: current.label, isFixture: current.isFixture };
+  return {
+    items,
+    versionLabel: current.label,
+    isFixture: current.isFixture,
+    coverageNote: current.coverageNote ?? null,
+  };
 }
 
 /**
@@ -308,7 +323,12 @@ export async function loadSsbjRequirementViews(
   ctx: AuthorizationContext,
   period: ReportingPeriod,
   options: SsbjReferenceDateOption = {},
-): Promise<{ views: SsbjRequirementView[]; versionLabel: string; isFixture: boolean } | null> {
+): Promise<{
+  views: SsbjRequirementView[];
+  versionLabel: string;
+  isFixture: boolean;
+  coverageNote: string | null;
+} | null> {
   const master = await loadSsbjItems(db, ctx.workspace.organizationId, period.id);
   if (!master) return null;
 
@@ -365,7 +385,12 @@ export async function loadSsbjRequirementViews(
     })
     .filter((v): v is SsbjRequirementView => v !== null);
 
-  return { views, versionLabel: master.versionLabel, isFixture: master.isFixture };
+  return {
+    views,
+    versionLabel: master.versionLabel,
+    isFixture: master.isFixture,
+    coverageNote: master.coverageNote,
+  };
 }
 
 // ----------------------------------------------------------------------
@@ -648,7 +673,7 @@ export async function loadSsbjOverview(
 ): Promise<SsbjOverview | null> {
   const loaded = await loadSsbjRequirementViews(db, ctx, period, options);
   if (!loaded) return null;
-  const { views, versionLabel, isFixture } = loaded;
+  const { views, versionLabel, isFixture, coverageNote } = loaded;
 
   // 対象外・重要性なしは整備度の分母から外す（対応する必要が無いため）
   const inScope = views.filter(isInScope);
@@ -719,6 +744,7 @@ export async function loadSsbjOverview(
   return {
     versionLabel,
     isFixture,
+    coverageNote,
     attribution,
     period,
     disclosureRate: coverageRate(inScope.map((v) => v.assessment.disclosureStatus)),

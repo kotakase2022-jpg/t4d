@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useActionState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, Save } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, FileText, Loader2, Save } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -595,7 +595,10 @@ export function ProjectForm(props: ProjectFormProps) {
                 {state.impact.blocks.map((b) => (
                   <li key={b.blockId} className="flex flex-wrap items-center gap-1">
                     <span>{b.title}</span>
-                    <Badge tone="neutral">{b.statusLabel}</Badge>
+                    <Badge tone="neutral">
+                      <FileText className="size-3" aria-hidden="true" />
+                      {b.statusLabel}
+                    </Badge>
                     <span className="text-[11px] text-ink-muted">{b.frameworkLabel}</span>
                   </li>
                 ))}

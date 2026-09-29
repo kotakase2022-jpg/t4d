@@ -219,11 +219,13 @@ describe('Cookie の中身を信用しない', () => {
       'reviewEvents',
       'reviewComments',
       'recheckDecisions',
-      'exportArtifacts',
       'kpiTargets',
     ] as const) {
       expect(isPersistedTable(table), table).toBe(true);
     }
+    // 出力の記録は、スナップショット（メモリのみ）と組でしか表示されない。別インスタンスでは
+    // 使われずに容量だけを使い、ほかの操作を押し出していた（PER-F7）
+    expect(isPersistedTable('exportArtifacts')).toBe(false);
     // 1 件で Cookie（約 7.6KB）を使い切りうる表。同一インスタンスのメモリにだけ残す（D-3）
     for (const table of [
       'narrativeVersions',

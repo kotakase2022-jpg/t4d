@@ -354,6 +354,24 @@ export function transitionBlock(action: BlockAction, from: BlockStatus): BlockTr
 
 export const DEFAULT_REVIEW_POLICY_VERSION = 'sod-3role-v1';
 
+/** 規則の版の表示（画面に内部の識別子をそのまま出さない。§4.2） */
+const REVIEW_POLICY_LABELS: Readonly<Record<string, string>> = {
+  'sod-3role-v1': '作成・レビュー・最終承認の 3 段階（職務分離・第 1 版）',
+};
+
+export function reviewPolicyLabel(policyVersion: string): string {
+  return REVIEW_POLICY_LABELS[policyVersion] ?? '規則の版（登録外）';
+}
+
+/** KPI 目標の表示名（内部の識別子 target_key や列挙値を画面に出さない。§4.2） */
+export function kpiTargetLabel(input: {
+  metricName: string | null;
+  targetYear: number;
+  direction: KpiDirection;
+}): string {
+  return `${input.metricName ?? '指標'} ${input.targetYear}年 ${KPI_DIRECTION_LABELS[input.direction]}目標`;
+}
+
 /** 依頼時点で review_requests.policy へ写す既定の規則（依頼者・レビュー・最終承認の 3 役割） */
 export const DEFAULT_REVIEW_POLICY: ReviewPolicy = {
   version: DEFAULT_REVIEW_POLICY_VERSION,
@@ -364,7 +382,13 @@ export const DEFAULT_REVIEW_POLICY: ReviewPolicy = {
 };
 
 export type SodViolation =
-  'request_not_open' | 'request_not_reviewed' | 'requester' | 'author' | 'reviewer';
+  | 'request_not_open'
+  | 'request_not_reviewed'
+  | 'review_missing'
+  | 'requester'
+  | 'author'
+  | 'contributor'
+  | 'reviewer';
 
 export type SodCheck = { ok: true } | { ok: false; code: SodViolation; reason: string };
 
@@ -373,9 +397,22 @@ export interface CompleteReviewInput {
   request: Pick<ReviewRequest, 'requestedBy' | 'status'>;
   /** 依頼で固定した版（target_version_id）の作成者 */
   targetVersionCreatedBy: Uuid;
+  /**
+   * 作成者以外でその版の本文（自動保存）を書いた人（DisclosureBlockVersion.contributorUserIds）。
+   * 別の人が依頼すると版の作成者は依頼者になるため、作成者だけを見ると本文を書いた人が
+   * 自分の文章をレビュー・承認できてしまう
+   */
+  targetVersionContributors?: readonly Uuid[] | null;
 }
 
-/** 第 1 段のレビュー完了ができるか（依頼者・対象版の作成者ではないこと） */
+function wroteTargetVersion(input: {
+  actorId: Uuid;
+  targetVersionContributors?: readonly Uuid[] | null;
+}): boolean {
+  return (input.targetVersionContributors ?? []).includes(input.actorId);
+}
+
+/** 第 1 段のレビュー完了ができるか（依頼者・対象版の作成者・本文を書いた人ではないこと） */
 export function canCompleteReview(input: CompleteReviewInput): SodCheck {
   if (input.request.status !== 'open') {
     return {
@@ -398,6 +435,13 @@ export function canCompleteReview(input: CompleteReviewInput): SodCheck {
       reason: 'この版を作成した本人はレビューを完了できません（職務分離）。',
     };
   }
+  if (wroteTargetVersion(input)) {
+    return {
+      ok: false,
+      code: 'contributor',
+      reason: 'この版の本文を書いた本人（自動保存を含む）はレビューを完了できません（職務分離）。',
+    };
+  }
   return { ok: true };
 }
 
@@ -405,17 +449,39 @@ export interface FinalApproveInput {
   actorId: Uuid;
   request: Pick<ReviewRequest, 'requestedBy' | 'status'>;
   targetVersionCreatedBy: Uuid;
-  /** 同じ依頼でレビューを完了した人（review_completed の actor） */
+  /** 作成者以外でその版の本文（自動保存）を書いた人 */
+  targetVersionContributors?: readonly Uuid[] | null;
+  /**
+   * 同じ依頼・同じ版でレビュー（第 1 段）を完了した人（review_completed の actor）。
+   * 空なら第 1 段を経ていないため最終承認できない（状態だけ「レビュー完了」に書き換えられても通さない）
+   */
   reviewCompletedBy: Uuid | null | readonly Uuid[];
 }
 
-/** 最終承認ができるか（依頼者・対象版の作成者・同じ依頼のレビュー完了者ではないこと） */
+/**
+ * 最終承認ができるか。
+ * 依頼者・対象版の作成者・本文を書いた人・同じ依頼のレビュー完了者ではなく、
+ * かつ別の人によるレビュー（第 1 段）の完了記録があること（DB の t4d.enforce_review_event と同じ規則）
+ */
 export function canFinalApprove(input: FinalApproveInput): SodCheck {
   if (input.request.status !== 'reviewed') {
     return {
       ok: false,
       code: 'request_not_reviewed',
       reason: 'レビューが完了していないため、最終承認できません。',
+    };
+  }
+  const completedBy =
+    input.reviewCompletedBy === null
+      ? []
+      : typeof input.reviewCompletedBy === 'string'
+        ? [input.reviewCompletedBy]
+        : input.reviewCompletedBy;
+  if (completedBy.length === 0) {
+    return {
+      ok: false,
+      code: 'review_missing',
+      reason: 'レビュー（第 1 段）の完了記録が無いため、最終承認できません。',
     };
   }
   if (input.actorId === input.request.requestedBy) {
@@ -432,13 +498,14 @@ export function canFinalApprove(input: FinalApproveInput): SodCheck {
       reason: 'この版を作成した本人は最終承認できません（職務分離）。',
     };
   }
-  const reviewers =
-    input.reviewCompletedBy === null
-      ? []
-      : typeof input.reviewCompletedBy === 'string'
-        ? [input.reviewCompletedBy]
-        : input.reviewCompletedBy;
-  if (reviewers.includes(input.actorId)) {
+  if (wroteTargetVersion(input)) {
+    return {
+      ok: false,
+      code: 'contributor',
+      reason: 'この版の本文を書いた本人（自動保存を含む）は最終承認できません（職務分離）。',
+    };
+  }
+  if (completedBy.includes(input.actorId)) {
     return {
       ok: false,
       code: 'reviewer',
@@ -482,6 +549,8 @@ export const BLOCK_BLOCKER_CODES = [
   'unresolved_major_comments',
   'stale_metric_refs',
   'applicability_not_assessed',
+  /** 依頼・承認の後に報告範囲（報告主体・期間・対象範囲）が変わった */
+  'scope_changed',
 ] as const;
 export type BlockBlockerCode = (typeof BLOCK_BLOCKER_CODES)[number];
 

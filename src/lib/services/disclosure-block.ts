@@ -33,13 +33,18 @@ import {
   transitionBlock,
   type BlockBlocker,
 } from '@/lib/domain/disclosure-status';
-import { missingTemplateFields, unresolvedNarrativeFields } from '@/lib/domain/narrative-template';
+import {
+  assessNarrativeFields,
+  notQuantifiedNote,
+  unresolvedNarrativeFields,
+} from '@/lib/domain/narrative-template';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import { formatNumber } from '@/lib/format/datetime';
 import { listMembers } from '@/lib/services/identity';
 import { computeBlockFreshness, type BlockFreshness } from '@/lib/services/disclosure-recheck';
 import type { DbClient } from '@/lib/repositories/types';
+import { isUuid } from '@/lib/validation/uuid';
 import type {
   AuthorizationContext,
   BlockBody,
@@ -76,20 +81,71 @@ import type {
 // エラー
 // ======================================================================
 
-/** 版の競合。ほかの人（別のタブ）が先に版を保存した。両方の本文を返し、上書きしない */
+/**
+ * 競合の種類。
+ *  - version … ほかの人（別のタブ）が先に版を保存した
+ *  - working … ほかの人が自動保存した作業本文があり、この画面はそれを読み込んでいない
+ */
+export type BlockConflictKind = 'version' | 'working';
+
+export const CONFLICT_MESSAGES: Record<BlockConflictKind, string> = {
+  version:
+    'ほかの操作で先に新しい版が保存されています。上書きせずに止めました。差分を確認して取り込み直してください。',
+  working:
+    'ほかの人が自動保存した作業中の本文があります。上書き・破棄せずに止めました。最新の本文を開いて取り込み直してください。',
+};
+
+/** 版の競合。両方の本文を返し、上書きしない */
 export class BlockConflictError extends ValidationError {
   readonly code = 'CONFLICT';
   constructor(
     readonly currentVersionId: Uuid | null,
     readonly currentBody: BlockBody,
     readonly yourBody: BlockBody,
+    readonly kind: BlockConflictKind = 'version',
   ) {
-    super(
-      'ほかの操作で先に新しい版が保存されています。上書きせずに止めました。差分を確認して取り込み直してください。',
-    );
+    super(CONFLICT_MESSAGES[kind]);
     this.name = 'BlockConflictError';
   }
 }
+
+/**
+ * ほかの人が自動保存した作業本文を、この画面が読み込まないまま上書き・破棄しようとしているか。
+ *
+ * 版の土台（base_version）が同じでも、別の人の自動保存は版にならないため、版の比較だけでは
+ * 気付けない（指示書 §10.2「競合時は上書きせず差分確認」）。画面は読み込んだ時点の
+ * working_saved_at を持ち回し、それ以後に別の人が保存していれば競合として止める。
+ * 自分の自動保存（別のタブ・別のインスタンスの古い本文）は競合にしない
+ * （Demo Mode では作業本文がインスタンスのメモリにしか無く、古い自分の本文で誤検知するため）。
+ */
+export function isForeignWorkingBody(
+  block: Pick<DisclosureBlock, 'workingBody' | 'workingSavedAt' | 'workingUpdatedBy'>,
+  actorId: Uuid,
+  knownWorkingSavedAt: IsoDateTime | null | undefined,
+): boolean {
+  if (!block.workingBody) return false;
+  const writer = block.workingUpdatedBy ?? null;
+  if (writer === null || writer === actorId) return false;
+  return (block.workingSavedAt ?? null) !== (knownWorkingSavedAt ?? null);
+}
+
+/** 作業本文を書いた人に自分を足す（既に書いた人は外さない。DB のトリガと同じ規則） */
+export function contributorsWith(
+  block: Pick<DisclosureBlock, 'workingContributorIds'>,
+  actorId: Uuid,
+): Uuid[] {
+  const current = block.workingContributorIds ?? [];
+  return current.includes(actorId) ? [...current] : [...current, actorId];
+}
+
+/** 作業本文を版へ取り込んだ（または捨てた）後の列。書いた人の記録も版へ移したので空にする */
+export const CLEARED_WORKING_COLUMNS = {
+  workingBody: null,
+  workingBaseVersionId: null,
+  workingSavedAt: null,
+  workingUpdatedBy: null,
+  workingContributorIds: [] as Uuid[],
+} satisfies Partial<DisclosureBlock>;
 
 export interface RefValidationIssue {
   paragraphId: string;
@@ -190,7 +246,7 @@ export async function loadBlock(
   blockId: Uuid,
 ): Promise<DisclosureBlock> {
   assertCan(ctx, 'enterprise.disclosure.read');
-  const block = await db.findById('disclosureBlocks', blockId);
+  const block = isUuid(blockId) ? await db.findById('disclosureBlocks', blockId) : null;
   // 別組織の節は「無い」として扱う（存在を漏らさない）
   if (!block || block.organizationId !== ctx.workspace.organizationId || block.deletedAt) {
     throw new NotFoundError('節が見つかりません。');
@@ -204,7 +260,7 @@ export async function loadProject(
   projectId: Uuid,
 ): Promise<DisclosureProject> {
   assertCan(ctx, 'enterprise.disclosure.read');
-  const project = await db.findById('disclosureProjects', projectId);
+  const project = isUuid(projectId) ? await db.findById('disclosureProjects', projectId) : null;
   if (!project || project.organizationId !== ctx.workspace.organizationId || project.deletedAt) {
     throw new NotFoundError('開示プロジェクトが見つかりません。');
   }
@@ -220,7 +276,9 @@ export async function loadBlockVersion(
   ctx: AuthorizationContext,
   versionId: Uuid,
 ): Promise<DisclosureBlockVersion> {
-  const version = await db.findById('disclosureBlockVersions', versionId);
+  const version = isUuid(versionId)
+    ? await db.findById('disclosureBlockVersions', versionId)
+    : null;
   if (!version || version.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError(
       '本文の版が見つかりません。デモ環境では、別のサーバーで保存した版を参照できない場合があります。',
@@ -330,6 +388,63 @@ export async function approvedDataPointVersionIds(
 // 参照の検証（保存時。別組織・存在しない版・表示の改ざんを拒否する）
 // ======================================================================
 
+export const AI_RUN_UNAVAILABLE_MESSAGE =
+  'AI 候補の実行記録をこのサーバーで読み込めません（デモ環境では、別のサーバーで記録した実行を参照できない場合があります）。段落はそのまま残っています。時間をおいて保存し直すか、段落を手で書き直してください。';
+
+/**
+ * 別組織の行を指す参照（作業本文の自動保存・AI 候補の採用で使う）。
+ *
+ * 自動保存は業務上の版ではないため、存在しない版（Demo Mode で別のサーバーが作った版など）までは
+ * 止めない（止めると入力中の本文を保存できなくなる）。ただし別組織の行は、保存すると
+ * 鮮度の判定・原稿一覧・ホームが他社の資料名や指標名を表示してしまう（A29）ため、ここで拒否する。
+ */
+export async function findForeignRefs(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  body: BlockBody,
+): Promise<RefValidationIssue[]> {
+  const organizationId = ctx.workspace.organizationId;
+  const issues: RefValidationIssue[] = [];
+  const foreign = (row: { organizationId: Uuid } | null) =>
+    row !== null && row.organizationId !== organizationId;
+  const seen = new Set<string>();
+  for (const paragraph of body.paragraphs) {
+    const push = (kind: RefValidationIssue['kind'], refId: string) => {
+      const key = `${kind}:${refId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      issues.push({
+        paragraphId: paragraph.id,
+        kind,
+        refId,
+        message: '別の組織のデータは引用できません。',
+      });
+    };
+    if (paragraph.aiRunId && foreign(await db.findById('aiRuns', paragraph.aiRunId))) {
+      push('ai_run', paragraph.aiRunId);
+    }
+    for (const inline of paragraph.children) {
+      if (inline.t === 'metric') {
+        if (
+          foreign(await db.findById('dataPointVersions', inline.dataPointVersionId)) ||
+          foreign(await db.findById('dataPoints', inline.dataPointId))
+        ) {
+          push('metric', inline.dataPointVersionId);
+        }
+      } else if (inline.t === 'narrative') {
+        if (foreign(await db.findById('narrativeVersions', inline.narrativeVersionId))) {
+          push('narrative', inline.narrativeVersionId);
+        }
+      } else if (inline.t === 'cite') {
+        if (foreign(await db.findById('sourceAnchors', inline.sourceAnchorId))) {
+          push('cite', inline.sourceAnchorId);
+        }
+      }
+    }
+  }
+  return issues;
+}
+
 export async function validateBodyRefs(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -348,8 +463,16 @@ export async function validateBodyRefs(
     if (paragraph.aiRunId) {
       const runId = paragraph.aiRunId;
       const run = await cached(`run:${runId}`, () => db.findById('aiRuns', runId));
-      if (
-        !run ||
+      if (!run) {
+        // 見つからないだけ（Demo Mode で別のサーバーが記録した実行・Cookie から押し出された実行）を
+        // 改ざんと同じ文言で責めない。保存は止めるが、理由と取れる手を示す
+        issues.push({
+          paragraphId: paragraph.id,
+          kind: 'ai_run',
+          refId: runId,
+          message: AI_RUN_UNAVAILABLE_MESSAGE,
+        });
+      } else if (
         run.organizationId !== organizationId ||
         run.featureType !== 'disclosureBlockDraft' ||
         !run.inputReferenceIds.includes(`block:${blockId}`)
@@ -478,6 +601,11 @@ export async function appendBlockVersion(
     contentHash: contentHashOf(body),
     createdAt: now,
     createdBy: ctx.userId,
+    // 作業本文を自動保存した人（作成者以外）を版に残す。職務分離では作成者と同じ扱いにする
+    // （DB のトリガ t4d.merge_block_version_contributors も同じ規則で補う）
+    contributorUserIds: [...new Set(block.workingContributorIds ?? [])].filter(
+      (id) => id !== ctx.userId,
+    ),
   };
   await db.insert('disclosureBlockVersions', [version]);
   await recordAuditEvent(db, ctx, {
@@ -576,11 +704,23 @@ export interface AutosaveInput {
   /** 編集を始めたときの現在の版（無ければ null） */
   baseVersionId: Uuid | null;
   body: unknown;
+  /**
+   * この画面が最後に読み込んだ・保存した作業本文の保存時刻（working_saved_at）。
+   * 別の人がそれ以後に自動保存していれば、上書きせず競合として返す。
+   * 省略時（サーバー内の呼び出し）は検査しない
+   */
+  knownWorkingSavedAt?: IsoDateTime | null;
 }
 
 export type AutosaveResult =
   | { status: 'saved'; savedAt: IsoDateTime; baseVersionId: Uuid | null }
-  | { status: 'conflict'; currentVersionId: Uuid | null; currentBody: BlockBody };
+  | {
+      status: 'conflict';
+      kind: BlockConflictKind;
+      message: string;
+      currentVersionId: Uuid | null;
+      currentBody: BlockBody;
+    };
 
 /** 作業本文を自動保存する（版は作らない）。下書き・差戻しの節だけ */
 export async function autosaveWorkingBody(
@@ -596,13 +736,30 @@ export async function autosaveWorkingBody(
   if (block.currentVersionId && !(await currentVersionBody(db, ctx, block)).version) {
     throw new NotFoundError(VERSION_UNAVAILABLE_MESSAGE);
   }
+  // 別組織の行を指す参照は、作業本文にも入れない（鮮度・一覧の表示から他社の情報が漏れる）
+  const foreign = await findForeignRefs(db, ctx, body);
+  if (foreign.length > 0) throw new BlockRefValidationError(foreign);
 
   if ((input.baseVersionId ?? null) !== (block.currentVersionId ?? null)) {
     const current = await currentVersionBody(db, ctx, block);
     return {
       status: 'conflict',
+      kind: 'version',
+      message: CONFLICT_MESSAGES.version,
       currentVersionId: block.currentVersionId,
       currentBody: current.body,
+    };
+  }
+  if (
+    input.knownWorkingSavedAt !== undefined &&
+    isForeignWorkingBody(block, ctx.userId, input.knownWorkingSavedAt)
+  ) {
+    return {
+      status: 'conflict',
+      kind: 'working',
+      message: CONFLICT_MESSAGES.working,
+      currentVersionId: block.currentVersionId,
+      currentBody: block.workingBody ?? emptyBody(),
     };
   }
 
@@ -611,6 +768,8 @@ export async function autosaveWorkingBody(
     workingBody: body,
     workingBaseVersionId: block.currentVersionId,
     workingSavedAt: savedAt,
+    workingUpdatedBy: ctx.userId,
+    workingContributorIds: contributorsWith(block, ctx.userId),
     updatedAt: savedAt,
     updatedBy: ctx.userId,
   });
@@ -626,7 +785,38 @@ export interface SaveBlockVersionInput {
   baseVersionId: Uuid | null;
   body: unknown;
   changeReason: string | null;
+  /** 自動保存と同じ。別の人の作業本文を読み込まずに版へ取り込み・破棄しない */
+  knownWorkingSavedAt?: IsoDateTime | null;
 }
+
+/**
+ * 承認済みの版が、報告範囲の変更より前の依頼で承認されたか（指示書 §10.3「報告範囲」の変更は再確認が必要）。
+ * 承認した依頼の範囲の改訂番号が、プロジェクトの現在の番号より小さければ再確認が必要。
+ */
+export async function scopeRecheckNeeded(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  block: Pick<DisclosureBlock, 'id' | 'approvedVersionId'>,
+  project: Pick<DisclosureProject, 'scopeRevision'>,
+): Promise<boolean> {
+  if (!block.approvedVersionId) return false;
+  const projectRevision = project.scopeRevision ?? 0;
+  if (projectRevision === 0) return false;
+  const requests = await db.select('reviewRequests', {
+    where: {
+      organizationId: ctx.workspace.organizationId,
+      targetType: 'disclosure_block',
+      targetId: block.id,
+      targetVersionId: block.approvedVersionId,
+      status: 'approved',
+    },
+  });
+  const approvedAt = Math.max(...requests.map((r) => r.projectScopeRevision ?? 0), -1);
+  return approvedAt < projectRevision;
+}
+
+export const SCOPE_RECHECK_MESSAGE =
+  '報告範囲（報告主体・期間・対象範囲）の変更より前に承認された節です。範囲の変更を踏まえて本文を確認し、再承認を受けてください。';
 
 export async function saveBlockVersion(
   db: DbClient,
@@ -663,11 +853,28 @@ export async function saveBlockVersion(
   if ((input.baseVersionId ?? null) !== (block.currentVersionId ?? null)) {
     throw new BlockConflictError(block.currentVersionId, current.body, body);
   }
+  if (
+    input.knownWorkingSavedAt !== undefined &&
+    isForeignWorkingBody(block, ctx.userId, input.knownWorkingSavedAt)
+  ) {
+    // 別の人の自動保存を読み込まないまま版を作ると、その人の作業本文を黙って捨ててしまう
+    throw new BlockConflictError(
+      block.currentVersionId,
+      block.workingBody ?? emptyBody(),
+      body,
+      'working',
+    );
+  }
   if (!hasBodyContent(body) && !block.currentVersionId) {
     throw new ValidationError('本文が空のため、版を作れません。');
   }
   if (current.version && current.version.contentHash === contentHashOf(body)) {
-    throw new ValidationError('前の版から本文が変わっていません。');
+    // 報告範囲の変更後の再確認だけは、本文が同じでも新しい版として再承認に回せる
+    // （本文を変えずに「範囲の変更を確認した」ことを承認の記録として残すため）
+    const project = await loadProject(db, ctx, block.projectId);
+    const scopeOnly =
+      action === 'revise_after_approval' && (await scopeRecheckNeeded(db, ctx, block, project));
+    if (!scopeOnly) throw new ValidationError('前の版から本文が変わっていません。');
   }
 
   const issues = await validateBodyRefs(db, ctx, block.id, body);
@@ -682,10 +889,8 @@ export async function saveBlockVersion(
   const updated = await db.update('disclosureBlocks', block.id, {
     currentVersionId: version.id,
     status: transition.to,
-    // 作業本文はこの版に取り込んだので空にする（次の自動保存はこの版を土台にする）
-    workingBody: null,
-    workingBaseVersionId: null,
-    workingSavedAt: null,
+    // 作業本文と書いた人の記録はこの版に取り込んだので空にする（次の自動保存はこの版を土台にする）
+    ...CLEARED_WORKING_COLUMNS,
     updatedAt: now,
     updatedBy: ctx.userId,
   });
@@ -786,9 +991,7 @@ export async function createBlock(
     currentVersionId: null,
     submittedVersionId: null,
     approvedVersionId: null,
-    workingBody: null,
-    workingBaseVersionId: null,
-    workingSavedAt: null,
+    ...CLEARED_WORKING_COLUMNS,
     deletedAt: null,
     createdAt: now,
     updatedAt: now,
@@ -971,6 +1174,8 @@ export interface EditorNarrative {
   /** 台帳の現在の版（これより古い版の引用は「古い参照」） */
   currentVersionId: Uuid | null;
   missingFieldLabels: string[];
+  /** 財務的影響を定量化しない理由（未記入の代わりに示す） */
+  notQuantifiedNote: string | null;
   paragraphIds: string[];
 }
 
@@ -1091,7 +1296,12 @@ export interface BlockEditorData {
     currentVersionId: Uuid | null;
     approvedVersionId: Uuid | null;
     submittedVersionId: Uuid | null;
+    /** 画面が読み込んだ作業本文の保存時刻。自動保存・版の保存で送り返し、別の人の保存との競合を検出する */
     workingSavedAt: IsoDateTime | null;
+    /** 作業本文を最後に自動保存したのが別の人なら、その人の名前（画面で知らせる） */
+    workingUpdatedByOtherName: string | null;
+    /** 報告範囲の変更より前に承認された（再確認・再承認が必要） */
+    scopeRecheckNeeded: boolean;
   };
   framework: {
     versionId: Uuid;
@@ -1397,7 +1607,16 @@ export async function getBlockEditorData(
       body: version.body,
       confirmed: record.confirmedVersionId === version.id,
       currentVersionId: record.currentVersionId,
-      missingFieldLabels: missingTemplateFields(record.theme, version.fields).map((f) => f.label),
+      ...(() => {
+        // 原稿一覧・スナップショットと同じ判定（domain/narrative-template.ts）
+        const assessed = assessNarrativeFields(record.theme, version.fields);
+        return {
+          missingFieldLabels: assessed.missing.map((f) => f.label),
+          notQuantifiedNote: assessed.notQuantifiedReason
+            ? notQuantifiedNote(assessed.notQuantifiedReason)
+            : null,
+        };
+      })(),
       paragraphIds: paragraphsCiting(
         body,
         (i) => i.t === 'narrative' && i.narrativeVersionId === version.id,
@@ -1717,6 +1936,11 @@ export async function getBlockEditorData(
       approvedVersionId: block.approvedVersionId,
       submittedVersionId: block.submittedVersionId,
       workingSavedAt: block.workingBody ? block.workingSavedAt : null,
+      workingUpdatedByOtherName:
+        block.workingBody && block.workingUpdatedBy && block.workingUpdatedBy !== ctx.userId
+          ? nameOf(members, block.workingUpdatedBy)
+          : null,
+      scopeRecheckNeeded: await scopeRecheckNeeded(db, ctx, block, project),
     },
     framework: {
       versionId: block.frameworkVersionId,
@@ -1840,6 +2064,8 @@ export interface ManuscriptRow {
   changedAfterApproval: boolean;
   /** 引用した定性情報の未記入項目（「未解決の必須情報」の理由として一覧に出す） */
   narrativeGaps: Array<{ title: string; fields: string[] }>;
+  /** 引用した定性情報の補足（財務的影響を定量化しない理由など。不足ではないが本文の判断材料として示す） */
+  narrativeNotes: Array<{ title: string; note: string }>;
   freshness: BlockFreshness['status'];
   freshnessLabel: string;
   blockers: BlockBlocker[];
@@ -1876,22 +2102,28 @@ function matchesFilter(row: ManuscriptRow, filter: ManuscriptFilter, userId: Uui
   }
 }
 
-/** 本文が引用した定性情報のうち、テンプレートの項目に未記入があるもの（開示ホームと同じ数え方） */
+/**
+ * 本文が引用した定性情報のうち、テンプレートの項目に未記入があるもの（開示ホームと同じ数え方）と、
+ * 未記入の代わりに示す補足（財務的影響を定量化しない理由）
+ */
 async function narrativeGapsOf(
   db: DbClient,
   ctx: AuthorizationContext,
   body: BlockBody,
-): Promise<ManuscriptRow['narrativeGaps']> {
+): Promise<Pick<ManuscriptRow, 'narrativeGaps' | 'narrativeNotes'>> {
   const gaps: ManuscriptRow['narrativeGaps'] = [];
+  const notes: ManuscriptRow['narrativeNotes'] = [];
   for (const id of collectRefs(body).narrativeVersionIds) {
     const version = await db.findById('narrativeVersions', id);
     if (!version || version.organizationId !== ctx.workspace.organizationId) continue;
     const record = await db.findById('narrativeRecords', version.narrativeRecordId);
-    if (!record) continue;
+    if (!record || record.organizationId !== ctx.workspace.organizationId) continue;
     const fields = unresolvedNarrativeFields(record.theme, version.fields);
     if (fields.length > 0) gaps.push({ title: record.title, fields });
+    const reason = assessNarrativeFields(record.theme, version.fields).notQuantifiedReason;
+    if (reason) notes.push({ title: record.title, note: notQuantifiedNote(reason) });
   }
-  return gaps;
+  return { narrativeGaps: gaps, narrativeNotes: notes };
 }
 
 export async function listProjectBlocks(
@@ -1930,7 +2162,7 @@ export async function listProjectBlocks(
     // 開示ホームのカードと同じ判定に渡す材料（版が読めない・定性情報の未記入・承認済みの版の鮮度）
     const versionMissing =
       !editing.fromWorking && block.currentVersionId !== null && editing.version === null;
-    const narrativeGaps = await narrativeGapsOf(db, ctx, editing.body);
+    const { narrativeGaps, narrativeNotes } = await narrativeGapsOf(db, ctx, editing.body);
     const approvedFreshness = approved
       ? await computeBlockFreshness(db, ctx, block, approved.body)
       : null;
@@ -1958,6 +2190,7 @@ export async function listProjectBlocks(
         blockers,
       }),
       narrativeGaps,
+      narrativeNotes,
       changedAfterApproval: isChangedAfterApproval({
         approvedVersionId: block.approvedVersionId,
         currentVersionId: block.currentVersionId,

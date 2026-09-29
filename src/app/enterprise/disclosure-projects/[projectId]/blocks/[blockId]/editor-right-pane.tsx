@@ -8,9 +8,12 @@ import {
   BarChart3,
   CheckCircle2,
   CircleDot,
+  Equal,
   FileText,
   Lock,
   MessageSquare,
+  Minus,
+  PencilLine,
   Plus,
   Quote,
 } from 'lucide-react';
@@ -247,6 +250,9 @@ function EvidenceTab({
                   <p className="mt-1 text-[#8a5d00]">
                     未記入の項目: {n.missingFieldLabels.join('、')}
                   </p>
+                )}
+                {n.notQuantifiedNote && (
+                  <p className="mt-1 text-ink-muted">{n.notQuantifiedNote}</p>
                 )}
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <JumpLinks ids={n.paragraphIds} onJump={onJump} />
@@ -565,6 +571,15 @@ function PriorTab({ data, onJump }: RightPaneProps) {
                           : 'warning'
                   }
                 >
+                  {d.kind === 'unchanged' ? (
+                    <Equal className="size-3" aria-hidden="true" />
+                  ) : d.kind === 'added' ? (
+                    <Plus className="size-3" aria-hidden="true" />
+                  ) : d.kind === 'removed' ? (
+                    <Minus className="size-3" aria-hidden="true" />
+                  ) : (
+                    <PencilLine className="size-3" aria-hidden="true" />
+                  )}
                   {d.kind === 'unchanged'
                     ? '変更なし'
                     : d.kind === 'added'

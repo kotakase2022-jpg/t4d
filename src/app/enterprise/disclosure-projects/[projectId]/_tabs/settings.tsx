@@ -28,11 +28,11 @@ import { DISCLOSURE_LANGUAGES, DISCLOSURE_PROJECT_STATUSES } from '@/types/domai
 import {
   attachFrameworkVersionAction,
   confirmApplicabilityAction,
-  saveProjectFrameworkAction,
   updateProjectAction,
 } from '../../actions';
 import { ApplicabilityBadge, LegalStatusBadge } from '../../_components/framework-badges';
 import { ProjectForm } from '../../new/project-form';
+import { FrameworkConditionsForm } from './framework-conditions-form';
 
 /**
  * 設定タブ（§6.2・§8.4）。
@@ -232,71 +232,30 @@ function FrameworkSettings({
           {f.conditionFields.length === 0 ? (
             <p className="text-[12px] text-ink-muted">この基準に記録する適用条件はありません。</p>
           ) : canWrite ? (
-            <form action={saveProjectFrameworkAction} className="space-y-2">
-              <input type="hidden" name="projectId" value={projectId} />
-              <input type="hidden" name="projectFrameworkId" value={pfId} />
-              <div className="grid gap-2 sm:grid-cols-2">
-                {f.conditionFields.map((field) => {
-                  const value = f.projectFramework.conditions[field.key];
-                  const id = `c-${pfId}-${field.key}`;
-                  return (
-                    <div key={field.key}>
-                      <label htmlFor={id} className="block text-[12px] text-ink">
-                        {field.label}
-                        {field.unit ? `（${field.unit}）` : ''}
-                      </label>
-                      <Input
-                        id={id}
-                        name={`condition.${field.key}`}
-                        inputMode={field.kind === 'number' ? 'decimal' : undefined}
-                        defaultValue={value === undefined || value === null ? '' : String(value)}
-                        placeholder="未入力（不明）"
-                        className="mt-0.5"
-                        aria-describedby={field.help ? `${id}-help` : undefined}
-                      />
-                      {field.help && (
-                        <p id={`${id}-help`} className="text-[11px] text-ink-muted">
-                          {field.help}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div>
-                <label htmlFor={`prep-${pfId}`} className="block text-[12px] text-ink">
-                  準備の区分
-                </label>
-                {decided ? (
-                  <p className="text-[11px] text-ink-muted">
-                    判断が確定済みのため区分は変わりません（
-                    {APPLICABILITY_STATUS_LABELS[f.projectFramework.applicabilityStatus]}
-                    ）。見直す場合は判断を追記してください。
-                  </p>
-                ) : (
-                  <select
-                    id={`prep-${pfId}`}
-                    name="preparationStatus"
-                    defaultValue={
-                      f.projectFramework.applicabilityStatus === 'awaiting_confirmation'
-                        ? 'awaiting_confirmation'
-                        : 'candidate'
-                    }
-                    className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
-                  >
-                    <option value="candidate">適用候補</option>
-                    <option value="awaiting_confirmation">確認待ち</option>
-                  </select>
-                )}
-              </div>
-              <SubmitButton variant="outline" pendingLabel="保存中…">
-                保存して準備を始める
-              </SubmitButton>
-              <p className="text-[11px] text-ink-muted">
-                空欄は「不明」として保存し、0
-                や対象外とは扱いません。保存しても適用判断は確定しません。
-              </p>
-            </form>
+            <FrameworkConditionsForm
+              projectId={projectId}
+              projectFrameworkId={pfId}
+              fields={f.conditionFields.map((field) => {
+                const value = f.projectFramework.conditions[field.key];
+                return {
+                  key: field.key,
+                  label: field.label,
+                  kind: field.kind,
+                  unit: field.unit,
+                  help: field.help,
+                  saved: value === undefined || value === null ? '' : String(value),
+                };
+              })}
+              decided={decided}
+              decidedStatusLabel={
+                APPLICABILITY_STATUS_LABELS[f.projectFramework.applicabilityStatus]
+              }
+              preparationStatus={
+                f.projectFramework.applicabilityStatus === 'awaiting_confirmation'
+                  ? 'awaiting_confirmation'
+                  : 'candidate'
+              }
+            />
           ) : (
             <dl className="space-y-0.5 text-[12px]">
               {f.conditionFields.map((field) => (

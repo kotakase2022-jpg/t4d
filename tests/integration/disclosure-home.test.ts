@@ -11,6 +11,7 @@ import { fid } from '@/lib/fixtures/ids';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { listProjectBlocks } from '@/lib/services/disclosure-block';
+import { getProject, summarizeProject } from '@/lib/services/disclosure-project';
 import { decideRecheck } from '@/lib/services/disclosure-recheck';
 import {
   blockHref,
@@ -120,6 +121,7 @@ function requestReviewOnRisk(
     decisionIds: [IDS.decisions.fy2026Ssbj],
     referencedVersions: { metricVersionIds: [], narrativeVersionIds: [], anchorIds: [] },
     status,
+    projectScopeRevision: 0,
     createdAt: at(2),
     updatedAt: at(1),
     createdBy: userId(AUTHOR),
@@ -386,15 +388,26 @@ describe('自分が次に行う作業（利用者ごとに違う）', () => {
 });
 
 describe('進捗は分母を明示する（率にまとめない）', () => {
-  it('適用確定済み 133 項目中、承認済み 3 項目。適用未判定は基準単位で別枠（ESRS-40a）', async () => {
+  it('分母は要求事項ごとに「適用（重要）」と確定したものだけ。概要タブと同じ数で、対象外・未判定は別枠（REG-F3）', async () => {
     const { progress } = await homeFor(author());
     expect(progress).not.toBeNull();
-    expect(progress!.confirmedItemCount).toBe(133);
-    // ガバナンス（気候-10・気候-11）と指標（気候-47(1)）の節が承認済み
-    expect(progress!.approvedItemCount).toBe(3);
-    // 指標の節は承認後に引用先が更新された
-    expect(progress!.staleApprovedItemCount).toBe(1);
-    expect(progress!.assignedItemCount).toBe(6);
+    // 収録 133 項目のうち、SSBJ 評価で対象外・非重要と判断した 9 項目と未判定の項目は分母に入れない
+    // （以前は基準単位の「適用」だけを見て 133 項目すべてを「適用確定済み」と数えていた）
+    const detail = await getProject(db, author(), IDS.projects.fy2026);
+    const overview = (await summarizeProject(db, author(), detail)).find(
+      (s) => s.framework.projectFramework.id === IDS.projectFrameworks.fy2026Ssbj,
+    )!.summary;
+    expect(progress!.confirmedItemCount).toBe(overview.applicableConfirmed);
+    expect(progress!.approvedItemCount).toBe(overview.approvedOfApplicable);
+    expect(progress!.excludedItemCount).toBe(overview.excludedDecided);
+    expect(progress!.notAssessedItemCount).toBe(overview.notAssessed);
+    expect(progress!.confirmedItemCount).toBe(104);
+    expect(progress!.excludedItemCount).toBe(9);
+    expect(
+      progress!.confirmedItemCount + progress!.excludedItemCount + progress!.notAssessedItemCount,
+    ).toBe(133);
+    expect(progress!.assignedItemCount).toBeLessThanOrEqual(progress!.confirmedItemCount);
+    expect(progress!.approvedItemCount).toBeLessThanOrEqual(progress!.assignedItemCount);
     expect(progress!.notAssessedCount).toBe(1);
     expect(progress!.excludedFrameworkCount).toBe(0);
 
@@ -470,7 +483,7 @@ describe('ヘッダーのプロジェクト表示', () => {
 });
 
 describe('定性情報の未記入の数え方', () => {
-  it('財務的影響: 影響額があれば「示さない理由」は不要。影響額が無ければ理由があっても影響額は未確定のまま', () => {
+  it('財務的影響: 影響額があれば「示さない理由」は不要。定量化しない理由があれば影響額・算定方法は未記入に数えない（スナップショットと同じ規則）', () => {
     expect(
       unresolvedNarrativeFields('financial_impact', {
         relatedRisk: 'x',
@@ -487,6 +500,14 @@ describe('定性情報の未記入の数え方', () => {
         estimationStatus: '評価中',
         noAmountReason: '評価中のため',
       }),
-    ).toEqual(['影響額', '算定方法・前提']);
+    ).toEqual([]);
+    // どちらも無ければ、影響額・算定方法・示さない理由のすべてが未記入
+    expect(
+      unresolvedNarrativeFields('financial_impact', {
+        relatedRisk: 'x',
+        impactDescription: 'x',
+        estimationStatus: '評価中',
+      }),
+    ).toEqual(['影響額', '算定方法・前提', '影響額を示さない理由']);
   });
 });

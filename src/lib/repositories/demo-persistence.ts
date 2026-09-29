@@ -3,10 +3,13 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import {
   decodeDemoEdits,
+  dropOldestUnpinned,
   encodeDemoEdits,
   isPersistedTable,
   type DemoEdit,
 } from './demo-edit-codec';
+import { randomUUID } from 'node:crypto';
+import { decodeDemoResetMark, encodeDemoResetMark, type DemoResetMark } from './demo-reset-sync';
 import type { TableName } from './types';
 
 /**
@@ -124,12 +127,16 @@ export async function appendDemoEdit(
   }
   merged.push(nextEdit);
 
-  // 全チャンクへ入りきらない分は、古い方から落とす
+  // 全チャンクへ入りきらない分は、古い方から落とす。機能設定（開示優先モードの ON/OFF）は落とさない
+  // （落とすと新しいインスタンスでメニューとホームが従来の構成へ戻り、実演の途中で画面が変わる）
   let candidate = merged;
   let chunks = packIntoChunks(candidate);
+  let evicted = false;
   while (candidate.length > 0 && countPacked(chunks) < candidate.length) {
-    candidate = candidate.slice(1);
+    const next = dropOldestUnpinned(candidate) ?? candidate.slice(1);
+    candidate = next;
     chunks = packIntoChunks(candidate);
+    evicted = true;
   }
 
   try {
@@ -144,8 +151,70 @@ export async function appendDemoEdit(
       // 使わなくなったチャンクは空にしておく（古い内容が残ると復元がずれる）
       store.set(chunkName(i), value ?? '', value ? options : { ...options, maxAge: 0 });
     }
+    // 古い操作を押し出したことを画面（デモの帯）で知らせる。別のサーバーでは押し出した操作が
+    // 戻らないため、黙っていると「さっきの操作が消えた」ように見える
+    if (evicted) store.set(EVICTED_COOKIE, '1', options);
   } catch {
     // Server Component からは Cookie を書けない。読み取り経路では何もしない。
+  }
+}
+
+/** 開示デモのリセットの印（組織と世代）。ほかのインスタンスがリセットを反映するのに使う */
+const RESET_COOKIE = 't4d.demo-reset';
+
+/** このインスタンスが反映済みのリセット（組織ごとの世代） */
+function appliedResets(): Map<string, string> {
+  const g = globalThis as unknown as { __t4dAppliedDemoResets?: Map<string, string> };
+  g.__t4dAppliedDemoResets ??= new Map();
+  return g.__t4dAppliedDemoResets;
+}
+
+/** リセットを行ったことを Cookie に残す（このインスタンスは既に戻しているので反映済みとする） */
+export async function markDemoReset(organizationId: string): Promise<void> {
+  const mark: DemoResetMark = { organizationId, epoch: randomUUID() };
+  appliedResets().set(organizationId, mark.epoch);
+  try {
+    const store = await cookies();
+    store.set(RESET_COOKIE, encodeDemoResetMark(mark), {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 8,
+    });
+  } catch {
+    // リクエストスコープ外（テスト・CLI）では何もしない
+  }
+}
+
+/**
+ * このインスタンスがまだ反映していないリセットの印（無ければ null）。
+ * 呼び出し側は Fixture の初期値へ戻したあと markDemoResetApplied を呼ぶ
+ */
+export async function pendingDemoReset(): Promise<DemoResetMark | null> {
+  try {
+    const store = await cookies();
+    const mark = decodeDemoResetMark(store.get(RESET_COOKIE)?.value);
+    if (!mark) return null;
+    return appliedResets().get(mark.organizationId) === mark.epoch ? null : mark;
+  } catch {
+    return null;
+  }
+}
+
+export function markDemoResetApplied(mark: DemoResetMark): void {
+  appliedResets().set(mark.organizationId, mark.epoch);
+}
+
+/** 古い操作を Cookie から押し出したことの印（デモの帯で注意を出す） */
+export const EVICTED_COOKIE = 't4d.demo-evicted';
+
+/** Cookie の容量不足で古い操作を押し出したか */
+export async function demoEditsWereEvicted(): Promise<boolean> {
+  try {
+    const store = await cookies();
+    return store.get(EVICTED_COOKIE)?.value === '1';
+  } catch {
+    return false;
   }
 }
 

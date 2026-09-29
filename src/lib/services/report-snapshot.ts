@@ -14,14 +14,17 @@ import {
   APPLICABILITY_STATUS_LABELS,
   AVAILABILITY_STATUS_LABELS,
   BLOCK_STATUS_LABELS,
+  DISCLOSURE_LANGUAGE_LABELS,
   FRAMEWORK_COVERAGE_STATUS_LABELS,
   REPORT_SNAPSHOT_KIND_LABELS,
   evaluateBlockBlockers,
   type BlockBlockerCode,
 } from '@/lib/domain/disclosure-status';
-import { missingTemplateFields } from '@/lib/domain/narrative-template';
+import { assessNarrativeFields, notQuantifiedNote } from '@/lib/domain/narrative-template';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { SCOPE_RECHECK_MESSAGE } from '@/lib/services/disclosure-block';
 import type { DbClient, Row, TableName, Where } from '@/lib/repositories/types';
+import { isUuid } from '@/lib/validation/uuid';
 import type {
   ApplicabilityStatus,
   AuthorizationContext,
@@ -33,6 +36,7 @@ import type {
   DisclosureBlockVersion,
   DisclosureFramework,
   DisclosureFrameworkVersion,
+  DisclosureLanguage,
   DisclosureProject,
   DisclosurePurpose,
   IsoDate,
@@ -106,7 +110,14 @@ export type SnapshotIssueCode =
   | 'metric_missing'
   | 'stale_narrative_refs'
   | 'narrative_missing_fields'
-  | 'anchor_missing';
+  /** 財務的影響を定量化しない理由（不足ではなく、理由そのものを示す注意） */
+  | 'narrative_not_quantified'
+  | 'anchor_missing'
+  /** 固定する版を読み込めない（Demo Mode で別のサーバーが作った版など） */
+  | 'version_missing'
+  /** 必須言語の翻訳版が無い・翻訳元の承認後に翻訳が見直されていない */
+  | 'translation_missing'
+  | 'translation_stale';
 
 export interface SnapshotIssue {
   code: SnapshotIssueCode;
@@ -353,7 +364,7 @@ export async function loadOwnedProject(
   projectId: Uuid,
 ): Promise<DisclosureProject> {
   assertEnterpriseWorkspace(ctx);
-  const project = projectId ? await db.findById('disclosureProjects', projectId) : null;
+  const project = isUuid(projectId) ? await db.findById('disclosureProjects', projectId) : null;
   if (!project || project.organizationId !== ctx.workspace.organizationId || project.deletedAt) {
     throw new NotFoundError('開示プロジェクトが見つかりません。');
   }
@@ -367,7 +378,8 @@ export async function loadOwnedSnapshot(
   snapshotId: Uuid,
 ): Promise<ReportSnapshotDetail> {
   assertEnterpriseWorkspace(ctx);
-  const row = snapshotId ? await db.findById('reportSnapshots', snapshotId) : null;
+  // UUID でない ID は Supabase Mode で 22P02 → 500 になるため、先に「見つからない」とする
+  const row = isUuid(snapshotId) ? await db.findById('reportSnapshots', snapshotId) : null;
   if (!row || row.organizationId !== ctx.workspace.organizationId) {
     // デモではスナップショットはインスタンスのメモリにしか無い（docs/known-limitations.md D-3）。
     // 別インスタンスで開くとここに来るため、存在の有無を区別せず同じ文言にする
@@ -411,8 +423,8 @@ interface Assembly {
   /** 確定を止める条件（草稿では注意として出すだけ） */
   blockers: ReportBlocker[];
   draftStandardPrep: boolean;
-  /** 固定した版の作成者（職務分離の判定に使う） */
-  authorIds: Uuid[];
+  /** 固定した版ごとの本文を書いた人（作成者と自動保存した人。職務分離の判定に使う） */
+  versionWriters: Uuid[][];
 }
 
 /** 草案の基準か（ESRS-40a 公開草案など）。準備目的（40a）で登録した基準も同じ扱い */
@@ -432,20 +444,18 @@ function isApplicabilityConfirmed(pf: ProjectFramework): boolean {
 }
 
 /**
- * 定性情報の未記入項目。財務的影響は「影響額を示さない理由」があれば影響額の欠落を
- * 未確定として示し、影響額があれば「示さない理由」の欠落は不足と数えない。
+ * 定性情報の未記入項目と、未記入の代わりに示す注記。開示ホーム・原稿一覧と同じ判定
+ * （domain/narrative-template.ts の assessNarrativeFields）を通す（以前はここだけ財務的影響の数え方が違った）
  */
-function narrativeGaps(theme: NarrativeTheme, fields: Readonly<Record<string, string>>): string[] {
-  const missing = missingTemplateFields(theme, fields);
-  if (theme !== 'financial_impact') return missing.map((f) => f.label);
-  const hasAmount = Boolean(fields.amount?.trim());
-  const hasReason = Boolean(fields.noAmountReason?.trim());
-  return missing
-    .filter((f) => !(f.key === 'noAmountReason' && hasAmount))
-    .filter((f) => !(hasReason && f.key === 'amountBasis'))
-    .map((f) =>
-      f.key === 'amount' && hasReason ? `${f.label}（未確定・理由は記載済み）` : f.label,
-    );
+function narrativeGaps(
+  theme: NarrativeTheme,
+  fields: Readonly<Record<string, string>>,
+): { missing: string[]; note: string | null } {
+  const assessed = assessNarrativeFields(theme, fields);
+  return {
+    missing: assessed.missing.map((f) => f.label),
+    note: assessed.notQuantifiedReason ? notQuantifiedNote(assessed.notQuantifiedReason) : null,
+  };
 }
 
 function formatMetricLabel(
@@ -786,18 +796,27 @@ async function assemble(
 
   // --- 節の写しと、節ごとの注意・阻害条件 ---------------------------------------------
   const snapshotBlocks: SnapshotBlock[] = [];
-  const authorIds = new Set<Uuid>();
+  const versionWriters: Uuid[][] = [];
   for (const block of blocks) {
     const versionId = chosenVersionId(block);
     const version = versionId ? (blockVersionById.get(versionId) ?? null) : null;
-    if (version) authorIds.add(version.createdBy);
+    if (version) versionWriters.push([version.createdBy, ...(version.contributorUserIds ?? [])]);
     const body: BlockBody = version?.body ?? { paragraphs: [] };
     const issues: SnapshotIssue[] = [];
 
     // 状態（承認済みの版を固定したか）
     const isApprovedVersion =
       version !== null && block.approvedVersionId === version.id && block.status === 'approved';
-    if (!isApprovedVersion) {
+    if (versionId !== null && version === null) {
+      // 版を指しているのに読めない。「未承認（承認済み）」のような矛盾した理由を出さない
+      issues.push({
+        code: 'version_missing',
+        message:
+          kind === 'approved'
+            ? '承認済みの版を読み込めません（デモ環境では、別のサーバーで作成された版を参照できない場合があります）。画面を開き直してから確定してください。'
+            : '保存済みの版を読み込めません（デモ環境では、別のサーバーで作成された版を参照できない場合があります）。',
+      });
+    } else if (!isApprovedVersion) {
       issues.push({
         code: 'not_approved',
         message:
@@ -805,6 +824,16 @@ async function assemble(
             ? `未承認（${BLOCK_STATUS_LABELS[block.status]}。承認済みの版の後に修正中）`
             : `未承認（${BLOCK_STATUS_LABELS[block.status]}）`,
       });
+    }
+    // 報告範囲の変更より前の依頼で承認された版（指示書 §10.3: 範囲の変更は再確認が必要）
+    if (isApprovedVersion && version) {
+      const approvedIn = approvedRequests.filter(
+        (r) => r.targetId === block.id && r.targetVersionId === version.id,
+      );
+      const revision = Math.max(...approvedIn.map((r) => r.projectScopeRevision ?? 0), -1);
+      if ((project.scopeRevision ?? 0) > 0 && revision < (project.scopeRevision ?? 0)) {
+        issues.push({ code: 'scope_changed', message: SCOPE_RECHECK_MESSAGE });
+      }
     }
     // 確定で承認済みの版が無い節は「未承認」だけを示す（本文の有無は承認済みの版の話ではない）
     const evaluateBody = version !== null || kind === 'review_draft';
@@ -897,10 +926,16 @@ async function assemble(
             });
           }
           const gaps = narrativeGaps(record.theme, nv.fields);
-          if (gaps.length > 0) {
+          if (gaps.missing.length > 0) {
             issues.push({
               code: 'narrative_missing_fields',
-              message: `不足情報: ${record.title} — ${gaps.join('、')}`,
+              message: `不足情報: ${record.title} — ${gaps.missing.join('、')}`,
+            });
+          }
+          if (gaps.note) {
+            issues.push({
+              code: 'narrative_not_quantified',
+              message: `${record.title} — ${gaps.note}`,
             });
           }
         } else if (inline.t === 'cite') {
@@ -959,9 +994,47 @@ async function assemble(
     });
   }
 
+  // 必須言語（プロジェクトの言語）と翻訳の鮮度（指示書 §10.4「必須言語の未確認」）。
+  // 翻訳元の節ごとに、プロジェクトの各言語の節が要る。翻訳版は、翻訳元の承認済みの版より前に
+  // 承認された版のままなら、翻訳元の修正を反映していないおそれがあるため確定させない
+  const projectLanguages: DisclosureLanguage[] = project.languages?.length
+    ? project.languages
+    : ['ja'];
+  const snapshotById = new Map(snapshotBlocks.map((b) => [b.blockId, b]));
+  for (const source of blocks.filter((b) => b.translationOfBlockId === null)) {
+    for (const language of projectLanguages) {
+      if (language === source.language) continue;
+      const translations = blocks.filter(
+        (b) => b.translationOfBlockId === source.id && b.language === language,
+      );
+      if (translations.length === 0) {
+        blockers.push({
+          code: 'translation_missing',
+          message: `${source.title}: 必須言語（${DISCLOSURE_LANGUAGE_LABELS[language]}）の節がありません。`,
+          blockId: source.id,
+        });
+      }
+    }
+  }
+  for (const translation of blocks.filter((b) => b.translationOfBlockId !== null)) {
+    const source = blocks.find((b) => b.id === translation.translationOfBlockId);
+    const entry = snapshotById.get(translation.id);
+    const sourceEntry = source ? snapshotById.get(source.id) : undefined;
+    if (!entry?.versionCreatedAt || !sourceEntry?.versionCreatedAt) continue;
+    if (entry.versionCreatedAt < sourceEntry.versionCreatedAt) {
+      entry.issues.push({
+        code: 'translation_stale',
+        message: `翻訳元「${sourceEntry.title}」の版 ${sourceEntry.versionNo ?? '—'} より前の版を訳したままです。翻訳を見直して再承認してください。`,
+      });
+    }
+  }
+
   // 確定を止める条件: 版の欠落・未承認・阻害条件・引用の不整合・証跡の欠落。
   // 定性情報の未記入項目は注意として出すだけ（人が承認した本文の判断を上書きしない）
-  const INFO_ONLY: ReadonlySet<SnapshotIssueCode> = new Set(['narrative_missing_fields']);
+  const INFO_ONLY: ReadonlySet<SnapshotIssueCode> = new Set([
+    'narrative_missing_fields',
+    'narrative_not_quantified',
+  ]);
   for (const block of snapshotBlocks) {
     for (const issue of block.issues) {
       if (INFO_ONLY.has(issue.code)) continue;
@@ -994,7 +1067,7 @@ async function assemble(
     policyVersion: policyVersions.length > 0 ? policyVersions.join(',') : null,
     blockers,
     draftStandardPrep: frameworks.some((f) => f.draftStandardPrep),
-    authorIds: [...authorIds],
+    versionWriters,
   };
 }
 
@@ -1028,7 +1101,7 @@ export interface ReportReadiness {
 function actorBlockersFor(
   ctx: AuthorizationContext,
   project: DisclosureProject,
-  authorIds: readonly Uuid[],
+  versionWriters: ReadonlyArray<readonly Uuid[]>,
 ): string[] {
   const reasons: string[] = [];
   if (!can(ctx, 'enterprise.disclosure.approve')) {
@@ -1037,9 +1110,13 @@ function actorBlockersFor(
   if (project.finalApproverUserId !== null && project.finalApproverUserId !== ctx.userId) {
     reasons.push('このプロジェクトの最終承認者として指定された人だけが確定できます。');
   }
-  // 自分が書いた節だけのレポートを自分で確定させない（職務分離）
-  if (authorIds.length > 0 && authorIds.every((id) => id === ctx.userId)) {
-    reasons.push('すべての節の版を作成した本人は、レポートを確定できません（職務分離）。');
+  // 自分が書いた節だけのレポートを自分で確定させない（職務分離）。
+  // 版の作成者だけでなく、自動保存で本文を書いた人も「書いた人」に数える（DB のトリガと同じ規則）
+  if (
+    versionWriters.length > 0 &&
+    versionWriters.every((writers) => writers.includes(ctx.userId))
+  ) {
+    reasons.push('すべての節の本文を書いた本人は、レポートを確定できません（職務分離）。');
   }
   return reasons;
 }
@@ -1053,7 +1130,7 @@ export async function evaluateReportReadiness(
   const project = await loadOwnedProject(db, ctx, projectId);
   assertCan(ctx, 'enterprise.disclosure.read');
   const assembly = await assemble(db, ctx, project, 'approved');
-  const actorBlockers = actorBlockersFor(ctx, project, assembly.authorIds);
+  const actorBlockers = actorBlockersFor(ctx, project, assembly.versionWriters);
   return {
     project,
     frameworks: assembly.frameworkSummaries,
@@ -1175,7 +1252,7 @@ export async function confirmReport(
   assertCan(ctx, 'enterprise.disclosure.approve');
 
   const assembly = await assemble(db, ctx, project, 'approved');
-  const actorBlockers = actorBlockersFor(ctx, project, assembly.authorIds);
+  const actorBlockers = actorBlockersFor(ctx, project, assembly.versionWriters);
   if (actorBlockers.length > 0) {
     throw new AuthorizationError(actorBlockers.join(' '));
   }

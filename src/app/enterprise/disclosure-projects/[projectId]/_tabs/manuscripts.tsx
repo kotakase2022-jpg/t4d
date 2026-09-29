@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, FileText, MessageSquare, Plus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, Info, MessageSquare, Plus } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -159,7 +159,8 @@ export async function ManuscriptsTab({
                             <CheckCircle2 className="size-3.5" aria-hidden="true" />
                             なし
                           </span>
-                        ) : (
+                        ) : null}
+                        {row.blockers.length === 0 && row.narrativeGaps.length === 0 ? null : (
                           <ul className="space-y-0.5 text-[12px] text-ink">
                             {row.blockers.map((b, i) => (
                               <li key={`${b.code}-${i}`} className="flex items-start gap-1">
@@ -178,6 +179,17 @@ export async function ManuscriptsTab({
                                   aria-hidden="true"
                                 />
                                 引用した定性情報「{gap.title}」に未記入: {gap.fields.join('・')}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {/* 不足ではないが、本文の判断材料として示す（財務的影響を定量化しない理由など） */}
+                        {row.narrativeNotes.length > 0 && (
+                          <ul className="mt-0.5 space-y-0.5 text-[11px] text-ink-muted">
+                            {row.narrativeNotes.map((note) => (
+                              <li key={`note-${note.title}`} className="flex items-start gap-1">
+                                <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />「
+                                {note.title}」: {note.note}
                               </li>
                             ))}
                           </ul>

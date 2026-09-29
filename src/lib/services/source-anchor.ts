@@ -1,8 +1,9 @@
 import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
-import { assertCan, NotFoundError } from '@/lib/authorization/can';
+import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
 import { ANCHOR_KIND_LABELS, EVIDENCE_USAGE_PURPOSE_LABELS } from '@/lib/domain/disclosure-status';
+import { MANUAL_EXCERPT_MAX_LENGTH } from '@/lib/domain/evidence-limits';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import {
@@ -14,6 +15,7 @@ import {
 } from '@/lib/imports/parsers';
 import { storeNewFile } from '@/lib/storage';
 import type { DbClient } from '@/lib/repositories/types';
+import { isUuid } from '@/lib/validation/uuid';
 import {
   CONFIDENTIALITY_LEVELS,
   EVIDENCE_USAGE_PURPOSES,
@@ -128,10 +130,23 @@ function safeFileName(fileName: string): string {
   return base.replace(/[^\p{L}\p{N}._\- ()（）・]/gu, '_').slice(0, 200);
 }
 
+/**
+ * 表示用の名前（一覧・紐付けの選択肢に出す）。パスと制御文字だけを除き、記号は変えない
+ * （【】や # を _ に置き換えると、利用者が付けた名前と一覧の表示が食い違う）。
+ * 保存キーは storeNewFile（buildStorageKey）が別に安全な形へ変える
+ */
+function displayFileName(fileName: string): string {
+  return fileName
+    .replace(/^.*[\\/]/, '')
+    .replace(/\p{Cc}/gu, '')
+    .trim()
+    .slice(0, 200);
+}
+
 /** 資料名を保存名にする。拡張子は元のファイルのものを保つ（保存キー・表示形式の判定に使う） */
-function storedName(title: string, safeName: string, extension: string): string {
-  const cleaned = safeFileName(title.trim());
-  if (!cleaned) return safeName;
+function storedName(title: string, originalName: string, extension: string): string {
+  const cleaned = displayFileName(title);
+  if (!cleaned) return originalName;
   return cleaned.toLowerCase().endsWith(extension) ? cleaned : `${cleaned}${extension}`;
 }
 
@@ -158,7 +173,12 @@ export async function registerEvidenceDocument(
     );
   }
   const extension = safeName.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? '';
-  if (!(EVIDENCE_EXTENSIONS as readonly string[]).includes(extension)) {
+  // 形式を限るのは定性情報の資料だけ（本文を抽出して引用に使うため）。証憑は従来どおり形式を問わない
+  // （請求書の .xls・議事録の .doc・写真の .heic なども証跡として保管できる）
+  if (
+    input.kind === 'qualitative' &&
+    !(EVIDENCE_EXTENSIONS as readonly string[]).includes(extension)
+  ) {
     throw new ValidationError(
       `拡張子 ${extension || '(なし)'} は登録できません（${EVIDENCE_EXTENSIONS.join(', ')}）。`,
     );
@@ -188,7 +208,11 @@ export async function registerEvidenceDocument(
     if (!period || period.organizationId !== organizationId) reportingPeriodId = null;
   }
 
-  const originalName = storedName(input.title, safeName, extension);
+  const originalName = storedName(
+    input.title,
+    displayFileName(input.fileName) || safeName,
+    extension,
+  );
   const stored = await storeNewFile(db, ctx, {
     bucket: 'evidence-private',
     scope: 'evidence',
@@ -310,7 +334,9 @@ export async function addManualExcerpt(
   if (!file.currentVersionId) throw new NotFoundError('資料の版が見つかりません。');
   const text = input.text.trim();
   if (!text) throw new ValidationError('抜粋する文言を入力してください。');
-  if (text.length > 4000) throw new ValidationError('抜粋は 4000 文字以内にしてください。');
+  if (text.length > MANUAL_EXCERPT_MAX_LENGTH) {
+    throw new ValidationError(`抜粋は ${MANUAL_EXCERPT_MAX_LENGTH} 文字以内にしてください。`);
+  }
   if (input.page !== null && (!Number.isInteger(input.page) || input.page < 1)) {
     throw new ValidationError('ページは 1 以上の整数で入力してください。');
   }
@@ -391,13 +417,18 @@ export async function listDocumentsForCitation(
     .sort((a, b) => Number(b.file.usagePurpose !== null) - Number(a.file.usagePurpose !== null));
 }
 
-/** 資料の現在の版の抽出結果（手動抜粋を含む） */
+/**
+ * 資料の現在の版の抽出結果（手動抜粋を含む）。
+ * 資料の閲覧権限（enterprise.evidence.read）が無い人には、資料の有無も含めて返さない
+ * （抽出結果は資料の本文そのものであり、機密区分の高い資料も含む）
+ */
 export async function loadDocumentFragments(
   db: DbClient,
   ctx: AuthorizationContext,
   fileId: Uuid,
 ): Promise<{ file: FileObject; version: FileVersion; fragments: FragmentView[] } | null> {
-  const file = await db.findById('files', fileId);
+  if (!can(ctx, 'enterprise.evidence.read')) return null;
+  const file = isUuid(fileId) ? await db.findById('files', fileId) : null;
   if (!file || file.deletedAt || file.organizationId !== ctx.workspace.organizationId) return null;
   if (!file.currentVersionId) return null;
   const version = await db.findById('fileVersions', file.currentVersionId);
@@ -546,11 +577,17 @@ export interface AnchorUsage {
   blocks: Array<{ blockId: Uuid; projectId: Uuid; title: string; versionNos: number[] }>;
 }
 
+/**
+ * 資料の引用位置が、どの定性情報・原稿の節で使われているか。
+ * 定性情報の題名・原稿の節の題名とリンクは開示の内容なので、開示の閲覧権限が無い人には返さない
+ * （資料の閲覧権限だけを持つ拠点担当者などに、原稿・定性情報の題名を見せない）
+ */
 export async function listAnchorUsagesForFile(
   db: DbClient,
   ctx: AuthorizationContext,
   fileId: Uuid,
 ): Promise<AnchorUsage[]> {
+  if (!can(ctx, 'enterprise.disclosure.read')) return [];
   const organizationId = ctx.workspace.organizationId;
   const file = await db.findById('files', fileId);
   if (!file || file.organizationId !== organizationId) return [];

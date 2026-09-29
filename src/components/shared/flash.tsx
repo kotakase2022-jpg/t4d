@@ -118,10 +118,16 @@ const MESSAGES: Record<string, (params: URLSearchParams) => string> = {
   blockCreated: () => '節を追加しました（下書き）。本文を書いて「版として保存」してください。',
   blockVersionSaved: (params) =>
     `本文を版 ${params.get('version') ?? ''} として保存しました。以前の版は履歴に残っています。`,
-  reviewRequested: () =>
-    'レビューを依頼しました。依頼した版・規則・引用した版を固定し、レビュー担当へ通知しました。',
+  // 通知できたかはサーバーが notified=1/0 で返す（担当が未定なら誰にも通知していない）
+  reviewRequested: (params) =>
+    params.get('notified') === '0'
+      ? 'レビューを依頼しました。依頼した版・規則・引用した版を固定しました（レビュー担当が未設定のため、通知はしていません）。'
+      : 'レビューを依頼しました。依頼した版・規則・引用した版を固定し、レビュー担当へ通知しました。',
   reviewReturned: () => '差し戻しました（理由と対象の段落を記録しました）。',
-  reviewCompleted: () => 'レビューを完了しました。最終承認者へ通知しました。',
+  reviewCompleted: (params) =>
+    params.get('notified') === '0'
+      ? 'レビューを完了しました（最終承認者が未設定のため、通知はしていません）。'
+      : 'レビューを完了しました。最終承認者へ通知しました。',
   reviewApproved: () =>
     '最終承認しました（社内承認の記録。第三者保証ではありません）。承認した版は以後も変わりません。',
   reviewWithdrawn: () => 'レビュー依頼を取り下げました。節は下書きに戻り、編集できます。',

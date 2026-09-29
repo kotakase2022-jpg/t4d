@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AI_TIMEOUT_MESSAGE, setAiProviderForTesting } from '@/lib/ai';
+import { buildMockDisclosureDraft } from '@/lib/ai/mock-disclosure-draft';
 import { PROMPT_VERSIONS, type AiFeature, type AiOutputOf } from '@/lib/ai/schemas';
 import type { AiInvocation, AiProvider, AiResult } from '@/lib/ai/types';
 import { paragraphText } from '@/lib/domain/disclosure-block';
@@ -134,13 +135,50 @@ describe('選択した根拠から下書き（Mock）', () => {
     expect(
       narrative?.children.some((i) => i.t === 'cite' && i.sourceAnchorId === A.riskPhysical),
     ).toBe(true);
-    // 候補の文はすべて入力の文言そのもの（入力に無い事実を作らない）
+    // 候補は根拠を丸ごと貼り付けた文ではなく、根拠の事実を言い直した短い段落（主題＋事実＋出典）。
+    // 事実の部分は入力の文そのもので、入力に無い事実を作らない。資料のファイル名は本文に書かない
     const inputs = [
       fixture.narrativeVersions.find((v) => v.id === IDS.narrativeVersions.riskPhysical)!.body,
       fixture.sourceAnchors.find((a) => a.id === A.riskPhysical)!.quoteText,
       fixture.sourceAnchors.find((a) => a.id === A.opportunity)!.quoteText,
     ];
-    for (const c of run.candidates) expect(inputs).toContain(c.text);
+    for (const c of run.candidates) {
+      expect(inputs).not.toContain(c.text);
+      const match = /^リスク及び機会について、(.+。)（出典: .+）$/.exec(c.text);
+      expect(match, c.text).not.toBeNull();
+      const facts = match![1]!;
+      expect(inputs.some((input) => input.includes(facts))).toBe(true);
+      expect(c.text).not.toContain('.txt');
+    }
+    // 定性情報の文は、言い直しの中でも版を持った引用のまま（元情報が変わっても黙って書き換わらない）
+    const quote = narrative!.children.find((i) => i.t === 'narrative');
+    expect(quote && quote.t === 'narrative' ? inputs[0]!.includes(quote.quote) : false).toBe(true);
+  });
+
+  it('同じ入力なら同じ下書きを返す（決定論的）', () => {
+    const input = {
+      operation: 'draft_from_sources' as const,
+      blockTitle: 'ガバナンス',
+      periodLabel: 'FY2026',
+      currentParagraphIds: [],
+      sources: [
+        {
+          kind: 'source_anchor' as const,
+          id: A.committeeGovernance2,
+          label: '委員会資料 第2章',
+          usage: 'current_fact' as const,
+          periodLabel: 'FY2026',
+          locator: '第2章 2.2 第1段落',
+          text: 'サステナビリティ委員会は代表取締役社長を委員長とし、年4回開催する。委員会は審議の結果を年2回、取締役会に報告する。追加の文。',
+        },
+      ],
+    };
+    const first = buildMockDisclosureDraft(input);
+    expect(buildMockDisclosureDraft(input)).toEqual(first);
+    // 長い根拠は先頭の 2 文だけを使う（短い段落にする）
+    expect(first.draftBlocks[0]?.text).toBe(
+      'ガバナンスについて、サステナビリティ委員会は代表取締役社長を委員長とし、年4回開催する。委員会は審議の結果を年2回、取締役会に報告する。（出典: 引用位置 第2章 2.2 第1段落）',
+    );
   });
 
   it('過年度の資料だけでは当年度の事実を書かず、不足情報を返す（A15）', async () => {
@@ -192,10 +230,9 @@ describe('選択した根拠から下書き（Mock）', () => {
     expect(conflict?.detail).toContain('年6回');
     const texts = result.run.candidates.map((c) => c.text);
     expect(texts.some((t) => t.includes('年4回') || t.includes('年6回'))).toBe(false);
-    // 食い違いの無い根拠は候補になる
-    expect(texts).toContain(
-      fixture.sourceAnchors.find((a) => a.id === A.committeeGovernance1)!.quoteText,
-    );
+    // 食い違いの無い根拠は候補になる（事実の文は根拠の文のまま、短い段落に言い直して入る）
+    const agreed = fixture.sourceAnchors.find((a) => a.id === A.committeeGovernance1)!.quoteText;
+    expect(texts.some((t) => t.includes(agreed))).toBe(true);
   });
 
   it('AI が入力に無い資料 ID を返したら、その段落を採用させず根拠なしとして扱う（A17）', async () => {
@@ -520,8 +557,43 @@ describe('候補の採用（A18）', () => {
     );
     expect(second.run.runId).not.toBe(first.run.runId);
     expect(blockRow(RISK).workingBody).toEqual(afterAdopt);
-    // 前の候補の残りは置き換わったものとして閉じる
-    expect(fixture.aiRuns.find((r) => r.id === first.run.runId)?.status).toBe('rejected');
+    // 前の候補の残りは置き換わったものとして閉じる。一部を採用した実行は「破棄」ではなく「採用」
+    // （本文に残った段落の出所が「破棄した AI 出力」にならないように）
+    const closed = fixture.aiRuns.find((r) => r.id === first.run.runId);
+    expect(closed?.status).toBe('accepted');
+    expect(
+      fixture.auditEvents.some(
+        (e) => e.eventType === 'ai_output_accepted' && e.resourceId === first.run.runId,
+      ),
+    ).toBe(true);
+  });
+
+  it('一部だけ採用した実行は、作り直しても確認を終えても「採用」として閉じる（採用は実行に記録する）', async () => {
+    const block = blockRow(RISK);
+    const first = succeeded(
+      await generateBlockDraft(db, author(), {
+        blockId: RISK,
+        operation: 'draft_from_sources',
+        sources: [
+          { kind: 'source_anchor', id: A.opportunity },
+          { kind: 'source_anchor', id: A.riskTransition },
+        ],
+      }),
+    );
+    await adoptDraftParagraphs(db, author(), {
+      blockId: RISK,
+      runId: first.run.runId,
+      candidateIndexes: [0],
+      baseVersionId: block.currentVersionId,
+    });
+    // 採用した事実は実行に残る（作業本文が別のサーバーに無くても判定できる）
+    expect(fixture.aiRuns.find((r) => r.id === first.run.runId)?.acceptedAt).not.toBeNull();
+    // 作業本文を持たない別インスタンス相当: 作業本文を消し、画面の本文も送らずに確認を終える
+    const index = fixture.disclosureBlocks.findIndex((b) => b.id === RISK);
+    fixture.disclosureBlocks[index] = { ...fixture.disclosureBlocks[index]!, workingBody: null };
+    expect(
+      await closeDraftRun(db, author(), { blockId: RISK, runId: first.run.runId, discard: true }),
+    ).toBe('accepted');
   });
 
   it('未確認の候補が残っている間はレビュー依頼できず、確認を終えると依頼できる', async () => {

@@ -136,7 +136,8 @@ export function SummarySection({ preview }: { preview: QuantitativeImportPreview
   ];
   return (
     <section aria-labelledby="standard-summary-title" className="space-y-2">
-      <h3 id="standard-summary-title" className="text-[13px] font-semibold text-ink">
+      {/* 検証の直後にフォーカスを移す先（tabIndex=-1: Tab 順には入れない） */}
+      <h3 id="standard-summary-title" tabIndex={-1} className="text-[13px] font-semibold text-ink">
         3. 検証
       </h3>
       <p className="text-[12px] text-ink-muted">

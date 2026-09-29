@@ -683,11 +683,31 @@ async function parseSource(
   };
 }
 
+/**
+ * 目標値と実績・推計の入れ替えは、取込では行わない（指示書 §7.1「実績・推計・目標を分離」）。
+ * 業務キー（指標・組織・期間・境界）に値の区分は含まれないため、同じキーの行で区分を「目標」へ
+ * 変えると実績の版が目標で上書きされ、集計から実績が消える（逆も同じ）。変更理由があっても止める
+ */
+export const TARGET_KIND_SWITCH_ERROR =
+  '目標値と実績・推計は同じ枠で入れ替えられません（区分を切り替えると既存の値が集計から消えます）。目標は ESG 経営の目標登録で管理し、実績・推計はこの取込で登録してください。';
+
 function targetValueKind(
   interp: InterpretedStandardRow,
   existing: DataPoint | null,
   warnings: string[],
+  errors: string[],
 ): ValueKind {
+  if (
+    interp.valueKind &&
+    existing &&
+    (interp.valueKind === 'target') !== ((existing.valueKind ?? 'actual') === 'target')
+  ) {
+    errors.push(TARGET_KIND_SWITCH_ERROR);
+    return existing.valueKind ?? 'actual';
+  }
+  if (interp.valueKind === 'target' && !existing) {
+    warnings.push('目標値として登録します。目標値は実績の合計・前年比に入りません。');
+  }
   if (interp.valueKind) {
     if (existing && existing.valueKind === 'estimate' && interp.valueKind === 'actual') {
       warnings.push('既存の「推計」を「実績」へ切り替えます。');
@@ -898,7 +918,7 @@ export async function validateQuantitativeImport(
       diffKind = 'error';
     } else if (!existing) {
       diffKind = 'new';
-      valueKind = targetValueKind(interp, null, warnings);
+      valueKind = targetValueKind(interp, null, warnings, errors);
     } else if (interp.blankCandidate && existing.availabilityStatus !== 'not_entered') {
       // 空欄は「未入力」の候補。既に値や人の判断（対象外など）がある枠を空欄で消さない
       diffKind = 'unchanged';
@@ -911,7 +931,7 @@ export async function validateQuantitativeImport(
       absenceReason = existing.absenceReason;
       finalUnit = existing.unitOfMeasure;
     } else {
-      valueKind = targetValueKind(interp, existing, warnings);
+      valueKind = targetValueKind(interp, existing, warnings, errors);
       const target = {
         value: interp.value,
         unitOfMeasure: unitOfMeasure ?? existing.unitOfMeasure,
@@ -919,7 +939,9 @@ export async function validateQuantitativeImport(
         availabilityStatus: interp.availabilityStatus,
         absenceReason: interp.absenceReason,
       };
-      if (sameState(target, existing)) {
+      if (errors.length > 0) {
+        diffKind = 'error';
+      } else if (sameState(target, existing)) {
         diffKind = 'unchanged';
         warnings.push('既存の値と同じため、新しい版は作りません（重複して登録しません）。');
         if (interp.methodology && interp.methodology !== existing.methodology) {

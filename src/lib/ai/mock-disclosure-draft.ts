@@ -75,6 +75,35 @@ function snippet(text: string, max = 40): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
+/** 文を句点（。！？）で分ける。句点は文に残し、前後の空白は落とす */
+export function splitSentences(text: string): string[] {
+  return (text.match(/[^。！？]+[。！？]?/g) ?? []).map((s) => s.trim()).filter(Boolean);
+}
+
+/** 下書きの 1 段落に使う根拠の文の数（長い根拠をそのまま貼り付けず、短い段落にする） */
+export const MAX_DRAFT_SENTENCES = 2;
+
+/** 出典の注記。資料のファイル名は書かない（対外の原稿へ社内資料の名前を出さない。出典は出典印で示す） */
+function attributionOf(source: DraftSourceInput): string {
+  if (source.kind === 'narrative_version') return `定性情報「${source.label}」`;
+  if (source.locator) return `引用位置 ${source.locator}`;
+  return '選択した根拠';
+}
+
+/**
+ * 根拠 1 件から、根拠にある事実だけを言い直した短い段落を作る（決定論的）。
+ *  - 事実の文は根拠の文をそのまま使う（数値・固有名詞・頻度を作り替えない。入力に無い事実を足さない）
+ *  - 前置きは節の主題（入力の節名）だけ、末尾に出典の注記を付ける
+ *  - 根拠の本文を丸ごと貼らない（同じ定性情報を引用した段落と本文が重複しないように）
+ */
+export function composeGroundedParagraph(
+  source: DraftSourceInput,
+  input: Pick<DraftInvocationInput, 'blockTitle'>,
+): string {
+  const facts = splitSentences(source.text).slice(0, MAX_DRAFT_SENTENCES).join('');
+  return `${input.blockTitle}について、${facts}（出典: ${attributionOf(source)}）`;
+}
+
 // ----------------------------------------------------------------------
 // 主張（事項・単位・値）の抽出。食い違いと前年からの変更の検出に使う
 // ----------------------------------------------------------------------
@@ -337,7 +366,7 @@ function draftFromSources(input: DraftInvocationInput): DisclosureBlockDraftOutp
     blocks.push({
       paragraphId: null,
       kind: 'paragraph',
-      text: source.text.trim(),
+      text: composeGroundedParagraph(source, input),
       sourceRefs: [ref(source), ...citeRefs],
     });
   }
@@ -414,7 +443,7 @@ function updateFromPriorYear(input: DraftInvocationInput): DisclosureBlockDraftO
     blocks.push({
       paragraphId: p.paragraphId && currentIds.has(p.paragraphId) ? p.paragraphId : null,
       kind: 'paragraph',
-      text: source.text.trim(),
+      text: composeGroundedParagraph(source, input),
       sourceRefs: [ref(source), ref(p)],
     });
   }

@@ -1,5 +1,6 @@
 import { AppShell } from '@/components/shared/app-shell';
 import { listDemoRoleChoices } from '@/lib/auth/demo-role';
+import { demoEditsWereEvicted } from '@/lib/repositories/demo-persistence';
 import { loadHeaderProjects } from '@/lib/services/disclosure-home';
 import { getFeatureSettings } from '@/lib/services/feature-settings';
 import { loadEnterpriseShell, toWorkspaceChoices } from '@/lib/services/shell';
@@ -16,6 +17,7 @@ export default async function EnterpriseLayout({ children }: { children: React.R
     loadHeaderProjects(shell.db, shell.ctx),
     listDemoRoleChoices(shell.db, shell.ctx),
   ]);
+  const demoEditsEvicted = shell.ctx.demo ? await demoEditsWereEvicted() : false;
 
   return (
     <AppShell
@@ -38,6 +40,7 @@ export default async function EnterpriseLayout({ children }: { children: React.R
         current: choice.current,
       }))}
       unreadNotifications={shell.unreadNotifications}
+      demoEditsEvicted={demoEditsEvicted}
     >
       {children}
     </AppShell>

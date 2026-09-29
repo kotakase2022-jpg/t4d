@@ -24,6 +24,7 @@ export interface TargetFormDefaults {
   targetType: string;
   direction: string;
   methodologyNote: string;
+  actualMethodology: string;
   ownerUserId: string;
 }
 
@@ -34,11 +35,14 @@ const selectClass =
 export function KpiTargetForm({
   metrics,
   members,
+  methodologies,
   defaults,
   revising,
 }: {
   metrics: Array<{ id: string; label: string }>;
   members: Array<{ userId: string; displayName: string }>;
+  /** 実績（Data Point）に登録されている算定方法の表記（入力の候補） */
+  methodologies: string[];
   defaults: TargetFormDefaults;
   /** 改訂中の目標（null は新規） */
   revising: { targetKey: string; versionNo: number } | null;
@@ -203,6 +207,21 @@ export function KpiTargetForm({
           defaultValue={v('methodologyNote')}
           className="mt-0.5"
         />
+      </label>
+      <label className={fieldClass}>
+        前提にした実績の算定方法（実績の「算定方法」と同じ表記。違えば達成率を出しません）
+        <Input
+          name="actualMethodology"
+          list="kpi-actual-methodologies"
+          defaultValue={v('actualMethodology')}
+          placeholder="例: 実測値の集計"
+          className="mt-0.5"
+        />
+        <datalist id="kpi-actual-methodologies">
+          {methodologies.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
       </label>
 
       {revising && (

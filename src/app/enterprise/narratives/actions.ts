@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
+import { can } from '@/lib/authorization/can';
 import { EVIDENCE_USAGE_PURPOSE_LABELS } from '@/lib/domain/disclosure-status';
 import { isUserFacingError, withUserFacingError } from '@/lib/errors/user-facing';
 import { formatJst } from '@/lib/format/datetime';
@@ -175,6 +176,11 @@ export async function loadFragmentsAction(
   | ActionFailure
 > {
   const ctx = await requireEnterpriseContext();
+  // 定性情報の編集（引用位置の登録）のための読み込み。編集権限が無い人には資料の本文を返さない。
+  // 資料の閲覧権限は loadDocumentFragments が確かめる。どちらも「見つからない」と同じ応答にする
+  if (!can(ctx, 'enterprise.disclosure.write')) {
+    return { status: 'error', message: '資料が見つかりません。', fieldErrors: {} };
+  }
   const db = await getDb();
   const loaded = await loadDocumentFragments(db, ctx, String(fileId));
   if (!loaded) return { status: 'error', message: '資料が見つかりません。', fieldErrors: {} };

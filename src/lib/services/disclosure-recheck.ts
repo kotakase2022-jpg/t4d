@@ -13,12 +13,14 @@ import { fid } from '@/lib/fixtures/ids';
 import {
   appendBlockVersion,
   approvedDataPointVersionIds,
+  contributorsWith,
   currentVersionBody,
   isVersionApproved,
   loadBlock,
   loadMembers,
   metricDisplay,
   nameOf,
+  VERSION_UNAVAILABLE_MESSAGE,
 } from '@/lib/services/disclosure-block';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
@@ -48,6 +50,7 @@ export const FRESHNESS_STATUSES = [
   'upstream_updated',
   'evidence_invalid',
   'rechecked',
+  'version_unavailable',
 ] as const;
 export type FreshnessStatus = (typeof FRESHNESS_STATUSES)[number];
 
@@ -57,6 +60,7 @@ export const FRESHNESS_LABELS: Record<FreshnessStatus, string> = {
   upstream_updated: '上流に新版あり',
   evidence_invalid: '根拠失効',
   rechecked: '再確認済み',
+  version_unavailable: '版を読み込めません',
 };
 
 export interface FreshnessItem {
@@ -76,6 +80,11 @@ export interface FreshnessItem {
   keptOld: RecheckDecision | null;
   /** 担当者へ差し戻した記録（再確認は未了のまま） */
   returnedToOwner: RecheckDecision | null;
+  /**
+   * この項目で選べる判断と、選べない判断の理由（サーバーが decideRecheck と同じ条件で決める）。
+   * 画面は選べない判断のフォームを出さず、理由を示す（押してから断られ、入力が消えることを防ぐ）
+   */
+  decisions: Record<RecheckDecisionKind, { allowed: boolean; reason: string | null }>;
 }
 
 export interface BlockFreshness {
@@ -88,17 +97,35 @@ function paragraphsWith(body: BlockBody, match: (inline: BlockInline) => boolean
   return body.paragraphs.filter((p) => p.children.some(match)).map((p) => p.id);
 }
 
-/** 鮮度を判定する本文（作業本文があればそれ。無ければ現在の版） */
+/**
+ * 鮮度を判定する本文（作業本文があればそれ。無ければ現在の版）。
+ * 節が版を指しているのにその版を読めない（Demo Mode で別のサーバーが作った版など）ときは null。
+ * 空の本文として判定すると、引用が 1 件も無い「現行」と誤って示してしまう
+ */
 async function freshnessBody(
   db: DbClient,
   ctx: AuthorizationContext,
   block: DisclosureBlock,
   body?: BlockBody,
-): Promise<BlockBody> {
+): Promise<BlockBody | null> {
   if (body) return body;
   if (block.workingBody) return block.workingBody;
-  return (await currentVersionBody(db, ctx, block)).body;
+  const current = await currentVersionBody(db, ctx, block);
+  if (block.currentVersionId && !current.version) return null;
+  return current.body;
 }
+
+const ALLOWED = { allowed: true, reason: null } as const;
+const denied = (reason: string) => ({ allowed: false, reason });
+
+/** 根拠失効（削除された資料・数値）の項目は、どの判断でも解消できない */
+const EVIDENCE_DECISIONS: FreshnessItem['decisions'] = {
+  adopt_new: denied(
+    '削除された資料・数値には新しい版がありません。本文から引用を外して版を作り直してください。',
+  ),
+  keep_old: denied('失効した資料・削除された数値は維持を選べません。'),
+  return_to_owner: denied('根拠の失効は差戻しでは解消しません。本文から引用を外してください。'),
+};
 
 /**
  * 節（または指定した本文）の参照の鮮度。
@@ -115,6 +142,13 @@ export async function computeBlockFreshness(
 ): Promise<BlockFreshness> {
   const organizationId = ctx.workspace.organizationId;
   const target = await freshnessBody(db, ctx, block, body);
+  if (target === null) {
+    return {
+      status: 'version_unavailable',
+      label: FRESHNESS_LABELS.version_unavailable,
+      items: [],
+    };
+  }
   const refs = collectRefs(target);
   const decisions = await db.select('recheckDecisions', {
     where: { organizationId, blockId: block.id },
@@ -156,6 +190,7 @@ export async function computeBlockFreshness(
         paragraphIds,
         keptOld: null,
         returnedToOwner: null,
+        decisions: EVIDENCE_DECISIONS,
       });
       continue;
     }
@@ -174,13 +209,32 @@ export async function computeBlockFreshness(
         paragraphIds,
         keptOld: null,
         returnedToOwner: null,
+        decisions: EVIDENCE_DECISIONS,
       });
       continue;
     }
     if (!dp.currentVersionId || dp.currentVersionId === version.id) continue;
     const current = await db.findById('dataPointVersions', dp.currentVersionId);
     const decision = latestDecision('metric', version.id, dp.currentVersionId);
+    const newApproved = current ? isVersionApproved(current, dp, approvedIds) : false;
     items.push({
+      decisions: {
+        adopt_new: !current
+          ? denied('新しい数値の版が見つかりません。')
+          : !newApproved
+            ? denied(
+                `新しい数値の版（版 ${current.versionNo}）はまだ承認されていません。承認されてから採用できます。`,
+              )
+            : current.availabilityStatus !== 'value_present'
+              ? denied(
+                  '新しい版に値がありません（未入力・対象外など）。担当者へ差し戻してください。',
+                )
+              : ALLOWED,
+        keep_old: isVersionApproved(version, null, approvedIds)
+          ? ALLOWED
+          : denied('引用中の数値の版は承認された版ではないため、維持を選べません。'),
+        return_to_owner: ALLOWED,
+      },
       refKind: 'metric',
       oldRefId: version.id,
       newRefId: dp.currentVersionId,
@@ -188,7 +242,7 @@ export async function computeBlockFreshness(
       oldDisplay: `${metricDisplay(version)}（版 ${version.versionNo}）`,
       newDisplay: current ? `${metricDisplay(current)}（版 ${current.versionNo}）` : null,
       changeReason: current?.changeReason ?? null,
-      newApproved: current ? isVersionApproved(current, dp, approvedIds) : false,
+      newApproved,
       paragraphIds,
       keptOld: decision?.decision === 'keep_old' ? decision : null,
       returnedToOwner: decision?.decision === 'return_to_owner' ? decision : null,
@@ -211,13 +265,14 @@ export async function computeBlockFreshness(
         oldRefId: versionId,
         newRefId: null,
         label: '引用した定性情報が見つかりません（削除された可能性があります）',
-        oldDisplay: version ? `版 ${version.versionNo}` : '—',
+        oldDisplay: version?.organizationId === organizationId ? `版 ${version.versionNo}` : '—',
         newDisplay: null,
         changeReason: null,
         newApproved: false,
         paragraphIds,
         keptOld: null,
         returnedToOwner: null,
+        decisions: EVIDENCE_DECISIONS,
       });
       continue;
     }
@@ -225,6 +280,11 @@ export async function computeBlockFreshness(
     const current = await db.findById('narrativeVersions', record.currentVersionId);
     const decision = latestDecision('narrative', version.id, record.currentVersionId);
     items.push({
+      decisions: {
+        adopt_new: current ? ALLOWED : denied('新しい定性情報の版が見つかりません。'),
+        keep_old: ALLOWED,
+        return_to_owner: ALLOWED,
+      },
       refKind: 'narrative',
       oldRefId: version.id,
       newRefId: record.currentVersionId,
@@ -249,14 +309,19 @@ export async function computeBlockFreshness(
       refKind: 'evidence',
       oldRefId: anchorId,
       newRefId: null,
-      label: file ? `資料「${file.originalName}」は削除されています` : '出典の資料が見つかりません',
-      oldDisplay: anchor?.locator ?? '—',
+      // 別組織の引用位置・資料の名前と位置は出さない（存在も含めて漏らさない。A29）
+      label:
+        anchor?.organizationId === organizationId && file?.organizationId === organizationId
+          ? `資料「${file.originalName}」は削除されています`
+          : '出典の資料が見つかりません',
+      oldDisplay: anchor?.organizationId === organizationId ? (anchor.locator ?? '—') : '—',
       newDisplay: null,
       changeReason: null,
       newApproved: false,
       paragraphIds: paragraphsWith(target, (i) => i.t === 'cite' && i.sourceAnchorId === anchorId),
       keptOld: null,
       returnedToOwner: null,
+      decisions: EVIDENCE_DECISIONS,
     });
   }
 
@@ -267,7 +332,24 @@ export async function computeBlockFreshness(
       : items.length > 0
         ? 'rechecked'
         : 'current';
-  return { status, label: FRESHNESS_LABELS[status], items };
+  // 失効した根拠があるあいだは、ほかの引用も「維持」で覆い隠せない（decideRecheck と同じ条件）
+  const finalItems =
+    status === 'evidence_invalid'
+      ? items.map((i) =>
+          i.refKind === 'evidence'
+            ? i
+            : {
+                ...i,
+                decisions: {
+                  ...i.decisions,
+                  keep_old: denied(
+                    '根拠が失効している節では、引用中の版の維持を選べません（先に失効した引用を本文から外してください）。',
+                  ),
+                },
+              },
+        )
+      : items;
+  return { status, label: FRESHNESS_LABELS[status], items: finalItems };
 }
 
 /** 未解消の参照（承認・確定を止めるもの）。維持と判断済みの組み合わせは除く */
@@ -420,6 +502,10 @@ export async function decideRecheck(
   if (!block.currentVersionId) {
     throw new ValidationError('版が無い節には再確認の判断を記録できません。');
   }
+  if (!(await currentVersionBody(db, ctx, block)).version) {
+    // 版を読めないまま判定すると「既に最新の版を引用しています」と誤って断ってしまう
+    throw new NotFoundError(VERSION_UNAVAILABLE_MESSAGE);
+  }
 
   const freshness = await computeBlockFreshness(db, ctx, block);
   const item = freshness.items.find(
@@ -526,6 +612,8 @@ export async function decideRecheck(
         ? {
             workingBody: replaceRef(block.workingBody, input.refKind, input.oldRefId, replacement),
             workingBaseVersionId: version.id,
+            workingUpdatedBy: ctx.userId,
+            workingContributorIds: contributorsWith(block, ctx.userId),
           }
         : {}),
       updatedAt: now,

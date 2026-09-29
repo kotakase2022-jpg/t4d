@@ -4,6 +4,7 @@ import {
   CheckCheck,
   CheckCircle2,
   FilePen,
+  FileQuestion,
   Hourglass,
   Send,
   Undo2,
@@ -48,7 +49,7 @@ export function BlockStatusBadge({ status }: { status: BlockStatus }) {
 }
 
 export type FreshnessBadgeStatus =
-  'current' | 'upstream_updated' | 'evidence_invalid' | 'rechecked';
+  'current' | 'upstream_updated' | 'evidence_invalid' | 'rechecked' | 'version_unavailable';
 
 const FRESHNESS: Record<
   FreshnessBadgeStatus,
@@ -62,6 +63,8 @@ const FRESHNESS: Record<
   upstream_updated: { label: '上流に新版あり', tone: 'warning', Icon: AlertTriangle },
   evidence_invalid: { label: '根拠失効', tone: 'danger', Icon: XCircle },
   rechecked: { label: '再確認済み', tone: 'neutral', Icon: CheckCheck },
+  // 版を読めない（Demo Mode で別のサーバーが作った版など）。「現行」と誤って示さない
+  version_unavailable: { label: '版を読み込めません', tone: 'warning', Icon: FileQuestion },
 };
 
 export function FreshnessBadge({ status }: { status: FreshnessBadgeStatus }) {

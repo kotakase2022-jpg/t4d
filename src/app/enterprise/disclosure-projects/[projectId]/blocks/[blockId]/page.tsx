@@ -90,7 +90,9 @@ export default async function BlockEditorPage({
               対象期間: {formatJstDate(data.project.periodStart)} 〜{' '}
               {formatJstDate(data.project.periodEnd)}
             </span>
-            <span>章: {data.block.sectionKey}</span>
+            {data.requirements.length > 0 && (
+              <span>要求事項: {data.requirements.map((r) => r.code).join('、')}</span>
+            )}
             <span>言語: {data.block.languageLabel}</span>
             <span>担当: {data.block.ownerName}</span>
             <span>期限: {formatJstDate(data.block.dueDate)}</span>

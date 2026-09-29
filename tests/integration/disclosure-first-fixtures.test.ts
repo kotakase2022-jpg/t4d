@@ -107,13 +107,14 @@ describe('基準の版メタデータ', () => {
     ).toEqual([]);
   });
 
-  it('SSBJ は採択済み・一部収録（133 項目）、CSRD は架空サンプル（12 項目）と明示される', () => {
+  it('SSBJ は公表済み・一部収録（133 項目）、CSRD は架空サンプル（12 項目）と明示される', () => {
     const ssbj = fixture.frameworkVersions.find(
       (v) => v.id === fid('framework_version', 'ssbj/2026'),
     );
     expect(ssbj).toMatchObject({
       versionCode: 'ssbj-2026-03-13',
-      legalStatus: 'adopted',
+      // 「採択済み（未発効）」は EU の委任規則の状態。SSBJ は公表した基準（REG-F4）
+      legalStatus: 'promulgated',
       coverageStatus: 'partial',
       issuedAt: '2026-03-13',
       jurisdiction: 'JP',

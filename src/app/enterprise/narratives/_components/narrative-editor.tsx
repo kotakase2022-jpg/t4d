@@ -504,7 +504,10 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
                       >
                         {u.blockTitle}
                       </Link>
-                      <Badge tone="neutral">{u.blockStatusLabel}</Badge>
+                      <Badge tone="neutral">
+                        <FileText className="size-3" aria-hidden="true" />
+                        {u.blockStatusLabel}
+                      </Badge>
                       <span className="text-[11px] text-ink-muted">
                         {u.projectName}／引用中の版 {u.citedVersionNo ?? '—'}
                         {u.citesCurrent ? '' : '（最新ではない）'}

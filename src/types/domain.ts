@@ -1344,6 +1344,11 @@ export interface DisclosureProject extends AuditColumns, SoftDeletable {
   /** 報告対象に含める組織・拠点。空配列は全社（未指定） */
   includedUnitIds: Uuid[];
   status: DisclosureProjectStatus;
+  /**
+   * 報告範囲の改訂番号（0041）。範囲を確定して変えるたびに 1 増やす。
+   * これより前の番号で依頼・承認された節は、範囲の変更後に再確認が必要（指示書 §10.3）
+   */
+  scopeRevision: number;
 }
 
 export const APPLICABILITY_STATUSES = [
@@ -1538,6 +1543,13 @@ export interface DisclosureBlock extends AuditColumns, SoftDeletable {
   workingBody: BlockBody | null;
   workingBaseVersionId: Uuid | null;
   workingSavedAt: IsoDateTime | null;
+  /** 作業本文を最後に自動保存した人（0041。別の人の作業本文を黙って上書きしないため） */
+  workingUpdatedBy: Uuid | null;
+  /**
+   * 現在の作業本文を自動保存した人（0041）。版を作るとその版の contributorUserIds へ写し、
+   * 職務分離（レビュー完了・最終承認）で作成者と同じ扱いにする
+   */
+  workingContributorIds: Uuid[];
 }
 
 export const BLOCK_VERSION_ORIGINS = ['human', 'human_adopted_ai'] as const;
@@ -1564,6 +1576,8 @@ export interface DisclosureBlockVersion {
   contentHash: string;
   createdAt: IsoDateTime;
   createdBy: Uuid;
+  /** 作成者以外でこの版の本文（自動保存）を書いた人（0041）。職務分離では作成者と同じ扱い */
+  contributorUserIds: Uuid[];
 }
 
 export const REVIEW_TARGET_TYPES = ['disclosure_block'] as const;
@@ -1616,6 +1630,8 @@ export interface ReviewRequest extends AuditColumns {
   decisionIds: Uuid[];
   referencedVersions: ReviewReferencedVersions;
   status: ReviewRequestStatus;
+  /** 依頼時点のプロジェクトの報告範囲の改訂番号（0041） */
+  projectScopeRevision: number;
 }
 
 export const REVIEW_EVENT_TYPES = [
@@ -1814,6 +1830,11 @@ export interface KpiTarget {
   targetType: KpiTargetType;
   direction: KpiDirection;
   methodologyNote: string;
+  /**
+   * 目標が前提にした実績の算定方法（0041）。Data Point の methodology と同じ表記で持ち、
+   * 実績の算定方法と一致しなければ達成率を出さない（指示書 §6.11）。null は未設定
+   */
+  actualMethodology: string | null;
   ownerUserId: Uuid | null;
   /** 2 版目以降は必須 */
   revisionReason: string | null;

@@ -1,6 +1,15 @@
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 
+import { permissionsFor } from '@/lib/authorization/can';
+import { availabilityFromValue } from '@/lib/domain/disclosure-status';
 import type { FixtureDb } from '@/lib/fixtures/store';
+import type {
+  DisclosureBlock,
+  PermissionKey,
+  ReviewEvent,
+  ReviewRequest,
+  Uuid,
+} from '@/types/domain';
 import type { TableName } from './types';
 
 /**
@@ -199,9 +208,40 @@ const PERSISTED_TABLES = new Set<TableName>([
   'reviewEvents',
   'reviewComments',
   'recheckDecisions',
-  'exportArtifacts',
+  // exportArtifacts は入れない。出力の記録はスナップショット（メモリのみ）と組でしか表示されず、
+  // 別インスタンスでは使われないまま Cookie の容量だけを使い、他のデモ操作を押し出していた
   'kpiTargets',
 ]);
+
+/**
+ * 追記専用の表。Cookie から既存の行を書き換えさせない（新しい行の追加だけを受け付ける）。
+ * DB では UPDATE ポリシーが無く t4d.forbid_mutation() が止める。Demo Mode でも同じにする
+ */
+const APPEND_ONLY_TABLES: ReadonlySet<string> = new Set([
+  'reviewEvents',
+  'recheckDecisions',
+  'kpiTargets',
+]);
+
+/**
+ * Cookie の容量が足りないときも押し出さない表。機能設定（開示優先モードの ON/OFF）が押し出されると、
+ * 新しいインスタンスでメニューとホームが従来の構成へ戻り、実演の途中で画面が変わってしまう
+ */
+const PINNED_TABLES: ReadonlySet<string> = new Set(['organizationFeatureSettings']);
+
+export function isPinnedEdit(edit: Pick<DemoEdit, 't'>): boolean {
+  return PINNED_TABLES.has(edit.t);
+}
+
+/**
+ * 容量を超えたときに落とす順: 押し出さない表以外の、いちばん古い編集から。
+ * 落とせる編集が無ければ null
+ */
+export function dropOldestUnpinned(edits: readonly DemoEdit[]): DemoEdit[] | null {
+  const index = edits.findIndex((e) => !isPinnedEdit(e));
+  if (index === -1) return null;
+  return [...edits.slice(0, index), ...edits.slice(index + 1)];
+}
 
 export function isPersistedTable(table: TableName): boolean {
   return PERSISTED_TABLES.has(table);
@@ -220,20 +260,279 @@ export function isPersistedTable(table: TableName): boolean {
  * これにより organizationMemberships（ロール注入）・membershipRoles・auditEvents・signoffs
  * といった、なりすましや証跡の改ざんに使える表には一切届かない。
  */
+/** 互いを参照して検証する表（依頼 ⇔ 記録 ⇔ 節）。受け付けられる順に適用する */
+const REVIEW_TABLES: ReadonlySet<string> = new Set([
+  'reviewRequests',
+  'reviewEvents',
+  'disclosureBlocks',
+]);
+
 export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
+  const deferred: DemoEdit[] = [];
   for (const edit of edits) {
     // 書き込み側の許可リスト（isPersistedTable）と対にする。
     // 片側だけの防御は、Cookie を偽造されると意味を持たない。
     if (!isPersistedTable(edit.t as TableName)) continue;
-    const rows = db[edit.t as TableName] as unknown as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(rows)) continue;
     if (!edit.v || typeof edit.v !== 'object' || Array.isArray(edit.v)) continue;
-    const row = rows.find((r) => r.id === edit.id);
-    if (row) {
-      Object.assign(row, edit.v);
-    } else if ('id' in edit.v) {
-      // 新規作成された行（コメントなど）は、そのまま足す
-      rows.push({ ...edit.v });
+    if (REVIEW_TABLES.has(edit.t)) {
+      deferred.push(edit);
+      continue;
     }
+    applyOne(db, edit, []);
+  }
+  // 承認・レビューの記録は、DB のトリガと同じ規則を満たすときだけ受け付ける
+  // （Fixture DB はインスタンスの全利用者で共有される。偽の Cookie 1 つで、職務分離を通らない
+  // 承認を全員の画面に出させない）。記録は依頼を、依頼の状態は記録を参照し、Cookie の中の順番は
+  // 更新のたびに入れ替わるため、受け付けられるものから適用し、進まなくなるまで繰り返す
+  let pending = deferred;
+  for (;;) {
+    const requests = pending.filter((e) => e.t === 'reviewRequests');
+    const rest = pending.filter((edit) => !applyOne(db, edit, requests));
+    if (rest.length === pending.length) break;
+    pending = rest;
+  }
+}
+
+/** 1 件を適用する。規則に合わず受け付けなかったら false */
+function applyOne(db: FixtureDb, edit: DemoEdit, pendingRequests: readonly DemoEdit[]): boolean {
+  const rows = db[edit.t as TableName] as unknown as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(rows)) return true;
+  const index = rows.findIndex((r) => r.id === edit.id);
+  const row = index === -1 ? undefined : rows[index];
+  if (!row && !('id' in edit.v)) return true;
+  const next = normalizeLegacyRow(edit.t, row ? { ...row, ...edit.v } : { ...edit.v });
+  if (!acceptEdit(db, edit.t, row, next, pendingRequests)) return false;
+  if (row) {
+    rows[index] = next;
+  } else {
+    // 新規作成された行（コメントなど）は、そのまま足す
+    rows.push(next);
+  }
+  return true;
+}
+
+/**
+ * 以前のデプロイの Cookie に残った行を、今の列の形へそろえる。
+ * 0039 より前に作られた Data Point・版の行は、値の区分・値の有無・理由の列を持たない。
+ * そのまま戻すと、それらの列を読む画面（一覧のバッジ・詳細の履歴）が落ちる
+ */
+export function normalizeLegacyRow(
+  table: string,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  if (table !== 'dataPoints' && table !== 'dataPointVersions') return row;
+  const out = { ...row };
+  if (out.valueKind === undefined) out.valueKind = 'actual';
+  if (out.availabilityStatus === undefined) {
+    out.availabilityStatus = availabilityFromValue(
+      out.value as number | null | undefined,
+      out.textValue as string | null | undefined,
+    );
+  }
+  if (out.absenceReason === undefined) out.absenceReason = null;
+  return out;
+}
+
+// ----------------------------------------------------------------------
+// 承認・レビューの記録の検証（0037 / 0041 のトリガと同じ規則を Demo Mode でも通す）
+// ----------------------------------------------------------------------
+
+function memberPermissions(db: FixtureDb, organizationId: Uuid, userId: Uuid): Set<PermissionKey> {
+  const memberships = db.memberships.filter(
+    (m) => m.organizationId === organizationId && m.userId === userId && m.status === 'active',
+  );
+  const roleKeys = db.membershipRoles
+    .filter((r) => memberships.some((m) => m.id === r.membershipId))
+    .map((r) => r.roleKey);
+  return permissionsFor(roleKeys);
+}
+
+function hasEvent(
+  db: FixtureDb,
+  request: Pick<ReviewRequest, 'id' | 'targetVersionId'>,
+  eventType: ReviewEvent['eventType'],
+): boolean {
+  return db.reviewEvents.some(
+    (e) =>
+      e.reviewRequestId === request.id &&
+      e.eventType === eventType &&
+      e.targetVersionId === request.targetVersionId,
+  );
+}
+
+function acceptReviewEvent(
+  db: FixtureDb,
+  event: ReviewEvent,
+  pendingRequests: readonly DemoEdit[],
+): boolean {
+  // 依頼の行がまだ適用されていなければ、同じ Cookie の依頼の編集（依頼時点の内容は変わらない）を見る
+  const pending = pendingRequests.find((e) => e.id === event.reviewRequestId);
+  const request =
+    db.reviewRequests.find((r) => r.id === event.reviewRequestId) ??
+    (pending ? (pending.v as unknown as ReviewRequest) : undefined);
+  if (!request || request.organizationId !== event.organizationId) return false;
+  if (event.targetVersionId !== request.targetVersionId) return false;
+  const permissions = memberPermissions(db, event.organizationId, event.actorUserId);
+  if (event.eventType === 'returned') {
+    if (!event.reason?.trim() || !event.paragraphId?.trim()) return false;
+    return (
+      permissions.has('enterprise.disclosure.write') ||
+      permissions.has('enterprise.disclosure.approve')
+    );
+  }
+  if (event.eventType === 'requested' || event.eventType === 'withdrawn') {
+    return permissions.has('enterprise.disclosure.write');
+  }
+  // レビュー完了・最終承認: 依頼者・版の作成者・本文を書いた人ではないこと
+  if (event.actorUserId === request.requestedBy) return false;
+  const version = db.disclosureBlockVersions.find((v) => v.id === request.targetVersionId);
+  if (
+    version &&
+    (version.createdBy === event.actorUserId ||
+      (version.contributorUserIds ?? []).includes(event.actorUserId))
+  ) {
+    return false;
+  }
+  if (event.eventType === 'review_completed') {
+    return permissions.has('enterprise.disclosure.write');
+  }
+  // 最終承認: 別の人のレビュー完了の記録があり、自分はレビューを完了していないこと
+  const reviewers = db.reviewEvents
+    .filter(
+      (e) =>
+        e.reviewRequestId === request.id &&
+        e.eventType === 'review_completed' &&
+        e.targetVersionId === request.targetVersionId,
+    )
+    .map((e) => e.actorUserId);
+  if (reviewers.length === 0 || reviewers.includes(event.actorUserId)) return false;
+  return permissions.has('enterprise.disclosure.approve');
+}
+
+const REQUEST_IMMUTABLE_KEYS = [
+  'organizationId',
+  'projectId',
+  'targetType',
+  'targetId',
+  'targetVersionId',
+  'requestedBy',
+  'reviewerUserId',
+  'approverUserId',
+  'policyVersion',
+  'policy',
+  'decisionIds',
+  'referencedVersions',
+  'projectScopeRevision',
+  'createdAt',
+  'createdBy',
+] as const;
+
+const TERMINAL_REQUEST_STATUSES: ReadonlyArray<ReviewRequest['status']> = [
+  'returned',
+  'approved',
+  'withdrawn',
+];
+
+function acceptReviewRequest(
+  db: FixtureDb,
+  existing: ReviewRequest | undefined,
+  next: ReviewRequest,
+): boolean {
+  if (existing) {
+    for (const key of REQUEST_IMMUTABLE_KEYS) {
+      if (JSON.stringify(existing[key] ?? null) !== JSON.stringify(next[key] ?? null)) return false;
+    }
+    if (existing.status === next.status) return true;
+    if (TERMINAL_REQUEST_STATUSES.includes(existing.status)) return false;
+  } else {
+    // 新しい依頼: 依頼者は書込権限を持つ組織の利用者で、指名は依頼者と別の人（0037 の検査制約と同じ）
+    if (
+      !memberPermissions(db, next.organizationId, next.requestedBy).has(
+        'enterprise.disclosure.write',
+      )
+    ) {
+      return false;
+    }
+    if (next.reviewerUserId && next.reviewerUserId === next.requestedBy) return false;
+    if (
+      next.approverUserId &&
+      (next.approverUserId === next.requestedBy || next.approverUserId === next.reviewerUserId)
+    ) {
+      return false;
+    }
+  }
+  switch (next.status) {
+    case 'open':
+      return !existing;
+    case 'reviewed':
+      return (!existing || existing.status === 'open') && hasEvent(db, next, 'review_completed');
+    case 'approved':
+      return (!existing || existing.status === 'reviewed') && hasEvent(db, next, 'approved');
+    case 'returned':
+      return hasEvent(db, next, 'returned');
+    case 'withdrawn':
+      return hasEvent(db, next, 'withdrawn');
+    default:
+      return false;
+  }
+}
+
+function acceptBlock(
+  db: FixtureDb,
+  existing: DisclosureBlock | undefined,
+  next: DisclosureBlock,
+): boolean {
+  const before = existing ?? { status: 'draft', approvedVersionId: null };
+  const approvalChanged =
+    (next.approvedVersionId !== null && next.approvedVersionId !== before.approvedVersionId) ||
+    (next.status === 'approved' && before.status !== 'approved');
+  if (approvalChanged) {
+    const approvedVersionId = next.approvedVersionId;
+    if (!approvedVersionId) return false;
+    const recorded = db.reviewRequests.some(
+      (r) =>
+        r.targetId === next.id &&
+        r.targetVersionId === approvedVersionId &&
+        hasEvent(db, r, 'approved'),
+    );
+    if (!recorded) return false;
+  }
+  if (next.status === 'approval_pending' && before.status !== 'approval_pending') {
+    const recorded = db.reviewRequests.some(
+      (r) =>
+        r.targetId === next.id &&
+        r.targetVersionId === next.submittedVersionId &&
+        hasEvent(db, r, 'review_completed'),
+    );
+    if (!recorded) return false;
+  }
+  return true;
+}
+
+function acceptEdit(
+  db: FixtureDb,
+  table: string,
+  existing: Record<string, unknown> | undefined,
+  next: Record<string, unknown>,
+  pendingRequests: readonly DemoEdit[],
+): boolean {
+  if (existing && APPEND_ONLY_TABLES.has(table)) return false;
+  switch (table) {
+    case 'reviewEvents':
+      return acceptReviewEvent(db, next as unknown as ReviewEvent, pendingRequests);
+    case 'reviewRequests':
+      return acceptReviewRequest(
+        db,
+        existing as unknown as ReviewRequest | undefined,
+        next as unknown as ReviewRequest,
+      );
+    case 'disclosureBlocks':
+      return acceptBlock(
+        db,
+        existing as unknown as DisclosureBlock | undefined,
+        next as unknown as DisclosureBlock,
+      );
+    default:
+      return true;
   }
 }

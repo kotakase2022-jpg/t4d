@@ -158,10 +158,11 @@ describe('目標の進捗率 (基準値 − 実績) ÷ (基準値 − 目標値)
   it('総量の目標と原単位の実績は比較しない', () => {
     expect(
       targetComparability(
-        { boundary: '連結', targetType: 'absolute' },
+        { boundary: '連結', targetType: 'absolute', actualMethodology: '実測値の集計' },
         {
           boundary: '連結',
           metric: { unit: 't-CO2e/百万円' },
+          methodologies: ['実測値の集計'],
         },
       ).comparable,
     ).toBe(false);
@@ -353,6 +354,7 @@ describe('目標の登録', () => {
     targetType: 'absolute',
     direction: 'reduce',
     methodologyNote: 'GHG プロトコル（架空）',
+    actualMethodology: '実測値の集計',
     ownerUserId: userId('sustainability@demo.local'),
     revisionReason: null,
     ...overrides,

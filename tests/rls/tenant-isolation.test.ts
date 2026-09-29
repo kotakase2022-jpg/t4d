@@ -9,6 +9,8 @@ import {
   metricId,
   userId,
 } from '@/lib/fixtures/dataset';
+import { DISCLOSURE_FIRST_IDS } from '@/lib/fixtures/disclosure-first';
+import { fid } from '@/lib/fixtures/ids';
 
 /**
  * RLS 越権テスト（指示書 11 章「RLS Test に必ず含める」10 項目）。
@@ -1274,6 +1276,897 @@ describe('11. 本 QA で新たにアプリへ露出したテーブルの越権',
       [ORG_IDS.aomi],
     );
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
+  // Fixture のデモ行（disclosure-first.ts）に頼らず、RLS をバイパスして企業 A の検証用の行を作る
+  // （デモの筋書きを直しても越権テストの前提が変わらないように）。機能設定だけは組織ごとに 1 行の
+  // 一意制約があるため、Fixture の行（disclosure_first = false）をそのまま使う。
+  // 越権の INSERT は RLS 以外では通る内容にし、エラーが RLS によるものであることまで確かめる。
+  const ORG_A = ORG_IDS.aomi;
+  const AUTHOR = userId('sustainability@demo.local'); // disclosure.write
+  const REVIEWER = ENT_A_REVIEWER; // disclosure.write（approve なし）
+  const APPROVER = ENT_A_APPROVER; // approver + reviewer（write と approve）
+  const ADMIN = ENT_A_ADMIN; // org.manage / disclosure.write / export.run / metric.manage / import.run
+  // 承認権限だけを持つ利用者（approver ロールのみ）。デモ利用者には居ないためここで作る
+  const APPROVE_ONLY = fid('user', 'rls-approve-only@demo.local');
+  const RLS_ERROR = /row-level security/;
+  const BODY = JSON.stringify({
+    paragraphs: [
+      { id: 'p1', kind: 'paragraph', children: [{ t: 'text', text: '取締役会が監督する。' }] },
+    ],
+  });
+
+  const ids: Record<string, string> = {};
+  const id = (key: string): string => {
+    const value = ids[key];
+    if (!value) throw new Error(`テスト用の行 ${key} が作られていない`);
+    return value;
+  };
+
+  async function one(sql: string, params: unknown[] = []): Promise<string> {
+    const rows = await h.asSuperuser<{ id: string }>(sql, params);
+    const value = rows[0]?.id;
+    if (!value) throw new Error(`行を作れませんでした: ${sql.slice(0, 80)}`);
+    return value;
+  }
+
+  const EVENT_SQL = `insert into review_events
+      (organization_id, review_request_id, event_type, stage, actor_user_id, target_version_id,
+       reason, paragraph_id, idempotency_key)
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`;
+  function eventParams(
+    request: string,
+    eventType: string,
+    stage: string,
+    actor: string,
+    version: string,
+    extra: { reason?: string; paragraphId?: string; key?: string } = {},
+  ): unknown[] {
+    return [
+      ORG_A,
+      id(request),
+      eventType,
+      stage,
+      actor,
+      id(version),
+      extra.reason ?? null,
+      extra.paragraphId ?? null,
+      extra.key ?? null,
+    ];
+  }
+
+  beforeAll(async () => {
+    ids.framework = await one(
+      `select v.id from disclosure_framework_versions v
+         join disclosure_frameworks f on f.id = v.framework_id
+        where f.key = 'ssbj' limit 1`,
+    );
+    ids.fileVersion = await one(
+      'select id from file_versions where organization_id = $1 order by id limit 1',
+      [ORG_A],
+    );
+    ids.metric = await one(
+      'select id from metric_definitions where organization_id = $1 order by code limit 1',
+      [ORG_A],
+    );
+    ids.dataPointVersion = await one(
+      'select id from data_point_versions where organization_id = $1 order by id limit 1',
+      [ORG_A],
+    );
+
+    await h.asSuperuser('insert into auth.users (id, email) values ($1, $2)', [
+      APPROVE_ONLY,
+      'rls-approve-only@demo.local',
+    ]);
+    await h.asSuperuser(
+      `insert into profiles (id, email, display_name) values ($1, $2, 'RLS 承認専任')`,
+      [APPROVE_ONLY, 'rls-approve-only@demo.local'],
+    );
+    const membership = await one(
+      `insert into organization_memberships (organization_id, user_id, status)
+       values ($1, $2, 'active') returning id`,
+      [ORG_A, APPROVE_ONLY],
+    );
+    await h.asSuperuser(
+      `insert into membership_roles (membership_id, role_key) values ($1, 'approver')`,
+      [membership],
+    );
+
+    ids.settings = await one(
+      `select id from organization_feature_settings
+        where organization_id = $1 and disclosure_first = false`,
+      [ORG_A],
+    );
+    ids.project = await one(
+      `insert into disclosure_projects
+         (organization_id, reporting_period_id, name, period_start, period_end, purposes)
+       values ($1, $2, 'RLS テスト用プロジェクト', '2026-04-01', '2027-03-31', '{ssbj_statutory}')
+       returning id`,
+      [ORG_A, PERIOD_IDS.fy2026],
+    );
+    ids.projectFramework = await one(
+      `insert into project_frameworks (organization_id, project_id, framework_version_id, purpose)
+       values ($1, $2, $3, 'ssbj_statutory') returning id`,
+      [ORG_A, id('project'), id('framework')],
+    );
+    ids.decision = await one(
+      `insert into project_framework_decisions
+         (organization_id, project_framework_id, decision_no, applicability_status,
+          reason, rule_ref, confirmed_on, decided_by)
+       values ($1, $2, 1, 'applicable', 'プライム上場のため', 'SSBJ 適用基準（2026-03-13 改正）',
+               '2026-08-01', $3)
+       returning id`,
+      [ORG_A, id('projectFramework'), AUTHOR],
+    );
+    await h.asSuperuser(
+      `update project_frameworks set current_decision_id = $1, applicability_status = 'applicable'
+        where id = $2`,
+      [id('decision'), id('projectFramework')],
+    );
+    ids.narrative = await one(
+      `insert into narrative_records (organization_id, theme, title)
+       values ($1, 'governance', '取締役会の監督体制') returning id`,
+      [ORG_A],
+    );
+    ids.narrativeVersion = await one(
+      `insert into narrative_versions
+         (organization_id, narrative_record_id, version_no, reporting_period_id, body,
+          content_hash, created_by)
+       values ($1, $2, 1, $3, '取締役会が気候関連課題を監督する。', 'hash-n1', $4) returning id`,
+      [ORG_A, id('narrative'), PERIOD_IDS.fy2026, AUTHOR],
+    );
+    ids.anchor = await one(
+      `insert into source_anchors
+         (organization_id, file_version_id, anchor_kind, quote_text, acquired_by, created_by)
+       values ($1, $2, 'manual_excerpt', '取締役会は年 4 回報告を受ける', 'manual', $3)
+       returning id`,
+      [ORG_A, id('fileVersion'), AUTHOR],
+    );
+
+    // 節は 3 つ。職務分離の筋書きごとに依頼を分ける（同じ節に進行中の依頼は 1 件まで）
+    //   main       … 版の作成者＝依頼者＝海野。検見川がレビュー、承が承認する（正常系）
+    //   byApprover … 版の作成者が承（最終承認者）。依頼者は海野
+    //   sameActor  … 承がレビューを完了し、同じ依頼を承認しようとする
+    const blocks: Array<[key: string, author: string]> = [
+      ['main', AUTHOR],
+      ['byApprover', APPROVER],
+      ['sameActor', AUTHOR],
+    ];
+    for (const [key, author] of blocks) {
+      ids[`block.${key}`] = await one(
+        `insert into disclosure_blocks
+           (organization_id, project_id, framework_version_id, section_key, title)
+         values ($1, $2, $3, $4, $5) returning id`,
+        [ORG_A, id('project'), id('framework'), `governance-${key}`, `ガバナンス（${key}）`],
+      );
+      ids[`version.${key}`] = await one(
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, plain_text, content_hash, created_by)
+         values ($1, $2, 1, $3::jsonb, '取締役会が監督する。', $4, $5) returning id`,
+        [ORG_A, id(`block.${key}`), BODY, `hash-${key}-v1`, author],
+      );
+      await h.asSuperuser(
+        `update disclosure_blocks
+            set current_version_id = $1, submitted_version_id = $1, status = 'review_requested'
+          where id = $2`,
+        [id(`version.${key}`), id(`block.${key}`)],
+      );
+      ids[`request.${key}`] = await one(
+        `insert into review_requests
+           (organization_id, project_id, target_id, target_version_id, requested_by,
+            policy_version, policy)
+         values ($1, $2, $3, $4, $5, 'sod-3role-v1', '{"version": "sod-3role-v1"}'::jsonb)
+         returning id`,
+        [ORG_A, id('project'), id(`block.${key}`), id(`version.${key}`), AUTHOR],
+      );
+    }
+    ids.event = await one(
+      EVENT_SQL,
+      eventParams('request.main', 'requested', 'request', AUTHOR, 'version.main'),
+    );
+    ids.comment = await one(
+      `insert into review_comments
+         (organization_id, block_id, block_version_id, paragraph_id, body, severity, created_by)
+       values ($1, $2, $3, 'p1', '根拠資料の版を確認してください', 'major', $4) returning id`,
+      [ORG_A, id('block.main'), id('version.main'), REVIEWER],
+    );
+    ids.recheck = await one(
+      `insert into recheck_decisions
+         (organization_id, block_id, block_version_id, ref_kind, old_ref_id, new_ref_id,
+          decision, reason, decided_by)
+       values ($1, $2, $3, 'metric', $4, $4, 'keep_old', '差分は端数処理のみ', $5) returning id`,
+      [ORG_A, id('block.main'), id('version.main'), id('dataPointVersion'), AUTHOR],
+    );
+    ids.snapshot = await one(
+      `insert into report_snapshots
+         (organization_id, project_id, snapshot_kind, snapshot_no, content_hash, created_by)
+       values ($1, $2, 'review_draft', 1, 'hash-s1', $3) returning id`,
+      [ORG_A, id('project'), AUTHOR],
+    );
+    ids.artifact = await one(
+      `insert into export_artifacts
+         (organization_id, snapshot_id, format, template_version, file_name, byte_size,
+          file_sha256, content_hash, generated_by)
+       values ($1, $2, 'docx', 'tpl-v1', 'report.docx', 1024, 'sha-1', 'hash-s1', $3)
+       returning id`,
+      [ORG_A, id('snapshot'), AUTHOR],
+    );
+    ids.kpi = await one(
+      `insert into kpi_targets
+         (organization_id, target_key, version_no, metric_id, target_year, target_value,
+          target_type, direction, created_by)
+       values ($1, 'ghg_2030', 1, $2, 2030, 100, 'absolute', 'reduce', $3) returning id`,
+      [ORG_A, id('metric'), AUTHOR],
+    );
+    ids.batch = await one(
+      `insert into quantitative_import_batches
+         (organization_id, reporting_period_id, file_name, file_sha256, preview_hash)
+       values ($1, $2, 'standard.csv', 'sha-csv', 'preview-1') returning id`,
+      [ORG_A, PERIOD_IDS.fy2026],
+    );
+  });
+
+  it('デモ Fixture の行が制約と職務分離トリガを通って投入され、他テナントからは見えない', async () => {
+    // 承認済みの節の記録（依頼・レビュー完了・最終承認）は投入時に t4d.enforce_review_event を通る。
+    // 件数まで見るのは、SEED_ORDER の漏れで行が黙って投入されない事故を拾うため
+    const [counts] = await h.asSuperuser<{ events: string; blocks: string; anchors: string }>(
+      `select (select count(*) from review_events where review_request_id = $1)::text as events,
+              (select count(*) from disclosure_blocks where project_id = $2)::text as blocks,
+              (select count(*) from source_anchors
+                where organization_id = $3 and acquired_by = 'extracted')::text as anchors`,
+      [
+        DISCLOSURE_FIRST_IDS.blocks.fy2026Governance.request,
+        DISCLOSURE_FIRST_IDS.projects.fy2026,
+        ORG_A,
+      ],
+    );
+    expect(counts).toEqual({ events: '3', blocks: '4', anchors: '9' });
+
+    const project = DISCLOSURE_FIRST_IDS.projects.fy2026;
+    const own = await h.asUser(AUTHOR, 'select id from disclosure_projects where id = $1', [
+      project,
+    ]);
+    expect(own).toHaveLength(1);
+    const other = await h.asUser(ENT_B_ADMIN, 'select id from disclosure_projects where id = $1', [
+      project,
+    ]);
+    expect(other).toHaveLength(0);
+  });
+
+  interface TenantSpec {
+    table: string;
+    /** 企業 B の管理者が企業 A の名義で試みる INSERT（RLS 以外の制約では通る内容） */
+    insert: () => [sql: string, params: unknown[]];
+    /** 企業 B の管理者が企業 A の行へ試みる UPDATE（$1 = 企業 A） */
+    update: string;
+  }
+
+  const TENANT_SPECS: TenantSpec[] = [
+    {
+      table: 'organization_feature_settings',
+      insert: () => [
+        'insert into organization_feature_settings (organization_id, disclosure_first) values ($1, false)',
+        [ORG_A],
+      ],
+      update: 'update organization_feature_settings set disclosure_first = false',
+    },
+    {
+      table: 'disclosure_projects',
+      insert: () => [
+        `insert into disclosure_projects (organization_id, reporting_period_id, name, period_start, period_end)
+         values ($1, $2, '越権プロジェクト', '2026-04-01', '2027-03-31')`,
+        [ORG_A, PERIOD_IDS.fy2026],
+      ],
+      update: `update disclosure_projects set name = '乗っ取り'`,
+    },
+    {
+      table: 'project_frameworks',
+      insert: () => [
+        `insert into project_frameworks (organization_id, project_id, framework_version_id, purpose)
+         values ($1, $2, $3, 'internal_esg')`,
+        [ORG_A, id('project'), id('framework')],
+      ],
+      update: `update project_frameworks set applicability_status = 'not_applicable'`,
+    },
+    {
+      table: 'project_framework_decisions',
+      insert: () => [
+        `insert into project_framework_decisions
+           (organization_id, project_framework_id, decision_no, applicability_status, reason,
+            rule_ref, confirmed_on, decided_by)
+         values ($1, $2, 2, 'not_applicable', '越権', '越権', '2026-08-01', $3)`,
+        [ORG_A, id('projectFramework'), ENT_B_ADMIN],
+      ],
+      update: `update project_framework_decisions set reason = '改ざん'`,
+    },
+    {
+      table: 'narrative_records',
+      insert: () => [
+        `insert into narrative_records (organization_id, theme, title) values ($1, 'strategy', '越権')`,
+        [ORG_A],
+      ],
+      update: `update narrative_records set title = '乗っ取り'`,
+    },
+    {
+      table: 'narrative_versions',
+      insert: () => [
+        `insert into narrative_versions
+           (organization_id, narrative_record_id, version_no, reporting_period_id, body, content_hash, created_by)
+         values ($1, $2, 2, $3, '越権', 'hash-x', $4)`,
+        [ORG_A, id('narrative'), PERIOD_IDS.fy2026, ENT_B_ADMIN],
+      ],
+      update: `update narrative_versions set body = '改ざん'`,
+    },
+    {
+      table: 'source_anchors',
+      insert: () => [
+        `insert into source_anchors
+           (organization_id, file_version_id, anchor_kind, quote_text, acquired_by, created_by)
+         values ($1, $2, 'manual_excerpt', '越権', 'manual', $3)`,
+        [ORG_A, id('fileVersion'), ENT_B_ADMIN],
+      ],
+      update: `update source_anchors set quote_text = '改ざん'`,
+    },
+    {
+      table: 'disclosure_blocks',
+      insert: () => [
+        `insert into disclosure_blocks (organization_id, project_id, framework_version_id, section_key, title)
+         values ($1, $2, $3, 'strategy', '越権')`,
+        [ORG_A, id('project'), id('framework')],
+      ],
+      update: `update disclosure_blocks set title = '乗っ取り'`,
+    },
+    {
+      table: 'disclosure_block_versions',
+      insert: () => [
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, content_hash, created_by)
+         values ($1, $2, 9, $3::jsonb, 'hash-x', $4)`,
+        [ORG_A, id('block.main'), BODY, ENT_B_ADMIN],
+      ],
+      update: `update disclosure_block_versions set plain_text = '改ざん'`,
+    },
+    {
+      table: 'review_requests',
+      insert: () => [
+        `insert into review_requests
+           (organization_id, project_id, target_id, target_version_id, requested_by, policy_version, policy)
+         values ($1, $2, $3, $4, $5, 'sod-3role-v1', '{}'::jsonb)`,
+        [ORG_A, id('project'), id('block.main'), id('version.main'), ENT_B_ADMIN],
+      ],
+      update: `update review_requests set reviewer_user_id = null`,
+    },
+    {
+      // BEFORE トリガ（職務分離）は RLS より先に走る。トリガを通る「依頼」の記録で RLS を確かめる
+      table: 'review_events',
+      insert: () => [
+        EVENT_SQL,
+        eventParams('request.main', 'requested', 'request', ENT_B_ADMIN, 'version.main'),
+      ],
+      update: `update review_events set reason = '改ざん'`,
+    },
+    {
+      table: 'review_comments',
+      insert: () => [
+        `insert into review_comments (organization_id, block_id, block_version_id, body, severity, created_by)
+         values ($1, $2, $3, '越権', 'info', $4)`,
+        [ORG_A, id('block.main'), id('version.main'), ENT_B_ADMIN],
+      ],
+      update: `update review_comments set resolution_note = '改ざん'`,
+    },
+    {
+      table: 'recheck_decisions',
+      insert: () => [
+        `insert into recheck_decisions
+           (organization_id, block_id, block_version_id, ref_kind, old_ref_id, new_ref_id, decision, reason, decided_by)
+         values ($1, $2, $3, 'metric', $4, $4, 'adopt_new', '越権', $5)`,
+        [ORG_A, id('block.main'), id('version.main'), id('dataPointVersion'), ENT_B_ADMIN],
+      ],
+      update: `update recheck_decisions set reason = '改ざん'`,
+    },
+    {
+      table: 'report_snapshots',
+      insert: () => [
+        `insert into report_snapshots (organization_id, project_id, snapshot_kind, snapshot_no, content_hash, created_by)
+         values ($1, $2, 'review_draft', 9, 'hash-x', $3)`,
+        [ORG_A, id('project'), ENT_B_ADMIN],
+      ],
+      update: `update report_snapshots set label = '改ざん'`,
+    },
+    {
+      table: 'export_artifacts',
+      insert: () => [
+        `insert into export_artifacts
+           (organization_id, snapshot_id, format, template_version, file_name, byte_size, file_sha256, content_hash, generated_by)
+         values ($1, $2, 'csv', 'tpl-v1', 'x.csv', 1, 'sha-x', 'hash-x', $3)`,
+        [ORG_A, id('snapshot'), ENT_B_ADMIN],
+      ],
+      update: `update export_artifacts set file_name = '改ざん.docx'`,
+    },
+    {
+      table: 'kpi_targets',
+      insert: () => [
+        `insert into kpi_targets
+           (organization_id, target_key, version_no, metric_id, target_year, target_value, target_type, direction, created_by)
+         values ($1, 'x', 1, $2, 2030, 1, 'absolute', 'reduce', $3)`,
+        [ORG_A, id('metric'), ENT_B_ADMIN],
+      ],
+      update: `update kpi_targets set scope_note = '改ざん'`,
+    },
+    {
+      table: 'quantitative_import_batches',
+      insert: () => [
+        `insert into quantitative_import_batches
+           (organization_id, reporting_period_id, file_name, file_sha256, preview_hash)
+         values ($1, $2, 'x.csv', 'sha-x', 'preview-x')`,
+        [ORG_A, PERIOD_IDS.fy2026],
+      ],
+      update: `update quantitative_import_batches set excluded_count = 99`,
+    },
+  ];
+
+  for (const spec of TENANT_SPECS) {
+    describe(spec.table, () => {
+      it('企業 A 自身は作成した行を取得できる（空振りテストでないことの確認）', async () => {
+        const rows = await h.asUser(
+          ENT_A_ADMIN,
+          `select id from ${spec.table} where organization_id = $1`,
+          [ORG_A],
+        );
+        expect(rows.length).toBeGreaterThan(0);
+      });
+
+      it('企業 B の管理者は企業 A の行を取得できない', async () => {
+        const rows = await h.asUser(
+          ENT_B_ADMIN,
+          `select id from ${spec.table} where organization_id = $1`,
+          [ORG_A],
+        );
+        expect(rows).toHaveLength(0);
+      });
+
+      it('企業 B の管理者は企業 A の名義で行を作れない（RLS で拒否）', async () => {
+        const [sql, params] = spec.insert();
+        await expect(h.asUser(ENT_B_ADMIN, sql, params)).rejects.toThrow(RLS_ERROR);
+      });
+
+      it('企業 B の管理者は企業 A の行を更新できない（0 行）', async () => {
+        const rows = await h.asUser(
+          ENT_B_ADMIN,
+          `${spec.update} where organization_id = $1 returning id`,
+          [ORG_A],
+        );
+        expect(rows).toHaveLength(0);
+      });
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // 追記専用（UPDATE / DELETE ポリシーなし ＋ t4d.forbid_mutation トリガ）
+  // ------------------------------------------------------------------
+
+  const APPEND_ONLY: Array<[table: string, key: string, column: string]> = [
+    ['project_framework_decisions', 'decision', 'reason'],
+    ['narrative_versions', 'narrativeVersion', 'body'],
+    ['source_anchors', 'anchor', 'quote_text'],
+    ['disclosure_block_versions', 'version.main', 'plain_text'],
+    ['review_events', 'event', 'reason'],
+    ['recheck_decisions', 'recheck', 'reason'],
+    ['report_snapshots', 'snapshot', 'label'],
+    ['export_artifacts', 'artifact', 'file_name'],
+    ['kpi_targets', 'kpi', 'scope_note'],
+  ];
+
+  for (const [table, key, column] of APPEND_ONLY) {
+    describe(`${table} は追記専用`, () => {
+      it('自組織の書込権限者でも UPDATE は 1 行も変更しない', async () => {
+        const rows = await h.asUser(
+          ENT_A_ADMIN,
+          `update ${table} set ${column} = '改ざん' where id = $1 returning id`,
+          [id(key)],
+        );
+        expect(rows).toHaveLength(0);
+      });
+
+      it('DELETE は権限自体が無い', async () => {
+        const denied = await h.expectDenied(ENT_A_ADMIN, `delete from ${table} where id = $1`, [
+          id(key),
+        ]);
+        expect(denied).toMatch(/permission denied/i);
+      });
+
+      it('Service Role 相当（RLS バイパス）でもトリガで UPDATE / DELETE が止まる', async () => {
+        await expect(
+          h.asSuperuser(`update ${table} set ${column} = ${column} where id = $1`, [id(key)]),
+        ).rejects.toThrow(/T4D_IMMUTABLE/);
+        await expect(
+          h.asSuperuser(`delete from ${table} where id = $1`, [id(key)]),
+        ).rejects.toThrow(/T4D_IMMUTABLE/);
+      });
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // 職務分離（review_events のトリガ t4d.enforce_review_event）
+  // ------------------------------------------------------------------
+
+  describe('職務分離（レビュー・最終承認）', () => {
+    it('依頼者本人はレビューを完了できない', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          EVENT_SQL,
+          eventParams('request.main', 'review_completed', 'review', AUTHOR, 'version.main'),
+        ),
+      ).rejects.toThrow(/T4D_SOD/);
+    });
+
+    it('依頼で固定した版以外を名乗った判断は記録できない', async () => {
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams('request.main', 'review_completed', 'review', REVIEWER, 'version.sameActor'),
+        ),
+      ).rejects.toThrow(/T4D_REVIEW_TARGET_MISMATCH/);
+    });
+
+    it('他人の名義では記録できない（代理禁止・RLS）', async () => {
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams('request.main', 'review_completed', 'review', APPROVER, 'version.main'),
+        ),
+      ).rejects.toThrow(RLS_ERROR);
+    });
+
+    it('差戻しは理由と対象段落が無いと記録できない', async () => {
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams('request.main', 'returned', 'review', REVIEWER, 'version.main'),
+        ),
+      ).rejects.toThrow(/T4D_RETURN_REASON_REQUIRED/);
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams('request.main', 'returned', 'review', REVIEWER, 'version.main', {
+            reason: '根拠が不足しています',
+          }),
+        ),
+      ).rejects.toThrow(/T4D_RETURN_REASON_REQUIRED/);
+    });
+
+    it('版の作成者は最終承認できない（承認権限を持っていても）', async () => {
+      await expect(
+        h.asUser(
+          APPROVER,
+          EVENT_SQL,
+          eventParams('request.byApprover', 'approved', 'final', APPROVER, 'version.byApprover'),
+        ),
+      ).rejects.toThrow(/T4D_SOD/);
+    });
+
+    it('承認権限の無い人は最終承認を記録できない（RLS）', async () => {
+      // 検見川は依頼者でも版の作成者でもないのでトリガは通るが、approve 権限が無い
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams('request.byApprover', 'approved', 'final', REVIEWER, 'version.byApprover'),
+        ),
+      ).rejects.toThrow(RLS_ERROR);
+    });
+
+    it('レビューを完了した人は、同じ依頼を最終承認できない', async () => {
+      const completed = await h.asUser(
+        APPROVER,
+        EVENT_SQL,
+        eventParams(
+          'request.sameActor',
+          'review_completed',
+          'review',
+          APPROVER,
+          'version.sameActor',
+        ),
+      );
+      expect(completed).toHaveLength(1);
+      await expect(
+        h.asUser(
+          APPROVER,
+          EVENT_SQL,
+          eventParams('request.sameActor', 'approved', 'final', APPROVER, 'version.sameActor'),
+        ),
+      ).rejects.toThrow(/T4D_SOD/);
+    });
+
+    it('差戻しは理由と対象段落があれば記録できる', async () => {
+      const rows = await h.asUser(
+        APPROVER,
+        EVENT_SQL,
+        eventParams('request.sameActor', 'returned', 'final', APPROVER, 'version.sameActor', {
+          reason: '財務影響の記載が不足しています',
+          paragraphId: 'p1',
+        }),
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it('依頼者・作成者・レビュー完了者のいずれでもない承認者は最終承認できる', async () => {
+      const reviewed = await h.asUser(
+        REVIEWER,
+        EVENT_SQL,
+        eventParams('request.main', 'review_completed', 'review', REVIEWER, 'version.main', {
+          key: `${id('request.main')}:review:${id('version.main')}`,
+        }),
+      );
+      expect(reviewed).toHaveLength(1);
+      const approved = await h.asUser(
+        APPROVER,
+        EVENT_SQL,
+        eventParams('request.main', 'approved', 'final', APPROVER, 'version.main', {
+          key: `${id('request.main')}:final:${id('version.main')}`,
+        }),
+      );
+      expect(approved).toHaveLength(1);
+    });
+
+    it('同じ判断を 2 回記録できない（冪等キー）', async () => {
+      await expect(
+        h.asUser(
+          REVIEWER,
+          EVENT_SQL,
+          eventParams('request.main', 'review_completed', 'review', REVIEWER, 'version.main', {
+            key: `${id('request.main')}:review:${id('version.main')}`,
+          }),
+        ),
+      ).rejects.toThrow(/duplicate key/);
+    });
+
+    it('記録の種類と段階の組み合わせは固定（第 1 段で最終承認は記録できない）', async () => {
+      await expect(
+        h.asSuperuser(
+          EVENT_SQL,
+          eventParams('request.byApprover', 'approved', 'review', REVIEWER, 'version.byApprover'),
+        ),
+      ).rejects.toThrow(/check constraint/);
+    });
+
+    it('Service Role 相当（RLS バイパス）でも職務分離は外れない', async () => {
+      await expect(
+        h.asSuperuser(
+          EVENT_SQL,
+          eventParams('request.byApprover', 'approved', 'final', AUTHOR, 'version.byApprover'),
+        ),
+      ).rejects.toThrow(/T4D_SOD/);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 依頼・節・コメント・取込バッチの更新ガード
+  // ------------------------------------------------------------------
+
+  describe('更新ガード', () => {
+    it('レビュー依頼の依頼者・対象版はすり替えられない（職務分離の前提を守る）', async () => {
+      await expect(
+        h.asUser(REVIEWER, 'update review_requests set requested_by = $2 where id = $1', [
+          id('request.byApprover'),
+          REVIEWER,
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asSuperuser('update review_requests set target_version_id = $2 where id = $1', [
+          id('request.byApprover'),
+          id('version.main'),
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+
+    it('承認権限の無い人は依頼を「承認済み」にできない', async () => {
+      await expect(
+        h.asUser(REVIEWER, `update review_requests set status = 'approved' where id = $1`, [
+          id('request.main'),
+        ]),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+    });
+
+    it('承認権限だけを持つ人は依頼を「承認済み」にでき、終わった依頼は再開できない', async () => {
+      const rows = await h.asUser(
+        APPROVE_ONLY,
+        `update review_requests set status = 'approved' where id = $1 returning id`,
+        [id('request.main')],
+      );
+      expect(rows).toHaveLength(1);
+      await expect(
+        h.asSuperuser(`update review_requests set status = 'open' where id = $1`, [
+          id('request.main'),
+        ]),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+    });
+
+    it('承認権限の無い人は節を承認済みにできない', async () => {
+      await expect(
+        h.asUser(
+          REVIEWER,
+          `update disclosure_blocks set status = 'approved', approved_version_id = $2 where id = $1`,
+          [id('block.main'), id('version.main')],
+        ),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+    });
+
+    it('承認権限だけを持つ人は節の状態は変えられるが、本文・題名は変えられない', async () => {
+      await expect(
+        h.asUser(APPROVE_ONLY, `update disclosure_blocks set title = '書き換え' where id = $1`, [
+          id('block.main'),
+        ]),
+      ).rejects.toThrow(/T4D_TRANSITION_FORBIDDEN/);
+      const rows = await h.asUser(
+        APPROVE_ONLY,
+        `update disclosure_blocks set status = 'approved', approved_version_id = $2
+          where id = $1 returning id`,
+        [id('block.main'), id('version.main')],
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it('節のポインタは同じ節の版しか指せない', async () => {
+      await expect(
+        h.asSuperuser('update disclosure_blocks set current_version_id = $2 where id = $1', [
+          id('block.main'),
+          id('version.sameActor'),
+        ]),
+      ).rejects.toThrow(/foreign key/);
+    });
+
+    it('コメントは解決の記録だけを更新できる（指摘の本文は変えられない）', async () => {
+      await expect(
+        h.asUser(REVIEWER, `update review_comments set body = '書き換え' where id = $1`, [
+          id('comment'),
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      const rows = await h.asUser(
+        REVIEWER,
+        `update review_comments set resolved_at = now(), resolved_by = $2, resolution_note = '確認済み'
+          where id = $1 returning id`,
+        [id('comment'), REVIEWER],
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it('確定した取込バッチは変更できない', async () => {
+      const committed = await h.asUser(
+        ENT_A_ADMIN,
+        `update quantitative_import_batches
+            set status = 'committed', committed_at = now(), committed_by = $2,
+                commit_idempotency_key = 'commit-1'
+          where id = $1 returning id`,
+        [id('batch'), ENT_A_ADMIN],
+      );
+      expect(committed).toHaveLength(1);
+      await expect(
+        h.asUser(
+          ENT_A_ADMIN,
+          'update quantitative_import_batches set excluded_count = 1 where id = $1',
+          [id('batch')],
+        ),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+
+    it('機能設定は org.manage を持つ人だけが変えられる', async () => {
+      const denied = await h.asUser(
+        REVIEWER,
+        'update organization_feature_settings set disclosure_first = false where id = $1 returning id',
+        [id('settings')],
+      );
+      expect(denied).toHaveLength(0);
+      const allowed = await h.asUser(
+        ADMIN,
+        'update organization_feature_settings set disclosure_first = true where id = $1 returning id',
+        [id('settings')],
+      );
+      expect(allowed).toHaveLength(1);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 本人名義・テナント整合（親と子の organization_id）
+  // ------------------------------------------------------------------
+
+  describe('本人名義とテナント整合', () => {
+    it('自組織の書込権限者は本人名義で版を追記できるが、他人の名義では追記できない', async () => {
+      const own = await h.asUser(
+        AUTHOR,
+        `insert into disclosure_block_versions
+           (organization_id, block_id, version_no, body, content_hash, created_by)
+         values ($1, $2, 2, $3::jsonb, 'hash-main-v2', $4) returning id`,
+        [ORG_A, id('block.main'), BODY, AUTHOR],
+      );
+      expect(own).toHaveLength(1);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into disclosure_block_versions
+             (organization_id, block_id, version_no, body, content_hash, created_by)
+           values ($1, $2, 3, $3::jsonb, 'hash-main-v3', $4)`,
+          [ORG_A, id('block.main'), BODY, REVIEWER],
+        ),
+      ).rejects.toThrow(RLS_ERROR);
+    });
+
+    it('子の organization_id は親と一致しなければならない（Service Role でも）', async () => {
+      await expect(
+        h.asSuperuser(
+          `insert into disclosure_blocks (organization_id, project_id, framework_version_id, section_key, title)
+           values ($1, $2, $3, 'metrics', '他社の名義')`,
+          [ORG_IDS.soten, id('project'), id('framework')],
+        ),
+      ).rejects.toThrow(/foreign key/);
+      await expect(
+        h.asSuperuser(
+          `insert into narrative_versions
+             (organization_id, narrative_record_id, version_no, reporting_period_id, body, content_hash)
+           values ($1, $2, 9, $3, '他社の名義', 'hash-x')`,
+          [ORG_IDS.soten, id('narrative'), PERIOD_IDS.fy2026],
+        ),
+      ).rejects.toThrow(/foreign key/);
+    });
+
+    it('節の基準はプロジェクトが扱うと決めた版に限る', async () => {
+      const [other] = await h.asSuperuser<{ id: string }>(
+        `select v.id from disclosure_framework_versions v
+           join disclosure_frameworks f on f.id = v.framework_id
+          where f.key = 'cdp' limit 1`,
+      );
+      await expect(
+        h.asSuperuser(
+          `insert into disclosure_blocks (organization_id, project_id, framework_version_id, section_key, title)
+           values ($1, $2, $3, 'cdp', '未登録の基準')`,
+          [ORG_A, id('project'), other!.id],
+        ),
+      ).rejects.toThrow(/foreign key/);
+    });
+
+    it('「未判定」を適用判断として確定することはできない', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into project_framework_decisions
+             (organization_id, project_framework_id, decision_no, applicability_status, reason,
+              rule_ref, confirmed_on, decided_by)
+           values ($1, $2, 2, 'not_assessed', '未判定', '規則', '2026-08-01', $3)`,
+          [ORG_A, id('projectFramework'), AUTHOR],
+        ),
+      ).rejects.toThrow(/check constraint/);
+    });
+
+    it('監査ログに開示業務の種類を記録できる（0040）', async () => {
+      // 海野は common.audit.read を持たず自分の記録を読み返せないため、RETURNING は付けない
+      await h.asUser(
+        AUTHOR,
+        `insert into audit_events (actor_user_id, actor_organization_id, event_type, resource_type, resource_id)
+         values ($1, $2, 'review_approved', 'review_request', $3)`,
+        [AUTHOR, ORG_A, id('request.main')],
+      );
+      const rows = await h.asSuperuser<{ count: string }>(
+        `select count(*)::text as count from audit_events
+          where event_type = 'review_approved' and resource_id = $1`,
+        [id('request.main')],
+      );
+      expect(rows[0]?.count).toBe('1');
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into audit_events (actor_user_id, actor_organization_id, event_type)
+           values ($1, $2, 'unknown_event')`,
+          [AUTHOR, ORG_A],
+        ),
+      ).rejects.toThrow(/check constraint/);
+    });
   });
 });
 

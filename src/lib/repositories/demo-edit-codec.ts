@@ -178,6 +178,29 @@ const PERSISTED_TABLES = new Set<TableName>([
   // 承認の道筋。段階を承認した結果が消えると、進み具合が巻き戻って見える。
   // 1 回の提出で作るのは 5 行なので容量に収まる
   'dataPointApprovalSteps',
+  // 開示優先モード（docs/disclosure-first.md §2-6）。状態・ポインタ・短文だけの小さい行に限る。
+  // 依頼・差戻し・承認の結果が消えると、レビューの流れが巻き戻って見えるため持ち回す。
+  // 節（disclosureBlocks）の自動保存本文（workingBody）は大きくなりうるため、
+  // DemoDbClient が Cookie へ書く前に外す（demo-client.ts の persistedColumns）。
+  //
+  // 次の表は**入れない**。本文 AST・定性情報の本文・引用文・スナップショット・取込行を持ち、
+  // Cookie の容量（2 チャンクで約 7.6KB）を 1 件で使い切って他のデモ操作を押し出すため。
+  //   narrativeVersions / disclosureBlockVersions / sourceAnchors /
+  //   reportSnapshots / quantitativeImportBatches
+  // これらは同一インスタンスのメモリにだけ残る（docs/known-limitations.md D-3 と同じ扱い）。
+  // 別インスタンスでは参照先の版が見つからないため、画面は「見つからない」として安全に失敗させる。
+  'organizationFeatureSettings',
+  'disclosureProjects',
+  'projectFrameworks',
+  'projectFrameworkDecisions',
+  'narrativeRecords',
+  'disclosureBlocks',
+  'reviewRequests',
+  'reviewEvents',
+  'reviewComments',
+  'recheckDecisions',
+  'exportArtifacts',
+  'kpiTargets',
 ]);
 
 export function isPersistedTable(table: TableName): boolean {

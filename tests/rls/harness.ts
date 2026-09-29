@@ -99,22 +99,36 @@ async function listMigrations(): Promise<string[]> {
   return entries.filter((f) => f.endsWith('.sql')).sort();
 }
 
-export async function createRlsHarness(): Promise<RlsHarness> {
+/** migration を 1 ファイル適用する（失敗時はファイル名付きで投げる） */
+export async function applyMigration(db: PGlite, file: string): Promise<void> {
+  const sql = await readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
+  try {
+    await db.exec(sql);
+  } catch (error) {
+    throw new Error(`migration ${file} の適用に失敗しました: ${(error as Error).message}`, {
+      cause: error,
+    });
+  }
+}
+
+/**
+ * Supabase シムと migration を適用した空の DB（Fixture は入れない）。
+ * `before` を渡すと、そのファイル名より前の migration だけを適用する
+ * （既存行がある状態で後続の migration を当てる backfill の検証に使う）。
+ */
+export async function createMigratedDb(options: { before?: string } = {}): Promise<PGlite> {
   const db = new PGlite();
   await db.waitReady;
-
   await db.exec(SUPABASE_SHIM);
-
   for (const file of await listMigrations()) {
-    const sql = await readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
-    try {
-      await db.exec(sql);
-    } catch (error) {
-      throw new Error(`migration ${file} の適用に失敗しました: ${(error as Error).message}`, {
-        cause: error,
-      });
-    }
+    if (options.before && file >= options.before) break;
+    await applyMigration(db, file);
   }
+  return db;
+}
+
+export async function createRlsHarness(): Promise<RlsHarness> {
+  const db = await createMigratedDb();
 
   // Fixture を投入（RLS はテーブル所有者には既定で適用されないため superuser で実行）
   const fixture = createFixtureDb();

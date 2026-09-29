@@ -40,6 +40,23 @@ import type {
   DisclosureMapping,
   DisclosureResponse,
   DisclosureResponseVersion,
+  DisclosureBlock,
+  DisclosureBlockVersion,
+  DisclosureProject,
+  ExportArtifact,
+  KpiTarget,
+  NarrativeRecord,
+  NarrativeVersion,
+  OrganizationFeatureSettings,
+  ProjectFramework,
+  ProjectFrameworkDecision,
+  QuantitativeImportBatch,
+  RecheckDecision,
+  ReportSnapshot,
+  ReviewComment,
+  ReviewEvent,
+  ReviewRequest,
+  SourceAnchor,
   EmissionFactor,
   Engagement,
   EngagementMember,
@@ -139,6 +156,25 @@ export interface TableMap {
   ssbjActionPlans: SsbjActionPlan;
   ssbjAnalysisSettings: SsbjAnalysisSettings;
   ssbjDisclosureDrafts: SsbjDisclosureDraft;
+
+  // 開示優先モード（docs/disclosure-first.md §3）
+  organizationFeatureSettings: OrganizationFeatureSettings;
+  disclosureProjects: DisclosureProject;
+  projectFrameworks: ProjectFramework;
+  projectFrameworkDecisions: ProjectFrameworkDecision;
+  narrativeRecords: NarrativeRecord;
+  narrativeVersions: NarrativeVersion;
+  sourceAnchors: SourceAnchor;
+  disclosureBlocks: DisclosureBlock;
+  disclosureBlockVersions: DisclosureBlockVersion;
+  reviewRequests: ReviewRequest;
+  reviewEvents: ReviewEvent;
+  reviewComments: ReviewComment;
+  recheckDecisions: RecheckDecision;
+  reportSnapshots: ReportSnapshot;
+  exportArtifacts: ExportArtifact;
+  kpiTargets: KpiTarget;
+  quantitativeImportBatches: QuantitativeImportBatch;
 
   ingestionJobs: IngestionJob;
   ingestionJobFiles: IngestionJobFile;

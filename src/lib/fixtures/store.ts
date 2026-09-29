@@ -7,6 +7,7 @@
  */
 
 import { isCountedInTotals } from '@/lib/domain/boundaries';
+import { availabilityFromValue } from '@/lib/domain/disclosure-status';
 import { SCOPE3_FORMULA, supplierInputLabel } from '@/lib/domain/scope3-labels';
 import { buildEvidenceText } from './evidence-documents';
 import { selectSample } from '@/lib/services/sampling';
@@ -36,6 +37,12 @@ import {
   userId,
 } from './dataset';
 import { SSBJ_FRAMEWORK_INFO, SSBJ_MASTER_ITEMS } from '@/lib/frameworks/ssbj-2026';
+import {
+  CSRD_SAMPLE_VERSION_METADATA,
+  SSBJ_2026_VERSION_METADATA,
+  applyScope1Correction,
+  seedDisclosureFirst,
+} from './disclosure-first';
 import { contentHash, fid } from './ids';
 import type {
   Alert,
@@ -67,6 +74,23 @@ import type {
   DisclosureMapping,
   DisclosureResponse,
   DisclosureResponseVersion,
+  DisclosureBlock,
+  DisclosureBlockVersion,
+  DisclosureProject,
+  ExportArtifact,
+  KpiTarget,
+  NarrativeRecord,
+  NarrativeVersion,
+  OrganizationFeatureSettings,
+  ProjectFramework,
+  ProjectFrameworkDecision,
+  QuantitativeImportBatch,
+  RecheckDecision,
+  ReportSnapshot,
+  ReviewComment,
+  ReviewEvent,
+  ReviewRequest,
+  SourceAnchor,
   EmissionFactor,
   Engagement,
   EngagementMember,
@@ -171,6 +195,25 @@ export interface FixtureDb {
   ssbjAnalysisSettings: SsbjAnalysisSettings[];
   ssbjDisclosureDrafts: SsbjDisclosureDraft[];
 
+  // 開示優先モード（docs/disclosure-first.md §3）
+  organizationFeatureSettings: OrganizationFeatureSettings[];
+  disclosureProjects: DisclosureProject[];
+  projectFrameworks: ProjectFramework[];
+  projectFrameworkDecisions: ProjectFrameworkDecision[];
+  narrativeRecords: NarrativeRecord[];
+  narrativeVersions: NarrativeVersion[];
+  sourceAnchors: SourceAnchor[];
+  disclosureBlocks: DisclosureBlock[];
+  disclosureBlockVersions: DisclosureBlockVersion[];
+  reviewRequests: ReviewRequest[];
+  reviewEvents: ReviewEvent[];
+  reviewComments: ReviewComment[];
+  recheckDecisions: RecheckDecision[];
+  reportSnapshots: ReportSnapshot[];
+  exportArtifacts: ExportArtifact[];
+  kpiTargets: KpiTarget[];
+  quantitativeImportBatches: QuantitativeImportBatch[];
+
   ingestionJobs: IngestionJob[];
   ingestionJobFiles: IngestionJobFile[];
   ingestionRows: IngestionRow[];
@@ -210,6 +253,28 @@ function must<T>(value: T | undefined, message: string): T {
   if (value === undefined) throw new Error(`Fixture inconsistency: ${message}`);
   return value;
 }
+
+/**
+ * 基準の版メタデータ（0034）の初期値。一次資料で確認していない版（CDP の架空版）は
+ * 法的位置付け・収録範囲を未確認のまま持つ（推測で埋めると、草案と正式基準の区別を誤って見せてしまう）。
+ * 確認済みの SSBJ・架空サンプルの CSRD・ESRS-40a の値は disclosure-first.ts に置く。
+ */
+const UNVERIFIED_VERSION_METADATA = {
+  versionCode: null,
+  legalStatus: null,
+  issuedAt: null,
+  effectiveAt: null,
+  jurisdiction: null,
+  materialityBasis: null,
+  sourceUrl: null,
+  verifiedAt: null,
+  verifiedBy: null,
+  coverageStatus: null,
+  coverageNote: null,
+} as const satisfies Omit<
+  DisclosureFrameworkVersion,
+  'id' | 'frameworkId' | 'year' | 'label' | 'status' | 'isFixture' | 'createdAt'
+>;
 
 // ======================================================================
 
@@ -261,6 +326,23 @@ export function createFixtureDb(): FixtureDb {
     ssbjActionPlans: [],
     ssbjAnalysisSettings: [],
     ssbjDisclosureDrafts: [],
+    organizationFeatureSettings: [],
+    disclosureProjects: [],
+    projectFrameworks: [],
+    projectFrameworkDecisions: [],
+    narrativeRecords: [],
+    narrativeVersions: [],
+    sourceAnchors: [],
+    disclosureBlocks: [],
+    disclosureBlockVersions: [],
+    reviewRequests: [],
+    reviewEvents: [],
+    reviewComments: [],
+    recheckDecisions: [],
+    reportSnapshots: [],
+    exportArtifacts: [],
+    kpiTargets: [],
+    quantitativeImportBatches: [],
     ingestionJobs: [],
     ingestionJobFiles: [],
     ingestionRows: [],
@@ -625,6 +707,10 @@ export function createFixtureDb(): FixtureDb {
         documentType: spec.docType,
         reportingPeriodId: periodId,
         scanStatus: 'skipped',
+        // 利用目的・版は開示優先モードのデモ資料で設定する（既存の証憑は未設定のまま）
+        usagePurpose: null,
+        editionLabel: null,
+        issuedOn: null,
         deletedAt: null,
         ...audit(
           at(PERIOD_AGE[periodCode]),
@@ -711,6 +797,9 @@ export function createFixtureDb(): FixtureDb {
       textValue: null,
       unitOfMeasure: seed.unitOfMeasure,
       status: seed.status === 'approved' ? 'approved' : seed.status,
+      valueKind: 'actual',
+      availabilityStatus: availabilityFromValue(originalValue, null),
+      absenceReason: null,
       sourceType: seed.metricCode === 'scope3_cat1' ? 'calculation' : 'import',
       sourceReference:
         seed.metricCode === 'scope3_cat1' ? '購買明細からの算定' : '拠点提出ファイル',
@@ -733,6 +822,9 @@ export function createFixtureDb(): FixtureDb {
         textValue: null,
         unitOfMeasure: seed.unitOfMeasure,
         status: seed.status,
+        valueKind: 'actual',
+        availabilityStatus: availabilityFromValue(seed.value, null),
+        absenceReason: null,
         sourceType: 'manual',
         sourceReference: '拠点からの再提出',
         changeReason: seed.changedAfterApproval
@@ -772,6 +864,9 @@ export function createFixtureDb(): FixtureDb {
           : null,
       approvedBy: seed.status === 'approved' ? userId('approver@demo.local') : null,
       changedAfterApproval: Boolean(seed.changedAfterApproval),
+      valueKind: current.valueKind,
+      availabilityStatus: current.availabilityStatus,
+      absenceReason: current.absenceReason,
       deletedAt: null,
       ...audit(createdAt, hasSecondVersion ? secondVersionAt : createdAt, owner),
     });
@@ -835,6 +930,11 @@ export function createFixtureDb(): FixtureDb {
       }
     }
   }
+
+  // 開示優先モードのデモ: 指標の節が引用した本社 Scope1（FY2026）に、節の承認後の訂正版を足す。
+  // Data Room・監査法人の Snapshot より前に済ませ、両者が訂正後の版を指すようにする
+  // （後から足すと Snapshot 後の変更として数えられ、保証側のデモの件数が変わる）
+  applyScope1Correction(db);
 
   // Scope3 Cat.1 の算定内訳。
   // ラベルは「<コード> <名前> / <品目>」規約（domain/scope3-labels.ts）。
@@ -919,6 +1019,7 @@ export function createFixtureDb(): FixtureDb {
       status: 'superseded',
       isFixture: true,
       createdAt: at(400),
+      ...UNVERIFIED_VERSION_METADATA,
     },
     {
       id: cdp2026,
@@ -928,6 +1029,7 @@ export function createFixtureDb(): FixtureDb {
       status: 'published',
       isFixture: true,
       createdAt: at(120),
+      ...UNVERIFIED_VERSION_METADATA,
     },
     {
       id: ssbj2026,
@@ -938,6 +1040,7 @@ export function createFixtureDb(): FixtureDb {
       // 正式基準の条文（SSBJ の転載許可取得済み）なので架空フラグを立てない
       isFixture: false,
       createdAt: at(120),
+      ...SSBJ_2026_VERSION_METADATA,
     },
   );
 
@@ -1407,6 +1510,7 @@ export function createFixtureDb(): FixtureDb {
     status: 'published',
     isFixture: true,
     createdAt: at(90),
+    ...CSRD_SAMPLE_VERSION_METADATA,
   });
 
   CSRD_ITEM_SPECS.forEach((spec, index) => {
@@ -1463,6 +1567,12 @@ export function createFixtureDb(): FixtureDb {
       });
     }
   });
+
+  // ------------------------------------------------------------------
+  // 開示優先モード（docs/disclosure-first.md §7）: ESRS-40a・根拠資料・定性情報・
+  // プロジェクト・節・レビュー・KPI 目標。中身は disclosure-first.ts
+  // ------------------------------------------------------------------
+  seedDisclosureFirst(db);
 
   // ------------------------------------------------------------------
   // 取込ジョブ Fixture
@@ -1639,6 +1749,9 @@ export function createFixtureDb(): FixtureDb {
       sourceType: 'manual',
       sourceReference: 'グループ内取引の集計',
       status: 'approved',
+      valueKind: 'actual',
+      availabilityStatus: 'value_present',
+      absenceReason: null,
       changeReason: null,
       contentHash: contentHash(`${dpId}|1|${seed.value}`),
       createdAt: at(40),
@@ -1684,6 +1797,9 @@ export function createFixtureDb(): FixtureDb {
       approvedAt: at(35),
       approvedBy: userId('approver@demo.local'),
       changedAfterApproval: false,
+      valueKind: 'actual',
+      availabilityStatus: 'value_present',
+      absenceReason: null,
       deletedAt: null,
       ...audit(at(40), at(35), userId('sustainability@demo.local')),
     });

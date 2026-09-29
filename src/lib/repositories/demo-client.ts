@@ -27,8 +27,30 @@ import type { Uuid } from '@/types/domain';
  */
 function persistedColumns(table: TableName, row: unknown): Record<string, unknown> {
   const record = row as Record<string, unknown>;
+  if (table === 'disclosureBlocks') return withoutWorkingBody(record);
   if (table !== 'aiRuns' || record.featureType !== 'importMapping') return record;
   return { ...record, outputJson: {} };
+}
+
+/**
+ * 節の自動保存本文（workingBody）は Cookie へ載せない。
+ * 本文 AST は数 KB になり、1 回の自動保存で他のデモ操作（依頼・承認など）を押し出してしまう。
+ * 自動保存は業務上の版ではないため、別インスタンスでは「自動保存なし」（現在の版から再開）に戻るだけで済む。
+ *
+ * 新規行は列を落とさずに空へ揃え（別インスタンスで欠けた列を読むと壊れるため）、
+ * 更新は自動保存の 3 列ごと記録から外す（本文だけ消えて保存時刻が残る食い違いを作らない）。
+ */
+const WORKING_COLUMNS = ['workingBody', 'workingBaseVersionId', 'workingSavedAt'] as const;
+
+function withoutWorkingBody(record: Record<string, unknown>): Record<string, unknown> {
+  return { ...record, workingBody: null, workingBaseVersionId: null, workingSavedAt: null };
+}
+
+function persistedPatch(table: TableName, patch: Record<string, unknown>): Record<string, unknown> {
+  if (table !== 'disclosureBlocks') return patch;
+  const rest = { ...patch };
+  for (const column of WORKING_COLUMNS) delete rest[column];
+  return rest;
 }
 
 export class DemoDbClient implements DbClient {
@@ -88,7 +110,8 @@ export class DemoDbClient implements DbClient {
 
     // 変更のあった列だけを Cookie へ（Cookie の容量を圧迫しないため）
     if (isPersistedTable(table)) {
-      await appendDemoEdit(table, id, patch as unknown as Record<string, unknown>);
+      const persisted = persistedPatch(table, patch as unknown as Record<string, unknown>);
+      if (Object.keys(persisted).length > 0) await appendDemoEdit(table, id, persisted);
     }
     return structuredClone(next) as unknown as Row<K>;
   }

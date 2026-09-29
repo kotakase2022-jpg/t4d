@@ -3,8 +3,8 @@
 `supabase/migrations/0012_rls_core.sql` / `0013_rls_assurance.sql`
 （＋ `0016_storage_bucket_read.sql` / `0017_rls_counterparty_organization.sql` /
 `0025_ssbj_gap_analysis.sql` / `0028_ssbj_analysis_settings.sql` / `0029_approval_routes.sql` /
-`0030_ssbj_disclosure_drafts.sql`）の要約です。
-**83 テーブルすべてで RLS を有効化**しており、`pnpm check:rls` が未設定を検出します。
+`0030_ssbj_disclosure_drafts.sql` / 開示優先モードの `0033`〜`0040`）の要約です。
+**100 テーブルすべてで RLS を有効化**しており（ポリシー 228 件）、`pnpm check:rls` が未設定を検出します。
 
 凡例
 
@@ -49,6 +49,7 @@
 | approval_routes / approval_route_stages | own                          | perm:org.manage       |
 | ssbj_analysis_settings                  | own                          | perm:disclosure.write |
 | ssbj_disclosure_drafts                  | own                          | perm:disclosure.write |
+| organization_feature_settings（0033）   | own                          | perm:org.manage       |
 
 ## 3. Data（企業原本）
 
@@ -60,6 +61,10 @@
 | data_point_validation_results | own                          | perm:data.write                 | perm:data.write                                                                                       | —      |
 | aggregation_rules / runs      | own                          | perm:metric.manage / data.write | 同左                                                                                                  | —      |
 | data_point_approval_steps     | own                          | perm:data.review                | perm:data.review。誰の段階かはアプリ層で判定する（役割・個人指定の組み合わせは SQL だけでは表せない） | —      |
+| quantitative_import_batches   | own                          | perm:import.run                 | perm:import.run。**確定・却下後はトリガで変更不可**（`quantitative_import_batch_guard`）              | —      |
+
+> `data_points` / `data_point_versions` に 0039 で足した `value_kind` / `availability_status` /
+> `absence_reason` は既存のポリシーに従う（列の追加のみで、ポリシーは変えていない）。
 
 > **監査法人に UPDATE ポリシーが存在しない**ことが「Read-only by Default」の実装です。
 
@@ -96,6 +101,36 @@
 | disclosure_response_versions                          | own                        | INSERT のみ（追記専用＋トリガ）。**AI 由来の `approved` は トリガで拒否** |
 | disclosure_mappings                                   | own                        | perm:disclosure.write                                                     |
 | response_evidence_links                               | own                        | perm:disclosure.write                                                     |
+
+### 6.1 開示優先モード（0035〜0038）
+
+権限キーは新設していない（docs/disclosure-first.md §2-2）。`self` = 行の実行者列が `auth.uid()` と一致（本人名義のみ・代理禁止）。
+子の `organization_id` は親と一致しなければならず、複合外部キーで固定している（Service Role でも他社の名義で書けない）。
+
+| テーブル                    | SELECT | INSERT                                                                                                                                                       | UPDATE                                                                                                                                           | DELETE |
+| --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| disclosure_projects         | own    | perm:disclosure.write                                                                                                                                        | perm:disclosure.write                                                                                                                            | —      |
+| project_frameworks          | own    | perm:disclosure.write                                                                                                                                        | perm:disclosure.write                                                                                                                            | —      |
+| project_framework_decisions | own    | perm:disclosure.write ＋ self（`decided_by`）。`not_assessed` は CHECK で拒否                                                                                | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| narrative_records           | own    | perm:disclosure.write                                                                                                                                        | perm:disclosure.write                                                                                                                            | —      |
+| narrative_versions          | own    | perm:disclosure.write ＋ self（`created_by`）                                                                                                                | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| source_anchors              | own    | perm:disclosure.write ＋ self（`created_by`）                                                                                                                | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| disclosure_blocks           | own    | perm:disclosure.write                                                                                                                                        | perm:disclosure.{write,approve}。`approved` への遷移・承認版の変更は approve。approve だけの人は状態・提出版・承認版以外を変えられない（トリガ） | —      |
+| disclosure_block_versions   | own    | perm:disclosure.write ＋ self（`created_by`）                                                                                                                | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| review_requests             | own    | perm:disclosure.write ＋ self（`requested_by`）                                                                                                              | perm:disclosure.{write,approve}。依頼時点の内容（対象版・依頼者・規則）は不変、`approved` は approve、終了した依頼は再開不可（トリガ）           | —      |
+| review_events               | own    | self（`actor_user_id`）＋ 種類別: requested / withdrawn / review_completed は write、returned は write か approve、approved は approve。**職務分離はトリガ** | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| review_comments             | own    | perm:disclosure.{write,approve} ＋ self（`created_by`）                                                                                                      | perm:disclosure.{write,approve}。解決の記録（`resolved_*`）以外は不変（トリガ）                                                                  | —      |
+| recheck_decisions           | own    | perm:disclosure.write ＋ self（`decided_by`）                                                                                                                | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| report_snapshots            | own    | self（`created_by`）＋ `review_draft` は perm:disclosure.write か export.run、`approved` は perm:disclosure.approve                                          | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| export_artifacts            | own    | perm:export.run ＋ self（`generated_by`）                                                                                                                    | **—（追記専用＋トリガ）**                                                                                                                        | —      |
+| kpi_targets                 | own    | perm:metric.manage ＋ self（`created_by`）                                                                                                                   | **—（追記専用の版＋トリガ）**                                                                                                                    | —      |
+
+`review_events` の職務分離（`t4d.enforce_review_event`、Service Role にも効く）:
+
+- `review_completed` / `approved` … 実行者 ≠ 依頼者（`review_requests.requested_by`）かつ ≠ 対象版の作成者
+- `approved` … さらに ≠ 同じ依頼の `review_completed` の実行者
+- `returned` … `reason` と `paragraph_id` が必須
+- すべて … `target_version_id` は依頼で固定した版と一致（別の版を名乗って作成者の判定をすり抜けさせない）
 
 ## 7. Import / AI
 
@@ -138,6 +173,9 @@
 | ------------ | ------------------------------------------------- | ---------------------------- | ---------------------------- | ------ |
 | audit_events | perm:common.audit.read（自組織）or member（案件） | `actor_user_id = auth.uid()` | **—（Immutable ＋ トリガ）** | —      |
 
+`event_type` の CHECK は `0040_audit_event_types_disclosure.sql` で開示業務の 17 種類を追加した
+（`src/types/domain.ts` の `AUDIT_EVENT_TYPES` と一致することを `tests/unit/disclosure-enum-parity.test.ts` が検査する）。
+
 `DELETE` は `0014_immutability_and_grants.sql` で `authenticated` から REVOKE しています
 （Soft Delete と監査証跡を優先）。
 
@@ -156,6 +194,14 @@ RLS は「通常ユーザー」に対する防御です。Service Role は RLS �
 | data_point_versions / disclosure_response_versions / file_versions / approvals | UPDATE/DELETE 禁止                                       |
 | disclosure_response_versions                                                   | `forbid_ai_auto_approval`（AI 由来 ＋ approved を拒否）  |
 | data_points                                                                    | `enforce_data_point_transition`（状態遷移権限）          |
+| project_framework_decisions / narrative_versions / source_anchors              | UPDATE/DELETE 禁止                                       |
+| disclosure_block_versions / review_events / recheck_decisions                  | UPDATE/DELETE 禁止                                       |
+| report_snapshots / export_artifacts / kpi_targets                              | UPDATE/DELETE 禁止                                       |
+| review_events                                                                  | `enforce_review_event`（職務分離・差戻しの必須項目）     |
+| review_requests                                                                | `review_request_guard`（依頼時点の内容は不変・承認権限） |
+| disclosure_blocks                                                              | `enforce_disclosure_block_update`（承認の遷移権限）      |
+| review_comments                                                                | `review_comment_guard`（解決の記録のみ更新可）           |
+| quantitative_import_batches                                                    | `quantitative_import_batch_guard`（確定・却下後は不変）  |
 
 ---
 
@@ -186,7 +232,8 @@ RLS は「通常ユーザー」に対する防御です。Service Role は RLS �
 ## 12. 検証（`pnpm test:rls`）
 
 PGlite（インプロセス Postgres）へ `supabase/migrations/*.sql` をそのまま適用し、
-`SET LOCAL ROLE authenticated` ＋ `request.jwt.claims` を切り替えて **56 件**を検証します。
+`SET LOCAL ROLE authenticated` ＋ `request.jwt.claims` を切り替えて **227 件**（2026-09-29 時点。
+開示優先モードの 17 表の越権・追記専用・職務分離・更新ガード、0039 の backfill を含む）を検証します。
 
 指示書 11 章「RLS Test に必ず含める」10 項目はすべて含まれています。
 

@@ -13,7 +13,14 @@ import { SQL_TABLE_NAMES, toSnake } from '@/lib/repositories/table-names';
 import type { TableName } from '@/lib/repositories/types';
 import type { FixtureDb } from './store';
 
-/** jsonb として扱う列（それ以外の JS 配列は Postgres 配列に変換する）。 */
+/**
+ * jsonb として扱う列（それ以外の JS 配列は Postgres 配列に変換する）。
+ *
+ * 列名だけで判定するため、ここには**どの表でも jsonb である列名**だけを置く。
+ * 同じ列名が表によって text / text[] / uuid[] になるもの（例: `body` は
+ * comments では text、disclosure_block_versions では jsonb）は下の表別の一覧に書く。
+ * 一覧と migration の一致は tests/unit/seed-sql.test.ts が検査する。
+ */
 const JSONB_COLUMNS = new Set([
   'inputs',
   'details',
@@ -28,6 +35,25 @@ const JSONB_COLUMNS = new Set([
   'recalculation_input',
   'saved_views',
 ]);
+
+/** 表ごとに jsonb である列（列名が他の表の text / 配列列と重なりうるもの）。 */
+const JSONB_COLUMNS_BY_TABLE: Partial<Record<TableName, ReadonlySet<string>>> = {
+  // JS 配列を持つ jsonb。ここに無いと Postgres 配列リテラルとして書かれて投入に失敗する
+  ssbjDisclosureDrafts: new Set(['gaps']),
+  projectFrameworks: new Set(['conditions']),
+  projectFrameworkDecisions: new Set(['conditions_snapshot']),
+  narrativeVersions: new Set(['fields']),
+  disclosureBlocks: new Set(['working_body']),
+  disclosureBlockVersions: new Set(['body']),
+  reviewRequests: new Set(['policy', 'referenced_versions']),
+  reportSnapshots: new Set(['framework_versions', 'blocks', 'metric_values', 'anchors']),
+  quantitativeImportBatches: new Set(['rows']),
+};
+
+/** Seed 生成で jsonb として書く列か（tests/unit/seed-sql.test.ts から migration と突合する）。 */
+export function isJsonbColumn(table: TableName, column: string): boolean {
+  return JSONB_COLUMNS.has(column) || (JSONB_COLUMNS_BY_TABLE[table]?.has(column) ?? false);
+}
 
 /**
  * 外部キー制約を満たす投入順序。
@@ -76,6 +102,25 @@ export const SEED_ORDER: TableName[] = [
   'ingestionJobFiles',
   'aiRuns',
   'ingestionRows',
+  // 開示優先モード。版・判断は ai_runs・file_versions・extracted_fragments を参照するため
+  // それらより後に置く（current_* のポインタは遅延可能な外部キー）。
+  'organizationFeatureSettings',
+  'disclosureProjects',
+  'projectFrameworks',
+  'projectFrameworkDecisions',
+  'narrativeRecords',
+  'sourceAnchors',
+  'narrativeVersions',
+  'disclosureBlocks',
+  'disclosureBlockVersions',
+  'reviewRequests',
+  'reviewEvents',
+  'reviewComments',
+  'recheckDecisions',
+  'reportSnapshots',
+  'exportArtifacts',
+  'kpiTargets',
+  'quantitativeImportBatches',
   'engagements',
   'engagementMembers',
   'grants',
@@ -121,17 +166,18 @@ function toArrayLiteral(values: unknown[]): string {
   return quote(`{${inner}}`);
 }
 
-function toSqlValue(column: string, value: unknown): string {
+function toSqlValue(table: TableName, column: string, value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (JSONB_COLUMNS.has(column)) return `${quote(JSON.stringify(value))}::jsonb`;
+  if (isJsonbColumn(table, column)) return `${quote(JSON.stringify(value))}::jsonb`;
   if (Array.isArray(value)) return toArrayLiteral(value);
   if (typeof value === 'object') return `${quote(JSON.stringify(value))}::jsonb`;
   return quote(String(value));
 }
 
-function buildInsert(sqlTable: string, rows: Record<string, unknown>[]): string {
+function buildInsert(table: TableName, rows: Record<string, unknown>[]): string {
+  const sqlTable = SQL_TABLE_NAMES[table];
   const first = rows[0];
   if (!first) return '';
   // 列は先頭行のキーで決め、各行の値も**同じキー順**で引く。
@@ -144,7 +190,7 @@ function buildInsert(sqlTable: string, rows: Record<string, unknown>[]): string 
       if (extra.length > 0) {
         throw new Error(`${sqlTable}: 先頭行に無いキーがあります: ${extra.join(', ')}`);
       }
-      const values = keys.map((key) => toSqlValue(toSnake(key), row[key]));
+      const values = keys.map((key) => toSqlValue(table, toSnake(key), row[key]));
       return `  (${values.join(', ')})`;
     })
     .join(',\n');
@@ -222,7 +268,7 @@ export function fixtureToSqlStatements(db: FixtureDb, options: SeedSqlOptions): 
   for (const table of SEED_ORDER) {
     const rows = db[table] as unknown as Record<string, unknown>[];
     if (!rows || rows.length === 0) continue;
-    const sql = buildInsert(SQL_TABLE_NAMES[table], rows);
+    const sql = buildInsert(table, rows);
     if (sql) statements.push(sql);
   }
 

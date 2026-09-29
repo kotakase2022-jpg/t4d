@@ -378,6 +378,26 @@ export type DataPointStatus = (typeof DATA_POINT_STATUSES)[number];
 export const DATA_SOURCE_TYPES = ['manual', 'import', 'calculation', 'carry_forward'] as const;
 export type DataSourceType = (typeof DATA_SOURCE_TYPES)[number];
 
+/**
+ * 現在値の区分（0039）。業務キーには含めない（同じ枠に実績と推計を並べない）。
+ * 値の出所（sourceType）とは別の軸。
+ */
+export const VALUE_KINDS = ['actual', 'estimate', 'target'] as const;
+export type ValueKind = (typeof VALUE_KINDS)[number];
+
+/**
+ * 値の有無の状態（0039）。value が null の理由を区別し、0 と未入力を混同しない。
+ * `not_applicable` は人が理由を添えて判断するもので、値が無いことから推測しない。
+ */
+export const AVAILABILITY_STATUSES = [
+  'value_present',
+  'not_entered',
+  'not_obtained',
+  'not_applicable',
+  'not_calculated',
+] as const;
+export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number];
+
 export interface DataPoint extends AuditColumns, SoftDeletable {
   id: Uuid;
   organizationId: Uuid;
@@ -398,6 +418,12 @@ export interface DataPoint extends AuditColumns, SoftDeletable {
   approvedBy: Uuid | null;
   /** 承認後に変更が入ったか（監査法人向け Change Alert の一次情報） */
   changedAfterApproval: boolean;
+  /** 現在値の区分（実績／推計／目標） */
+  valueKind: ValueKind;
+  /** 値の有無の状態。value_present 以外の行は集計に含めない */
+  availabilityStatus: AvailabilityStatus;
+  /** 値が無い理由（未取得・対象外・未算定のときに人が書く） */
+  absenceReason: string | null;
 }
 
 export interface DataPointVersion {
@@ -409,6 +435,10 @@ export interface DataPointVersion {
   textValue: string | null;
   unitOfMeasure: string;
   status: DataPointStatus;
+  /** その版の時点の区分・値の有無（開示本文はこの版を引用する） */
+  valueKind: ValueKind;
+  availabilityStatus: AvailabilityStatus;
+  absenceReason: string | null;
   sourceType: DataSourceType;
   sourceReference: string | null;
   changeReason: string | null;
@@ -531,6 +561,17 @@ export type StorageBucket = (typeof STORAGE_BUCKETS)[number];
 export const CONFIDENTIALITY_LEVELS = ['public', 'internal', 'confidential', 'restricted'] as const;
 export type ConfidentialityLevel = (typeof CONFIDENTIALITY_LEVELS)[number];
 
+/**
+ * 根拠資料の利用目的（0034）。
+ * current_fact 以外（前年度の記載・文体の参考）は当年度の事実の根拠として引用しない。
+ */
+export const EVIDENCE_USAGE_PURPOSES = [
+  'current_fact',
+  'prior_year_text',
+  'style_reference',
+] as const;
+export type EvidenceUsagePurpose = (typeof EVIDENCE_USAGE_PURPOSES)[number];
+
 export interface FileObject extends AuditColumns, SoftDeletable {
   id: Uuid;
   organizationId: Uuid;
@@ -543,6 +584,11 @@ export interface FileObject extends AuditColumns, SoftDeletable {
   reportingPeriodId: Uuid | null;
   /** ウイルススキャン結果。Interface 化のみ（Phase 1 は 'skipped'）。 */
   scanStatus: 'pending' | 'clean' | 'infected' | 'skipped';
+  /** 利用目的。null は未設定（当年度の根拠としては扱わない） */
+  usagePurpose: EvidenceUsagePurpose | null;
+  /** 版の表示名（例: 2025 年 6 月発行版） */
+  editionLabel: string | null;
+  issuedOn: IsoDate | null;
 }
 
 export interface FileVersion {
@@ -802,7 +848,11 @@ export interface Alert {
 // 10.6 Disclosure
 // ======================================================================
 
-export const FRAMEWORK_KEYS = ['cdp', 'ssbj', 'csrd', 'msci', 'ftse'] as const;
+/**
+ * `esrs_40a` は EU 域外企業向け ESRS（Art. 40a）。CSRD（EU 法人向け）とは
+ * 重要性の考え方も適用条件も異なるため、別フレームワークとして持つ（0034）。
+ */
+export const FRAMEWORK_KEYS = ['cdp', 'ssbj', 'csrd', 'esrs_40a', 'msci', 'ftse'] as const;
 export type FrameworkKey = (typeof FRAMEWORK_KEYS)[number];
 
 export interface DisclosureFramework {
@@ -811,6 +861,30 @@ export interface DisclosureFramework {
   name: string;
   description: string;
 }
+
+/** 基準の版の法的な位置付け（0034）。sample は架空の縮小マスター */
+export const FRAMEWORK_LEGAL_STATUSES = [
+  'draft',
+  'adopted',
+  'promulgated',
+  'effective',
+  'superseded',
+  'sample',
+] as const;
+export type FrameworkLegalStatus = (typeof FRAMEWORK_LEGAL_STATUSES)[number];
+
+/** 要求事項の収録範囲（0034）。not_loaded は版だけ登録して要求事項を収録していない */
+export const FRAMEWORK_COVERAGE_STATUSES = [
+  'full_for_scope',
+  'partial',
+  'not_loaded',
+  'sample',
+] as const;
+export type FrameworkCoverageStatus = (typeof FRAMEWORK_COVERAGE_STATUSES)[number];
+
+/** 基準が求める重要性の考え方（0034）。ESRS-40a 草案はインパクト重要性 */
+export const MATERIALITY_BASES = ['financial', 'impact', 'double', 'not_specified'] as const;
+export type MaterialityBasis = (typeof MATERIALITY_BASES)[number];
 
 export interface DisclosureFrameworkVersion {
   id: Uuid;
@@ -821,6 +895,18 @@ export interface DisclosureFrameworkVersion {
   /** Fixture である旨を UI に必ず出す */
   isFixture: boolean;
   createdAt: IsoDateTime;
+  // 以下は 0034 で追加した版メタデータ。すべて null 可で、未確認のものを推測で埋めない
+  versionCode: string | null;
+  legalStatus: FrameworkLegalStatus | null;
+  issuedAt: IsoDate | null;
+  effectiveAt: IsoDate | null;
+  jurisdiction: string | null;
+  materialityBasis: MaterialityBasis | null;
+  sourceUrl: string | null;
+  verifiedAt: IsoDate | null;
+  verifiedBy: string | null;
+  coverageStatus: FrameworkCoverageStatus | null;
+  coverageNote: string | null;
 }
 
 export const ANSWER_TYPES = ['text', 'numeric', 'single_choice', 'multi_choice', 'table'] as const;
@@ -1186,6 +1272,585 @@ export interface SsbjActionPlan extends AuditColumns {
   status: SsbjActionStatus;
   /** データ収集項目を作った場合の指標コード */
   linkedMetricCode: string | null;
+}
+
+// ======================================================================
+// 開示優先モード（docs/disclosure-first.md §3・§4。migration 0033〜0039）
+//
+// 表示ラベルは src/lib/domain/disclosure-status.ts に集約する（画面ごとに訳さない）。
+// ======================================================================
+
+/** 組織単位の機能設定（0033）。行が無い組織は既定値（disclosureFirst = false）として扱う */
+export interface OrganizationFeatureSettings extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  disclosureFirst: boolean;
+}
+
+export const DISCLOSURE_PURPOSES = [
+  'ssbj_statutory',
+  'ssbj_voluntary',
+  'csrd_40a_prep',
+  'csrd_eu_entity',
+  'internal_esg',
+] as const;
+export type DisclosurePurpose = (typeof DISCLOSURE_PURPOSES)[number];
+
+export const DISCLOSURE_LANGUAGES = ['ja', 'en'] as const;
+export type DisclosureLanguage = (typeof DISCLOSURE_LANGUAGES)[number];
+
+export const DISCLOSURE_PROJECT_STATUSES = ['preparing', 'active', 'closed'] as const;
+export type DisclosureProjectStatus = (typeof DISCLOSURE_PROJECT_STATUSES)[number];
+
+/** 開示プロジェクト（0035）。報告期間・目的・担当・報告範囲を束ねる */
+export interface DisclosureProject extends AuditColumns, SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  name: string;
+  reportingEntity: string;
+  periodStart: IsoDate;
+  periodEnd: IsoDate;
+  currency: string;
+  purposes: DisclosurePurpose[];
+  languages: DisclosureLanguage[];
+  ownerUserId: Uuid | null;
+  reviewerUserId: Uuid | null;
+  finalApproverUserId: Uuid | null;
+  dueDate: IsoDate | null;
+  scopeOrgNote: string;
+  scopeConsolidationNote: string;
+  scopeGhgBoundaryNote: string;
+  scopeValueChainNote: string;
+  /** 報告対象に含める組織・拠点。空配列は全社（未指定） */
+  includedUnitIds: Uuid[];
+  status: DisclosureProjectStatus;
+}
+
+export const APPLICABILITY_STATUSES = [
+  'not_assessed',
+  'candidate',
+  'applicable',
+  'not_applicable',
+  'voluntary',
+  'awaiting_confirmation',
+] as const;
+export type ApplicabilityStatus = (typeof APPLICABILITY_STATUSES)[number];
+
+/**
+ * 適用条件の入力（§8.4: EU 域内売上・従業員数など）。
+ * 未入力の項目はキー自体を持たない（0 と「分からない」を混同しない）。
+ */
+export type FrameworkConditionValue = number | string | boolean | null;
+export type FrameworkConditions = Record<string, FrameworkConditionValue>;
+
+/** プロジェクトが扱う基準の版と適用区分（0035）。保存しただけでは判断は確定しない */
+export interface ProjectFramework extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  projectId: Uuid;
+  /** 使う版を固定する（最新版を引き直すと、改正で黙って判断根拠が変わる） */
+  frameworkVersionId: Uuid;
+  purpose: DisclosurePurpose;
+  applicabilityStatus: ApplicabilityStatus;
+  currentDecisionId: Uuid | null;
+  conditions: FrameworkConditions;
+}
+
+/** 適用判断の確定記録（0035・追記専用）。未判定（not_assessed）は確定できない */
+export interface ProjectFrameworkDecision {
+  id: Uuid;
+  organizationId: Uuid;
+  projectFrameworkId: Uuid;
+  decisionNo: number;
+  applicabilityStatus: Exclude<ApplicabilityStatus, 'not_assessed'>;
+  reason: string;
+  /** 参照した規則とその版 */
+  ruleRef: string;
+  /** 規則を確認した日 */
+  confirmedOn: IsoDate;
+  transitionalNote: string | null;
+  /** 判断時点の適用条件の写し */
+  conditionsSnapshot: FrameworkConditions;
+  decidedBy: Uuid;
+  decidedAt: IsoDateTime;
+}
+
+export const NARRATIVE_THEMES = [
+  'risk_opportunity',
+  'financial_impact',
+  'governance',
+  'strategy',
+  'policy_other',
+] as const;
+export type NarrativeTheme = (typeof NARRATIVE_THEMES)[number];
+
+export const NARRATIVE_STATUSES = ['draft', 'confirmed', 'needs_recheck'] as const;
+export type NarrativeStatus = (typeof NARRATIVE_STATUSES)[number];
+
+/** 定性情報の台帳（0036）。内容は NarrativeVersion に版として追記する */
+export interface NarrativeRecord extends AuditColumns, SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  theme: NarrativeTheme;
+  title: string;
+  ownerUserId: Uuid | null;
+  ownerDepartment: string;
+  tags: string[];
+  status: NarrativeStatus;
+  currentVersionId: Uuid | null;
+  /** 人が確認した版。確認後に版を追加しても残る */
+  confirmedVersionId: Uuid | null;
+  confirmedBy: Uuid | null;
+  confirmedAt: IsoDateTime | null;
+}
+
+/** 定性情報の版（0036・追記専用） */
+export interface NarrativeVersion {
+  id: Uuid;
+  organizationId: Uuid;
+  narrativeRecordId: Uuid;
+  versionNo: number;
+  reportingPeriodId: Uuid;
+  scopeNote: string;
+  /** テンプレート項目。値が無い項目はキー自体を持たない */
+  fields: Record<string, string>;
+  body: string;
+  sourceAnchorIds: Uuid[];
+  carriedFromVersionId: Uuid | null;
+  changeReason: string | null;
+  /** AI の候補を人が採用して作った版なら、その実行 ID */
+  originatedFromAiRunId: Uuid | null;
+  contentHash: string;
+  createdAt: IsoDateTime;
+  createdBy: Uuid | null;
+}
+
+export const ANCHOR_KINDS = [
+  'pdf_page',
+  'heading_paragraph',
+  'sheet_cell',
+  'text_range',
+  'manual_excerpt',
+] as const;
+export type AnchorKind = (typeof ANCHOR_KINDS)[number];
+
+export const ANCHOR_ACQUIRED_BY = ['manual', 'extracted'] as const;
+export type AnchorAcquiredBy = (typeof ANCHOR_ACQUIRED_BY)[number];
+
+/** 根拠資料の引用位置（0036・追記専用）。利用目的は FileObject.usagePurpose で判定する */
+export interface SourceAnchor {
+  id: Uuid;
+  organizationId: Uuid;
+  fileVersionId: Uuid;
+  /** extracted のときは必須（抽出結果を指す） */
+  fragmentId: Uuid | null;
+  anchorKind: AnchorKind;
+  /** pdf_page のときは必須 */
+  page: number | null;
+  /** 見出し・段落番号・シート!セル */
+  locator: string | null;
+  /** 引用した文言の写し */
+  quoteText: string;
+  acquiredBy: AnchorAcquiredBy;
+  createdAt: IsoDateTime;
+  createdBy: Uuid | null;
+}
+
+// ----------------------------------------------------------------------
+// 本文 AST（§4）。disclosure_block_versions.body / disclosure_blocks.working_body の中身。
+// 数値・定性情報は「版」を参照し、表示用の文字列は挿入・採用時点の値を持つ
+// （参照先に新しい版ができても、承認済み本文の見た目が黙って変わらないように）。
+// ----------------------------------------------------------------------
+
+export type BlockInline =
+  | { t: 'text'; text: string }
+  /** 表示用文字列は挿入時の値 */
+  | { t: 'metric'; dataPointId: Uuid; dataPointVersionId: Uuid; display: string }
+  /** 採用時の本文を保持 */
+  | { t: 'narrative'; narrativeVersionId: Uuid; quote: string }
+  /** 出典印 */
+  | { t: 'cite'; sourceAnchorId: Uuid };
+
+export interface BlockParagraph {
+  /** 安定 ID（差戻し・コメントの紐付け先）。編集しても変えない */
+  id: string;
+  kind: 'paragraph' | 'heading';
+  children: BlockInline[];
+  /** AI の候補を採用した段落なら、その実行 ID */
+  aiRunId?: Uuid;
+}
+
+export interface BlockBody {
+  paragraphs: BlockParagraph[];
+}
+
+export const BLOCK_STATUSES = [
+  'draft',
+  'review_requested',
+  'returned',
+  'approval_pending',
+  'approved',
+] as const;
+export type BlockStatus = (typeof BLOCK_STATUSES)[number];
+
+/** 開示本文の節（0037）。本文そのものは DisclosureBlockVersion に版として追記する */
+export interface DisclosureBlock extends AuditColumns, SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  projectId: Uuid;
+  /** プロジェクトが扱う基準の版（ProjectFramework にある版に限る） */
+  frameworkVersionId: Uuid;
+  sectionKey: string;
+  title: string;
+  sortOrder: number;
+  language: DisclosureLanguage;
+  translationOfBlockId: Uuid | null;
+  requirementItemIds: Uuid[];
+  ownerUserId: Uuid | null;
+  dueDate: IsoDate | null;
+  status: BlockStatus;
+  currentVersionId: Uuid | null;
+  /** レビュー依頼で固定した版 */
+  submittedVersionId: Uuid | null;
+  /** 承認された版。承認後に修正しても残る */
+  approvedVersionId: Uuid | null;
+  /** 自動保存中の作業本文。業務上の版ではない */
+  workingBody: BlockBody | null;
+  workingBaseVersionId: Uuid | null;
+  workingSavedAt: IsoDateTime | null;
+}
+
+export const BLOCK_VERSION_ORIGINS = ['human', 'human_adopted_ai'] as const;
+export type BlockVersionOrigin = (typeof BLOCK_VERSION_ORIGINS)[number];
+
+/** 開示本文の版（0037・追記専用）。版は必ず人が保存する */
+export interface DisclosureBlockVersion {
+  id: Uuid;
+  organizationId: Uuid;
+  blockId: Uuid;
+  versionNo: number;
+  baseVersionId: Uuid | null;
+  body: BlockBody;
+  plainText: string;
+  /** 引用した data_point_versions.id */
+  metricRefs: Uuid[];
+  /** 引用した narrative_versions.id */
+  narrativeRefs: Uuid[];
+  /** 出典印の source_anchors.id */
+  anchorRefs: Uuid[];
+  changeReason: string | null;
+  origin: BlockVersionOrigin;
+  originatedFromAiRunId: Uuid | null;
+  contentHash: string;
+  createdAt: IsoDateTime;
+  createdBy: Uuid;
+}
+
+export const REVIEW_TARGET_TYPES = ['disclosure_block'] as const;
+export type ReviewTargetType = (typeof REVIEW_TARGET_TYPES)[number];
+
+export const REVIEW_REQUEST_STATUSES = [
+  'open',
+  'returned',
+  'reviewed',
+  'approved',
+  'withdrawn',
+] as const;
+export type ReviewRequestStatus = (typeof REVIEW_REQUEST_STATUSES)[number];
+
+/** 依頼時点の規則の写し（review_requests.policy）。後から規則を変えても依頼の判断基準は変わらない */
+export interface ReviewPolicy {
+  /** policy_version と同じ値（例: sod-3role-v1） */
+  version: string;
+  /** 依頼の後に通す段階（第 1 段レビュー → 最終承認） */
+  stages: Array<'review' | 'final'>;
+  /** 依頼者・対象版の作成者はレビュー完了できない */
+  forbidRequesterOrAuthorReview: boolean;
+  /** 依頼者・対象版の作成者・同じ依頼のレビュー完了者は最終承認できない */
+  forbidRequesterAuthorOrReviewerApproval: boolean;
+  /** 差戻しには理由と対象段落を必須にする */
+  requireReturnReasonAndParagraph: boolean;
+}
+
+/** 依頼時点で本文が引用していた版（review_requests.referenced_versions） */
+export interface ReviewReferencedVersions {
+  metricVersionIds: Uuid[];
+  narrativeVersionIds: Uuid[];
+  anchorIds: Uuid[];
+}
+
+/** レビュー依頼（0037）。対象の版・規則・参照版を依頼時点で固定する */
+export interface ReviewRequest extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  projectId: Uuid;
+  targetType: ReviewTargetType;
+  targetId: Uuid;
+  targetVersionId: Uuid;
+  requestedBy: Uuid;
+  reviewerUserId: Uuid | null;
+  approverUserId: Uuid | null;
+  policyVersion: string;
+  policy: ReviewPolicy;
+  /** 依頼時点の適用判断の版（ProjectFrameworkDecision.id） */
+  decisionIds: Uuid[];
+  referencedVersions: ReviewReferencedVersions;
+  status: ReviewRequestStatus;
+}
+
+export const REVIEW_EVENT_TYPES = [
+  'requested',
+  'returned',
+  'review_completed',
+  'approved',
+  'withdrawn',
+] as const;
+export type ReviewEventType = (typeof REVIEW_EVENT_TYPES)[number];
+
+export const REVIEW_STAGES = ['request', 'review', 'final'] as const;
+export type ReviewStage = (typeof REVIEW_STAGES)[number];
+
+/**
+ * レビューの記録（0037・追記専用）。
+ * 職務分離と差戻しの必須項目は DB トリガ（t4d.enforce_review_event）でも強制する。
+ */
+export interface ReviewEvent {
+  id: Uuid;
+  organizationId: Uuid;
+  reviewRequestId: Uuid;
+  eventType: ReviewEventType;
+  stage: ReviewStage;
+  actorUserId: Uuid;
+  /** 依頼で固定した版と同じ値でなければならない */
+  targetVersionId: Uuid;
+  reason: string | null;
+  /** 差戻しの対象段落（BlockParagraph.id） */
+  paragraphId: string | null;
+  /** 依頼 ID＋段階＋対象版。二重押下で同じ判断を 2 回記録しない */
+  idempotencyKey: string | null;
+  createdAt: IsoDateTime;
+}
+
+export const REVIEW_COMMENT_SEVERITIES = ['info', 'major'] as const;
+export type ReviewCommentSeverity = (typeof REVIEW_COMMENT_SEVERITIES)[number];
+
+/** 版・段落に紐付くレビューコメント（0037）。更新できるのは解決の記録だけ */
+export interface ReviewComment {
+  id: Uuid;
+  organizationId: Uuid;
+  blockId: Uuid;
+  blockVersionId: Uuid;
+  paragraphId: string | null;
+  body: string;
+  /** 未解決の major はレビュー完了・承認の阻害条件 */
+  severity: ReviewCommentSeverity;
+  createdAt: IsoDateTime;
+  createdBy: Uuid;
+  resolvedAt: IsoDateTime | null;
+  resolvedBy: Uuid | null;
+  resolutionNote: string | null;
+}
+
+export const RECHECK_REF_KINDS = ['metric', 'narrative'] as const;
+export type RecheckRefKind = (typeof RECHECK_REF_KINDS)[number];
+
+export const RECHECK_DECISIONS = ['adopt_new', 'keep_old', 'return_to_owner'] as const;
+export type RecheckDecisionKind = (typeof RECHECK_DECISIONS)[number];
+
+/** 引用先が更新されたときの判断（0037・追記専用） */
+export interface RecheckDecision {
+  id: Uuid;
+  organizationId: Uuid;
+  blockId: Uuid;
+  blockVersionId: Uuid;
+  refKind: RecheckRefKind;
+  /** refKind に応じて data_point_versions.id / narrative_versions.id */
+  oldRefId: Uuid;
+  newRefId: Uuid;
+  decision: RecheckDecisionKind;
+  reason: string;
+  decidedBy: Uuid;
+  decidedAt: IsoDateTime;
+}
+
+export const REPORT_SNAPSHOT_KINDS = ['review_draft', 'approved'] as const;
+export type ReportSnapshotKind = (typeof REPORT_SNAPSHOT_KINDS)[number];
+
+/** スナップショットに固定した基準の版 */
+export interface ReportSnapshotFramework {
+  frameworkVersionId: Uuid;
+  frameworkKey: FrameworkKey;
+  label: string;
+  versionCode: string | null;
+  legalStatus: FrameworkLegalStatus | null;
+  coverageStatus: FrameworkCoverageStatus | null;
+  applicabilityStatus: ApplicabilityStatus;
+  decisionId: Uuid | null;
+}
+
+/** スナップショットに固定した節 */
+export interface ReportSnapshotBlock {
+  blockId: Uuid;
+  /** 固定した版。版が無い節は null（草稿のみ。確定版では必ず版がある） */
+  versionId: Uuid | null;
+  sectionKey: string;
+  title: string;
+  language: DisclosureLanguage;
+  status: BlockStatus;
+  body: BlockBody;
+  contentHash: string | null;
+}
+
+/** スナップショットに固定した数値（参照した data_point_version の写し） */
+export interface ReportSnapshotMetricValue {
+  dataPointId: Uuid;
+  dataPointVersionId: Uuid;
+  metricId: Uuid;
+  value: number | null;
+  textValue: string | null;
+  unitOfMeasure: string;
+  reportingPeriodId: Uuid;
+  boundary: string;
+  status: DataPointStatus;
+  valueKind: ValueKind;
+  availabilityStatus: AvailabilityStatus;
+}
+
+/** スナップショットに固定した引用位置 */
+export interface ReportSnapshotAnchor {
+  sourceAnchorId: Uuid;
+  fileVersionId: Uuid;
+  anchorKind: AnchorKind;
+  page: number | null;
+  locator: string | null;
+  quoteText: string;
+  usagePurpose: EvidenceUsagePurpose | null;
+}
+
+/** レポートのスナップショット（0038・追記専用）。出力は必ずここから作る */
+export interface ReportSnapshot {
+  id: Uuid;
+  organizationId: Uuid;
+  projectId: Uuid;
+  snapshotKind: ReportSnapshotKind;
+  snapshotNo: number;
+  label: string;
+  frameworkVersions: ReportSnapshotFramework[];
+  decisionIds: Uuid[];
+  blocks: ReportSnapshotBlock[];
+  metricValues: ReportSnapshotMetricValue[];
+  narrativeVersionIds: Uuid[];
+  anchors: ReportSnapshotAnchor[];
+  policyVersion: string | null;
+  /** 正規化した内容のハッシュ。再出力で一致する */
+  contentHash: string;
+  createdAt: IsoDateTime;
+  createdBy: Uuid;
+}
+
+export const EXPORT_ARTIFACT_FORMATS = ['docx', 'xlsx', 'csv'] as const;
+export type ExportArtifactFormat = (typeof EXPORT_ARTIFACT_FORMATS)[number];
+
+export const EXPORT_AUDIENCES = ['internal', 'external'] as const;
+export type ExportAudience = (typeof EXPORT_AUDIENCES)[number];
+
+/** 出力ファイルの記録（0038・追記専用） */
+export interface ExportArtifact {
+  id: Uuid;
+  organizationId: Uuid;
+  snapshotId: Uuid;
+  format: ExportArtifactFormat;
+  audience: ExportAudience;
+  templateVersion: string;
+  fileName: string;
+  byteSize: number;
+  fileSha256: string;
+  /** スナップショットの正規化内容のハッシュ（再出力で一致する） */
+  contentHash: string;
+  generatedAt: IsoDateTime;
+  generatedBy: Uuid;
+}
+
+export const KPI_TARGET_TYPES = ['absolute', 'intensity'] as const;
+export type KpiTargetType = (typeof KPI_TARGET_TYPES)[number];
+
+export const KPI_DIRECTIONS = ['reduce', 'increase'] as const;
+export type KpiDirection = (typeof KPI_DIRECTIONS)[number];
+
+/** KPI 目標（0038・追記専用の版）。変更は改訂理由付きの新しい版で行う */
+export interface KpiTarget {
+  id: Uuid;
+  organizationId: Uuid;
+  /** 版が変わっても同じ値 */
+  targetKey: string;
+  versionNo: number;
+  metricId: Uuid;
+  boundary: string;
+  scopeNote: string;
+  baseYear: number | null;
+  baseValue: number | null;
+  targetYear: number;
+  targetValue: number;
+  targetType: KpiTargetType;
+  direction: KpiDirection;
+  methodologyNote: string;
+  ownerUserId: Uuid | null;
+  /** 2 版目以降は必須 */
+  revisionReason: string | null;
+  createdAt: IsoDateTime;
+  createdBy: Uuid | null;
+}
+
+export const QUANTITATIVE_IMPORT_STATUSES = ['validated', 'committed', 'rejected'] as const;
+export type QuantitativeImportStatus = (typeof QUANTITATIVE_IMPORT_STATUSES)[number];
+
+/** 取込行の差分区分（既存の値に対して新規・変更・同一・エラー） */
+export const QUANTITATIVE_IMPORT_DIFF_KINDS = ['new', 'changed', 'unchanged', 'error'] as const;
+export type QuantitativeImportDiffKind = (typeof QUANTITATIVE_IMPORT_DIFF_KINDS)[number];
+
+/** 標準 CSV の 1 行の解析結果（quantitative_import_batches.rows の要素） */
+export interface QuantitativeImportBatchRow {
+  /** CSV 上の行番号（見出し行を 1 とする） */
+  rowNo: number;
+  raw: Record<string, string>;
+  diffKind: QuantitativeImportDiffKind;
+  /** 確定の対象に含めるか（「有効な行だけ確定」で外した行は false） */
+  included: boolean;
+  metricId: Uuid | null;
+  unitId: Uuid | null;
+  boundary: string | null;
+  /** 既存の Data Point と、検証時点の現在版（確定時にずれていれば拒否する） */
+  dataPointId: Uuid | null;
+  currentVersionId: Uuid | null;
+  value: number | null;
+  textValue: string | null;
+  unitOfMeasure: string | null;
+  valueKind: ValueKind;
+  availabilityStatus: AvailabilityStatus;
+  absenceReason: string | null;
+  errors: string[];
+  warnings: string[];
+}
+
+/** 標準 CSV の取込バッチ（0039）。確定・却下したバッチは変更しない */
+export interface QuantitativeImportBatch {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  projectId: Uuid | null;
+  fileName: string;
+  fileSha256: string;
+  status: QuantitativeImportStatus;
+  rows: QuantitativeImportBatchRow[];
+  /** 検証結果のハッシュ。確定時に再計算して一致しなければ拒否する */
+  previewHash: string;
+  commitIdempotencyKey: string | null;
+  committedAt: IsoDateTime | null;
+  committedBy: Uuid | null;
+  excludedCount: number;
+  createdAt: IsoDateTime;
+  createdBy: Uuid | null;
 }
 
 // ======================================================================
@@ -1802,6 +2467,24 @@ export const AUDIT_EVENT_TYPES = [
   'ai_run_completed',
   'ai_output_accepted',
   'export_created',
+  // 開示優先モード（0040）。開示業務の操作を data_* で代用しない
+  'settings_changed',
+  'project_created',
+  'project_updated',
+  'framework_decision_confirmed',
+  'narrative_version_created',
+  'narrative_confirmed',
+  'block_version_created',
+  'review_requested',
+  'review_returned',
+  'review_completed',
+  'review_approved',
+  'review_withdrawn',
+  'comment_created',
+  'comment_resolved',
+  'recheck_decided',
+  'report_snapshot_created',
+  'import_committed',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
 

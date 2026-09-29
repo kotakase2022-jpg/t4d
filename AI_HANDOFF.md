@@ -2217,3 +2217,77 @@ docs の導線表記も更新。
   aria-current が 2 つ並ぶ問題を sidebar 側で修正、Command Palette へ旧名
   「サプライヤーデータ取込」の検索語を残す、docs の BOM 混入除去、コメントの
   不変条件の誤り訂正、単位手修正・解決済み行候補の integration テスト追加。
+
+## 2026-09-29 開示優先モード W1-F1（スキーマ基盤・型・純粋関数）
+
+設計の正本は `docs/disclosure-first.md` §3・§4。この段階は保存層と型までで、画面・Service は未着手。
+
+**変更**
+
+- migration 0033〜0040 を追加（既存ファイルは書き換えていない）。17 表を新設し、全表で RLS 有効・ポリシーあり。
+  - 子の `organization_id` は親と複合外部キーで一致させる（0021/0022 方式。既存表へは `(id, organization_id)` の一意制約だけを追加）。
+    節・依頼・コメントが指す版は「同じ節の版」に限る（`(版 ID, 節 ID)` の複合外部キー）。
+  - 追記専用 9 表（判断・定性情報の版・引用位置・本文の版・レビュー記録・再確認・スナップショット・出力記録・KPI 目標）は
+    UPDATE/DELETE ポリシーなし＋`t4d.forbid_mutation()`。
+  - 職務分離トリガ `t4d.enforce_review_event`（`T4D_SOD` / `T4D_RETURN_REASON_REQUIRED` / `T4D_REVIEW_TARGET_MISMATCH`）。
+    §3 の approved・returned に加え、§2 のレビュー完了（依頼者・版作成者は不可）も DB で強制する。
+    依頼の依頼者・対象版を後からすり替えてトリガを回避できないよう `review_request_guard` で固定。
+  - 承認権限だけの人（approver ロール）が節の本文・担当を書き換えられないよう `enforce_disclosure_block_update`。
+  - 0039 の backfill は UPDATE ではなく `ALTER COLUMN ... TYPE ... USING` で行い、追記専用トリガを外さず、
+    data_points の更新日時も動かさない。値も文字もない行だけ `not_entered`（`not_applicable` にはしない）。
+- `src/types/domain.ts`: 新表の型・enum 配列 15 種ほか、DataPoint / DataPointVersion / FileObject /
+  DisclosureFrameworkVersion の新列、FrameworkKey に `esrs_40a`、AUDIT_EVENT_TYPES に 17 種。
+- 登録簿: TableMap / SQL_TABLE_NAMES / SEED_ORDER / FixtureDb / PERSISTED_TABLES（小さい 12 表のみ。版・スナップショット等は D-3 扱い）。
+  seed 生成の jsonb 判定を表別にした（`body` が表によって text と jsonb になるため）。`ssbj_disclosure_drafts.gaps` の登録漏れも同時に修正。
+- 純粋関数: `src/lib/clock.ts`（基準日。呼び出し側の置き換えは未実施）、`src/lib/domain/disclosure-block.ts`（AST・参照収集・内容ハッシュ・
+  手書き数値・段落/文字差分）、`src/lib/domain/disclosure-status.ts`（ラベル・遷移表・職務分離・阻害条件・値の有無）。
+- 既存 Service の DataPoint 生成箇所へ新列の既定値（取込・前年複製・値更新）。値更新は値の有無を `availabilityAfterValueChange` で追従。
+
+**テスト結果**（2026-09-29、ローカル）: lint / format:check / typecheck 合格、`pnpm test` 739 件（66 ファイル）合格、
+`pnpm test:rls` 227 件（2 ファイル）合格、`pnpm check:rls` 100 表 / ポリシー 228 件で合格。E2E・build は本段階では未実行。
+
+**未解決・次作業**
+
+- Fixture（§7 のデモ企業・プロジェクト・節・資料）は未投入。新表は seed 上 0 行。
+- `FIXTURE_TODAY` の直接参照の `getReferenceDate()` への置き換え（別担当）。
+- Service / 画面 / AI Use Case（`disclosureBlockDraft`）は未実装。RLS は §2 の権限キーに合わせてあるため、
+  Service 側も `enterprise.disclosure.write/approve`・`export.run`・`metric.manage`（KPI 目標）・`import.run`（取込バッチ）で判定すること。
+- `docs/disclosure-first.md` は prettier の整形（空行・表・コードブロック）だけを当てた（内容の変更なし）。
+
+## 2026-09-29 開示優先モード W1-F2（デモ Fixture）
+
+設計の正本は `docs/disclosure-first.md` §7（実装メモを同節に追記）。すべて架空。実在企業名は含めない（テストで検査）。
+
+**変更**
+
+- `src/lib/fixtures/disclosure-first.ts`（新規）: 主役の架空企業（青海テクノロジー）に次を投入。ID は `DISCLOSURE_FIRST_IDS` で公開（E2E から同じ値で引ける）。
+  - 機能設定 1 行（`disclosure_first=false`。蒼天には行を作らない）。
+  - 基準の版メタデータ: SSBJ（`ssbj-2026-03-13`・adopted・partial・133 項目）、既存 CSRD（sample・12 項目）、
+    ESRS-40a を別フレームワークとして追加（公開草案・draft・not_loaded・impact。要求事項は 0 件）。
+  - 根拠資料 3 点（有報抜粋＝過年度の記載、委員会資料・リスク評価資料＝当年度の根拠）と段落単位の抽出結果、引用位置 9 件。
+  - 定性情報 5 件（ガバナンスは FY2025→FY2026 の 2 版で確認済み、他は下書き。財務的影響は金額キーを持たず理由を持つ）。
+  - プロジェクト 2 件（FY2025 完了・FY2026 進行中）、適用判断（SSBJ は確定、ESRS-40a は判断なしの適用候補）。
+  - 節 6 件: FY2026 のガバナンス（承認済み）・リスク機会（下書き）・指標（承認済みだが引用した Scope1 に新版＝再確認が必要）・
+    ESRS-40a 準備のガバナンス（同じ定性情報の版を再利用・下書き）、FY2025 のガバナンス・指標（承認済み）。
+    承認済みの節はレビュー依頼と記録 3 件（海野→検見川→承）を持つ。KPI 目標 2 件（Scope2 は境界が実績と違う）。
+- 本社 Scope1（FY2026）に訂正版 v2 を追加（**値は同じ**・変更理由「集計範囲の訂正（架空）」・再承認済み）。
+  値と承認状態を保ち、SNAP-1 より前に置いたので、GHG 集計・Data Room・Snapshot 後変更 2 件・検証結果は従来どおり。
+  ダッシュボードの「最近の更新」には v2 の行が 1 件増える。
+- `src/lib/fixtures/disclosure-documents.ts`（新規）: 資料の本文と ID・Storage Key。`DemoStorageAdapter.get` がメモリに実体の無いとき
+  ここから本文（UTF-8・BOM 付き）を返す（`src/lib/storage/index.ts`）。他の Fixture ファイルは従来どおり実体なし（D-2 を更新）。
+- `src/lib/domain/narrative-template.ts`（新規）: 定性情報のテーマ別テンプレート項目と未記入・未知キーの判定。
+- 有報抜粋は「最新の有価証券報告書」自動選択（securities-report.ts）に拾われないよう、全文 PDF より前に登録した日付にしてある。
+- `tests/rls/tenant-isolation.test.ts`: 機能設定は組織ごとに一意のため、INSERT をやめ Fixture の行を使うよう変更（期待値は変えていない）。
+  Fixture の行が制約・職務分離トリガを通って投入されることの検査を 1 件追加。
+- `supabase/seed.sql` 再生成（1648 行）。
+
+**テスト結果**（2026-09-29、ローカル）: lint / format:check / typecheck 合格、`pnpm test` 764 件（67 ファイル）合格
+（新規 `tests/integration/disclosure-first-fixtures.test.ts` 25 件）、`pnpm test:rls` 228 件（2 ファイル）合格、
+`pnpm check:rls` 100 表 / ポリシー 228 件で合格。E2E・build は本段階では未実行（別段階で実施）。
+
+**未解決・次作業**
+
+- E2E（既存 spec）は未実行。影響しうる点: 証憑一覧の先頭に架空資料 3 件が並ぶ（既存 spec は名前で行を選んでいる）、
+  ダッシュボードの「最近の更新」に Scope1 v2 が出る、本社 Scope1 の履歴が 2 版になる。
+- 監査ログの行は作っていない（必要なら件数を見ている spec と調整のうえで追加）。
+- 画面・Service は未実装。定性情報の画面はテンプレート項目を `narrative-template.ts` から引くこと。

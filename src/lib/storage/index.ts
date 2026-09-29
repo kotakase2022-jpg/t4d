@@ -2,12 +2,15 @@ import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { getAppMode } from '@/lib/config';
+import { findDisclosureDocumentBytes } from '@/lib/fixtures/disclosure-documents';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
+  EvidenceUsagePurpose,
   FileObject,
   FileVersion,
+  IsoDate,
   StorageBucket,
   Uuid,
 } from '@/types/domain';
@@ -83,7 +86,10 @@ class DemoStorageAdapter implements StorageAdapter {
   }
 
   async get(bucket: StorageBucket, key: string): Promise<Uint8Array | null> {
-    return demoStore().get(`${bucket}/${key}`) ?? null;
+    // 開示優先モードのデモ資料（架空のテキスト 3 点）は、引用・前年比較の題材として本文を見せる必要がある。
+    // メモリに実体が無ければ Fixture の定義から生成して返す（再起動後も同じ内容が出る）。
+    // それ以外の Fixture 由来ファイルは従来どおり実体なし（known-limitations D-2）
+    return demoStore().get(`${bucket}/${key}`) ?? findDisclosureDocumentBytes(bucket, key);
   }
 
   async createSignedUrl(bucket: StorageBucket, key: string): Promise<string> {
@@ -191,6 +197,10 @@ export interface StoreFileInput {
   reportingPeriodId?: Uuid | null;
   documentType?: string | null;
   engagementId?: Uuid;
+  /** 根拠資料の利用目的・版（0034）。未指定は未設定（当年度の根拠としては扱わない） */
+  usagePurpose?: EvidenceUsagePurpose | null;
+  editionLabel?: string | null;
+  issuedOn?: IsoDate | null;
 }
 
 export interface StoredFile {
@@ -237,6 +247,9 @@ export async function storeNewFile(
     documentType: input.documentType ?? null,
     reportingPeriodId: input.reportingPeriodId ?? null,
     scanStatus,
+    usagePurpose: input.usagePurpose ?? null,
+    editionLabel: input.editionLabel ?? null,
+    issuedOn: input.issuedOn ?? null,
     createdAt: now,
     updatedAt: now,
     createdBy: ctx.userId,

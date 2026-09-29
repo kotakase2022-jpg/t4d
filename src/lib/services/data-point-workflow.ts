@@ -8,6 +8,7 @@ import {
   can,
   NotFoundError,
 } from '@/lib/authorization/can';
+import { availabilityAfterValueChange } from '@/lib/domain/disclosure-status';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import {
@@ -262,6 +263,8 @@ export async function updateDataPointValue(
   });
   const nextVersionNo = (versions[0]?.versionNo ?? 0) + 1;
   const now = new Date().toISOString();
+  // 値を入れたら「値あり」、消したら「未入力」。値が無いままなら人が付けた状態（対象外など）を保つ
+  const availability = availabilityAfterValueChange(dp, input.value, null);
 
   const version: DataPointVersion = {
     id: fid('data_point_version', `${dp.id}/v${nextVersionNo}`),
@@ -272,6 +275,9 @@ export async function updateDataPointValue(
     textValue: null,
     unitOfMeasure: input.unitOfMeasure,
     status: dp.status === 'approved' ? 'draft' : dp.status,
+    valueKind: dp.valueKind,
+    availabilityStatus: availability.availabilityStatus,
+    absenceReason: availability.absenceReason,
     sourceType: 'manual',
     sourceReference: '画面からの手入力',
     changeReason: input.changeReason,
@@ -284,6 +290,8 @@ export async function updateDataPointValue(
   const dataPoint = await db.update('dataPoints', dp.id, {
     value: input.value,
     unitOfMeasure: input.unitOfMeasure,
+    availabilityStatus: availability.availabilityStatus,
+    absenceReason: availability.absenceReason,
     methodology: input.methodology ?? dp.methodology,
     currentVersionId: version.id,
     status: dp.status === 'approved' ? 'draft' : dp.status === 'not_started' ? 'draft' : dp.status,

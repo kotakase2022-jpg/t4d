@@ -5,6 +5,7 @@ import {
   applyDemoEdits,
   decodeDemoEdits,
   encodeDemoEdits,
+  isPersistedTable,
   type DemoEdit,
 } from '../../src/lib/repositories/demo-edit-codec';
 
@@ -203,6 +204,36 @@ describe('Cookie の中身を信用しない', () => {
     const db = fixtureLike();
     applyDemoEdits(db as never, [{ t: 'comments', id: 'c1', v: { id: 'c1', body: '本文' } }]);
     expect(db.comments).toHaveLength(1);
+  });
+
+  it('開示優先モードは小さい表だけを持ち回し、本文・版・スナップショットは持ち回さない', () => {
+    // 状態・ポインタ・短文だけの表。依頼・承認の結果が消えるとレビューの流れが巻き戻って見える
+    for (const table of [
+      'organizationFeatureSettings',
+      'disclosureProjects',
+      'projectFrameworks',
+      'projectFrameworkDecisions',
+      'narrativeRecords',
+      'disclosureBlocks',
+      'reviewRequests',
+      'reviewEvents',
+      'reviewComments',
+      'recheckDecisions',
+      'exportArtifacts',
+      'kpiTargets',
+    ] as const) {
+      expect(isPersistedTable(table), table).toBe(true);
+    }
+    // 1 件で Cookie（約 7.6KB）を使い切りうる表。同一インスタンスのメモリにだけ残す（D-3）
+    for (const table of [
+      'narrativeVersions',
+      'disclosureBlockVersions',
+      'sourceAnchors',
+      'reportSnapshots',
+      'quantitativeImportBatches',
+    ] as const) {
+      expect(isPersistedTable(table), table).toBe(false);
+    }
   });
 
   it('展開後が大きすぎる Cookie は展開せず空で返す（圧縮爆弾）', () => {

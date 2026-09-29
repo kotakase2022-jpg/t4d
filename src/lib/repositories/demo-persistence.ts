@@ -2,13 +2,15 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 import {
+  STREAM_MARK,
   decodeDemoEdits,
   dropOldestUnpinned,
-  encodeDemoEdits,
+  encodeDemoEditStream,
   isPersistedTable,
   type DemoEdit,
 } from './demo-edit-codec';
 import { randomUUID } from 'node:crypto';
+import { isFreshFixturePerRequest } from './demo-fresh-fixture';
 import {
   decodeDemoResetMark,
   encodeDemoResetMark,
@@ -83,11 +85,13 @@ function inAppendOrder(edits: DemoEdit[]): DemoEdit[] {
 }
 
 function readFrom(store: CookieStore): DemoEdit[] {
-  const edits: DemoEdit[] = [];
-  for (let i = 0; i < COOKIE_CHUNKS; i += 1) {
-    const raw = store.get(chunkName(i))?.value;
-    if (raw) edits.push(...decodeDemoEdits(raw));
-  }
+  const values: string[] = [];
+  for (let i = 0; i < COOKIE_CHUNKS; i += 1) values.push(store.get(chunkName(i))?.value ?? '');
+  // 1 本の圧縮列を分けて持つ形式（STREAM_MARK）は、順につなげてから戻す。
+  // 以前の形式（Cookie ごとに別々に圧縮）はそれぞれを戻す（デプロイをまたいだ Cookie も読めるように）
+  const edits = values[0]?.startsWith(STREAM_MARK)
+    ? decodeDemoEdits(values.join(''))
+    : values.flatMap((raw) => (raw ? decodeDemoEdits(raw) : []));
   return inAppendOrder(edits);
 }
 
@@ -103,37 +107,33 @@ export async function readDemoEdits(): Promise<DemoEdit[]> {
 }
 
 /**
- * 変更をチャンクへ詰める。古い順に、入るいちばん前のチャンクへ入れる（first-fit）。
+ * 変更をチャンクへ詰める。すべての編集を 1 本に圧縮してから、Cookie 1 つの上限ごとに切り分ける。
  *
- * 以前は「先頭から入るだけ」を 1 つ目のチャンクへ入れ、残りを次へ送っていた。大きな編集
- * （原稿の AI 下書きの実行 約 2.3KB）が 1 つ目に入らないと、それ以後の編集はすべて 2 つ目に回り、
- * 1 つ目に 1KB 以上の空きを残したまま押し出しが始まっていた（実演の 6 手目で 3 手目の取込が消えた）。
- * 並びは追記の順番（n）で戻せるため、チャンクをまたいで順序を保つ必要は無い。
+ * 以前は編集を Cookie ごとに分けて別々に圧縮していた（空きのあるチャンクへ詰める first-fit）。
+ * 同じ UUID・列名が Cookie ごとに辞書へ載り直し、実演の流れでは 1 本で圧縮するより約 3 割大きかった。
+ * 1 本にすれば詰め方で空きを残すことも無い。並びは追記の順番（n）で戻す。
  *
- * 返すのは詰めたチャンクと、どのチャンクにも入らなかった編集。
+ * 返すのは切り分けたチャンクと、入りきらなかった編集（入りきらなければ全部。呼び出し側が古い順に落とす）。
  */
 export function packIntoChunks(edits: readonly DemoEdit[]): {
   chunks: string[];
   overflow: DemoEdit[];
 } {
-  const bins: DemoEdit[][] = [];
-  const overflow: DemoEdit[] = [];
-  for (const edit of edits) {
-    let placed = false;
-    for (let i = 0; i < COOKIE_CHUNKS; i += 1) {
-      const candidate = [...(bins[i] ?? []), edit];
-      if (encodeDemoEdits(candidate).length <= MAX_BYTES_PER_COOKIE) {
-        bins[i] = candidate;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) overflow.push(edit);
+  if (edits.length === 0) return { chunks: [], overflow: [] };
+  const encoded = encodeDemoEditStream([...edits]);
+  if (encoded.length > COOKIE_CHUNKS * MAX_BYTES_PER_COOKIE) {
+    return { chunks: [], overflow: [...edits] };
   }
-  return {
-    chunks: bins.filter((bin) => bin.length > 0).map((bin) => encodeDemoEdits(bin)),
-    overflow,
-  };
+  const chunks: string[] = [];
+  for (let i = 0; i < encoded.length; i += MAX_BYTES_PER_COOKIE) {
+    chunks.push(encoded.slice(i, i + MAX_BYTES_PER_COOKIE));
+  }
+  return { chunks, overflow: [] };
+}
+
+/** 1 件で Cookie 1 つ分（MAX_BYTES_PER_COOKIE）を超える編集か（そのような編集は持ち回さない） */
+function tooLargeAlone(edit: DemoEdit): boolean {
+  return encodeDemoEditStream([edit]).length > MAX_BYTES_PER_COOKIE;
 }
 
 /**
@@ -192,7 +192,7 @@ export async function appendDemoEdit(
   // メモリ上の Fixture に反映済み）。ここで諦めずに縮小ループへ進むと、
   // 「新しい 1 件も入らない → 既存の編集まで全部落ちて空 Cookie を書く」
   // という全消滅になる（レビュー指摘）。既存の持ち回りは守る。
-  if (packIntoChunks([nextEdit]).chunks.length === 0) {
+  if (tooLargeAlone(nextEdit)) {
     return;
   }
   merged.push(nextEdit);
@@ -212,6 +212,16 @@ export async function appendDemoEdit(
 
   try {
     writeChunks(store, packed.chunks);
+    if (isFreshFixturePerRequest()) {
+      // 試験用の切替（pnpm test:e2e:stateless）のときだけ、Cookie の容量の推移を記録する。
+      // 実演の流れで押し出しが起きないこと・ヘッダーの上限に余裕があることを実測するため
+      // （console.log は本番コードで禁止のため、標準エラーへ出す。切替が無効なら何も出さない）
+      const sizes = packed.chunks.map((c) => c.length);
+      console.warn(
+        `[t4d.demo-edits] ${table}:${id} total=${sizes.reduce((a, b) => a + b, 0)}B chunks=${sizes.join('/')} edits=${candidate.length}` +
+          (noisyTables.size > 0 ? ` evicted=${[...noisyTables].join(',')}` : ''),
+      );
+    }
     // 古い操作を押し出したことを画面（デモの帯）で知らせる。別のサーバーでは押し出した操作が
     // 戻らないため、黙っていると「さっきの操作が消えた」ように見える。どの表の操作かを残し、
     // その表をリセットしたら知らせを消す（リセット後も古い注意を出し続けない）
@@ -404,9 +414,16 @@ export async function removeDemoEditsWhere(
   const current = readFrom(store);
   const remaining = current.filter((e) => !shouldRemove(e));
   if (remaining.length === current.length) return;
+  // 取り除いた後はふつう必ず入る。1 本に圧縮する形式では、中身によって縮み方がわずかに変わるため、
+  // 万一入らなくても全部を捨てて空の Cookie を書かないよう、古い順に落として入れる
+  let candidate = remaining;
+  let packed = packIntoChunks(candidate);
+  while (candidate.length > 0 && packed.overflow.length > 0) {
+    candidate = dropOldestUnpinned(candidate) ?? candidate.slice(1);
+    packed = packIntoChunks(candidate);
+  }
   try {
-    // 取り除いた後は必ず入る（入らなかった分は元から入っていない）
-    writeChunks(store, packIntoChunks(remaining).chunks);
+    writeChunks(store, packed.chunks);
   } catch {
     // Server Component からは書けない。リセットは Server Action からのみ呼ぶ。
   }

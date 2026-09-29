@@ -1,4 +1,5 @@
 import { getDemoDb, type FixtureDb } from '@/lib/fixtures/store';
+import { compactRow, isCompactedTable } from './demo-compact';
 import { appendDemoEdit, isPersistedTable, removeDemoEditsFor } from './demo-persistence';
 import {
   applyQuery,
@@ -33,8 +34,14 @@ import type { Uuid } from '@/types/domain';
  * 根拠 9 件で 約 11.7KB → 約 3.5KB。1 件で 1 チャンク（3.8KB）を超えると Cookie に載らず、
  * 実行したインスタンスのメモリにだけ残る（docs/known-limitations.md D-3）。
  */
-function persistedColumns(table: TableName, row: unknown): Record<string, unknown> {
+function persistedColumns(
+  table: TableName,
+  row: unknown,
+  db: FixtureDb,
+): Record<string, unknown> | null {
   const record = row as Record<string, unknown>;
+  // 本文の版・スナップショットなどは小さくした形で載せる（demo-compact.ts）。載せないものは null
+  if (isCompactedTable(table)) return compactRow(table, record, db);
   if (table === 'disclosureBlocks') return withoutWorkingBody(record);
   if (isDisclosureReviewNotification(table, row)) return { ...record, body: '' };
   if (table !== 'aiRuns' || record.featureType !== 'importMapping') return record;
@@ -91,7 +98,13 @@ function persistedPatch(
   table: TableName,
   patch: Record<string, unknown>,
   row: Record<string, unknown>,
+  db: FixtureDb,
 ): Record<string, unknown> {
+  if (isCompactedTable(table)) {
+    // 追記専用の表は書き換えを載せない。取込バッチだけは「確定した」ときに確定の控えを行ごと載せる
+    // （別インスタンスには検証した行が無く、変更の列だけでは戻せないため）
+    return table === 'quantitativeImportBatches' ? (compactRow(table, row, db) ?? {}) : {};
+  }
   if (table === 'aiRuns' && isClosedDraftRun(row)) {
     const tokens = Array.isArray(row.inputReferenceIds) ? (row.inputReferenceIds as string[]) : [];
     return {
@@ -146,9 +159,8 @@ export class DemoDbClient implements DbClient {
     if (isPersistedTable(table)) {
       for (const row of cloned) {
         const record = row as unknown as { id?: string };
-        if (record.id) {
-          await appendDemoEdit(table, record.id, persistedColumns(table, row));
-        }
+        const persisted = record.id ? persistedColumns(table, row, this.db) : null;
+        if (record.id && persisted) await appendDemoEdit(table, record.id, persisted);
       }
     }
     return cloned.map((r) => structuredClone(r));
@@ -164,7 +176,12 @@ export class DemoDbClient implements DbClient {
 
     // 変更のあった列だけを Cookie へ（Cookie の容量を圧迫しないため）
     if (isPersistedTable(table)) {
-      const persisted = persistedPatch(table, patch as unknown as Record<string, unknown>, next);
+      const persisted = persistedPatch(
+        table,
+        patch as unknown as Record<string, unknown>,
+        next,
+        this.db,
+      );
       if (Object.keys(persisted).length > 0) await appendDemoEdit(table, id, persisted);
     }
     return structuredClone(next) as unknown as Row<K>;

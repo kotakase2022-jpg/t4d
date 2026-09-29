@@ -121,7 +121,8 @@ export default async function NarrativeDetailPage({
             className="flex items-center gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
           >
             <AlertTriangle className="size-3.5 text-danger" aria-hidden="true" />
-            現在の版が見つかりません（デモ環境では版の本文をサーバーのメモリに保存しており、再起動で失われることがあります）。保存はできません。
+            現在の版が見つかりません（デモ環境では版の本文をこのブラウザの Cookie
+            で持ち回しており、別のブラウザや、古い操作が押し出された後は失われることがあります）。保存はできません。
           </p>
         )}
 

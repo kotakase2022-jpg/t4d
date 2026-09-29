@@ -126,8 +126,10 @@ function prefixPackOverflows(edits: readonly DemoEdit[], chunks: number = COOKIE
 // F3（永続化）: チャンクの詰め方
 // ----------------------------------------------------------------------
 
-describe('F3 Cookie のチャンクは空きのあるところへ詰め、1 つ目の空きを残したまま押し出さない', () => {
-  it('大きな編集が 1 つ目に入らなくても、後の小さな編集は 1 つ目の空きへ入る', () => {
+describe('F3 Cookie のチャンクは空きを残したまま押し出さない', () => {
+  // 2026-09-30: 編集を Cookie ごとに分けて圧縮する形式から、1 本に圧縮して切り分ける形式へ変えた
+  // （demo-persistence.ts の packIntoChunks）。チャンクの境界で空きが残ることはもう起きない
+  it('大きな編集と小さな編集が混ざっても、全チャンクの容量まで詰めてから押し出す', () => {
     // チャンクの数によらず、先頭から詰めると 1 つ前のチャンクに空きを残す並び
     // （中くらい・大きいの組を「チャンク数 - 1」回、最後に小さい 2 件）
     const edits: DemoEdit[] = [];
@@ -141,7 +143,8 @@ describe('F3 Cookie のチャンクは空きのあるところへ詰め、1 つ�
     const packed = packIntoChunks(edits);
     expect(packed.overflow).toEqual([]);
     expect(packed.chunks.every((c) => c.length <= MAX_BYTES_PER_COOKIE)).toBe(true);
-    const restored = packed.chunks.flatMap((c) => decodeDemoEdits(c));
+    // 1 本の圧縮列を切り分けたもの。つなげてから戻す
+    const restored = decodeDemoEdits(packed.chunks.join(''));
     expect(restored.map((e) => e.id).sort()).toEqual(edits.map((e) => e.id).sort());
   });
 

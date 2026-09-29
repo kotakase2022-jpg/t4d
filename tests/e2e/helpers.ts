@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Cookie, type Page } from '@playwright/test';
 
 /**
  * E2E 共通ヘルパー。
@@ -32,9 +32,79 @@ export async function logout(page: Page): Promise<void> {
   }
 }
 
+// ----------------------------------------------------------------------
+// Demo Mode の状態の持ち回り（playwright.stateless.config.ts だけが使う）
+// ----------------------------------------------------------------------
+
+/**
+ * Demo Mode の状態を運ぶ Cookie（操作の記録・リセットの印・押し出しの知らせ）。
+ * ログインの Cookie（t4d_demo_user・t4d_workspace）は含めない
+ */
+function isDemoStateCookie(cookie: Pick<Cookie, 'name'>): boolean {
+  return cookie.name.startsWith('t4d.demo-');
+}
+
+/**
+ * 1 つのブラウザの Cookie を最後まで持ち回す設定か（metadata.carryDemoState）。
+ * 状態がリクエストごとに消えるサーバー（リクエストごとに新しい Fixture）では、状態は Cookie にしか無い。
+ * 実演の発表者は 1 つのブラウザで操作し、アプリのログイン・ログアウトは操作の記録を消さないため、
+ * テストごとに新しい文脈を作る Playwright の既定を、発表者のブラウザに合わせる
+ */
+export function carriesDemoState(): boolean {
+  try {
+    return test.info().project.metadata?.carryDemoState === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 前のテストの終わりに持っていた Demo Mode の Cookie（持ち回す設定のときだけ使う） */
+let carriedDemoCookies: Cookie[] = [];
+/** 実演の流れの中で最も大きかった Cookie ヘッダー（名前=値; を足した長さ）と、そのときの操作 */
+let peakCookieHeader = { bytes: 0, editsBytes: 0, label: '' };
+
+function cookieHeaderBytes(cookies: readonly Cookie[]): number {
+  return Buffer.byteLength(cookies.map((c) => `${c.name}=${c.value}`).join('; '), 'utf8');
+}
+
+/**
+ * テストの終わりに Demo Mode の Cookie を控え、次のテストの文脈へ渡す。あわせて Cookie の大きさを
+ * 記録し、押し出し（容量不足で古い操作を捨てた印）が起きていないことを確かめる
+ */
+export async function carryDemoState(context: BrowserContext, label: string): Promise<void> {
+  if (!carriesDemoState()) return;
+  const all = await context.cookies();
+  carriedDemoCookies = all.filter(isDemoStateCookie);
+  const header = cookieHeaderBytes(all);
+  const edits = carriedDemoCookies
+    .filter((c) => c.name.startsWith('t4d.demo-edits'))
+    .map((c) => c.value.length);
+  const editsBytes = edits.reduce((a, b) => a + b, 0);
+  if (header > peakCookieHeader.bytes) peakCookieHeader = { bytes: header, editsBytes, label };
+  const evicted = all.find((c) => c.name === 't4d.demo-evicted')?.value ?? '';
+  const line = `[stateless] ${label}: Cookie ヘッダー ${header}B（操作の記録 ${editsBytes}B = ${edits.join('/') || '0'}）${evicted ? ` 押し出し: ${evicted}` : ''}`;
+  console.log(line);
+  await test.info().attach('demo-cookie-size', { body: line, contentType: 'text/plain' });
+  // 押し出しが起きると、別インスタンスでは前の手順の結果が戻らない（後の手順が偶然通っても信用できない）
+  expect(evicted, `${label} で古い操作が押し出された`).toBe('');
+}
+
+/** 持ち回した中で最大の Cookie ヘッダー（afterAll で報告する） */
+export function peakCarriedCookieHeader(): { bytes: number; editsBytes: number; label: string } {
+  return peakCookieHeader;
+}
+
 /** デモアカウントでログインし、ワークスペースを選択する。 */
 export async function loginAs(page: Page, displayName: string): Promise<void> {
-  await page.context().clearCookies();
+  if (carriesDemoState()) {
+    // ログインの Cookie だけを消す（Demo Mode の操作の記録は、同じブラウザのまま持ち回す）
+    const current = (await page.context().cookies()).filter(isDemoStateCookie);
+    await page.context().clearCookies();
+    const keep = current.length > 0 ? current : carriedDemoCookies;
+    if (keep.length > 0) await page.context().addCookies(keep);
+  } else {
+    await page.context().clearCookies();
+  }
   await page.goto('/login');
   await expect(page.getByRole('heading', { name: 'デモログイン' })).toBeVisible();
 

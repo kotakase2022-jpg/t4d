@@ -301,7 +301,8 @@ export default async function EsgPage({ searchParams }: { searchParams: Promise<
             role="alert"
             className="rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-ink"
           >
-            選んだスナップショットが見つかりません（デモではスナップショットがサーバーのメモリにだけ保持されるため、消えている場合があります）。
+            選んだスナップショットが見つかりません（デモではスナップショットをこのブラウザの Cookie
+            で持ち回すため、別のブラウザや、古い操作が押し出された後は消えている場合があります）。
           </p>
         ) : (
           <SnapshotComparisonView comparison={comparison} />

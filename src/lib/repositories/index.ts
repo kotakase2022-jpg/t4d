@@ -18,15 +18,21 @@ export async function getDb(): Promise<DbClient> {
     // Cookie に控えた変更を Fixture へ再適用してから返す。
     const { readDemoEdits, applyDemoEdits, ensureDemoResetBaseline } =
       await import('./demo-persistence');
-    const { getDemoDb } = await import('@/lib/fixtures/store');
+    const { demoFixtureForRequest, isFreshFixturePerRequest } =
+      await import('./demo-fresh-fixture');
     // リセットの基準時刻は、メモリが Cookie の操作を受け取り始める前に決める。これより後のリセットの印は、
     // このインスタンスのメモリに入った操作より新しいので反映が要る
     ensureDemoResetBaseline();
+    const { db, created } = await demoFixtureForRequest();
     // 別のインスタンスで行った開示デモのリセットは、ここでは反映しない。印は署名の無い Cookie で、
-    // ログイン前に反映すると、誰でも任意の組織のデモ状態を消せてしまう（applyPendingDemoResetFor）
-    const edits = await readDemoEdits();
-    if (edits.length > 0) applyDemoEdits(getDemoDb(), edits);
-    return new DemoDbClient();
+    // ログイン前に反映すると、誰でも任意の組織のデモ状態を消せてしまう（applyPendingDemoResetFor）。
+    // 試験用の切替（リクエストごとに新しい Fixture）では、作った直後に 1 回だけ適用する。
+    // 同じリクエストの後の書き込みは Fixture と Cookie の両方へ入るため、適用し直すと二重になる
+    if (!isFreshFixturePerRequest() || created) {
+      const edits = await readDemoEdits();
+      if (edits.length > 0) applyDemoEdits(db, edits);
+    }
+    return new DemoDbClient(db);
   }
   const { createSupabaseServerClient } = await import('@/lib/supabase/server');
   return new SupabaseDbClient(await createSupabaseServerClient());
@@ -52,9 +58,10 @@ export async function applyPendingDemoResetFor(ctx: AuthorizationContext): Promi
   ) {
     return false;
   }
-  const { getDemoDb, createFixtureDb } = await import('@/lib/fixtures/store');
+  const { createFixtureDb } = await import('@/lib/fixtures/store');
+  const { demoFixtureForRequest } = await import('./demo-fresh-fixture');
   const { restoreDisclosureDemoTables } = await import('./demo-reset-sync');
-  const db = getDemoDb();
+  const { db } = await demoFixtureForRequest();
   restoreDisclosureDemoTables(db, pristineFixture(createFixtureDb), reset.organizationId, {
     includeDataPoints: reset.includesDataPoints === true,
   });
@@ -83,7 +90,14 @@ function pristineFixture<T>(create: () => T): T {
  */
 export async function getInvitationAcceptDb(): Promise<DbClient> {
   if (getAppMode() === 'demo') {
-    return new DemoDbClient();
+    const { demoFixtureForRequest } = await import('./demo-fresh-fixture');
+    const { db, created } = await demoFixtureForRequest();
+    if (created) {
+      // 試験用の切替でこのリクエストの Fixture を初めて作ったときは、getDb と同じく Cookie の操作を適用する
+      const { readDemoEdits, applyDemoEdits } = await import('./demo-persistence');
+      applyDemoEdits(db, await readDemoEdits());
+    }
+    return new DemoDbClient(db);
   }
   const { createSupabaseServiceRoleClient } = await import('@/lib/supabase/server');
   return new SupabaseDbClient(createSupabaseServiceRoleClient());

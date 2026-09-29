@@ -25,7 +25,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
-import { detectHandwrittenNumbers } from '@/lib/domain/disclosure-block';
+import { canonicalJson, detectHandwrittenNumbers } from '@/lib/domain/disclosure-block';
 import { formatJst } from '@/lib/format/datetime';
 import type { DraftRunView, SelectableSourceKind } from '@/lib/services/disclosure-ai-draft';
 import type { BlockConflictKind, BlockEditorData } from '@/lib/services/disclosure-block';
@@ -56,6 +56,8 @@ export interface BlockEditorProps {
   data: BlockEditorData;
   runs: DraftRunView[];
   aiMode: 'mock' | 'openai';
+  /** 表示している利用者（このタブに残す作業本文の控えを、利用者ごとに分けるため） */
+  viewerId: string;
 }
 
 type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'conflict' | 'offline';
@@ -80,6 +82,61 @@ function timeOf(iso: string | null): string {
   return formatted.length >= 16 ? formatted.slice(11, 16) : formatted;
 }
 
+/**
+ * 自動保存した作業本文の控え（このタブの sessionStorage）。
+ *
+ * デモ環境（Vercel）では作業本文（working_body）をサーバーのメモリにしか置かず、Cookie でも持ち回さない
+ * （本文は大きく、1 回の自動保存でほかの操作を押し出すため）。画面を離れて戻ったときに別のサーバーへ届くと、
+ * 自動保存した本文が見えず、利用者の入力が消えたように見える。自動保存に成功した本文（AI 候補の採用で
+ * サーバーが保存した本文を含む）をこのタブにも控え、サーバーに作業本文が無く、最後に自動保存したのが
+ * この利用者だとサーバーが示すときだけ、同じ節・同じ土台の版・同じ利用者の控えを画面へ戻す（戻した本文は
+ * 改めて自動保存する）。版として保存・レビュー依頼で控えを消し、サーバーが示さない控え（開示デモの
+ * リセット前の入力など）は戻さずに消す。控えは補助で、業務上の保存ではない。
+ * 読み書きできない環境（プライベートモード・容量不足）でも編集は続けられる
+ */
+interface DraftBackup {
+  body: BlockBody;
+  savedAt: string;
+}
+
+function draftKeyOf(blockId: string, baseVersionId: string | null, viewerId: string): string {
+  return `t4d.block-draft:${blockId}:${baseVersionId ?? 'none'}:${viewerId}`;
+}
+
+function readDraft(key: string): DraftBackup | null {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<DraftBackup>;
+    if (
+      !parsed.body ||
+      !Array.isArray(parsed.body.paragraphs) ||
+      typeof parsed.savedAt !== 'string'
+    ) {
+      return null;
+    }
+    return { body: parsed.body, savedAt: parsed.savedAt };
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(key: string, draft: DraftBackup): void {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // 控えを残せなくても編集は続けられる（サーバーの自動保存は成功している）
+  }
+}
+
+function removeDraft(key: string): void {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // 読み書きできない環境では控えも無い
+  }
+}
+
 function rowsFor(text: string): number {
   const lines = text
     .split('\n')
@@ -87,10 +144,11 @@ function rowsFor(text: string): number {
   return Math.min(14, Math.max(2, lines));
 }
 
-export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps) {
+export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEditorProps) {
   const router = useRouter();
   const blockId = data.block.id;
   const baseVersionId = data.block.currentVersionId;
+  const draftKey = draftKeyOf(blockId, baseVersionId, viewerId);
   const { permissions } = data;
   /** 入力できるか（承認済みの節は「版として保存」で新しい版になる。自動保存はしない） */
   const canType = permissions.editable || permissions.reviseAfterApproval;
@@ -129,6 +187,8 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
   const [versionPending, setVersionPending] = React.useState(false);
   const [versionError, setVersionError] = React.useState<string | null>(null);
   const [requestPending, setRequestPending] = React.useState(false);
+  /** このタブの控えから作業本文を戻した（サーバーに作業本文が無かった） */
+  const [restoredDraftAt, setRestoredDraftAt] = React.useState<string | null>(null);
 
   const revision = React.useRef(0);
   const savedRevision = React.useRef(0);
@@ -193,6 +253,10 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
       if (result.status === 'saved') {
         savedRevision.current = target;
         workingToken.current = result.savedAt;
+        writeDraft(draftKey, {
+          body: bodyFromEditable(editableRef.current),
+          savedAt: result.savedAt,
+        });
         setSavedAt(result.savedAt);
         setSaveError(null);
         setSaveState(revision.current === target ? 'saved' : 'pending');
@@ -216,7 +280,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
     } finally {
       inflight.current = null;
     }
-  }, [announce, baseVersionId, blockId, canAutosave, projectId]);
+  }, [announce, baseVersionId, blockId, canAutosave, draftKey, projectId]);
 
   const flush = React.useCallback(async (): Promise<boolean> => {
     if (timer.current) {
@@ -236,6 +300,32 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
       void save();
     }, AUTOSAVE_DELAY_MS);
   }, [canAutosave, save]);
+
+  // サーバーに作業本文が無い（デモ環境で別のサーバーに届いた）ときは、このタブに控えた自動保存の本文を戻す。
+  // 戻した本文はこのサーバーへ自動保存し直す（以後の AI 下書き・版の保存も、画面の本文を送る）。
+  // 戻すのは、作業本文を最後に自動保存したのがこの利用者だとサーバーが示すときだけ（その記録は Cookie でも
+  // 持ち回し、版の保存・レビュー依頼・開示デモのリセットで消える）。示さないなら控えは古い
+  // （リセット前のリハーサルの入力・別の人の後の自動保存）ので、戻さずに消す
+  React.useEffect(() => {
+    if (!canAutosave || data.bodyFromWorking) return;
+    if (!data.block.workingSavedByViewer) {
+      removeDraft(draftKey);
+      return;
+    }
+    const draft = readDraft(draftKey);
+    if (!draft) return;
+    const restored = editableFromBody(draft.body);
+    if (canonicalJson(bodyFromEditable(restored)) === canonicalJson(data.body)) {
+      removeDraft(draftKey);
+      return;
+    }
+    setEditable(restored);
+    editableRef.current = restored;
+    setRestoredDraftAt(draft.savedAt);
+    // 戻したことは画面の知らせ（role=status）で読み上げる
+    markChanged();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 画面を開いたときに 1 回だけ戻す（以後の編集は画面の状態が正）
+  }, []);
 
   // オンラインに戻ったら保存し直す／未保存のまま離れようとしたら止める
   React.useEffect(() => {
@@ -558,6 +648,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
     }
     if (result.status === 'saved') {
       savedRevision.current = revision.current;
+      removeDraft(draftKey);
       announce(`版 ${result.versionNo} として保存しました。`);
       // 版が変わると画面を作り直す（ページ側の key が現在の版なので、再描画で編集状態も新しい版から始まる）
       router.replace(
@@ -610,6 +701,7 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
       });
       if (result.status === 'requested') {
         savedRevision.current = revision.current;
+        removeDraft(draftKey);
         router.replace(result.href);
         router.refresh();
         return;
@@ -887,6 +979,16 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
         </div>
       </div>
 
+      {restoredDraftAt && (
+        <p
+          role="status"
+          className="border-b border-line bg-brand-50 px-3 py-1.5 text-[12px] text-brand-900"
+        >
+          このタブに残っていた自動保存の本文（{formatJst(restoredDraftAt)}）を戻しました。
+          作業中の本文はサーバーをまたいで持ち回さないため、この画面の本文を正として保存し直します。
+        </p>
+      )}
+
       {requestError && (
         <p
           role="alert"
@@ -1103,6 +1205,10 @@ export function BlockEditor({ projectId, data, runs, aiMode }: BlockEditorProps)
               savedRevision.current = revision.current;
               // 採用はサーバーで作業本文として保存済み。以後の自動保存はこの保存を土台にする
               workingToken.current = at;
+              // タブの控えも採用後の本文にする（自動保存と同じ）。控えが採用前のままだと、作業本文の無い
+              // サーバーで開き直したときに採用前の本文を戻して自動保存し、採用した段落が消える
+              // （採用で実行は閉じ、同じ候補をもう一度採用できない）
+              writeDraft(draftKey, { body, savedAt: at });
               setSavedAt(at);
               setSaveState('saved');
             }}

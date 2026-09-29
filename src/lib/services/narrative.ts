@@ -3,7 +3,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
-import { canonicalJson, diffChars, type DiffSegment } from '@/lib/domain/disclosure-block';
+import { diffChars, type DiffSegment } from '@/lib/domain/disclosure-block';
 import {
   BLOCK_STATUS_LABELS,
   NARRATIVE_STATUS_LABELS,
@@ -14,8 +14,9 @@ import {
   missingTemplateFields,
   type NarrativeTemplateField,
 } from '@/lib/domain/narrative-template';
+import { narrativeContentHash } from '@/lib/domain/narrative-hash';
 import { ValidationError } from '@/lib/errors/user-facing';
-import { contentHash, fid } from '@/lib/fixtures/ids';
+import { fid } from '@/lib/fixtures/ids';
 import { FieldValidationError } from '@/lib/services/disclosure-project';
 import { listMembers, type MemberEntry } from '@/lib/services/identity';
 import {
@@ -132,24 +133,11 @@ export function normalizeNarrativeFields(
   return out;
 }
 
-/** 版の内容ハッシュ（Fixture と同じ正規化。同じ内容なら同じ値） */
-export function narrativeContentHash(v: {
-  reportingPeriodId: Uuid;
-  scopeNote: string;
-  fields: Record<string, string>;
-  body: string;
-  sourceAnchorIds: Uuid[];
-}): string {
-  return contentHash(
-    canonicalJson({
-      reportingPeriodId: v.reportingPeriodId,
-      scopeNote: v.scopeNote,
-      fields: v.fields,
-      body: v.body,
-      sourceAnchorIds: v.sourceAnchorIds,
-    }),
-  );
-}
+/**
+ * 版の内容ハッシュ（Fixture と同じ正規化。同じ内容なら同じ値）。
+ * Demo Mode の Cookie の再適用でも同じ規則で計算し直すため、純粋な関数は domain に置く
+ */
+export { narrativeContentHash };
 
 /** 「資料から候補を作成」で作った版の変更理由（候補かどうかの判定に使う） */
 export const CANDIDATE_CHANGE_REASON = '資料の抜粋から作成した候補（人の確認前）';

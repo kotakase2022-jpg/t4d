@@ -123,7 +123,9 @@ export default async function BlockEditorPage({
         <FlashMessage searchParams={sp} />
         {ctx.demo && (
           <p className="text-[11px] text-ink-muted">
-            デモデータ｜企業・資料・数値はすべて架空です。本文の版はこのサーバーのメモリにだけ保持します（別のサーバーに切り替わると版を参照できない場合があります）。
+            デモデータ｜企業・資料・数値はすべて架空です。本文の版はこのブラウザの Cookie
+            でサーバー間を持ち回します（別のブラウザや、Cookie
+            の容量不足で古い操作が押し出された後は、版を参照できない場合があります）。自動保存した作業中の本文はサーバーをまたいで持ち回さないため、「版として保存」で版にしてください。
           </p>
         )}
         {data.framework.isDraftStandard && (
@@ -170,6 +172,7 @@ export default async function BlockEditorPage({
         data={data}
         runs={runs}
         aiMode={aiMode}
+        viewerId={ctx.userId}
       />
     </>
   );

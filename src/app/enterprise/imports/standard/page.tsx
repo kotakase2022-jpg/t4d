@@ -119,9 +119,9 @@ export default async function StandardImportPage() {
           <p className="flex items-start gap-1.5 rounded-t4d border border-brand-200 bg-brand-50 px-3 py-1.5 text-[11px] text-brand-900">
             <FlaskConical className="mt-0.5 size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
             <span>
-              デモデータ｜組織・指標・値はすべて架空です。検証結果（取込バッチ）はこのサーバーのメモリにだけ保持します。
-              時間が経ったり別のサーバーへ振り分けられたりすると「検証結果の有効期限が切れました」と表示されます。
-              その場合も入力は画面に残っているので、もう一度検証してください。
+              デモデータ｜組織・指標・値はすべて架空です。検証結果（取込バッチ）はサーバーのメモリにだけ置き、
+              「登録を確定」では画面が検証した元の入力をもう一度送り、サーバーが検証し直してから確定します
+              （別のサーバーへ振り分けられても確定できます）。検証の後に台帳が変わっていれば、確定を止めて差分を示します。
             </span>
           </p>
         )}
@@ -186,7 +186,7 @@ export default async function StandardImportPage() {
                 title="まだ取込はありません"
                 description={
                   demo
-                    ? '検証した取込がここに並びます（デモではこのサーバーのメモリにあるものだけ）。'
+                    ? '検証した取込がここに並びます（デモでは、このサーバーで検証したものと、このブラウザで確定したもの）。'
                     : '検証した取込がここに並びます。'
                 }
               />

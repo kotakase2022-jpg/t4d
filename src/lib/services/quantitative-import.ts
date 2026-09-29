@@ -221,6 +221,29 @@ export interface CommitQuantitativeImportInput {
   mode: QuantitativeImportCommitMode;
   /** 既存値を変える行があるときは必須（新しい版の変更理由になる） */
   correctionReason?: string | null;
+  /**
+   * 検証した元の入力（CSV・貼り付け・手入力）。画面が検証のときと同じものを送り直す。
+   *
+   * Demo Mode（Vercel）では検証結果（取込バッチ）がインスタンスのメモリにしか無く、確定のリクエストが
+   * 別のインスタンスへ届くと見つからない（2026-09-30 本番で「有効期限切れ」になった）。バッチが無いときは
+   * ここからサーバーが検証し直し、そのハッシュが利用者の確認したもの（previewHash）と一致するときだけ
+   * 確定する。画面から届く解析済みの値は使わない（送られるのは元の入力だけで、解析・照合はサーバーが行う）
+   */
+  source?: ValidateQuantitativeImportInput;
+  /**
+   * 利用者が確認した差分の行（行番号・差分区分・既存値の版番号・状態・表示）。検証し直した結果が確認した
+   * ものと違うときに、どの行が変わったかを示すためだけに使う（書き込みには使わない）
+   */
+  confirmedRows?: QuantitativeImportConfirmedRow[];
+}
+
+/** 画面が確認した差分の行（競合の説明にだけ使う。信用しない値なので書き込みには使わない） */
+export interface QuantitativeImportConfirmedRow {
+  rowNo: number;
+  diffKind: QuantitativeImportDiffKind;
+  previousVersionNo: number | null;
+  previousStatus: DataPointStatus | null;
+  previousDisplay: string;
 }
 
 export interface QuantitativeImportCommitResult {
@@ -253,7 +276,10 @@ export interface QuantitativeImportConflict {
 export const QUANTITATIVE_IMPORT_EXPIRED_MESSAGE =
   '検証結果の有効期限が切れました。もう一度検証してください。';
 
-/** 検証結果（取込バッチ）が見つからない（デモではサーバーのメモリにしか無い） */
+/**
+ * 検証結果（取込バッチ）が見つからず、検証し直す元の入力も届いていない
+ * （デモではバッチがサーバーのメモリにしか無い。画面は確定のときに元の入力を送り直す）
+ */
 export class QuantitativeImportExpiredError extends NotFoundError {
   constructor() {
     super(QUANTITATIVE_IMPORT_EXPIRED_MESSAGE);
@@ -369,7 +395,10 @@ async function sha256OfText(text: string): Promise<string> {
  * 確定の進み具合（included・書き込み済みの ID）は含めない。
  */
 async function computePreviewHash(
-  batch: Pick<QuantitativeImportBatch, 'organizationId' | 'reportingPeriodId' | 'fileSha256'>,
+  batch: Pick<
+    QuantitativeImportBatch,
+    'organizationId' | 'reportingPeriodId' | 'fileSha256' | 'createdBy'
+  >,
   rows: readonly StandardImportRow[],
 ): Promise<string> {
   const canonical = rows.map((row) => {
@@ -381,6 +410,11 @@ async function computePreviewHash(
       organizationId: batch.organizationId,
       reportingPeriodId: batch.reportingPeriodId,
       fileSha256: batch.fileSha256,
+      // 検証した人を含める。確定のときに検証し直す場合（バッチが別インスタンスにある）も、
+      // 検証した本人でなければ一致しない（「検証した本人だけが確定できる」を保つ）
+      createdBy: batch.createdBy,
+      // 行には既存値の現在の版（currentVersionId・previous.versionId）と状態が入っている。
+      // 検証の後に既存値が変われば一致しない（A05）
       rows: canonical,
     }),
   );
@@ -748,11 +782,38 @@ function sameState(
   );
 }
 
+interface BuiltBatch {
+  batch: QuantitativeImportBatch;
+  masters: MasterLookups;
+  meta: {
+    format: StandardCsvFormat;
+    encoding: string;
+    delimiter: string;
+    mapping: StandardCsvParseResult['mapping'];
+    fileWarnings: string[];
+  };
+}
+
 export async function validateQuantitativeImport(
   db: DbClient,
   ctx: AuthorizationContext,
   input: ValidateQuantitativeImportInput,
 ): Promise<QuantitativeImportPreview> {
+  const built = await buildValidatedBatch(db, ctx, input, crypto.randomUUID());
+  await db.insert('quantitativeImportBatches', [built.batch]);
+  return buildPreview(built.batch, built.masters, built.meta);
+}
+
+/**
+ * 入力を解析・照合して、検証結果（まだ保存しないバッチ）を作る。検証と、バッチが見つからない
+ * ときの確定（検証し直し）が同じ関数を使う（同じ入力・同じ台帳なら同じハッシュになる）
+ */
+async function buildValidatedBatch(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: ValidateQuantitativeImportInput,
+  batchId: Uuid,
+): Promise<BuiltBatch> {
   assertCanImport(ctx);
   const organizationId = ctx.workspace.organizationId;
   const notation = input.numberNotation ?? 'auto';
@@ -1027,9 +1088,14 @@ export async function validateQuantitativeImport(
   }
 
   const now = new Date().toISOString();
-  const base = { organizationId, reportingPeriodId: batchPeriod.id, fileSha256 };
+  const base = {
+    organizationId,
+    reportingPeriodId: batchPeriod.id,
+    fileSha256,
+    createdBy: ctx.userId,
+  };
   const batch: QuantitativeImportBatch = {
-    id: crypto.randomUUID(),
+    id: batchId,
     ...base,
     projectId: input.projectId ?? null,
     fileName,
@@ -1041,17 +1107,18 @@ export async function validateQuantitativeImport(
     committedBy: null,
     excludedCount: 0,
     createdAt: now,
-    createdBy: ctx.userId,
   };
-  await db.insert('quantitativeImportBatches', [batch]);
-
-  return buildPreview(batch, masters, {
-    format: parse.format,
-    encoding: parse.encoding,
-    delimiter: parse.delimiter,
-    mapping: parse.mapping,
-    fileWarnings,
-  });
+  return {
+    batch,
+    masters,
+    meta: {
+      format: parse.format,
+      encoding: parse.encoding,
+      delimiter: parse.delimiter,
+      mapping: parse.mapping,
+      fileWarnings,
+    },
+  };
 }
 
 function buildPreview(
@@ -1260,6 +1327,91 @@ export async function commitQuantitativeImport(
   );
 }
 
+/**
+ * 確定のリクエストに検証結果（バッチ）が無いとき、画面が送り直した元の入力から検証し直してバッチを作る。
+ *
+ * Demo Mode（Vercel・外部ストアなし）では、検証と確定が別のインスタンスに届くとバッチが見つからない。
+ * 検証結果（行ごとの解析・差分）は大きく Cookie に載らないため、元の入力（数 KB の CSV）をブラウザが
+ * 持ち、確定のときに送り直す。サーバーは送られた解析結果を使わず、元の入力を同じ関数で解析・照合し、
+ * 内容・既存値の版と状態・検証した人を含むハッシュが利用者の確認したものと一致するときだけ確定する
+ * （一致しなければ、検証の後に何かが変わったとして止める。A05 と同じ）。
+ * 確定キーの意味は変えない: 確定の控えは Cookie でも持ち回し（demo-compact.ts）、同じキーの再送は
+ * 検証し直す前に控えから最初の結果を返す。
+ */
+async function rebuildBatchForCommit(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: CommitQuantitativeImportInput,
+): Promise<QuantitativeImportBatch> {
+  if (!input.source) throw new QuantitativeImportExpiredError();
+  let built: BuiltBatch;
+  try {
+    built = await buildValidatedBatch(db, ctx, input.source, input.batchId);
+  } catch (error) {
+    // 送り直した入力が今は検証を通らない（期間・形式）。確認した差分とは違う結果なので競合として止める
+    if (error instanceof ValidationError || error instanceof NotFoundError) {
+      throw new QuantitativeImportConflictError([wholeImportConflict()]);
+    }
+    throw error;
+  }
+  if (built.batch.previewHash !== input.previewHash) {
+    throw new QuantitativeImportConflictError(
+      staleRowConflicts(built.batch.rows.map(toStandardRow), input.confirmedRows ?? []),
+    );
+  }
+  await db.insert('quantitativeImportBatches', [built.batch]);
+  return built.batch;
+}
+
+function wholeImportConflict(): QuantitativeImportConflict {
+  return {
+    rowNo: 0,
+    label: '取込全体',
+    reason:
+      '検証の後に、台帳・マスター・操作している利用者のいずれかが変わりました（確認した差分と、いまの検証結果が一致しません）。',
+    previewDisplay: '—',
+    currentDisplay: '—',
+  };
+}
+
+/**
+ * 検証し直した結果と、利用者が確認した差分の違い（どの行の既存値が変わったか）。画面が送る確認済みの行は
+ * 説明にだけ使う（検証し直した結果が確認したものと違う時点で確定は止まっている）
+ */
+function staleRowConflicts(
+  rows: readonly StandardImportRow[],
+  confirmed: readonly QuantitativeImportConfirmedRow[],
+): QuantitativeImportConflict[] {
+  const conflicts: QuantitativeImportConflict[] = [];
+  for (const row of rows) {
+    const seen = confirmed.find((c) => c.rowNo === row.rowNo);
+    const now = row.previous;
+    let reason: string | null = null;
+    if (!seen) {
+      reason = '検証の後に、登録する行が変わりました。';
+    } else if (seen.diffKind === 'new' && now) {
+      reason = '検証の後に、同じ指標・組織・期間・集計範囲の値が登録されました。';
+    } else if (seen.previousVersionNo !== null && !now) {
+      reason = '検証の後に、既存の値が削除されました。';
+    } else if ((seen.previousVersionNo ?? null) !== (now?.versionNo ?? null)) {
+      reason = '検証の後に、既存の値が更新されました（新しい版があります）。';
+    } else if (seen.previousStatus && now && seen.previousStatus !== now.status) {
+      reason = `検証の後に、既存の値の状態が変わりました（${DATA_POINT_STATUS_LABELS[seen.previousStatus]} → ${DATA_POINT_STATUS_LABELS[now.status]}）。`;
+    } else if (seen.diffKind !== row.diffKind) {
+      reason = '検証の後に、台帳またはマスターが変わり、差分の区分が変わりました。';
+    }
+    if (!reason) continue;
+    conflicts.push({
+      rowNo: row.rowNo,
+      label: rowLabel(row),
+      reason,
+      previewDisplay: seen?.previousDisplay ?? '—',
+      currentDisplay: now ? displayState(now) : '（既存の値なし）',
+    });
+  }
+  return conflicts.length > 0 ? conflicts : [wholeImportConflict()];
+}
+
 async function commitSerialized(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -1290,12 +1442,14 @@ async function commitSerialized(
     if (replay.status === 'committed') return resultFromCommittedBatch(replay, true);
   }
 
-  const batch = UUID_PATTERN.test(input.batchId)
-    ? await db.findById('quantitativeImportBatches', input.batchId)
-    : null;
-  if (!batch || batch.organizationId !== organizationId) {
+  if (!UUID_PATTERN.test(input.batchId)) throw new QuantitativeImportExpiredError();
+  const stored = await db.findById('quantitativeImportBatches', input.batchId);
+  if (stored && stored.organizationId !== organizationId) {
     throw new QuantitativeImportExpiredError();
   }
+  // 検証結果が無い（Demo Mode で検証したインスタンスと別のインスタンスに届いた）ときは、画面が送り直した
+  // 元の入力から検証し直す。検証し直した結果が利用者の確認したものと同じときだけ確定する
+  const batch = stored ?? (await rebuildBatchForCommit(db, ctx, input));
   if (batch.status === 'committed') {
     throw new ValidationError(
       `この取込は ${formatJst(batch.committedAt)} に確定済みです。同じ内容をもう一度登録する場合は、改めて検証してください。`,
@@ -1726,7 +1880,7 @@ export interface QuantitativeImportHistoryItem {
   committedAt: IsoDateTime | null;
 }
 
-/** 直近の取込バッチ（デモではこのサーバーのメモリにあるものだけ） */
+/** 直近の取込バッチ（デモでは、このサーバーで検証したものと、Cookie で持ち回した確定の控え） */
 export async function listQuantitativeImportBatches(
   db: DbClient,
   ctx: AuthorizationContext,

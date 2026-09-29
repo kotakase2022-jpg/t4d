@@ -1,18 +1,33 @@
-import { deflateRawSync, inflateRawSync } from 'node:zlib';
+import {
+  brotliCompressSync,
+  brotliDecompressSync,
+  constants as zlibConstants,
+  deflateRawSync,
+  inflateRawSync,
+} from 'node:zlib';
 
 import { permissionsFor } from '@/lib/authorization/can';
 import { availabilityFromValue } from '@/lib/domain/disclosure-status';
 import type { FixtureDb } from '@/lib/fixtures/store';
+import { expandRow, isCompactedTable, type ReplayBudget } from './demo-compact';
 import type {
+  Approval,
   DataPoint,
   DataPointVersion,
   DisclosureBlock,
+  DisclosureBlockVersion,
+  DisclosureProject,
+  ExportArtifact,
+  NarrativeVersion,
   OrganizationFeatureSettings,
   PermissionKey,
   ProjectFramework,
   ProjectFrameworkDecision,
+  QuantitativeImportBatch,
+  ReportSnapshot,
   ReviewEvent,
   ReviewRequest,
+  SourceAnchor,
   Uuid,
 } from '@/types/domain';
 import type { TableName } from './types';
@@ -22,9 +37,12 @@ import type { TableName } from './types';
  *
  * Cookie は 4KB 程度が上限で、取込 1 行は UUID を 7 個持つ。
  * そのうち jobId・jobFileId・organizationId・reportingPeriodId・aiRunId は
- * 同じジョブの全行で同じ値になる。deflate だけでは 2 倍程度にしか縮まないため、
- * **2 回以上現れる文字列を辞書へ移して参照に置き換えてから** deflate する。
- * 実測で 8〜10 倍になり、20〜30 行の取込結果が 1 つの Cookie に収まる。
+ * 同じジョブの全行で同じ値になる。
+ *
+ * 形式は 2 つ。書くのは '3'（STREAM_MARK）だけで、'2' は以前のデプロイの Cookie を読むために残す。
+ *  - '3': すべての編集の JSON を 1 本に Brotli で圧縮し、呼び出し側が Cookie の上限ごとに切り分ける
+ *  - '2': Cookie ごとに、**2 回以上現れる文字列を辞書へ移して参照に置き換えてから** deflate したもの
+ *    （deflate だけでは 2 倍程度にしか縮まなかった。辞書化で 8〜10 倍）
  *
  * 副作用が無く Cookie にも依存しないので、この層だけ単体テストできる
  * （`demo-persistence.ts` は `server-only` のため直接はテストできない）。
@@ -39,7 +57,7 @@ export interface DemoEdit {
   /** 変更後の列（部分） */
   v: Record<string, unknown>;
   /**
-   * 追記した順番（大きいほど新しい）。チャンクへは空きのあるところへ詰めるため、
+   * 追記した順番（大きいほど新しい）。以前の形式（'2'）ではチャンクへ空きのあるところへ詰めたため、
    * 読んだ順が追記の順と一致しない。押し出す順（古いものから）を保つのに使う
    */
   n?: number;
@@ -51,6 +69,33 @@ export interface DemoEdit {
  * '2' と衝突しないため、この 1 文字で新旧を判別できる。
  */
 const VERSION_2 = '2';
+
+/**
+ * 1 本の圧縮列を複数の Cookie に分けて持つ形式の目印（'3'）。中身は編集の JSON を Brotli で圧縮したもの。
+ *
+ * 以前は編集を Cookie ごとに分けて別々に圧縮していた（'2': 文字列の辞書化 ＋ deflate）。同じ UUID・列名・
+ * 日時の接頭辞が Cookie ごとに辞書へ載り直すため、実演の流れでは 3 分割で 11.2KB になり、前半の取込が
+ * 押し出されていた。全部を 1 本にすると、辞書化 ＋ deflate で 10.0KB、JSON をそのまま Brotli で 8.4KB
+ * （2026-09-30 実測・実演の流れの終わりの編集 47 件）。Brotli は文脈で次の文字を予測するため、同じ列名・
+ * UUID の繰り返しと日本語の定型文に強く、辞書化（参照番号への置き換え）はかえって妨げになる。
+ * 全部を 1 本に圧縮してから Cookie の上限ごとに切り分け、読むときは順につなげて戻す（demo-persistence.ts）。
+ * 先頭の Cookie がこの目印で始まれば分割形式、'2' なら以前の形式として Cookie ごとに読む
+ */
+export const STREAM_MARK = '3';
+
+/**
+ * Brotli の設定。品質 9 は 34KB の JSON を 1ms 未満で圧縮できる（品質 10 以上は約 10〜30 倍遅く、
+ * 1 回の書き込みで何度も圧縮し直す押し出しの繰り返しや、数百行の取込で書き込みが遅くなる）。
+ * 窓 64KB（lgwin 16）は、展開後の上限（MAX_INFLATED_BYTES）より小さいが、Cookie に収まる量の JSON
+ * （実測 34KB）を覆う
+ */
+const BROTLI_OPTIONS = {
+  params: {
+    [zlibConstants.BROTLI_PARAM_QUALITY]: 9,
+    [zlibConstants.BROTLI_PARAM_LGWIN]: 16,
+    [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_TEXT,
+  },
+};
 
 /**
  * 辞書参照の目印。制御文字なので実データにはまず現れないが、
@@ -116,10 +161,21 @@ function unpack(packed: unknown): unknown {
   return restoreStrings(body, Array.isArray(table) ? table : []);
 }
 
+function deflatePacked(edits: DemoEdit[]): string {
+  return deflateRawSync(Buffer.from(JSON.stringify(pack(edits)), 'utf8')).toString('base64url');
+}
+
 export function encodeDemoEdits(edits: DemoEdit[]): string {
+  return VERSION_2 + deflatePacked(edits);
+}
+
+/** 分割して持つための 1 本の圧縮列（STREAM_MARK で始まる）。切り分けは呼び出し側が行う */
+export function encodeDemoEditStream(edits: DemoEdit[]): string {
   return (
-    VERSION_2 +
-    deflateRawSync(Buffer.from(JSON.stringify(pack(edits)), 'utf8')).toString('base64url')
+    STREAM_MARK +
+    brotliCompressSync(Buffer.from(JSON.stringify(edits), 'utf8'), BROTLI_OPTIONS).toString(
+      'base64url',
+    )
   );
 }
 
@@ -132,6 +188,13 @@ const MAX_INFLATED_BYTES = 512 * 1024;
 
 export function decodeDemoEdits(raw: string): DemoEdit[] {
   try {
+    if (raw.startsWith(STREAM_MARK)) {
+      const json = brotliDecompressSync(Buffer.from(raw.slice(1), 'base64url'), {
+        maxOutputLength: MAX_INFLATED_BYTES,
+      }).toString('utf8');
+      const parsed: unknown = JSON.parse(json);
+      return Array.isArray(parsed) ? (parsed as DemoEdit[]) : [];
+    }
     if (raw.startsWith(VERSION_2)) {
       const json = inflateRawSync(Buffer.from(raw.slice(1), 'base64url'), {
         maxOutputLength: MAX_INFLATED_BYTES,
@@ -202,12 +265,21 @@ const PERSISTED_TABLES = new Set<TableName>([
   // 節（disclosureBlocks）の自動保存本文（workingBody）は大きくなりうるため、
   // DemoDbClient が Cookie へ書く前に外す（demo-client.ts の persistedColumns）。
   //
-  // 次の表は**入れない**。本文 AST・定性情報の本文・引用文・スナップショット・取込行を持ち、
-  // Cookie の容量（2 チャンクで約 7.6KB）を 1 件で使い切って他のデモ操作を押し出すため。
-  //   narrativeVersions / disclosureBlockVersions / sourceAnchors /
-  //   reportSnapshots / quantitativeImportBatches
-  // これらは同一インスタンスのメモリにだけ残る（docs/known-limitations.md D-3 と同じ扱い）。
-  // 別インスタンスでは参照先の版が見つからないため、画面は「見つからない」として安全に失敗させる。
+  //
+  // 本文の版・定性情報の版・引用位置・スナップショット・出力記録・標準 CSV の確定の控え・データの承認の記録は、
+  // 以前は「1 件で Cookie を使い切る」として載せず、同じインスタンスのメモリにだけ残していた。本番（Vercel）で
+  // 実演の流れが別インスタンスで途切れた（2026-09-30）ため、**小さくした形**で載せる（demo-compact.ts）:
+  // 計算できる列を落とし、版の本文は土台の版との差分に、スナップショットは目録にする。
+  'narrativeVersions',
+  'sourceAnchors',
+  'disclosureBlockVersions',
+  'reportSnapshots',
+  'exportArtifacts',
+  // 検証しただけのバッチは載せない。確定の控え（二重登録を止める確定キーと、書いた行）だけ
+  'quantitativeImportBatches',
+  // データの承認の記録（Data Point の承認だけ）。承認後に数値を訂正しても、引用・固定した版が
+  // 承認済みだったことを別インスタンスでも示す（承認済みスナップショットの検査に要る）
+  'approvals',
   'organizationFeatureSettings',
   'disclosureProjects',
   'projectFrameworks',
@@ -218,8 +290,6 @@ const PERSISTED_TABLES = new Set<TableName>([
   'reviewEvents',
   'reviewComments',
   'recheckDecisions',
-  // exportArtifacts は入れない。出力の記録はスナップショット（メモリのみ）と組でしか表示されず、
-  // 別インスタンスでは使われないまま Cookie の容量だけを使い、他のデモ操作を押し出していた
   'kpiTargets',
 ]);
 
@@ -235,6 +305,15 @@ const APPEND_ONLY_TABLES: ReadonlySet<string> = new Set([
   // 0035 project_framework_decisions_immutable）。Cookie から承認済みの版の値を書き換えさせない
   'dataPointVersions',
   'projectFrameworkDecisions',
+  // Cookie から戻す版・引用位置・スナップショット・出力記録・確定の控え・承認の記録も DB では追記専用
+  // （0036〜0039 の forbid_mutation。取込バッチは確定したら変えない）。既にある行は書き換えない
+  'narrativeVersions',
+  'sourceAnchors',
+  'disclosureBlockVersions',
+  'reportSnapshots',
+  'exportArtifacts',
+  'quantitativeImportBatches',
+  'approvals',
 ]);
 
 /**
@@ -275,78 +354,284 @@ export function isPersistedTable(table: TableName): boolean {
  * といった、なりすましや証跡の改ざんに使える表には一切届かない。
  */
 /**
- * 互いを参照して検証する表。受け付けられる順に適用する。
- *  - 依頼 ⇔ 記録 ⇔ 節
+ * 互いを参照して検証する表と、戻す順番（小さいほど先）。受け付けられる順に、進まなくなるまで繰り返す。
+ *  - 引用位置 → 定性情報の版 → 原稿の版（土台の版・引用した行が先に要る）
+ *  - 依頼 ⇔ 記録 ⇔ 節（記録は対象の版が要る。職務分離を版の作成者で確かめるため）
  *  - Data Point → 数値の版・承認の道筋（現在の版と値の一致、承認の根拠）
  *  - 基準の適用区分 → 適用判断の記録（現在の判断と区分の一致）
+ *  - データの承認の記録 → スナップショット（固定した版・数値の承認の根拠が要る）→ 出力記録
  */
-const REVIEW_TABLES: ReadonlySet<string> = new Set([
-  'reviewRequests',
-  'reviewEvents',
-  'disclosureBlocks',
-  'dataPoints',
-  'projectFrameworks',
-  'projectFrameworkDecisions',
-]);
+const DEFERRED_ORDER: Readonly<Record<string, number>> = {
+  sourceAnchors: 1,
+  narrativeVersions: 2,
+  disclosureBlockVersions: 3,
+  reviewRequests: 4,
+  reviewEvents: 4,
+  disclosureBlocks: 4,
+  dataPoints: 4,
+  projectFrameworks: 4,
+  projectFrameworkDecisions: 4,
+  approvals: 5,
+  reportSnapshots: 6,
+  exportArtifacts: 7,
+  quantitativeImportBatches: 8,
+};
 
-export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
-  const deferred: DemoEdit[] = [];
-  for (const edit of edits) {
-    // 書き込み側の許可リスト（isPersistedTable）と対にする。
-    // 片側だけの防御は、Cookie を偽造されると意味を持たない。
-    if (!isPersistedTable(edit.t as TableName)) continue;
-    if (!edit.v || typeof edit.v !== 'object' || Array.isArray(edit.v)) continue;
-    if (REVIEW_TABLES.has(edit.t)) {
-      deferred.push(edit);
-      continue;
-    }
-    applyOne(db, edit, []);
-  }
-  // 承認・レビューの記録は、DB のトリガと同じ規則を満たすときだけ受け付ける
-  // （Fixture DB はインスタンスの全利用者で共有される。偽の Cookie 1 つで、職務分離を通らない
-  // 承認を全員の画面に出させない）。記録は依頼を、依頼の状態は記録を参照し、Cookie の中の順番は
-  // 更新のたびに入れ替わるため、受け付けられるものから適用し、進まなくなるまで繰り返す
-  let pending = deferred;
-  for (;;) {
-    const requests = pending.filter((e) => e.t === 'reviewRequests');
-    const rest = pending.filter((edit) => !applyOne(db, edit, requests));
-    if (rest.length === pending.length) break;
-    pending = rest;
-  }
-  // 最後まで受け付けられなかった節の編集: レビューの状態だけが依頼と合わない（依頼の編集が
-  // Cookie から押し出された等）なら、状態を下書きに戻して他の変更（現在の版・題名・担当）は残す。
-  // 状態を残すと「レビュー依頼中」なのに取り下げる依頼が無く、節を編集できなくなる
-  for (const edit of pending) {
-    if (edit.t === 'disclosureBlocks') applyOne(db, edit, [], { lenientBlockStatus: true });
-  }
-}
+/**
+ * 1 回の適用で扱う編集の上限（新しいものから）。正規の Cookie（3 × 3,800B）に載る編集は数百件まで
+ * （行ごとに乱数の ID を持ち、圧縮しても 1 件 20B を下回らない）。偽の Cookie は短い ID で数千件を詰められる
+ */
+export const MAX_APPLIED_EDITS = 1000;
 
-interface ApplyOptions {
+/**
+ * 受け付けられるものから適用し直す周回の上限。正規の Cookie は依存の深さが数段で、2〜3 周で落ち着く
+ * （原稿の版は節・版番号の順に並べ直すため、長い版の鎖も 1 周で戻る）。以前は上限が無く、新しい順に並べた
+ * 版の鎖で 1 周に 1 版しか進まず、9KB の偽の Cookie で 1 リクエストに約 18 秒かかった（自己監査 第 2 巡 F1）
+ */
+const MAX_PASSES = 8;
+
+/**
+ * Cookie から 1 つの節へ戻せる版の数の上限（インスタンスのメモリ全体で）。実演の流れで作る版は数個。
+ * 偽の Cookie で ID を変えながら版を足し続け、共有のメモリを増やし続けさせない
+ */
+export const MAX_REPLAYED_VERSIONS_PER_BLOCK = 200;
+
+/**
+ * 1 回の適用で組み立て直してよい本文・スナップショットの写しの量（文字数）。実演の流れの終わりの Cookie で
+ * 約 1.3 万字（2026-09-30 実測・stateless-demo-chain.test.ts）。展開後の大きさは Cookie の大きさでは抑えられない
+ * （強く圧縮できる）。内容ハッシュ（BigInt の FNV）は 1 文字ずつ計算するため、この量が 1 リクエストの CPU 時間を決める
+ */
+const REPLAY_BUDGET_CHARS = 1_000_000;
+
+/** 1 件の適用の結果。'retry' は依存する行が後から戻れば受け付けうる、'settled' はこの適用では変わらない */
+type ApplyOutcome = 'applied' | 'retry' | 'settled';
+
+interface ApplyContext {
+  /** まだ適用していない依頼の編集（記録の検査で、依頼時点の内容を見る） */
+  pendingRequests: readonly DemoEdit[];
+  /** Cookie の原稿の版の編集が名乗る節（版の ID → 節の ID）。後の周で戻る版の持ち主を先に知る */
+  cookieVersionBlocks: ReadonlyMap<string, ReadonlySet<string>>;
+  budget: ReplayBudget;
+  rowIndex: RowIndex;
+  /**
+   * スナップショットの目録が参照しうる行（版・節・引用位置・数値など）を受け付けた回数。目録の組み立て直しは
+   * 重いため、失敗した後にこの数が変わっていなければ組み立て直さない
+   */
+  generation: number;
+  failedAt: WeakMap<DemoEdit, number>;
   /** 節のレビュー状態が依頼と合わないとき、編集を捨てずに状態を下書きへ戻して受け付ける */
   lenientBlockStatus?: boolean;
 }
 
-/** 1 件を適用する。規則に合わず受け付けなかったら false */
-function applyOne(
-  db: FixtureDb,
-  edit: DemoEdit,
-  pendingRequests: readonly DemoEdit[],
-  options: ApplyOptions = {},
-): boolean {
+/** 目録の組み立て直しに関わらない表（これらを受け付けても、失敗した目録を組み立て直さない） */
+const SNAPSHOT_INDEPENDENT_TABLES: ReadonlySet<string> = new Set([
+  'reportSnapshots',
+  'exportArtifacts',
+  'quantitativeImportBatches',
+]);
+
+/**
+ * 表ごとの ID の位置（1 回の適用の間だけ使う）。行は末尾に足すか同じ位置で置き換えるだけなので、
+ * 足したときに位置を覚えれば作り直さなくてよい
+ */
+class RowIndex {
+  private readonly byTable = new Map<string, Map<unknown, number>>();
+
+  indexOf(table: string, rows: ReadonlyArray<Record<string, unknown>>, id: unknown): number {
+    let map = this.byTable.get(table);
+    if (!map) {
+      const built = new Map<unknown, number>();
+      rows.forEach((row, i) => {
+        if (!built.has(row.id)) built.set(row.id, i);
+      });
+      this.byTable.set(table, built);
+      map = built;
+    }
+    return map.get(id) ?? -1;
+  }
+
+  pushed(table: string, id: unknown, index: number): void {
+    this.byTable.get(table)?.set(id, index);
+  }
+}
+
+/** 同じ表の中の並べ方。原稿の版は節・版番号の順（土台の版が先に戻る）、ほかは追記した順のまま */
+function versionOrderKey(edit: DemoEdit): [string, number] {
+  const blockId = typeof edit.v.blockId === 'string' ? edit.v.blockId : '';
+  const versionNo = typeof edit.v.versionNo === 'number' ? edit.v.versionNo : 0;
+  return [blockId, versionNo];
+}
+
+function compareDeferred(a: DemoEdit, b: DemoEdit): number {
+  const order = (DEFERRED_ORDER[a.t] ?? 0) - (DEFERRED_ORDER[b.t] ?? 0);
+  if (order !== 0 || a.t !== 'disclosureBlockVersions') return order;
+  const [blockA, noA] = versionOrderKey(a);
+  const [blockB, noB] = versionOrderKey(b);
+  if (blockA !== blockB) return blockA < blockB ? -1 : 1;
+  return noA - noB;
+}
+
+export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
+  const ctx: ApplyContext = {
+    pendingRequests: [],
+    cookieVersionBlocks: new Map(),
+    budget: { remaining: REPLAY_BUDGET_CHARS },
+    rowIndex: new RowIndex(),
+    generation: 0,
+    failedAt: new WeakMap(),
+  };
+  const deferred: DemoEdit[] = [];
+  // 新しい編集を残す（呼び出し側は追記の順に並べて渡す）。正規の Cookie はこの数に届かない
+  for (const edit of edits.slice(-MAX_APPLIED_EDITS)) {
+    // 書き込み側の許可リスト（isPersistedTable）と対にする。
+    // 片側だけの防御は、Cookie を偽造されると意味を持たない。
+    if (!edit || typeof edit.t !== 'string' || !isPersistedTable(edit.t as TableName)) continue;
+    if (!edit.v || typeof edit.v !== 'object' || Array.isArray(edit.v)) continue;
+    if (DEFERRED_ORDER[edit.t] !== undefined) {
+      deferred.push(edit);
+      continue;
+    }
+    applyOne(db, edit, ctx);
+  }
+  // 同じ順番の中は追記した順のまま（安定ソート）。原稿の版だけは節・版番号の順
+  deferred.sort(compareDeferred);
+  const versionBlocks = new Map<string, Set<string>>();
+  for (const edit of deferred) {
+    if (edit.t !== 'disclosureBlockVersions') continue;
+    const blocks = versionBlocks.get(edit.id) ?? new Set<string>();
+    blocks.add(typeof edit.v.blockId === 'string' ? edit.v.blockId : '');
+    versionBlocks.set(edit.id, blocks);
+  }
+  ctx.cookieVersionBlocks = versionBlocks;
+  // 承認・レビューの記録は、DB のトリガと同じ規則を満たすときだけ受け付ける
+  // （Fixture DB はインスタンスの全利用者で共有される。偽の Cookie 1 つで、職務分離を通らない
+  // 承認を全員の画面に出させない）。記録は依頼を、依頼の状態は記録を参照し、Cookie の中の順番は
+  // 更新のたびに入れ替わるため、受け付けられるものから適用し、進まなくなるまで繰り返す（周回に上限あり）
+  let pending = deferred;
+  for (let pass = 0; pass < MAX_PASSES && pending.length > 0; pass += 1) {
+    ctx.pendingRequests = pending.filter((e) => e.t === 'reviewRequests');
+    const rest: DemoEdit[] = [];
+    let progressed = false;
+    for (const edit of pending) {
+      const outcome = applyOne(db, edit, ctx);
+      if (outcome === 'applied') progressed = true;
+      else if (outcome === 'retry') rest.push(edit);
+    }
+    pending = rest;
+    if (!progressed) break;
+  }
+  // 最後まで受け付けられなかった節の編集: レビューの状態だけが依頼と合わない（依頼の編集が
+  // Cookie から押し出された等）なら、状態を下書きに戻して他の変更（現在の版・題名・担当）は残す。
+  // 状態を残すと「レビュー依頼中」なのに取り下げる依頼が無く、節を編集できなくなる
+  ctx.pendingRequests = [];
+  ctx.lenientBlockStatus = true;
+  for (const edit of pending) {
+    if (edit.t === 'disclosureBlocks') applyOne(db, edit, ctx);
+  }
+}
+
+/** 1 件を適用する */
+function applyOne(db: FixtureDb, edit: DemoEdit, ctx: ApplyContext): ApplyOutcome {
   const rows = db[edit.t as TableName] as unknown as Array<Record<string, unknown>> | undefined;
-  if (!Array.isArray(rows)) return true;
-  const index = rows.findIndex((r) => r.id === edit.id);
+  if (!Array.isArray(rows)) return 'settled';
+  const index = ctx.rowIndex.indexOf(edit.t, rows, edit.id);
   const row = index === -1 ? undefined : rows[index];
-  if (!row && !('id' in edit.v)) return true;
+  const push = (next: Record<string, unknown>): ApplyOutcome => {
+    rows.push(next);
+    ctx.rowIndex.pushed(edit.t, next.id, rows.length - 1);
+    if (!SNAPSHOT_INDEPENDENT_TABLES.has(edit.t)) ctx.generation += 1;
+    return 'applied';
+  };
+  if (isCompactedTable(edit.t)) {
+    // 小さくした形で載せた追記専用の行。既にある行（このインスタンスで作った・既に戻した）は書き換えない。
+    // ただし標準 CSV の確定の控えは、このインスタンスで検証しただけのバッチに重ねる（検証と確定が
+    // 別のインスタンスに届いた後、確定の再送が検証したインスタンスに届く場合）
+    if (row) {
+      if (edit.t !== 'quantitativeImportBatches') return 'settled';
+      const receipt = expandRow(edit.t, edit.v, db);
+      if (!receipt || receipt.id !== edit.id) return 'settled';
+      const merged = mergeImportReceipt(db, row, receipt);
+      if (!merged) return 'settled';
+      rows[index] = merged;
+      return 'applied';
+    }
+    // 無ければ組み立て直し（依存する行がまだ無ければ次の周で）、同じ規則で検査してから足す。
+    // スナップショットの目録は組み立て直しが重いため、安い検査を先に通し、依存する行が変わるまで繰り返さない
+    const isSnapshot = edit.t === 'reportSnapshots';
+    if (isSnapshot) {
+      if (ctx.failedAt.get(edit) === ctx.generation) return 'retry';
+      if (!snapshotManifestPlausible(db, edit.v)) {
+        ctx.failedAt.set(edit, ctx.generation);
+        return 'retry';
+      }
+    }
+    const expanded = expandRow(edit.t, edit.v, db, { budget: ctx.budget });
+    if (!expanded || expanded.id !== edit.id || !acceptEdit(db, edit.t, undefined, expanded, ctx)) {
+      if (isSnapshot) ctx.failedAt.set(edit, ctx.generation);
+      return 'retry';
+    }
+    return push(expanded);
+  }
+  if (!row && !('id' in edit.v)) return 'settled';
+  // 追記専用の表の既にある行は書き換えない（何度繰り返しても変わらない）
+  if (row && APPEND_ONLY_TABLES.has(edit.t)) return 'settled';
   const next = normalizeLegacyRow(edit.t, row ? { ...row, ...edit.v } : { ...edit.v });
-  if (!acceptEdit(db, edit.t, row, next, pendingRequests, options)) return false;
+  if (!acceptEdit(db, edit.t, row, next, ctx)) return 'retry';
   if (row) {
     rows[index] = next;
-  } else {
-    // 新規作成された行（コメントなど）は、そのまま足す
-    rows.push(next);
+    if (!SNAPSHOT_INDEPENDENT_TABLES.has(edit.t)) ctx.generation += 1;
+    return 'applied';
   }
-  return true;
+  // 新規作成された行（コメントなど）は、そのまま足す
+  return push(next);
+}
+
+/**
+ * 標準 CSV の確定の控え（Cookie）を、このインスタンスで検証しただけのバッチに重ねる。
+ *
+ * 検証がインスタンス A、確定が B に届くと、A のメモリには「検証済み」のバッチが残る。確定の応答が届かず
+ * 同じ確定キーで押し直した再送が A に届くと、A は控えを「既にある行」として捨て、検証済みのバッチで
+ * 確定し直そうとして「検証の後に既存の値が変わった」競合を返していた（確定は成功しているのに）。
+ * 同じバッチ（同じ組織・期間・内容・検証した人・行と差分区分）の控えなら、確定の結果を重ねる。
+ * 検証済みの行（元の入力・警告）はそのまま残し、確定キー・書いた行・除外だけを控えから写す
+ */
+function mergeImportReceipt(
+  db: FixtureDb,
+  existing: Record<string, unknown>,
+  receipt: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const before = existing as unknown as QuantitativeImportBatch;
+  const after = receipt as unknown as QuantitativeImportBatch;
+  if (before.status !== 'validated' || !acceptImportBatch(db, after)) return null;
+  for (const key of ['organizationId', 'reportingPeriodId', 'fileSha256', 'createdBy'] as const) {
+    if (before[key] !== after[key]) return null;
+  }
+  if (before.rows.length !== after.rows.length) return null;
+  type ReceiptRow = QuantitativeImportBatch['rows'][number] & {
+    writtenDataPointId?: string | null;
+    writtenVersionId?: string | null;
+  };
+  const byRowNo = new Map((after.rows as ReceiptRow[]).map((r) => [r.rowNo, r]));
+  const rows: ReceiptRow[] = [];
+  for (const row of before.rows) {
+    const committed = byRowNo.get(row.rowNo);
+    if (!committed || committed.diffKind !== row.diffKind) return null;
+    rows.push({
+      ...row,
+      included: committed.included,
+      writtenDataPointId: committed.writtenDataPointId ?? null,
+      writtenVersionId: committed.writtenVersionId ?? null,
+    });
+  }
+  return {
+    ...existing,
+    status: 'committed',
+    rows,
+    commitIdempotencyKey: after.commitIdempotencyKey,
+    committedAt: after.committedAt,
+    committedBy: after.committedBy,
+    excludedCount: after.excludedCount,
+  };
 }
 
 /**
@@ -502,10 +787,13 @@ function acceptReviewEvent(
   // レビュー完了・最終承認: 依頼者・版の作成者・本文を書いた人ではないこと
   if (event.actorUserId === request.requestedBy) return false;
   const version = db.disclosureBlockVersions.find((v) => v.id === request.targetVersionId);
+  // 対象の版が戻るまで受け付けない（版は Cookie でも持ち回し、記録より先に戻す）。以前は版がメモリに
+  // しか無く、別インスタンスでは版が無いまま作成者の検査を飛ばしていた（偽の Cookie で作成者自身の
+  // 承認を戻せた）。版は依頼の対象の節のもの（別の節の版を承認済みにさせない）
+  if (!version || version.blockId !== request.targetId) return false;
   if (
-    version &&
-    (version.createdBy === event.actorUserId ||
-      (version.contributorUserIds ?? []).includes(event.actorUserId))
+    version.createdBy === event.actorUserId ||
+    (version.contributorUserIds ?? []).includes(event.actorUserId)
   ) {
     return false;
   }
@@ -632,8 +920,19 @@ function acceptBlock(
   db: FixtureDb,
   existing: DisclosureBlock | undefined,
   next: DisclosureBlock,
-  options: ApplyOptions,
+  ctx: ApplyContext,
 ): boolean {
+  // 現在の版は、この節の版でなければならない（版も Cookie で持ち回すため、先に戻っている。
+  // 押し出されて無いときは、画面が「版を読み込めない」として編集を止める）。
+  // まだ戻っていない版でも、同じ Cookie の版の編集が別の節の版を名乗っていれば受け付けない
+  // （後の周で戻ると、別の節の本文をこの節の現在の版として出してしまう）。別のリクエストで後から
+  // 届く版は、acceptBlockVersion が「別の節が既に指している版」として止める
+  if (next.currentVersionId) {
+    const current = db.disclosureBlockVersions.find((v) => v.id === next.currentVersionId);
+    if (current && current.blockId !== next.id) return false;
+    const claimed = ctx.cookieVersionBlocks.get(next.currentVersionId);
+    if (!current && claimed && [...claimed].some((blockId) => blockId !== next.id)) return false;
+  }
   const before = existing ?? { status: 'draft', approvedVersionId: null };
   const approvalChanged =
     (next.approvedVersionId !== null && next.approvedVersionId !== before.approvedVersionId) ||
@@ -660,7 +959,7 @@ function acceptBlock(
       next.status === 'approval_pending' ? 'review_completed' : undefined,
     );
     if (!recorded) {
-      if (!options.lenientBlockStatus) return false;
+      if (!ctx.lenientBlockStatus) return false;
       // 承認済みの版（approvedVersionId）はそのまま残る。下書きは「承認後に修正中」と同じ状態
       next.status = 'draft';
       next.submittedVersionId = existing?.submittedVersionId ?? null;
@@ -812,16 +1111,440 @@ function acceptFeatureSettings(db: FixtureDb, next: OrganizationFeatureSettings)
   );
 }
 
+// ----------------------------------------------------------------------
+// 小さくした形で持ち回す追記専用の表の検査（demo-compact.ts が組み立て直した行に対して行う）
+//
+// Fixture DB はインスタンスの全利用者で共有される。偽の Cookie で、別の組織の行を指す版・権限の無い
+// 人の名義の版・承認していない「承認済み」のスナップショットを全員の画面に出させない。
+// DB の RLS（書込権限・組織）と、0041〜0043 のトリガ（職務分離・スナップショットの検証）と同じ規則を通す。
+// 後から変わりうる行（節の状態・Data Point の現在の版）ではなく、追記専用の記録（依頼・承認の記録・版）で
+// 確かめる。Cookie は最終の状態をまとめて戻すため、作成時点の状態を再現できないため
+// ----------------------------------------------------------------------
+
+function hasPermission(
+  db: FixtureDb,
+  organizationId: unknown,
+  userId: unknown,
+  permission: PermissionKey,
+): boolean {
+  return (
+    typeof organizationId === 'string' &&
+    typeof userId === 'string' &&
+    memberPermissions(db, organizationId, userId).has(permission)
+  );
+}
+
+function acceptBlockVersion(db: FixtureDb, next: DisclosureBlockVersion): boolean {
+  const block = db.disclosureBlocks.find((b) => b.id === next.blockId);
+  if (!block || block.organizationId !== next.organizationId) return false;
+  if (!hasPermission(db, next.organizationId, next.createdBy, 'enterprise.disclosure.write')) {
+    return false;
+  }
+  const siblings = db.disclosureBlockVersions.filter((v) => v.blockId === next.blockId);
+  if (siblings.length >= MAX_REPLAYED_VERSIONS_PER_BLOCK) return false;
+  if (siblings.some((v) => v.versionNo === next.versionNo)) return false;
+  if (next.baseVersionId !== null) {
+    const base = siblings.find((v) => v.id === next.baseVersionId);
+    if (!base || base.versionNo >= next.versionNo) return false;
+  }
+  // 別の節が既にこの ID を現在の版・承認済みの版・審査中の版として指していれば足さない。
+  // 節のポインタは版が無いまま受け付けることがある（版が Cookie から押し出された場合）ため、
+  // 後から（同じ Cookie の後の周・別のリクエストで）その ID の別の節の版を足すと、別の節の本文を指してしまう
+  return !db.disclosureBlocks.some(
+    (b) =>
+      b.id !== next.blockId &&
+      (b.currentVersionId === next.id ||
+        b.approvedVersionId === next.id ||
+        b.submittedVersionId === next.id),
+  );
+}
+
+function normalizeSpace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function acceptSourceAnchor(db: FixtureDb, next: SourceAnchor): boolean {
+  if (!hasPermission(db, next.organizationId, next.createdBy, 'enterprise.disclosure.write')) {
+    return false;
+  }
+  // 引用位置は資料の抽出結果（または手動の抜粋）から作る（source-anchor.ts の createAnchorFromFragment）。
+  // 引用文はその箇所に実在する文言に限る
+  const fragment = next.fragmentId ? db.fragments.find((f) => f.id === next.fragmentId) : undefined;
+  if (
+    !fragment ||
+    fragment.organizationId !== next.organizationId ||
+    fragment.fileVersionId !== next.fileVersionId
+  ) {
+    return false;
+  }
+  return normalizeSpace(fragment.text).includes(normalizeSpace(next.quoteText));
+}
+
+function acceptNarrativeVersion(db: FixtureDb, next: NarrativeVersion): boolean {
+  const record = db.narrativeRecords.find((r) => r.id === next.narrativeRecordId);
+  if (!record || record.organizationId !== next.organizationId) return false;
+  if (!hasPermission(db, next.organizationId, next.createdBy, 'enterprise.disclosure.write')) {
+    return false;
+  }
+  if (
+    db.narrativeVersions.some(
+      (v) => v.narrativeRecordId === next.narrativeRecordId && v.versionNo === next.versionNo,
+    )
+  ) {
+    return false;
+  }
+  const period = db.periods.find((p) => p.id === next.reportingPeriodId);
+  if (!period || period.organizationId !== next.organizationId) return false;
+  // 根拠の引用位置は同じ組織のもの（先に戻しておく）
+  return next.sourceAnchorIds.every((id) =>
+    db.sourceAnchors.some((a) => a.id === id && a.organizationId === next.organizationId),
+  );
+}
+
+/**
+ * その版を承認した記録（最終承認で終わった依頼と、その最終承認の日時）。追記専用の記録で確かめる
+ * （節の現在の状態は見ない）
+ */
+function approvalsOf(
+  db: FixtureDb,
+  blockId: Uuid,
+  versionId: Uuid,
+): Array<{ request: ReviewRequest; approvedAt: number }> {
+  const out: Array<{ request: ReviewRequest; approvedAt: number }> = [];
+  for (const request of db.reviewRequests) {
+    if (
+      request.targetId !== blockId ||
+      request.targetVersionId !== versionId ||
+      request.status !== 'approved'
+    ) {
+      continue;
+    }
+    for (const event of db.reviewEvents) {
+      if (
+        event.reviewRequestId === request.id &&
+        event.eventType === 'approved' &&
+        event.targetVersionId === versionId
+      ) {
+        out.push({ request, approvedAt: Date.parse(event.createdAt) });
+      }
+    }
+  }
+  return out;
+}
+
+/** 時刻のずれの許容（インスタンスの時計の差）。これより先の作成日時は名乗らせない */
+const CLOCK_SKEW_MS = 10 * 60 * 1000;
+
+/**
+ * 固定した時点で出力の対象だった基準（プロジェクトの基準の行と、追記専用の適用判断の記録で決める）。
+ * 目録が名乗る基準の一覧は信用しない（空にすれば、どの節も「対象外の基準の節」として外せてしまう）。
+ * 固定の後に登録した基準は含めない。判断が固定の後なら、固定時点は未判定（対象外ではない）として含める
+ * （判断の記録が無いまま名乗れるのは準備の区分と未判定だけ。acceptProjectFramework）
+ */
+function frameworksInForceAt(db: FixtureDb, project: DisclosureProject, at: number): Set<Uuid> {
+  const out = new Set<Uuid>();
+  for (const pf of db.projectFrameworks) {
+    if (pf.projectId !== project.id || pf.organizationId !== project.organizationId) continue;
+    if (!(Date.parse(pf.createdAt) <= at)) continue;
+    let latest: ProjectFrameworkDecision | undefined;
+    for (const decision of db.projectFrameworkDecisions) {
+      if (decision.projectFrameworkId !== pf.id || !(Date.parse(decision.decidedAt) <= at)) {
+        continue;
+      }
+      if (!latest || decision.decisionNo > latest.decisionNo) latest = decision;
+    }
+    if (latest?.applicabilityStatus !== 'not_applicable') out.add(pf.frameworkVersionId);
+  }
+  return out;
+}
+
+/**
+ * 目録の組み立て直しの前に通す安い検査（プロジェクト・組織・作成者の権限・節の所属・番号の重複）。
+ * 組み立て直しは本文の写しと内容ハッシュの計算で重いため、明らかに受け付けない目録で行わない
+ * （acceptReportSnapshot は組み立てた写しに対して同じ検査を改めて行う）
+ */
+function snapshotManifestPlausible(db: FixtureDb, v: Record<string, unknown>): boolean {
+  const project = db.disclosureProjects.find((p) => p.id === v.projectId);
+  if (!project || project.organizationId !== v.organizationId) return false;
+  const permitted =
+    v.snapshotKind === 'approved'
+      ? hasPermission(db, v.organizationId, v.createdBy, 'enterprise.disclosure.approve')
+      : hasPermission(db, v.organizationId, v.createdBy, 'enterprise.disclosure.write') ||
+        hasPermission(db, v.organizationId, v.createdBy, 'enterprise.export.run');
+  if (!permitted) return false;
+  if (
+    db.reportSnapshots.some(
+      (s) =>
+        s.projectId === v.projectId &&
+        s.snapshotKind === v.snapshotKind &&
+        s.snapshotNo === v.snapshotNo,
+    )
+  ) {
+    return false;
+  }
+  if (!Array.isArray(v.bl)) return false;
+  const projectBlocks = new Set(
+    db.disclosureBlocks
+      .filter((b) => b.projectId === project.id && b.organizationId === project.organizationId)
+      .map((b) => b.id),
+  );
+  const seen = new Set<unknown>();
+  for (const entry of v.bl as unknown[]) {
+    const blockId = (entry as { i?: unknown } | null)?.i;
+    if (typeof blockId !== 'string' || !projectBlocks.has(blockId) || seen.has(blockId)) {
+      return false;
+    }
+    seen.add(blockId);
+  }
+  return true;
+}
+
+/** 数値の版が承認されていた根拠（0042 の t4d.verify_report_snapshot と同じ 3 つ） */
+function dataPointVersionApproved(db: FixtureDb, version: DataPointVersion): boolean {
+  if (version.status === 'approved') return true;
+  const dp = db.dataPoints.find((d) => d.id === version.dataPointId);
+  if (dp?.status === 'approved' && dp.currentVersionId === version.id) return true;
+  return db.approvals.some(
+    (a) =>
+      a.targetType === 'data_point' &&
+      a.targetId === version.dataPointId &&
+      a.targetVersionId === version.id &&
+      a.decision === 'approved',
+  );
+}
+
+/**
+ * スナップショットの目録（組み立て直した写し）。内容ハッシュの一致は組み立て直しで確かめ済み
+ * （demo-compact.ts）。ここでは 0042 の t4d.verify_report_snapshot と同じ主張の検査を、
+ * 追記専用の記録に対して行う（ハッシュは鍵の無い sha256 で、偽の目録でも合わせられるため）
+ */
+function acceptReportSnapshot(db: FixtureDb, next: ReportSnapshot): boolean {
+  const project = db.disclosureProjects.find((p) => p.id === next.projectId);
+  if (!project || project.organizationId !== next.organizationId) return false;
+  const approvedKind = next.snapshotKind === 'approved';
+  // 作成日時はプロジェクトの作成より後で、未来ではないこと（作成日時で完全性の検査の範囲が決まる。
+  // 過去へずらして、後から作った節・後から確定した判断を「固定時点に無かった」ことにさせない）
+  const createdAt = Date.parse(next.createdAt);
+  if (
+    !Number.isFinite(createdAt) ||
+    createdAt > Date.now() + CLOCK_SKEW_MS ||
+    !(createdAt >= Date.parse(project.createdAt))
+  ) {
+    return false;
+  }
+  if (approvedKind) {
+    if (!hasPermission(db, next.organizationId, next.createdBy, 'enterprise.disclosure.approve')) {
+      return false;
+    }
+  } else if (
+    !hasPermission(db, next.organizationId, next.createdBy, 'enterprise.disclosure.write') &&
+    !hasPermission(db, next.organizationId, next.createdBy, 'enterprise.export.run')
+  ) {
+    return false;
+  }
+  // 番号は (プロジェクト, 種別) ごとの通し番号（report_snapshots_unique）
+  if (
+    db.reportSnapshots.some(
+      (s) =>
+        s.projectId === next.projectId &&
+        s.snapshotKind === next.snapshotKind &&
+        s.snapshotNo === next.snapshotNo,
+    )
+  ) {
+    return false;
+  }
+  const blocks = next.blocks as Array<ReportSnapshot['blocks'][number] & SnapshotClaims>;
+  // 固定時点の報告範囲の改訂番号（目録の pj.r）。番号は上がるだけなので、プロジェクトより先の番号は名乗れない
+  const claimedRevision =
+    (next.frameworkVersions[0] as { scopeRevision?: number | null } | undefined)?.scopeRevision ??
+    0;
+  const projectRevision = project.scopeRevision ?? 0;
+  if (claimedRevision > projectRevision) return false;
+  // 確定版の再確認は、プロジェクトの今の番号でも求める（DB の verify_report_snapshot は作成時のプロジェクトの
+  // 番号と比べる）。目録の番号は偽れるうえ、Cookie には範囲を変えた日時が残らず、固定時点の番号を
+  // 確かめられない。範囲を変えた後は、変える前に確定した確定版を別のインスタンスでは戻さない（上流の行が
+  // 変わった目録と同じく「見つからない」になる。docs/known-limitations.md D-3）
+  const frozenRevision = Math.max(claimedRevision, projectRevision);
+  // 確定版が含むべき基準は、目録の一覧ではなくプロジェクトの行で決める
+  const inForce = approvedKind ? frameworksInForceAt(db, project, createdAt) : new Set<Uuid>();
+  let versionCount = 0;
+  let allSelf = true;
+  for (const entry of blocks) {
+    const block = db.disclosureBlocks.find((b) => b.id === entry.blockId);
+    if (
+      !block ||
+      block.projectId !== next.projectId ||
+      block.organizationId !== next.organizationId
+    ) {
+      return false;
+    }
+    // 確定版は、固定時点で対象だった基準の節だけを含む（report-snapshot.ts の assemble と同じ）
+    if (approvedKind && !inForce.has(block.frameworkVersionId)) return false;
+    if (entry.versionId === null) {
+      if (approvedKind) return false;
+      continue;
+    }
+    const version = db.disclosureBlockVersions.find((v) => v.id === entry.versionId);
+    if (!version || version.blockId !== block.id) return false;
+    versionCount += 1;
+    if (
+      version.createdBy !== next.createdBy &&
+      !(version.contributorUserIds ?? []).includes(next.createdBy)
+    ) {
+      allSelf = false;
+    }
+    if (
+      approvedKind &&
+      (!entry.isApprovedVersion ||
+        entry.status !== 'approved' ||
+        entry.approvedVersionId !== version.id)
+    ) {
+      return false;
+    }
+    // 承認済みの版と名乗るなら、最終承認で終わった依頼がその版にあること（草稿でも同じ）
+    if (entry.isApprovedVersion || approvedKind) {
+      const approvals = approvalsOf(db, block.id, version.id);
+      if (approvals.length === 0) return false;
+      // 確定版: 固定時点までに最終承認されていること（作成日時を最終承認より前にずらさせない）。
+      // 報告範囲の変更より前の依頼でしか承認されていない版は含めない
+      if (
+        approvedKind &&
+        !approvals.some(
+          (a) =>
+            a.approvedAt <= createdAt && (a.request.projectScopeRevision ?? 0) >= frozenRevision,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  for (const value of next.metricValues as Array<
+    ReportSnapshot['metricValues'][number] & { versionApproved?: boolean }
+  >) {
+    const version = db.dataPointVersions.find((v) => v.id === value.dataPointVersionId);
+    if (!version || version.organizationId !== next.organizationId) return false;
+    if (value.versionApproved === true) {
+      if (!dataPointVersionApproved(db, version)) return false;
+    } else if (approvedKind || value.status === 'approved') {
+      return false;
+    }
+  }
+  for (const anchor of next.anchors) {
+    const row = db.sourceAnchors.find((a) => a.id === anchor.sourceAnchorId);
+    if (!row || row.organizationId !== next.organizationId) return false;
+  }
+  if (
+    !next.narrativeVersionIds.every((id) =>
+      db.narrativeVersions.some((v) => v.id === id && v.organizationId === next.organizationId),
+    )
+  ) {
+    return false;
+  }
+  if (approvedKind) {
+    // 固定した基準の一覧は、固定時点で対象だった基準（対象外と判断した基準以外）と一致すること
+    // （0042 の verify_report_snapshot はプロジェクトの基準の行で見る。以前は目録の一覧を信用し、
+    // 一覧を空にすればどの節も外せた）
+    const frozen = next.frameworkVersions.map((f) => f.frameworkVersionId);
+    if (
+      frozen.length === 0 ||
+      frozen.length !== inForce.size ||
+      !frozen.every((id) => inForce.has(id)) ||
+      next.frameworkVersions.some((f) => f.applicabilityStatus === 'not_applicable')
+    ) {
+      return false;
+    }
+    // 対象の基準の節をすべて含める（固定時点にあった節で見る）
+    const fixed = new Set(blocks.map((b) => b.blockId));
+    const omitted = db.disclosureBlocks.some(
+      (b) =>
+        b.projectId === next.projectId &&
+        inForce.has(b.frameworkVersionId) &&
+        Date.parse(b.createdAt) <= createdAt &&
+        (b.deletedAt === null || Date.parse(b.deletedAt) > createdAt) &&
+        !fixed.has(b.id),
+    );
+    if (omitted) return false;
+    if (project.finalApproverUserId !== null && project.finalApproverUserId !== next.createdBy) {
+      return false;
+    }
+    if (versionCount > 0 && allSelf) return false;
+  }
+  return true;
+}
+
+interface SnapshotClaims {
+  approvedVersionId: Uuid | null;
+  isApprovedVersion: boolean;
+}
+
+function acceptExportArtifact(db: FixtureDb, next: ExportArtifact): boolean {
+  const snapshot = db.reportSnapshots.find((s) => s.id === next.snapshotId);
+  if (!snapshot || snapshot.organizationId !== next.organizationId) return false;
+  return hasPermission(db, next.organizationId, next.generatedBy, 'enterprise.export.run');
+}
+
+function acceptImportBatch(db: FixtureDb, next: QuantitativeImportBatch): boolean {
+  // 確定できるのは検証した本人だけ（quantitative-import.ts の commit と同じ）
+  if (next.status !== 'committed' || next.committedBy !== next.createdBy) return false;
+  if (
+    !hasPermission(db, next.organizationId, next.committedBy, 'enterprise.import.run') ||
+    !hasPermission(db, next.organizationId, next.committedBy, 'enterprise.data.write')
+  ) {
+    return false;
+  }
+  const period = db.periods.find((p) => p.id === next.reportingPeriodId);
+  return period !== undefined && period.organizationId === next.organizationId;
+}
+
+function acceptApproval(db: FixtureDb, next: Approval): boolean {
+  if (next.targetType !== 'data_point') return false;
+  const dp = db.dataPoints.find((d) => d.id === next.targetId);
+  if (!dp || dp.organizationId !== next.organizationId) return false;
+  if (next.targetVersionId !== null) {
+    const version = db.dataPointVersions.find((v) => v.id === next.targetVersionId);
+    if (!version || version.dataPointId !== dp.id) return false;
+  }
+  if (next.decision === 'returned') {
+    return hasPermission(db, next.organizationId, next.actorUserId, 'enterprise.data.review');
+  }
+  if (next.decision !== 'approved') return false;
+  if (!hasPermission(db, next.organizationId, next.actorUserId, 'enterprise.data.approve')) {
+    return false;
+  }
+  // 承認の道筋がある Data Point は、全段階を承認した巡があること（transitionDataPoint と同じ）
+  const steps = db.dataPointApprovalSteps.filter(
+    (s) => s.dataPointId === dp.id && s.organizationId === dp.organizationId,
+  );
+  if (steps.length === 0) return true;
+  const rounds = [...new Set(steps.map((s) => s.round))];
+  return rounds.some((round) =>
+    steps.filter((s) => s.round === round).every((s) => s.status === 'approved'),
+  );
+}
+
 function acceptEdit(
   db: FixtureDb,
   table: string,
   existing: Record<string, unknown> | undefined,
   next: Record<string, unknown>,
-  pendingRequests: readonly DemoEdit[],
-  options: ApplyOptions = {},
+  ctx: ApplyContext,
 ): boolean {
   if (existing && APPEND_ONLY_TABLES.has(table)) return false;
   switch (table) {
+    case 'disclosureBlockVersions':
+      return acceptBlockVersion(db, next as unknown as DisclosureBlockVersion);
+    case 'sourceAnchors':
+      return acceptSourceAnchor(db, next as unknown as SourceAnchor);
+    case 'narrativeVersions':
+      return acceptNarrativeVersion(db, next as unknown as NarrativeVersion);
+    case 'reportSnapshots':
+      return acceptReportSnapshot(db, next as unknown as ReportSnapshot);
+    case 'exportArtifacts':
+      return acceptExportArtifact(db, next as unknown as ExportArtifact);
+    case 'quantitativeImportBatches':
+      return acceptImportBatch(db, next as unknown as QuantitativeImportBatch);
+    case 'approvals':
+      return acceptApproval(db, next as unknown as Approval);
     case 'dataPointVersions':
       return acceptDataPointVersion(next as unknown as DataPointVersion);
     case 'dataPoints':
@@ -841,7 +1564,7 @@ function acceptEdit(
     case 'organizationFeatureSettings':
       return acceptFeatureSettings(db, next as unknown as OrganizationFeatureSettings);
     case 'reviewEvents':
-      return acceptReviewEvent(db, next as unknown as ReviewEvent, pendingRequests);
+      return acceptReviewEvent(db, next as unknown as ReviewEvent, ctx.pendingRequests);
     case 'reviewRequests':
       return acceptReviewRequest(
         db,
@@ -860,7 +1583,7 @@ function acceptEdit(
         db,
         existing as unknown as DisclosureBlock | undefined,
         next as unknown as DisclosureBlock,
-        options,
+        ctx,
       );
     default:
       return true;

@@ -3,7 +3,14 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { dataPointId } from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
 import { parseDocx } from '@/lib/imports/docx-text';
-import { DEMO_USERS, loginAs, switchDemoRole } from './helpers';
+import {
+  DEMO_USERS,
+  carriesDemoState,
+  carryDemoState,
+  loginAs,
+  peakCarriedCookieHeader,
+  switchDemoRole,
+} from './helpers';
 
 /**
  * 開示優先モード（D0 デモ）の一連の業務を、同じプロジェクト（FY2026）の上で最後まで通す。
@@ -162,7 +169,19 @@ async function resetDisclosureDemo(page: Page): Promise<void> {
   await expect(page.getByText(/開示デモのデータを初期状態に戻しました/)).toBeVisible();
 }
 
+// 状態がリクエストごとに消えるサーバーの E2E（playwright.stateless.config.ts）では、前の手順の結果を
+// Cookie だけで次の手順へ渡す（実演の発表者と同じく 1 つのブラウザを使い続ける）。通常の E2E では何もしない
+test.afterEach(async ({ context }, testInfo) => {
+  await carryDemoState(context, testInfo.title);
+});
+
 test.afterAll(async ({ browser }) => {
+  if (carriesDemoState()) {
+    const peak = peakCarriedCookieHeader();
+    console.log(
+      `[stateless] 実演の流れの最大: Cookie ヘッダー ${peak.bytes}B（操作の記録 ${peak.editsBytes}B）— ${peak.label}`,
+    );
+  }
   // 途中で失敗しても、後続の spec が既定の状態（開示デモ初期状態・開示優先モード OFF）を見るように戻す。
   // 正常に最後まで進んだ場合は最後のテストで戻し済みで、ここでは何も変わらない
   const author = await browser.newPage();

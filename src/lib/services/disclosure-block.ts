@@ -1451,6 +1451,13 @@ export interface BlockEditorData {
     workingSavedAt: IsoDateTime | null;
     /** 作業本文を最後に自動保存したのが別の人なら、その人の名前（画面で知らせる） */
     workingUpdatedByOtherName: string | null;
+    /**
+     * 作業本文を最後に自動保存したのが、画面を開いた本人か。作業本文そのものは Demo Mode では別のサーバーに
+     * 無いことがあるが、この記録（working_updated_by）は Cookie でも持ち回し、版の保存・レビュー依頼・
+     * 開示デモのリセットで消える。画面はこれが真のときだけ、タブに控えた自動保存の本文を戻す
+     * （リセットや版の保存の後に古い控えを戻さない）
+     */
+    workingSavedByViewer: boolean;
     /** 報告範囲の変更より前に承認された（再確認・再承認が必要） */
     scopeRecheckNeeded: boolean;
     /** 適用判断を確定し直す前に承認された（再確認・再承認が必要。本文を変えずに版を作れる） */
@@ -2090,6 +2097,7 @@ export async function getBlockEditorData(
         block.workingUpdatedBy !== ctx.userId
           ? nameOf(members, block.workingUpdatedBy)
           : null,
+      workingSavedByViewer: (block.workingUpdatedBy ?? null) === ctx.userId,
       scopeRecheckNeeded: await scopeRecheckNeeded(db, ctx, block, project),
       applicabilityRecheckNeeded: await applicabilityRecheckNeeded(db, ctx, block),
     },

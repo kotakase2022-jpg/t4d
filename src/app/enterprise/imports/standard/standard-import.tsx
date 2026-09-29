@@ -199,6 +199,12 @@ export function StandardImport({
   const [reason, setReason] = React.useState('');
   const [commitFeedback, setCommitFeedback] = React.useState<CommitFeedback>(null);
   const idempotencyKey = React.useRef<string | null>(null);
+  /**
+   * 検証したときの元の入力（ファイル・貼り付け・手入力）。確定のときに同じものを送り直す。
+   * デモ環境（Vercel）では検証結果がサーバーのメモリにしか無く、確定が別のサーバーに届くと見つからないため、
+   * サーバーはこの入力から検証し直し、確認した差分と同じときだけ確定する（解析済みの値は送らない）
+   */
+  const validatedSource = React.useRef<FormData | null>(null);
 
   const [validating, startValidate] = React.useTransition();
   const [committing, startCommit] = React.useTransition();
@@ -278,6 +284,7 @@ export function StandardImport({
           setMode('all');
           setConfirmExcluded(false);
           idempotencyKey.current = newKey();
+          validatedSource.current = fd;
           const c = result.preview.counts;
           setAnnouncement(
             `検証しました（まだ登録していません）: 新規 ${c.new} 行／変更 ${c.changed} 行／変更なし ${c.unchanged} 行／エラー ${c.error} 行。`,
@@ -297,15 +304,31 @@ export function StandardImport({
     const key = idempotencyKey.current ?? newKey();
     idempotencyKey.current = key;
     setCommitFeedback(null);
+    const fd = new FormData();
+    for (const [name, value] of validatedSource.current?.entries() ?? []) fd.append(name, value);
+    fd.set('batchId', preview.batchId);
+    fd.set('previewHash', preview.previewHash);
+    fd.set('idempotencyKey', key);
+    fd.set('mode', mode);
+    fd.set('correctionReason', reason);
+    // 確認した差分（競合のときに、どの行が変わったかを示すためだけに使う）
+    fd.set(
+      'confirmedRows',
+      JSON.stringify(
+        preview.rows.map((row) => ({
+          rowNo: row.rowNo,
+          diffKind: row.diffKind,
+          previousVersionNo: row.previous?.versionNo ?? null,
+          previousStatus: row.previous?.status ?? null,
+          previousDisplay: row.previous
+            ? `${row.previous.valueDisplay}${row.previous.availabilityStatus === 'value_present' && row.previous.unitOfMeasure ? ` ${row.previous.unitOfMeasure}` : ''}`
+            : '（既存の値なし）',
+        })),
+      ),
+    );
     startCommit(async () => {
       try {
-        const result = await commitStandardImportAction({
-          batchId: preview.batchId,
-          previewHash: preview.previewHash,
-          idempotencyKey: key,
-          mode,
-          correctionReason: reason,
-        });
+        const result = await commitStandardImportAction(fd);
         if (result.ok) {
           setCommitFeedback({ kind: 'success', result: result.result });
         } else if (result.kind === 'conflict') {
@@ -336,6 +359,7 @@ export function StandardImport({
     setValidateFeedback(null);
     setDirty(false);
     idempotencyKey.current = null;
+    validatedSource.current = null;
   }
 
   const currentStep = !preview ? 0 : committed ? 4 : 3;

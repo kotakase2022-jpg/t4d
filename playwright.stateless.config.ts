@@ -1,0 +1,70 @@
+import { defineConfig, devices } from '@playwright/test';
+
+/**
+ * 「すべてのリクエストが別インスタンスに届く」最悪の場合の E2E（Demo Mode）。
+ *
+ *   E2E_PORT=3219 pnpm test:e2e:stateless
+ *
+ * 本番（Vercel の Demo Mode）は外部ストアを持たず、状態はインスタンスのメモリと Cookie にしか無い。
+ * 2026-09-30 に本番で実演の流れ（zz-disclosure-project.spec.ts）を流したところ、標準 CSV の
+ * 「検証」と「登録を確定」が別インスタンスに届き、確定が「検証結果の有効期限が切れました」で止まった。
+ * ローカルの 1 プロセスではメモリが残るため再現しない。
+ *
+ * そこでサーバーを `T4D_DEMO_FRESH_FIXTURE_PER_REQUEST=1` で起動し、リクエストごとに Fixture を
+ * 作り直す（src/lib/repositories/demo-fresh-fixture.ts）。Cookie とブラウザが持ち回した状態だけが残る。
+ *
+ * ブラウザ側は、実演の発表者と同じく**1 つのブラウザの Cookie を最後まで持ち回す**
+ * （metadata.carryDemoState。tests/e2e/helpers.ts）。通常の E2E はテストごとに新しいブラウザの
+ * 文脈を作り、共有のメモリを通じて前のテストの状態を引き継いでいるが、ここではメモリが残らないため。
+ *
+ * - 既存のサーバーは再利用しない（切替の無いサーバーに当たると、何も確かめずに通ってしまう）。
+ * - 他の E2E と同時に流さない（ビルドの出力 .next を共有する。記憶: E2E は単独で実行）。
+ */
+const PORT = Number(process.env.E2E_PORT ?? 3219);
+const BASE_URL = `http://127.0.0.1:${PORT}`;
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  // 実演の流れ（zz-disclosure-project）と読み取りだけの導線、この構成でだけ意味のある作業本文の控えの確認
+  testMatch: [
+    'disclosure-first-nav.spec.ts',
+    'editor-draft-restore.stateless.ts',
+    'zz-disclosure-project.spec.ts',
+  ],
+  fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  retries: 0,
+  workers: 1,
+  reporter: [['list']],
+  timeout: 90_000,
+  expect: { timeout: 15_000 },
+  use: {
+    baseURL: BASE_URL,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    locale: 'ja-JP',
+    timezoneId: 'Asia/Tokyo',
+    viewport: { width: 1440, height: 900 },
+  },
+  projects: [
+    {
+      name: 'chromium-stateless',
+      metadata: { carryDemoState: true },
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+    },
+  ],
+  webServer: {
+    command: `pnpm exec next build && pnpm exec next start --port ${PORT} --hostname 127.0.0.1`,
+    url: BASE_URL,
+    reuseExistingServer: false,
+    timeout: 600_000,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: {
+      NEXT_PUBLIC_APP_MODE: 'demo',
+      NEXT_TELEMETRY_DISABLED: '1',
+      OPENAI_API_KEY: '',
+      T4D_DEMO_FRESH_FIXTURE_PER_REQUEST: '1',
+    },
+  },
+});

@@ -8,6 +8,7 @@ import {
   isPersistedTable,
   type DemoEdit,
 } from '../../src/lib/repositories/demo-edit-codec';
+import { isCompactedTable } from '../../src/lib/repositories/demo-compact';
 
 /**
  * Demo Mode の変更差分を Cookie へ収める符号化。
@@ -206,7 +207,7 @@ describe('Cookie の中身を信用しない', () => {
     expect(db.comments).toHaveLength(1);
   });
 
-  it('開示優先モードは小さい表だけを持ち回し、本文・版・スナップショットは持ち回さない', () => {
+  it('開示優先モードの状態の表と、小さくした形の版・引用位置・スナップショット・出力記録を持ち回す', () => {
     // 状態・ポインタ・短文だけの表。依頼・承認の結果が消えるとレビューの流れが巻き戻って見える
     for (const table of [
       'organizationFeatureSettings',
@@ -223,18 +224,19 @@ describe('Cookie の中身を信用しない', () => {
     ] as const) {
       expect(isPersistedTable(table), table).toBe(true);
     }
-    // 出力の記録は、スナップショット（メモリのみ）と組でしか表示されない。別インスタンスでは
-    // 使われずに容量だけを使い、ほかの操作を押し出していた（PER-F7）
-    expect(isPersistedTable('exportArtifacts')).toBe(false);
-    // 1 件で Cookie（約 7.6KB）を使い切りうる表。同一インスタンスのメモリにだけ残す（D-3）
+    // 以前はメモリにだけ残していた表（1 件で Cookie を使い切るため）。本番（Vercel）で実演の流れが
+    // 別インスタンスで途切れたため、計算できる列を落とし・差分や目録にした小さい形で持ち回す
+    // （2026-09-30。形と偽の Cookie の拒否は tests/unit/demo-compact.test.ts）
     for (const table of [
       'narrativeVersions',
       'disclosureBlockVersions',
       'sourceAnchors',
       'reportSnapshots',
+      'exportArtifacts',
       'quantitativeImportBatches',
     ] as const) {
-      expect(isPersistedTable(table), table).toBe(false);
+      expect(isPersistedTable(table), table).toBe(true);
+      expect(isCompactedTable(table), table).toBe(true);
     }
   });
 

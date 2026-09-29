@@ -32,6 +32,7 @@
     "verify:openai": "tsx scripts/verify-openai.ts",
     "verify:openai:all": "tsx scripts/verify-openai.ts --all",
     "test:e2e:prod": "playwright test --config playwright.production.config.ts",
+    "test:e2e:stateless": "playwright test --config playwright.stateless.config.ts",
     "check:colors": "tsx scripts/check-color-tokens.ts"
   },
   "dependencies": {

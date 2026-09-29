@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import {
   AuthorizationError,
@@ -11,6 +11,26 @@ import {
 } from '@/lib/authorization/can';
 import { canonicalJson, hasBodyContent, isOldRefKept } from '@/lib/domain/disclosure-block';
 import {
+  computeSnapshotContentHash,
+  isDraftStandard,
+  snapshotAnchorOf,
+  snapshotBlockOf,
+  snapshotCommentOf,
+  snapshotFrameworkOf,
+  snapshotMetricValueOf,
+  snapshotRequirementsOf,
+  unresolvedCommentsInOrder,
+  type ReportSnapshotDetail,
+  type SnapshotAnchor,
+  type SnapshotBlock,
+  type SnapshotComment,
+  type SnapshotFramework,
+  type SnapshotIssue,
+  type SnapshotIssueCode,
+  type SnapshotMetricValue,
+  type SnapshotRequirement,
+} from '@/lib/domain/report-snapshot-content';
+import {
   APPLICABILITY_STATUS_LABELS,
   AVAILABILITY_STATUS_LABELS,
   BLOCK_STATUS_LABELS,
@@ -20,7 +40,6 @@ import {
   VALUE_KIND_LABELS,
   applicabilityDecisionChangedSince,
   evaluateBlockBlockers,
-  type BlockBlockerCode,
 } from '@/lib/domain/disclosure-status';
 import { assessNarrativeFields, notQuantifiedNote } from '@/lib/domain/narrative-template';
 import { ValidationError } from '@/lib/errors/user-facing';
@@ -40,21 +59,14 @@ import type {
   DisclosureBlock,
   DisclosureBlockVersion,
   DisclosureFramework,
-  DisclosureFrameworkVersion,
   DisclosureLanguage,
   DisclosureProject,
   DisclosurePurpose,
-  IsoDate,
   IsoDateTime,
   NarrativeTheme,
   ProjectFramework,
   ReportSnapshot,
-  ReportSnapshotAnchor,
-  ReportSnapshotBlock,
-  ReportSnapshotFramework,
   ReportSnapshotKind,
-  ReportSnapshotMetricValue,
-  ReviewCommentSeverity,
   Uuid,
 } from '@/types/domain';
 
@@ -79,122 +91,23 @@ import type {
  * 固定した内容と出力が食い違うため（ファイル名の変更・指標名の変更など）。
  */
 
-/** 内容ハッシュの計算規則の版。規則を変えたら上げる（過去のハッシュと混同しない） */
-export const SNAPSHOT_HASH_VERSION = 'report-snapshot-v1';
-
-// ======================================================================
-// スナップショットに固定する写し（domain の基本型を拡張する）
-// ======================================================================
-
-export interface SnapshotFramework extends ReportSnapshotFramework {
-  purpose: DisclosurePurpose | null;
-  /** 草案の基準による準備（社内の確定はできるが、法定準拠の確定として扱わない） */
-  draftStandardPrep: boolean;
-  frameworkName: string;
-  coverageNote: string | null;
-  /** 固定時点のプロジェクトの表示（出力の表紙に使う。プロジェクトは後から編集されうる） */
-  projectName: string;
-  reportingEntity: string;
-  periodStart: IsoDate;
-  periodEnd: IsoDate;
-  /**
-   * 固定時点の報告範囲の改訂番号（disclosure_projects.scope_revision）。後から範囲を変えたことを
-   * 「上流の変更」として示すために持つ。この項目より前に作ったスナップショットでは null
-   */
-  scopeRevision: number | null;
-}
-
-export interface SnapshotRequirement {
-  itemId: Uuid;
-  code: string;
-  section: string;
-  text: string;
-}
-
-export type SnapshotIssueCode =
-  | BlockBlockerCode
-  | 'not_approved'
-  | 'revised_after_approval'
-  | 'metric_not_approved'
-  | 'metric_value_absent'
-  | 'metric_missing'
-  /** 推計・目標の数値を引用している（止めない注意。本文・出力では区分を添える） */
-  | 'metric_not_actual'
-  | 'stale_narrative_refs'
-  | 'narrative_missing_fields'
-  /** 財務的影響を定量化しない理由（不足ではなく、理由そのものを示す注意） */
-  | 'narrative_not_quantified'
-  | 'anchor_missing'
-  /** 固定する版を読み込めない（Demo Mode で別のサーバーが作った版など） */
-  | 'version_missing'
-  /** 必須言語の翻訳版が無い・翻訳元の承認後に翻訳が見直されていない */
-  | 'translation_missing'
-  | 'translation_stale';
-
-export interface SnapshotIssue {
-  code: SnapshotIssueCode;
-  message: string;
-}
-
-export interface SnapshotComment {
-  paragraphId: string | null;
-  severity: ReviewCommentSeverity;
-  body: string;
-  createdAt: IsoDateTime;
-}
-
-export interface SnapshotBlock extends ReportSnapshotBlock {
-  frameworkVersionId: Uuid;
-  sortOrder: number;
-  versionNo: number | null;
-  versionCreatedBy: Uuid | null;
-  versionCreatedAt: IsoDateTime | null;
-  /** 固定時点の承認済みの版（草稿では固定した版と違うことがある） */
-  approvedVersionId: Uuid | null;
-  /** 固定した版が承認済みの版か */
-  isApprovedVersion: boolean;
-  requirements: SnapshotRequirement[];
-  /** 未承認・不足情報・阻害条件（社内向けの説明。対外原稿では節名と要約だけを出す） */
-  issues: SnapshotIssue[];
-  /** 未解決の社内コメント（社内確認用の出力だけに出す） */
-  internalComments: SnapshotComment[];
-  /**
-   * 固定時点で非公開だった資料のうち、この節の本文（地の文・定性情報の引用文）に名前が現れるもの。
-   * 対外用の出力で伏せる名前を固定し、後から資料を登録・区分変更しても再出力の本文を変えない（§10.3）。
-   * この項目より前に作ったスナップショットでは null（出力時の資料一覧から集める）
-   */
-  maskedFileNames: string[] | null;
-}
-
-export interface SnapshotMetricValue extends ReportSnapshotMetricValue {
-  versionNo: number;
-  metricCode: string;
-  metricName: string;
-  unitId: Uuid;
-  unitName: string;
-  periodCode: string;
-  periodStart: IsoDate;
-  periodEnd: IsoDate;
-  /** この版が承認された版か（承認記録がこの版を指す、または承認済みの現在版） */
-  versionApproved: boolean;
-  changeReason: string | null;
-  absenceReason: string | null;
-}
-
-export interface SnapshotAnchor extends ReportSnapshotAnchor {
-  fileId: Uuid | null;
-  fileName: string;
-  fileVersionNo: number | null;
-  confidentiality: ConfidentialityLevel;
-  editionLabel: string | null;
-}
-
-export interface ReportSnapshotDetail extends ReportSnapshot {
-  frameworkVersions: SnapshotFramework[];
-  blocks: SnapshotBlock[];
-  metricValues: SnapshotMetricValue[];
-  anchors: SnapshotAnchor[];
-}
+// スナップショットの型・内容ハッシュ・写しの作り方は domain に置く（Demo Mode で Cookie の目録から
+// 写しを組み立て直すとき（demo-compact.ts）も同じ規則を使うため）
+export {
+  SNAPSHOT_HASH_VERSION,
+  computeSnapshotContentHash,
+} from '@/lib/domain/report-snapshot-content';
+export type {
+  ReportSnapshotDetail,
+  SnapshotAnchor,
+  SnapshotBlock,
+  SnapshotComment,
+  SnapshotFramework,
+  SnapshotIssue,
+  SnapshotIssueCode,
+  SnapshotMetricValue,
+  SnapshotRequirement,
+} from '@/lib/domain/report-snapshot-content';
 
 /**
  * 画面・出力で使うスナップショット種別の表示（社内承認を保証と取り違えさせない）。
@@ -202,46 +115,6 @@ export interface ReportSnapshotDetail extends ReportSnapshot {
  */
 export const SNAPSHOT_KIND_DISPLAY: Record<ReportSnapshotKind, string> =
   REPORT_SNAPSHOT_KIND_LABELS;
-
-// ======================================================================
-// 内容ハッシュ
-// ======================================================================
-
-type SnapshotContent = Pick<
-  ReportSnapshot,
-  | 'projectId'
-  | 'snapshotKind'
-  | 'label'
-  | 'frameworkVersions'
-  | 'decisionIds'
-  | 'blocks'
-  | 'metricValues'
-  | 'narrativeVersionIds'
-  | 'anchors'
-  | 'policyVersion'
->;
-
-/**
- * 正規化した内容のハッシュ（report_snapshots.content_hash / export_artifacts.content_hash）。
- * ID・番号・作成日時は含めない（同じ内容なら同じ値。再出力で一致することの検証に使う）。
- * キー順は canonicalJson が固定するため、jsonb を往復してキー順が変わっても同じ値になる。
- */
-export function computeSnapshotContentHash(snapshot: SnapshotContent): string {
-  const content = {
-    hashVersion: SNAPSHOT_HASH_VERSION,
-    projectId: snapshot.projectId,
-    snapshotKind: snapshot.snapshotKind,
-    label: snapshot.label,
-    frameworkVersions: snapshot.frameworkVersions,
-    decisionIds: snapshot.decisionIds,
-    blocks: snapshot.blocks,
-    metricValues: snapshot.metricValues,
-    narrativeVersionIds: snapshot.narrativeVersionIds,
-    anchors: snapshot.anchors,
-    policyVersion: snapshot.policyVersion,
-  };
-  return createHash('sha256').update(canonicalJson(content), 'utf8').digest('hex');
-}
 
 /** 保存された内容が作成時のハッシュと一致するか（出力の直前に確かめる） */
 export function verifySnapshotIntegrity(snapshot: ReportSnapshot): boolean {
@@ -447,14 +320,6 @@ interface Assembly {
   draftStandardPrep: boolean;
   /** 固定した版ごとの本文を書いた人（作成者と自動保存した人。職務分離の判定に使う） */
   versionWriters: Uuid[][];
-}
-
-/** 草案の基準か（ESRS-40a 公開草案など）。準備目的（40a）で登録した基準も同じ扱い */
-function isDraftStandard(
-  version: DisclosureFrameworkVersion | null,
-  purpose: DisclosurePurpose,
-): boolean {
-  return version?.legalStatus === 'draft' || purpose === 'csrd_40a_prep';
 }
 
 /** 適用判断が確定しているか（判断の記録があり、適用・任意適用のいずれか） */
@@ -723,30 +588,15 @@ async function assemble(
       const unit = unitById.get(dp.unitId);
       const period = periodById.get(dp.reportingPeriodId);
       const approved = versionApproved(v);
-      return {
-        dataPointId: dp.id,
-        dataPointVersionId: v.id,
-        metricId: dp.metricId,
-        value: v.value,
-        textValue: v.textValue,
-        unitOfMeasure: v.unitOfMeasure,
-        reportingPeriodId: dp.reportingPeriodId,
-        boundary: dp.boundary,
-        status: approved ? 'approved' : dp.currentVersionId === v.id ? dp.status : v.status,
-        valueKind: v.valueKind,
-        availabilityStatus: v.availabilityStatus,
-        versionNo: v.versionNo,
-        metricCode: metric?.code ?? '',
-        metricName: metric?.name ?? '（指標名不明）',
-        unitId: dp.unitId,
-        unitName: unit?.name ?? '（組織不明）',
-        periodCode: period?.code ?? '',
-        periodStart: period?.startDate ?? '',
-        periodEnd: period?.endDate ?? '',
-        versionApproved: approved,
-        changeReason: v.changeReason,
-        absenceReason: v.absenceReason,
-      };
+      return snapshotMetricValueOf(
+        v,
+        dp,
+        { metric, unit, period },
+        {
+          status: approved ? 'approved' : dp.currentVersionId === v.id ? dp.status : v.status,
+          versionApproved: approved,
+        },
+      );
     })
     .filter((mv): mv is SnapshotMetricValue => mv !== null)
     .sort((a, b) =>
@@ -764,20 +614,7 @@ async function assemble(
       if (!anchor) return null;
       const fileVersion = fileVersionById.get(anchor.fileVersionId);
       const file = fileVersion ? fileById.get(fileVersion.fileId) : undefined;
-      return {
-        sourceAnchorId: anchor.id,
-        fileVersionId: anchor.fileVersionId,
-        anchorKind: anchor.anchorKind,
-        page: anchor.page,
-        locator: anchor.locator,
-        quoteText: anchor.quoteText,
-        usagePurpose: file?.usagePurpose ?? null,
-        fileId: file?.id ?? null,
-        fileName: file?.originalName ?? '（ファイル名不明）',
-        fileVersionNo: fileVersion?.versionNo ?? null,
-        confidentiality: file?.confidentiality ?? 'confidential',
-        editionLabel: file?.editionLabel ?? null,
-      };
+      return snapshotAnchorOf(anchor, fileVersion, file);
     })
     .filter((a): a is SnapshotAnchor => a !== null);
 
@@ -811,25 +648,7 @@ async function assemble(
     });
     if (!included) continue;
 
-    frameworks.push({
-      frameworkVersionId: pf.frameworkVersionId,
-      frameworkKey: framework?.key ?? 'ssbj',
-      label,
-      versionCode: version?.versionCode ?? null,
-      legalStatus: version?.legalStatus ?? null,
-      coverageStatus: version?.coverageStatus ?? null,
-      applicabilityStatus: pf.applicabilityStatus,
-      decisionId: pf.currentDecisionId,
-      purpose: pf.purpose,
-      draftStandardPrep,
-      frameworkName: framework?.name ?? label,
-      coverageNote: version?.coverageNote ?? null,
-      projectName: project.name,
-      reportingEntity: project.reportingEntity,
-      periodStart: project.periodStart,
-      periodEnd: project.periodEnd,
-      scopeRevision: project.scopeRevision ?? 0,
-    });
+    frameworks.push(snapshotFrameworkOf(pf, version, framework, project));
 
     // 法定・任意適用の基準は、適用判断が確定していなければ確定させない。
     // 草案の基準による準備は、その区分のまま社内で確定できる（§10.4）。未判定だけは止める
@@ -1047,48 +866,22 @@ async function assemble(
       }
     }
 
-    const requirements: SnapshotRequirement[] = block.requirementItemIds
-      .map((id) => itemById.get(id))
-      .filter((item): item is NonNullable<typeof item> => Boolean(item))
-      .map((item) => ({
-        itemId: item.id,
-        code: item.code,
-        section: item.section,
-        text:
-          item.questionText.length > 200
-            ? `${item.questionText.slice(0, 199)}…`
-            : item.questionText,
-      }));
+    const requirements: SnapshotRequirement[] = snapshotRequirementsOf(
+      block.requirementItemIds,
+      itemById,
+    );
 
-    snapshotBlocks.push({
-      blockId: block.id,
-      versionId: version?.id ?? null,
-      sectionKey: block.sectionKey,
-      title: block.title,
-      language: block.language,
-      status: block.status,
-      body,
-      contentHash: version?.contentHash ?? null,
-      frameworkVersionId: block.frameworkVersionId,
-      sortOrder: block.sortOrder,
-      versionNo: version?.versionNo ?? null,
-      versionCreatedBy: version?.createdBy ?? null,
-      versionCreatedAt: version?.createdAt ?? null,
-      approvedVersionId: block.approvedVersionId,
-      isApprovedVersion,
-      requirements,
-      issues: dedupeIssues(issues),
-      internalComments: blockComments
-        .filter((c) => c.resolvedAt === null)
-        .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
-        .map((c) => ({
-          paragraphId: c.paragraphId,
-          severity: c.severity,
-          body: c.body,
-          createdAt: c.createdAt,
-        })),
-      maskedFileNames: namesMentionedIn(body, nonPublicNames),
-    });
+    snapshotBlocks.push(
+      snapshotBlockOf(block, version, {
+        status: block.status,
+        approvedVersionId: block.approvedVersionId,
+        isApprovedVersion,
+        requirements,
+        issues: dedupeIssues(issues),
+        internalComments: unresolvedCommentsInOrder(blockComments).map(snapshotCommentOf),
+        maskedFileNames: namesMentionedIn(body, nonPublicNames),
+      }),
+    );
   }
 
   // 必須言語（プロジェクトの言語）と翻訳の鮮度（指示書 §10.4「必須言語の未確認」）。

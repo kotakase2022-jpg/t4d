@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { PERIOD_IDS } from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, carryDemoState, loginAs } from './helpers';
 
 /**
  * 開示優先モード（disclosure_first）の導線。**読み取りだけ**（状態を変える操作はしない）。
@@ -151,6 +151,12 @@ async function expectHeaderFits(page: Page): Promise<void> {
   });
   expect(overlap).toBeNull();
 }
+
+// 状態がリクエストごとに消えるサーバーの E2E（playwright.stateless.config.ts）では、Cookie を次のテストへ渡す。
+// 通常の E2E では何もしない
+test.afterEach(async ({ context }, testInfo) => {
+  await carryDemoState(context, testInfo.title);
+});
 
 test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニューとホームのまま、新しい画面は URL で開ける', async ({
   page,

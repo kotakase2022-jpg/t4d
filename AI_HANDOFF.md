@@ -2772,3 +2772,15 @@ commit・push・deploy はしていない。`docs/disclosure-first.md` は編集
 - ID を変えながら新しい行（節・コメント・通知など）を足し続ける偽の Cookie で共有のメモリが増えること自体は残る
   （1 回の適用あたりの量と、1 節あたりの版の数は上限を設けた）。
 - 範囲を変えた後は、変える前に確定した確定版が別インスタンスで「見つからない」になる（安全側。known-limitations に記載）。
+
+## 2026-09-30 開示優先モード（顧客候補向け D0）の本番反映と最終結果（統括）
+
+- 指示書: 「T4D 開示業務拡張 Codex実装指示書 v1.0」（2026-09-29）。W0 棚卸し・設計・実施結果は `docs/disclosure-first.md`（§1 訂正、§8 実施結果・A01〜A40・実演手順）。
+- コミット（未 Push）: 8265280（W1 基盤）→ ebdfd11（D0 機能）→ 81dd049 / b3927cd / 0be8cc5（自己監査 3 巡の修正）→ 0a30fbb（Vercel の別インスタンス対策）→ 本コミット（文書・画面写真）。
+- 本番（Demo Mode・環境変数なし）: `vercel deploy --prod` → `vercel alias set … terrast-t4d.vercel.app`。
+  - 本番スモーク `pnpm test:e2e:prod`: 31/31（開示優先モードの 2 件を追加）。
+  - 実演の流れ `PROD_BASE_URL=https://terrast-t4d.vercel.app pnpm exec playwright test --config playwright.production-chain.config.ts`: 8/8、最大 Cookie ヘッダー 8,868B。
+  - 初回の本番実行では標準 CSV の確定が別インスタンスに届いて止まった（「検証結果の有効期限が切れました」）。0a30fbb で修正し、`pnpm test:e2e:stateless`（要求ごとに Fixture を作り直す最悪条件）で再発を防ぐ。
+  - 実演の流れを本番に流すと、数値（欧州販売子会社の水使用量 FY2026）の訂正がそのインスタンスのメモリに残るため、最後に同じコミットを再デプロイしてインスタンスを入れ替えた。
+- ローカル最終: lint / format / typecheck 合格、unit+integration 1,259、RLS 248、check:rls 100 表、build 合格、E2E 282/282、stateless 16/16。
+- 未解決（発注者の判断が必要）: 取込画面のデモ信頼度表示（80〜97%）と指示書 §9.3 の関係。A30 資料 ACL、A36 は未対応・未検証。0041〜0043 は本番 Supabase へ未適用。

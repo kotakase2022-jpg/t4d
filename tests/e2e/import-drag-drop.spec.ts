@@ -201,7 +201,11 @@ test('自由記述の .txt は根拠資料の画面で中身を読める', async
   await row.getByRole('link', { name: '画面内で開く' }).click();
   await page.waitForURL(/\/enterprise\/evidence\/[0-9a-f-]+/, { timeout: 30_000 });
 
-  // 「この形式は画面内表示に対応していません」で終わらせない
-  await expect(page.getByText('Scope1 の算定範囲')).toBeVisible();
+  // 「この形式は画面内表示に対応していません」で終わらせない。
+  // プレビューの行（1 行ずつ表示）で確かめる。同じ文言は「引用できる箇所」（抽出した断片の一覧）にも出る
+  const previewLine =
+    '第3条 Scope1 の算定範囲は、当社が所有または支配する設備からの直接排出とする。';
+  await expect(page.getByText(previewLine, { exact: true })).toBeVisible();
   await expect(page.getByText('この形式は画面内表示に対応していません')).toHaveCount(0);
+  await expect(page.getByText(/引用できる箇所（抽出 [1-9]\d* ／ 手動抜粋 0）/)).toBeVisible();
 });

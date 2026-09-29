@@ -260,6 +260,96 @@ function hrData(periodCode: string): EvidenceDocumentLine[] {
 }
 
 /**
+ * 労働災害記録（労働災害度数率 LTIFR の根拠）。
+ *
+ * LTIFR は「休業災害件数 × 1,000,000 ÷ 延べ労働時間」なので、国内の事業所は分子と分母の両方を載せる。
+ * 各行から計算した度数率（小数第 1 位）が Fixture の拠点別 Data Point
+ * （FY2025: 本社 1.4・東日本 4.5・西日本 3.4、FY2026: 本社 1.1・東日本 3.5・西日本 2.7）と
+ * 一致するよう労働時間を選んである（書類と台帳の値が食い違うと、証跡として説明できない）。
+ * 海外子会社・合弁会社は各社の報告値を転記する体裁にした（件数は整数でしかありえず、
+ * 小規模拠点で Fixture の値に合う労働時間を作ると人数と釣り合わないため）。
+ */
+const SAFETY_RECORD: Record<
+  string,
+  {
+    domestic: Array<[site: string, hours: number, injuries: number]>;
+    reported: Array<[site: string, ltifr: string]>;
+  }
+> = {
+  FY2024: {
+    domestic: [
+      ['本社', 905_000, 2],
+      ['東日本工場', 2_850_000, 15],
+      ['西日本工場', 2_010_000, 8],
+    ],
+    reported: [
+      ['欧州販売子会社', '1.0'],
+      ['青海マテリアル合弁会社', '0.6'],
+    ],
+  },
+  FY2025: {
+    domestic: [
+      ['本社', 714_300, 1],
+      ['東日本工場', 2_888_900, 13],
+      ['西日本工場', 2_058_800, 7],
+    ],
+    reported: [
+      ['欧州販売子会社', '0.9'],
+      ['青海マテリアル合弁会社', '0.5'],
+    ],
+  },
+  FY2026: {
+    domestic: [
+      ['本社', 909_100, 1],
+      ['東日本工場', 3_142_900, 11],
+      ['西日本工場', 2_222_200, 6],
+    ],
+    reported: [
+      ['欧州販売子会社', '0.7'],
+      ['青海マテリアル合弁会社', '0.4'],
+    ],
+  },
+};
+
+const ltifrOf = (injuries: number, hours: number) => ((injuries * 1_000_000) / hours).toFixed(1);
+
+function safetyRecord(periodCode: string): EvidenceDocumentLine[] {
+  const record = SAFETY_RECORD[periodCode] ?? SAFETY_RECORD.FY2026!;
+  const hours = record.domestic.reduce((sum, [, h]) => sum + h, 0);
+  const injuries = record.domestic.reduce((sum, [, , n]) => sum + n, 0);
+  return [
+    { kind: 'title', text: '労働災害発生状況報告（休業災害・延べ労働時間）' },
+    { kind: 'meta', text: '作成: 安全衛生委員会事務局 ／ 確認: 総務部長' },
+    { kind: 'meta', text: `対象期間: ${periodCode}` },
+    {
+      kind: 'meta',
+      text: '定義: 休業災害は休業 1 日以上。度数率 = 休業災害件数 × 1,000,000 ÷ 延べ労働時間',
+    },
+    {
+      kind: 'header',
+      text: '事業所                延べ労働時間(h)    休業災害(件)    度数率(件/百万時間)',
+    },
+    ...record.domestic.map(([site, h, n]) => ({
+      kind: 'row' as const,
+      text: `${site.padEnd(10, '　')}${h.toLocaleString('ja-JP').padStart(14)}    ${String(n).padStart(8)}        ${ltifrOf(n, h)}`,
+    })),
+    {
+      kind: 'total',
+      text: `国内 3 事業所計: 延べ労働時間 ${hours.toLocaleString('ja-JP')} h ／ 休業災害 ${injuries} 件 ／ 度数率 ${ltifrOf(injuries, hours)}`,
+    },
+    ...record.reported.map(([site, ltifr]) => ({
+      kind: 'row' as const,
+      text: `${site.padEnd(10, '　')}（各社の安全衛生報告による報告値）            ${ltifr}`,
+    })),
+    {
+      kind: 'note',
+      text: '※ 海外子会社・合弁会社は各社の報告値の転記。算定根拠は各社の報告書（別紙）を参照',
+    },
+    { kind: 'note', text: '※ 本書は架空のサンプルです。実在の事業所・災害とは関係ありません。' },
+  ];
+}
+
+/**
  * 有価証券報告書（抜粋）。
  *
  * SSBJ の報告範囲は連結財務諸表と同一が基本なので、
@@ -318,6 +408,8 @@ export function buildEvidenceDocument(
       return purchaseLedger(periodCode);
     case 'hr-data':
       return hrData(periodCode);
+    case 'safety-record':
+      return safetyRecord(periodCode);
     case 'securities-report':
       return securitiesReport(periodCode, page);
     default:

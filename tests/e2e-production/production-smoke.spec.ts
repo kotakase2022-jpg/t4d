@@ -536,8 +536,9 @@ test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({
 
   // 内訳の可視化: 提出状況・構成比・一次データ比率（30 社・素データ 3 種別の混在）
   await page.goto(`${BASE}/enterprise/ghg`);
+  // 見出しは「一次データ」から改名（金額×係数の推計を含むため。W0 O6）
   await expect(
-    main.getByRole('heading', { name: 'Scope3 Category 1 サプライヤー内訳（一次データ）' }),
+    main.getByRole('heading', { name: 'Scope3 Category 1 サプライヤー内訳（算定根拠）' }),
   ).toBeVisible();
   await expect(main.getByText('確定値に占める一次データ比率')).toBeVisible();
   const tokiwa = page.locator('tr', { hasText: '常盤精密工業' }).first();

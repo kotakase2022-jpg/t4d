@@ -80,6 +80,39 @@ export interface RunAiOptions<F extends AiFeature> {
   engagementId?: Uuid | null;
   /** 同一キーの同時実行を 1 本にまとめる */
   idempotencyKey: string;
+  /**
+   * 実行 ID を呼び出し側で決める（省略時は従来どおり時刻から作る）。
+   * 開示本文の下書きは「節・版・操作・入力」から決定論的に決め、二重押下で同じ候補を 2 度作らない。
+   */
+  runId?: Uuid;
+  /**
+   * 応答を待つ上限（ミリ秒）。超えたら失敗（タイムアウト）として記録し、呼び出し側へ例外を返す。
+   * 省略時は上限なし（従来の Use Case の挙動を変えない）。
+   */
+  timeoutMs?: number;
+}
+
+/** タイムアウトの失敗理由（画面・テストが「失敗」と区別して表示するため固定の文言にする） */
+export const AI_TIMEOUT_MESSAGE = 'AI の応答が時間内に返りませんでした（タイムアウト）。';
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number | undefined,
+  feature: AiFeature,
+): Promise<T> {
+  if (timeoutMs === undefined) return promise;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new AiProviderError(AI_TIMEOUT_MESSAGE, feature)),
+      Math.max(0, timeoutMs),
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export interface RunAiResult<F extends AiFeature> {
@@ -104,7 +137,7 @@ export async function runAi<F extends AiFeature>(
   const promise = (async (): Promise<RunAiResult<F>> => {
     checkRateLimit(organizationId, invocation.feature);
     const provider = await getAiProvider();
-    const runId = fid('ai_run', `${idempotencyKey}|${Date.now()}`);
+    const runId = options.runId ?? fid('ai_run', `${idempotencyKey}|${Date.now()}`);
     const startedAt = new Date().toISOString();
 
     await recordAuditEvent(db, ctx, {
@@ -116,7 +149,11 @@ export async function runAi<F extends AiFeature>(
     });
 
     try {
-      const result = await provider.run(invocation);
+      const result = await withTimeout(
+        provider.run(invocation),
+        options.timeoutMs,
+        invocation.feature,
+      );
 
       const run: AiRun = {
         id: runId,

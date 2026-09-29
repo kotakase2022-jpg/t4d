@@ -40,6 +40,8 @@ export async function GET(request: Request) {
     priority: url.searchParams.getAll('priority'),
     department: url.searchParams.getAll('department'),
     linkage: url.searchParams.getAll('linkage'),
+    // 一覧画面の CSV リンクは scope=in_scope を渡す。落とすと対象外の行まで CSV に入る
+    scope: url.searchParams.getAll('scope'),
     search: url.searchParams.get('q') ?? undefined,
   });
 

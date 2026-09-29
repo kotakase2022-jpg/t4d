@@ -1,15 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { CircleAlert, FlaskConical, Minus, ShieldCheck, TriangleAlert } from 'lucide-react';
 import {
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
-  FlaskConical,
-  Minus,
-  ShieldCheck,
-  TriangleAlert,
-} from 'lucide-react';
-import { AiGeneratedBadge, ResponseStatusBadge } from '@/components/shared/badges';
+  AiGeneratedBadge,
+  DataCoverageBadge,
+  ResponseStatusBadge,
+} from '@/components/shared/badges';
 import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -76,11 +72,14 @@ export default async function CsrdWorkspacePage({
   const answered = rows.filter(
     (r) => r.response && r.response.status !== 'not_started' && r.response.answerText,
   ).length;
-  const withData = rows.filter((r) => r.currentValue !== null).length;
+  // 「データあり」は対応付いた指標すべてに承認済みの値がある項目だけ。
+  // 1 指標の値で複数指標の項目（ESRS E1-6 など）を充足済みにしない（W0 O7）
+  const withData = rows.filter((r) => r.dataCoverage === 'full').length;
+  const partialData = rows.filter((r) => r.dataCoverage === 'partial').length;
   const mapped = rows.filter((r) => r.mappedMetrics.length > 0).length;
   const requiredTotal = rows.filter((r) => r.item.required).length;
   const requiredReady = rows.filter(
-    (r) => r.item.required && (r.currentValue !== null || r.response?.answerText),
+    (r) => r.item.required && (r.dataCoverage === 'full' || r.response?.answerText),
   ).length;
 
   return (
@@ -143,7 +142,7 @@ export default async function CsrdWorkspacePage({
               href="/enterprise/data?status=approved"
               label="データあり（承認済み）"
               value={withData}
-              suffix={`/ ${mapped} マッピング済み`}
+              suffix={`/ ${mapped} マッピング済み${partialData > 0 ? `（一部のみ ${partialData}）` : ''}`}
               tone={withData === mapped ? 'success' : 'warning'}
             />
           </li>
@@ -254,25 +253,37 @@ export default async function CsrdWorkspacePage({
                       </TD>
                       <TD>{row.item.required ? <Badge tone="brand">必須</Badge> : '—'}</TD>
                       <TD>
-                        {row.mappedMetrics.length === 0 ? (
+                        {row.dataCoverage === 'not_mapped' ? (
                           <span className="text-[11px] text-ink-muted">記述式</span>
-                        ) : row.currentValue !== null ? (
-                          <Badge tone="success">
-                            <CircleCheck className="size-3" aria-hidden="true" />
-                            データあり
-                          </Badge>
                         ) : (
-                          <Badge tone="warning">
-                            <CircleDashed className="size-3" aria-hidden="true" />
-                            承認済みデータなし
-                          </Badge>
+                          <DataCoverageBadge
+                            coverage={row.dataCoverage}
+                            missingNames={row.missingMetrics.map((m) => m.name)}
+                            noneLabel="承認済みデータなし"
+                          />
                         )}
                       </TD>
                       <TD className="text-[12px]">
                         {row.mappedMetrics.map((m) => m.name).join('、') || '—'}
                       </TD>
                       <TD align="right" className="tnum">
-                        {formatNumber(row.currentValue)}
+                        {row.metricValues.length > 1 ? (
+                          // 異なる指標は足さず、指標ごとに並べる（Scope2 の 2 方式も別々）
+                          <ul className="space-y-0.5 text-[11px]">
+                            {row.metricValues.map((v) => (
+                              <li key={v.metric.id} className="whitespace-nowrap">
+                                <span className="text-ink-muted">{v.metric.name}: </span>
+                                {v.currentValue === null ? (
+                                  <span className="text-[#8a5d00]">値なし</span>
+                                ) : (
+                                  formatNumber(v.currentValue)
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          formatNumber(row.currentValue)
+                        )}
                       </TD>
                       <TD>
                         <ResponseStatusBadge status={row.response?.status ?? 'not_started'} />

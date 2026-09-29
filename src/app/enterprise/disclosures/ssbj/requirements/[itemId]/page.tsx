@@ -197,15 +197,33 @@ export default async function SsbjRequirementDetailPage({
                     紐づく指標がありません（定性的な要求事項です）。
                   </p>
                 ) : (
-                  <ul className="flex flex-wrap gap-1">
-                    {metrics.map((metric) => (
-                      <li key={metric.id}>
-                        <Badge tone="outline">
-                          {metric.name}（{metric.unit}）
-                        </Badge>
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    {/* 指標ごとに当期の値の有無を出す。1 指標の値で要求事項全体を
+                        「データあり」と見せない（W0 O7） */}
+                    <ul className="flex flex-wrap gap-1">
+                      {metrics.map((metric) => {
+                        const missing = view.missingMetrics.some((m) => m.id === metric.id);
+                        return (
+                          <li key={metric.id}>
+                            <Badge tone={missing ? 'warning' : 'outline'}>
+                              {missing ? (
+                                <CircleAlert className="size-3" aria-hidden="true" />
+                              ) : (
+                                <Database className="size-3" aria-hidden="true" />
+                              )}
+                              {metric.name}（{metric.unit}）: {missing ? '値なし' : '値あり'}
+                            </Badge>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {view.dataCoverage === 'partial' && (
+                      <p className="mt-1 text-[11px] text-[#8a5d00]">
+                        一部の指標にだけ値があります（不足:{' '}
+                        {view.missingMetrics.map((m) => m.name).join('・')}）。
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             </div>

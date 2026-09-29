@@ -224,7 +224,8 @@ test.describe('企業 Vertical Slice', () => {
     const questionUrl = page.url();
     await loginAs(page, DEMO_USERS.approver);
     await page.goto(questionUrl);
-    await page.getByRole('button', { name: '承認' }).click();
+    // exact: ヘッダーの「役割切替（デモ） 現在: 承 花子・最終承認者」も名前に「承認」を含むため
+    await page.getByRole('button', { name: '承認', exact: true }).click();
     await expect(page.getByText('承認済み').first()).toBeVisible();
   });
 

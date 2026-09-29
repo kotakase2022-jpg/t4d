@@ -38,7 +38,7 @@ test('デモリセット: 削除範囲の確認つきで算定版を初期状態
   await page.waitForURL(/flash=supplierDemoReset/);
   await expect(page.getByText(/サプライヤーデモの算定版をリセットしました/)).toBeVisible();
 
-  // 初期状態（Fixture: 一次データ合計 143.1）に戻っている
+  // 初期状態（Fixture: 内訳合計 143.1）に戻っている
   await expect(page.getByText('143.1').first()).toBeVisible();
 });
 
@@ -125,7 +125,7 @@ test('20 ファイルを一括投入 → 候補を選択 → 240 明細を確定
     fullPage: false,
   });
 
-  // 確定 → 一次データ合計 6,760.3（既存 13 社 143.1 + 新規 20 社 6,617.2）
+  // 確定 → 内訳合計 6,760.3（既存 13 社 143.1 + 新規 20 社 6,617.2）
   await page.getByRole('button', { name: 'チェックした行を確定する' }).click();
   await page.waitForURL(/flash=supplierImported/, { timeout: 120_000 });
   await expect(page.getByText(/新規 20 社/)).toBeVisible();

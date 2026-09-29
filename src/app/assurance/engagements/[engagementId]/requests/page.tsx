@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
 import { requireAssuranceContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
-import { FIXTURE_TODAY } from '@/lib/config';
+import { getReferenceDate } from '@/lib/clock';
 import { formatJst, formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
 import { loadEngagementOr404, loadDataRoom } from '@/lib/services/assurance';
@@ -40,6 +40,8 @@ export default async function RequestsPage({
       : [];
 
   const canManage = can(ctx, 'assurance.pbc.manage');
+  // 期限の基準日は 1 か所（デモは FIXTURE_TODAY、Supabase Mode は実時計）
+  const today = getReferenceDate();
 
   // 依頼の対象に選べるのは Data Room に共有済みの Data Point だけ
   const { rows: dataRoomRows } = await loadDataRoom(db, ctx, engagementId);
@@ -143,7 +145,7 @@ export default async function RequestsPage({
             <ul className="divide-y divide-line">
               {requests.map((request) => {
                 const response = responses.find((r) => r.requestId === request.id);
-                const overdue = isOverdue(request.dueDate, FIXTURE_TODAY);
+                const overdue = isOverdue(request.dueDate, today);
                 return (
                   <li key={request.id} className="p-3">
                     <div className="flex flex-wrap items-center gap-2">

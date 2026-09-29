@@ -1,11 +1,23 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Check, FileText, History, Send, Sparkles, Undo2 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import {
+  AlertTriangle,
+  CalendarClock,
+  Check,
+  FileText,
+  History,
+  Send,
+  Sparkles,
+  Undo2,
+} from 'lucide-react';
+import {
+  AvailabilityBadge,
   DataPointStatusBadge,
   EvidenceBadge,
   SeverityBadge,
   ValidationBadge,
+  ValueKindBadge,
 } from '@/components/shared/badges';
 import { CommentBox } from '@/components/shared/comment-box';
 import { FlashMessage } from '@/components/shared/flash';
@@ -29,6 +41,11 @@ import { loadActiveValidations } from '@/lib/services/validation-store';
 import { listMentionCandidates } from '@/lib/services/comments';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { summarizeValidations } from '@/lib/validation/data-point-rules';
+import { isApprovedNeedingRecheck } from '@/lib/validation/display-state';
+import {
+  CALCULATION_DATA_CLASS_LABELS,
+  classifyCalculationInput,
+} from '@/lib/services/scope3-suppliers';
 import { loadEvidenceSuggestion } from '@/lib/services/ai-assist';
 import { loadAnomalyExplanation } from '@/lib/services/anomaly-explanation';
 import {
@@ -92,6 +109,10 @@ export default async function DataPointDetailPage({
     errors: 0,
     warnings: 0,
   };
+  // 承認済みだが承認後に証跡不足が見つかった（DB の状態は承認済みのまま。W0 O3）
+  const needsRecheck = isApprovedNeedingRecheck(dataPoint, validations);
+  // 画面上部で選んでいる報告期間と、この記録の期間が違う（アラート等から過年度へ来た。W0 O2）
+  const isOtherPeriod = dataPoint.reportingPeriodId !== shell.currentPeriod.id;
 
   const [
     versions,
@@ -218,10 +239,14 @@ export default async function DataPointDetailPage({
         title={`${metric.name} — ${unit.name}`}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <DataPointStatusBadge status={dataPoint.status} />
+            <DataPointStatusBadge status={dataPoint.status} needsRecheck={needsRecheck} />
             <ValidationBadge errorCount={summary.errors} warningCount={summary.warnings} />
             <EvidenceBadge count={evidenceLinks.length} required={metric.requiresEvidence} />
             {dataPoint.changedAfterApproval && <Badge tone="warning">承認後に変更あり</Badge>}
+            <Badge tone={isOtherPeriod ? 'warning' : 'neutral'}>
+              <CalendarClock className="size-3" aria-hidden="true" />
+              対象期間 {period.code}
+            </Badge>
           </span>
         }
         breadcrumbs={[
@@ -295,8 +320,34 @@ export default async function DataPointDetailPage({
         }
       />
 
-      <div className="px-4 pt-3">
+      <div className="space-y-2 px-4 pt-3">
         <FlashMessage searchParams={query} />
+        {isOtherPeriod && (
+          <div
+            role="note"
+            className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-[#8a5d00]"
+          >
+            <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>
+              <span className="font-semibold">過年度のデータです。</span>
+              表示中の報告期間（{shell.currentPeriod.label}）とは異なる {period.label}{' '}
+              のデータを開いています。値・状態・検証結果は {period.label} のものです。
+            </span>
+          </div>
+        )}
+        {needsRecheck && (
+          <div
+            role="note"
+            className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-[#8a5d00]"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>
+              <span className="font-semibold">承認済み・要再確認:</span> 承認後に証跡不足（Evidence
+              必須の指標に Evidence が紐付いていない）が見つかりました。
+              承認は取り消されていません。証跡を紐付けるか、必要なら承認をやり直してください。
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-3 p-4">
@@ -317,12 +368,47 @@ export default async function DataPointDetailPage({
                 value={`${dataPoint.boundary} / 持分 ${unit.ownershipPercent}%`}
               />
               <Row label="対象期間" value={`${period.label}`} />
+              {/* 実績ゼロ・未入力・対象外などを区別して見せる（空欄を 0 と見せない。§7.1） */}
+              <Row
+                label="現在値"
+                value={
+                  dataPoint.availabilityStatus !== 'value_present' ? (
+                    <AvailabilityBadge
+                      status={dataPoint.availabilityStatus}
+                      reason={dataPoint.absenceReason}
+                    />
+                  ) : dataPoint.value === null ? (
+                    (dataPoint.textValue ?? '—')
+                  ) : (
+                    `${formatNumber(dataPoint.value)} ${dataPoint.unitOfMeasure}`
+                  )
+                }
+              />
+              <Row
+                label="値の有無・区分"
+                value={
+                  <span className="inline-flex flex-wrap justify-end gap-1">
+                    <AvailabilityBadge status={dataPoint.availabilityStatus} />
+                    <ValueKindBadge kind={dataPoint.valueKind} />
+                  </span>
+                }
+              />
+              {dataPoint.absenceReason && (
+                <Row label="値が無い理由" value={dataPoint.absenceReason} />
+              )}
               <Row
                 label="前年実績"
                 value={
-                  previous
-                    ? `${formatNumber(previous.value)} ${previous.unitOfMeasure}`
-                    : '—（前年データなし）'
+                  !previous ? (
+                    '—（前年データなし）'
+                  ) : previous.availabilityStatus !== 'value_present' ? (
+                    <AvailabilityBadge
+                      status={previous.availabilityStatus}
+                      reason={previous.absenceReason}
+                    />
+                  ) : (
+                    `${formatNumber(previous.value)} ${previous.unitOfMeasure}`
+                  )
                 }
               />
               <Row label="算定方法" value={dataPoint.methodology ?? '—'} />
@@ -391,24 +477,33 @@ export default async function DataPointDetailPage({
                         <TH>内訳</TH>
                         <TH align="right">値</TH>
                         <TH>単位</TH>
+                        <TH>区分</TH>
                         <TH>根拠</TH>
                       </TR>
                     </THead>
                     <TBody>
-                      {calc.inputs.map((inputRow, i) => (
-                        <TR key={i}>
-                          <TD>{inputRow.label}</TD>
-                          <TD align="right">{formatNumber(inputRow.value)}</TD>
-                          <TD>{inputRow.unit}</TD>
-                          <TD className="text-[11px] text-ink-muted">{inputRow.note}</TD>
-                        </TR>
-                      ))}
+                      {calc.inputs.map((inputRow, i) => {
+                        // 金額×係数（推計）を一次データと取り違えないよう区分を出す（W0 O6）
+                        const dataClass = classifyCalculationInput(inputRow);
+                        return (
+                          <TR key={i}>
+                            <TD>{inputRow.label}</TD>
+                            <TD align="right">{formatNumber(inputRow.value)}</TD>
+                            <TD>{inputRow.unit}</TD>
+                            <TD className="whitespace-nowrap text-[11px]">
+                              {dataClass ? CALCULATION_DATA_CLASS_LABELS[dataClass] : '—'}
+                            </TD>
+                            <TD className="text-[11px] text-ink-muted">{inputRow.note}</TD>
+                          </TR>
+                        );
+                      })}
                       <TR>
                         <TD className="font-medium">合計</TD>
                         <TD align="right" className="font-medium">
                           {formatNumber(calc.result)}
                         </TD>
                         <TD>{calc.resultUnit}</TD>
+                        <TD />
                         <TD />
                       </TR>
                     </TBody>
@@ -442,7 +537,16 @@ export default async function DataPointDetailPage({
                         </Badge>
                       )}
                     </TD>
-                    <TD align="right">{formatNumber(v.value)}</TD>
+                    <TD align="right">
+                      {v.availabilityStatus !== 'value_present' ? (
+                        <AvailabilityBadge status={v.availabilityStatus} reason={v.absenceReason} />
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          {formatNumber(v.value)}
+                          {v.valueKind !== 'actual' && <ValueKindBadge kind={v.valueKind} />}
+                        </span>
+                      )}
+                    </TD>
                     <TD>{v.unitOfMeasure}</TD>
                     <TD className="text-[11px]">{v.sourceReference ?? v.sourceType}</TD>
                     <TD className="text-[11px] text-ink-muted">{v.changeReason ?? '—'}</TD>
@@ -831,7 +935,7 @@ export default async function DataPointDetailPage({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3 border-b border-line py-1.5 last:border-b-0">
       <span className="shrink-0 text-ink-muted">{label}</span>

@@ -39,7 +39,8 @@ describe('SSBJ 2026 正式基準マスター', () => {
     expect(numeric.map((i) => [i.code, i.metricCode])).toEqual([
       ['気候-47(1)', 'scope1'],
       ['気候-47(2)', 'scope2'],
-      ['気候-47(3)', 'scope3_cat1'],
+      // (3) は絶対総量なので Scope3 合計。Category 1 へ紐づけると Cat.1 が総量に見える
+      ['気候-47(3)', 'scope3_total'],
     ]);
   });
 

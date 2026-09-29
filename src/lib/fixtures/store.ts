@@ -648,6 +648,15 @@ export function createFixtureDb(): FixtureDb {
       docType: '人事データ',
       pages: 1,
     },
+    // 労働災害度数率（証跡必須）の根拠。以前は対応する証跡が無く、FY2025 の承認済み
+    // 5 件が「証跡必須なのに証跡なし」になっていた（W0 O3: Fixture 生成の漏れ）
+    {
+      key: 'safety-record',
+      name: '労働災害記録_{P}.xlsx',
+      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      docType: '安全衛生記録',
+      pages: 1,
+    },
     {
       key: 'purchase-ledger',
       name: '購買明細_{P}.xlsx',
@@ -753,6 +762,7 @@ export function createFixtureDb(): FixtureDb {
     if (metricCode === 'scope2' || metricCode === 'energy') return 'power-invoice';
     if (metricCode === 'waste') return 'waste-manifest';
     if (metricCode === 'scope3_cat1') return 'purchase-ledger';
+    if (metricCode === 'ltifr') return 'safety-record';
     if (
       metricCode === 'employees' ||
       metricCode === 'managers_total' ||
@@ -957,6 +967,8 @@ export function createFixtureDb(): FixtureDb {
         note: 'サプライヤー報告排出量（一次データ）',
         activityAmount: null,
         activityUnit: null,
+        // 区分を明示して持つ（金額ベースを一次データに数えないため。W0 O6）
+        dataClass: 'supplier_specific',
       };
     }
     const factor = must(factorByCode.get(row.factorCode ?? ''), `factor ${row.factorCode}`);
@@ -972,6 +984,7 @@ export function createFixtureDb(): FixtureDb {
           : `活動量 ${row.amount.toLocaleString('ja-JP')} ${row.unit} × 係数 ${factor.factorValue} (${factor.factorYear}年度)`,
       activityAmount: row.amount,
       activityUnit: row.unit,
+      dataClass: row.dataType === 'monetary' ? 'spend_based' : 'activity_based',
     };
   });
   db.calculations.push({
@@ -1188,12 +1201,12 @@ export function createFixtureDb(): FixtureDb {
       ...audit(at(120)),
     });
 
-    if (spec.metricCode) {
+    for (const metricCode of spec.metricCodes ?? []) {
       db.disclosureMappings.push({
-        id: fid('disclosure_mapping', `cdp/2026/${spec.code}/${spec.metricCode}`),
+        id: fid('disclosure_mapping', `cdp/2026/${spec.code}/${metricCode}`),
         organizationId: ORG_IDS.aomi,
         itemId: curItemId,
-        metricId: metricId('AOMI', spec.metricCode),
+        metricId: metricId('AOMI', metricCode),
         unitId: null,
         transform: null,
         mappingSource: 'manual',
@@ -1551,12 +1564,12 @@ export function createFixtureDb(): FixtureDb {
       ...audit(at(90)),
     });
 
-    if (spec.metricCode) {
+    for (const metricCode of spec.metricCodes ?? []) {
       db.disclosureMappings.push({
-        id: fid('disclosure_mapping', `csrd/2026/${spec.code}/${spec.metricCode}`),
+        id: fid('disclosure_mapping', `csrd/2026/${spec.code}/${metricCode}`),
         organizationId: ORG_IDS.aomi,
         itemId,
-        metricId: metricId('AOMI', spec.metricCode),
+        metricId: metricId('AOMI', metricCode),
         unitId: null,
         transform: null,
         mappingSource: 'manual',

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
-import { FIXTURE_TODAY } from '@/lib/config';
+import { getReferenceDate } from '@/lib/clock';
 import { daysUntilJst, formatJstDate } from '@/lib/format/datetime';
 import { loadAssuranceDashboard } from '@/lib/services/assurance';
 import { loadAssuranceShell } from '@/lib/services/shell';
@@ -28,8 +28,10 @@ export default async function AssuranceDashboardPage() {
     { pbc: 0, tests: 0, review: 0, issues: 0, changes: 0 },
   );
 
+  // 期限の基準日は 1 か所（デモは FIXTURE_TODAY、Supabase Mode は実時計）
+  const today = getReferenceDate();
   const upcoming = rows.filter((r) => {
-    const remaining = daysUntilJst(r.engagement.deadlineDate, FIXTURE_TODAY);
+    const remaining = daysUntilJst(r.engagement.deadlineDate, today);
     return remaining !== null && remaining <= 60;
   }).length;
 
@@ -139,7 +141,7 @@ export default async function AssuranceDashboardPage() {
                   </THead>
                   <TBody>
                     {rows.map((row) => {
-                      const remaining = daysUntilJst(row.engagement.deadlineDate, FIXTURE_TODAY);
+                      const remaining = daysUntilJst(row.engagement.deadlineDate, today);
                       return (
                         <TR key={row.engagement.id}>
                           <TD>

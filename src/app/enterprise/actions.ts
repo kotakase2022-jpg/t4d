@@ -545,26 +545,8 @@ export async function linkEvidenceAction(formData: FormData): Promise<void> {
   });
 }
 
-export async function uploadEvidenceAction(formData: FormData): Promise<void> {
-  const ctx = await requireEnterpriseContext();
-  assertCan(ctx, 'enterprise.evidence.write');
-  const db = await getDb();
-
-  const file = formData.get('file');
-  if (!(file instanceof File) || file.size === 0) throw new Error('ファイルを選択してください。');
-
-  await storeNewFile(db, ctx, {
-    bucket: 'evidence-private',
-    scope: 'evidence',
-    originalName: file.name,
-    mimeType: file.type || 'application/octet-stream',
-    bytes: new Uint8Array(await file.arrayBuffer()),
-    reportingPeriodId: (formData.get('reportingPeriodId') as string) || null,
-    documentType: (formData.get('documentType') as string) || null,
-  });
-
-  revalidatePath('/enterprise/evidence');
-}
+// 資料・証跡の登録は src/app/enterprise/evidence/actions.ts（uploadEvidenceDocumentAction）。
+// 利用目的・機密区分・テキスト抽出を扱うため、従来の uploadEvidenceAction は置き換えた
 
 // ----------------------------------------------------------------------
 // CDP / CSRD（質問詳細ビューを共有するため、両フレームワークの画面を再検証する）

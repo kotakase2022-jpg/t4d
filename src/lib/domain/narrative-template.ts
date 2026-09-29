@@ -59,6 +59,24 @@ export function missingTemplateFields(
   return NARRATIVE_TEMPLATE_FIELDS[theme].filter((f) => !(fields[f.key] ?? '').trim());
 }
 
+/**
+ * 引用した定性情報の未記入項目（表示ラベル）。「未解決の必須情報」の数え方で、
+ * 開示ホームのカードと原稿一覧の絞り込みが同じこの関数を使う（件数と一覧を食い違わせない）。
+ *
+ * テンプレートの項目を必須として扱う。財務的影響は、影響額があれば「影響額を示さない理由」は不要
+ * （どちらか一方で足りる項目の組）。影響額が無い場合は、理由が書かれていても影響額・算定方法は
+ * 未確定として残す（0 や仮の値で埋めない。定量化しない理由の登録は基準上の免除とは別: 指示書 §6.6）。
+ */
+export function unresolvedNarrativeFields(
+  theme: NarrativeTheme,
+  fields: Readonly<Record<string, string>>,
+): string[] {
+  const hasAmount = Boolean(fields.amount?.trim());
+  return missingTemplateFields(theme, fields)
+    .filter((f) => !(theme === 'financial_impact' && f.key === 'noAmountReason' && hasAmount))
+    .map((f) => f.label);
+}
+
 /** テンプレートに無いキー（取り違え・古い版のキー）。空なら全てテンプレートの項目 */
 export function unknownTemplateKeys(
   theme: NarrativeTheme,

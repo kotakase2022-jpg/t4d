@@ -1,9 +1,10 @@
 import 'server-only';
 
 import { isUnitInScope } from '@/lib/authorization/can';
-import { FIXTURE_TODAY } from '@/lib/config';
-import { daysUntilJst, isOverdue, toJstDate } from '@/lib/format/datetime';
+import { getReferenceDate } from '@/lib/clock';
+import { daysUntilJst, isOverdue } from '@/lib/format/datetime';
 import { summarizeValidations } from '@/lib/validation/data-point-rules';
+import { isApprovedNeedingRecheck } from '@/lib/validation/display-state';
 import {
   findDataPointIdsWithValidation,
   loadActiveValidations,
@@ -15,6 +16,7 @@ import type {
   DataPointStatus,
   DataPointValidationResult,
   DisclosureResponse,
+  IsoDate,
   MetricDefinition,
   OrganizationUnit,
   Page,
@@ -32,6 +34,11 @@ export interface DataPointRow {
   evidenceCount: number;
   errorCount: number;
   warningCount: number;
+  /**
+   * 承認済みだが、未解消の証跡不足がある（表示は「承認済み・要再確認」）。
+   * DB の status は承認済みのまま（W0 O3）
+   */
+  needsRecheck: boolean;
   /** 現在のユーザーが編集できるか（Unit スコープ判定込み） */
   editable: boolean;
 }
@@ -135,7 +142,10 @@ export async function loadDataPointPage(
   // 要対応フラグ
   switch (filters.flag) {
     case 'validation_error': {
-      const ids = await findDataPointIdsWithValidation(db, organizationId, { severity: 'error' });
+      const ids = await findDataPointIdsWithValidation(db, organizationId, {
+        severity: 'error',
+        reportingPeriodId: period.id,
+      });
       if (ids.length === 0) return emptyPage(safePage, pageSize);
       where.id = { in: ids };
       break;
@@ -143,6 +153,7 @@ export async function loadDataPointPage(
     case 'missing_evidence': {
       const ids = await findDataPointIdsWithValidation(db, organizationId, {
         ruleKey: 'missing_evidence',
+        reportingPeriodId: period.id,
       });
       if (ids.length === 0) return emptyPage(safePage, pageSize);
       where.id = { in: ids };
@@ -223,6 +234,7 @@ export async function loadDataPointPage(
       evidenceCount: evidenceCount.get(dp.id) ?? 0,
       errorCount: counts.errors,
       warningCount: counts.warnings,
+      needsRecheck: isApprovedNeedingRecheck(dp, validations),
       editable: isUnitInScope(ctx, dp.unitId) && dp.status !== 'approved',
     });
   }
@@ -308,6 +320,7 @@ export function buildDataPointRows(
       evidenceCount: dataset.evidenceCountByDataPoint.get(dp.id) ?? 0,
       errorCount: counts.errors,
       warningCount: counts.warnings,
+      needsRecheck: isApprovedNeedingRecheck(dp, dataset.validations),
       editable: isUnitInScope(ctx, dp.unitId) && dp.status !== 'approved',
     });
   }
@@ -319,10 +332,19 @@ export function buildDataPointRows(
 // ======================================================================
 
 export interface EnterpriseDashboardData {
+  /**
+   * 期限・超過の判定に使った基準日（src/lib/clock.ts）。
+   * 画面で残り日数を出すときも同じ日を使う（FIXTURE_TODAY を直接読まない）
+   */
+  referenceDate: IsoDate;
   overdueCount: number;
   notSubmittedCount: number;
+  /** 表示中の報告期間の Data Point に限る（一覧 ?flag=validation_error の件数と一致） */
   validationErrorCount: number;
+  /** 表示中の報告期間の Data Point に限る（一覧 ?flag=missing_evidence の件数と一致） */
   missingEvidenceCount: number;
+  /** 承認済みだが、承認後に証跡不足が見つかった件数（表示は「承認済み・要再確認」） */
+  approvedNeedsRecheckCount: number;
   reviewPendingCount: number;
   approvalRate: number;
   cdpReadiness: number;
@@ -338,6 +360,7 @@ export interface EnterpriseDashboardData {
   }>;
   todaysTasks: WorkTask[];
   overdueTasks: WorkTask[];
+  /** 表示中の報告期間の Data Point に対する未解消の検証エラー（新しい順・最大 8 件） */
   topAlerts: DataPointValidationResult[];
   recentActivity: Array<{ id: string; label: string; at: string }>;
 }
@@ -345,6 +368,9 @@ export interface EnterpriseDashboardData {
 /**
  * ダッシュボードの KPI。
  * 件数はすべて `db.count()`（DB 側集計）で求め、行そのものは読み込まない。
+ *
+ * 期限の判定は `referenceDate`（既定は src/lib/clock.ts の基準日）で行う。
+ * Supabase Mode でも FIXTURE_TODAY で判定していた不具合（W0 O5）の修正。
  */
 export async function loadEnterpriseDashboard(
   db: DbClient,
@@ -352,8 +378,10 @@ export async function loadEnterpriseDashboard(
   period: ReportingPeriod,
   units: OrganizationUnit[],
   metrics: MetricDefinition[],
+  options: { referenceDate?: IsoDate } = {},
 ): Promise<EnterpriseDashboardData> {
   const organizationId = ctx.workspace.organizationId;
+  const referenceDate = options.referenceDate ?? getReferenceDate();
   const base: Where<DataPoint> = {
     organizationId,
     reportingPeriodId: period.id,
@@ -369,18 +397,33 @@ export async function loadEnterpriseDashboard(
       db.count('dataPoints', { where: { ...base, changedAfterApproval: true } }),
     ]);
 
+  // 検証結果は報告期間を持たないため、表示中の期間の Data Point に絞る（W0 O2）。
+  // 絞らないと、FY2026 のホームに FY2025 の検証エラーが混ざり、
+  // KPI の件数とリンク先の一覧（期間で絞り込み済み）の件数が食い違う
   const [errorIds, missingEvidenceIds] = await Promise.all([
-    findDataPointIdsWithValidation(db, organizationId, { severity: 'error' }),
-    findDataPointIdsWithValidation(db, organizationId, { ruleKey: 'missing_evidence' }),
+    findDataPointIdsWithValidation(db, organizationId, {
+      severity: 'error',
+      reportingPeriodId: period.id,
+    }),
+    findDataPointIdsWithValidation(db, organizationId, {
+      ruleKey: 'missing_evidence',
+      reportingPeriodId: period.id,
+    }),
   ]);
+  const approvedNeedsRecheckCount =
+    missingEvidenceIds.length === 0
+      ? 0
+      : await db.count('dataPoints', {
+          where: { ...base, status: 'approved', id: { in: missingEvidenceIds } },
+        });
 
   const tasks = await db.select('tasks', {
     where: { organizationId, status: { notIn: ['done', 'cancelled'] } },
     orderBy: { column: 'dueDate' },
   });
-  const overdueTasks = tasks.filter((t) => isOverdue(t.dueDate, FIXTURE_TODAY));
+  const overdueTasks = tasks.filter((t) => isOverdue(t.dueDate, referenceDate));
   const todaysTasks = tasks.filter((t) => {
-    const diff = daysUntilJst(t.dueDate, FIXTURE_TODAY);
+    const diff = daysUntilJst(t.dueDate, referenceDate);
     return diff !== null && diff >= 0 && diff <= 7;
   });
 
@@ -421,13 +464,20 @@ export async function loadEnterpriseDashboard(
     }),
   );
 
-  const topAlerts = (
-    await db.select('validations', {
-      where: { organizationId, severity: 'error', resolvedAt: { isNull: true } },
-      orderBy: { column: 'detectedAt', dir: 'desc' },
-      limit: 8,
-    })
-  ).slice(0, 8);
+  // 同じ検出時刻の行が多い（再計算で一斉に入る）ため、id を第 2 キーにして並びを安定させる
+  const topAlerts =
+    errorIds.length === 0
+      ? []
+      : await db.select('validations', {
+          where: {
+            organizationId,
+            severity: 'error',
+            resolvedAt: { isNull: true },
+            dataPointId: { in: errorIds },
+          },
+          orderBy: [{ column: 'detectedAt', dir: 'desc' }, { column: 'id' }],
+          limit: 8,
+        });
 
   const versions = await db.select('dataPointVersions', {
     where: { organizationId },
@@ -456,10 +506,12 @@ export async function loadEnterpriseDashboard(
   });
 
   return {
+    referenceDate,
     overdueCount: overdueTasks.length,
     notSubmittedCount,
     validationErrorCount: errorIds.length,
     missingEvidenceCount: missingEvidenceIds.length,
+    approvedNeedsRecheckCount,
     reviewPendingCount,
     approvalRate: total === 0 ? 0 : Math.round((approvedCount / total) * 100),
     cdpReadiness: readinessPercent(responses),
@@ -478,8 +530,4 @@ export function readinessPercent(responses: DisclosureResponse[]): number {
     (r) => r.status === 'approved' || r.status === 'in_review' || r.status === 'draft',
   ).length;
   return Math.round((done / responses.length) * 100);
-}
-
-export function jstToday(): string {
-  return toJstDate(new Date().toISOString());
 }

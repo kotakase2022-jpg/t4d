@@ -3,6 +3,7 @@ import { normalizeLabel } from '@/lib/imports/learning';
 import { classifyColumns, pickValueCell } from '@/lib/imports/column-roles';
 import { parseFlexibleNumber } from '@/lib/imports/number';
 import type { SsbjCoverageStatus as SsbjCoverage } from '@/types/domain';
+import { buildMockDisclosureDraft, type DraftInvocationInput } from './mock-disclosure-draft';
 import { AI_SCHEMAS, PROMPT_VERSIONS, type AiFeature, type AiOutputOf } from './schemas';
 import { AiProviderError, type AiInvocation, type AiProvider, type AiResult } from './types';
 
@@ -1101,6 +1102,11 @@ function buildMockOutput<F extends AiFeature>(
         ],
         sources: (input.sources as never[]) ?? [],
       };
+    }
+
+    case 'disclosureBlockDraft': {
+      // 文は入力の source の本文だけから組み立てる（mock-disclosure-draft.ts）。乱数は使わない
+      return buildMockDisclosureDraft(input as unknown as DraftInvocationInput);
     }
 
     default: {

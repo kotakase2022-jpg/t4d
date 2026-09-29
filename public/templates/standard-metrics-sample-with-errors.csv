@@ -1,0 +1,11 @@
+﻿metric_code,period_start,period_end,entity_code,boundary_code,value,unit,value_kind,availability_status,absence_reason,methodology_code,breakdown_key,source_reference
+scope2_location,2026-04-01,2027-03-31,HQ,連結,2950.4,t-CO2e,actual,,,location_based,,電力会社の請求書（架空）
+scope2_location,2026-04-01,2027-03-31,EAST,連結,9120.0,t-CO2e,actual,,,location_based,,電力会社の請求書（架空）
+scope2_location,2026-04-01,2027-03-31,EAST,連結,9210.0,t-CO2e,actual,,,location_based,,再集計表（架空）
+scope2_location,2025-04-01,2026-03-31,WEST,連結,7010.8,t-CO2e,actual,,,location_based,,前年度の請求書（架空）
+waste,2026-04-01,2027-03-31,WEST,連結,1850,kg,actual,,,,,マニフェスト集計（架空）
+work_related_injuries,2026-04-01,2027-03-31,EAST,連結,0,件,actual,,,,,安全衛生委員会資料（架空）
+work_related_injuries,2026-04-01,2027-03-31,WEST,連結,,件,actual,未提出,拠点からの報告が未着（架空）,,,
+scope3_cat4,2026-04-01,2027-03-31,HQ,連結,1.234,t-CO2e,estimate,,,,,物流委託先の概算（架空）
+scope2_location,2026-04-01,2027-03-31,OSAKA,連結,500,t-CO2e,actual,,,,,
+energy,2026-04-01,2026-06-30,HQ,連結,1500,MWh,actual,,,,,第1四半期の検針票（架空）

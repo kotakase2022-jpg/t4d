@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NotFoundError } from '@/lib/authorization/can';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
-import { ORG_IDS, userId } from '@/lib/fixtures/dataset';
+import { ORG_IDS, PERIOD_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
+import { loadEnterpriseDashboard } from '@/lib/services/enterprise-data';
 import {
   createCollectionCampaign,
   createMetricDefinition,
@@ -150,6 +151,55 @@ describe('指標マスター（MASTER-P0-001）', () => {
 
   it('不正なカテゴリを拒否する', () => {
     expect(() => parseMetricInput(metricForm({ category: 'not_a_category' }))).toThrow();
+  });
+
+  it('証跡必須に変えると、締めていない期間の承認済み・証跡なしの行がすぐ要再確認になる（W0 O3）', async () => {
+    // 取締役人数は証跡不要・FY2026 本社分が承認済みで証跡なし（Fixture）
+    const metric = fixture.metrics.find(
+      (m) => m.organizationId === ORG_IDS.aomi && m.code === 'directors_count',
+    )!;
+    expect(metric.requiresEvidence).toBe(false);
+    const fy2026 = fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!;
+    const dashboard = () =>
+      loadEnterpriseDashboard(
+        db,
+        admin(),
+        fy2026,
+        fixture.units.filter((u) => u.organizationId === ORG_IDS.aomi),
+        fixture.metrics.filter((m) => m.organizationId === ORG_IDS.aomi),
+      );
+    const before = (await dashboard()).approvedNeedsRecheckCount;
+
+    await updateMetricDefinition(
+      db,
+      admin(),
+      metric.id,
+      parseMetricInput(
+        metricForm({
+          code: metric.code,
+          name: metric.name,
+          category: metric.category,
+          unit: metric.unit,
+          baseUnit: metric.baseUnit,
+          dataType: metric.dataType,
+          aggregationMethod: metric.aggregationMethod,
+          requiresEvidence: 'on',
+        }),
+      ),
+    );
+
+    expect((await dashboard()).approvedNeedsRecheckCount).toBeGreaterThan(before);
+    // 締めた期間（FY2025）の検証結果は作り直さない
+    const fy2025Ids = new Set(
+      fixture.dataPoints
+        .filter((d) => d.reportingPeriodId === PERIOD_IDS.fy2025 && d.metricId === metric.id)
+        .map((d) => d.id),
+    );
+    expect(
+      fixture.validations.some(
+        (r) => fy2025Ids.has(r.dataPointId) && r.ruleKey === 'missing_evidence',
+      ),
+    ).toBe(false);
   });
 
   it('他組織の指標は編集できない（テナント分離）', async () => {

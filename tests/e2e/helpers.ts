@@ -58,6 +58,25 @@ export async function loginAs(page: Page, displayName: string): Promise<void> {
   await page.waitForURL(/\/(enterprise|assurance)\//);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * ヘッダーの「役割切替（デモ）」で同じ組織のデモ利用者へ切り替える（ログアウトしない）。
+ * 切替後は今いる画面へ戻る。ヘッダーの現在の利用者が変わるまで待つ。
+ */
+export async function switchDemoRole(page: Page, displayName: string): Promise<void> {
+  const name = escapeRegExp(displayName);
+  const trigger = page.getByRole('button', { name: /^役割切替（デモ）/ });
+  await trigger.click();
+  await page.getByRole('menuitem', { name: new RegExp(name) }).click();
+  await expect(
+    page.getByRole('button', { name: new RegExp(`^役割切替（デモ） 現在: ${name}・`) }),
+  ).toBeVisible();
+  await expect(page.locator('#t4d-main')).toBeVisible();
+}
+
 export async function gotoEnterprise(page: Page, path: string): Promise<void> {
   await page.goto(`/enterprise/${path}`);
   await expect(page.locator('#t4d-main')).toBeVisible();

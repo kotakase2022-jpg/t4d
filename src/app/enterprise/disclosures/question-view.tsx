@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Bot, Check, Send, Undo2 } from 'lucide-react';
-import { AiGeneratedBadge, ResponseStatusBadge } from '@/components/shared/badges';
+import {
+  AiGeneratedBadge,
+  DataCoverageBadge,
+  ResponseStatusBadge,
+} from '@/components/shared/badges';
 import { CommentBox } from '@/components/shared/comment-box';
 import { MentionText } from '@/components/shared/mention-text';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -11,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
+import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { loadDisclosureWorkspace } from '@/lib/services/disclosure';
@@ -23,6 +28,11 @@ import {
   saveCdpResponseAction,
   transitionCdpResponseAction,
 } from '../actions';
+
+/** 指標 1 つ分の値の表示。値の行が無いときは 0 ではなく「値なし」と書く（W0 O4） */
+function metricValueLabel(value: number | null, unit: string): string {
+  return value === null ? '値なし' : `${formatNumber(value)} ${unit}`;
+}
 
 /**
  * 開示質問の詳細（三ペイン）。CDP と CSRD で共有する。
@@ -88,6 +98,7 @@ export async function QuestionDetailView({
   const canApprove = can(ctx, 'enterprise.disclosure.approve');
   const isAiDraft = Boolean(currentVersion?.originatedFromAiRunId);
 
+  const isMultiMetric = row.metricValues.length > 1;
   const delta =
     row.currentValue !== null && row.previousValue !== null && row.previousValue !== 0
       ? ((row.currentValue - row.previousValue) / row.previousValue) * 100
@@ -184,39 +195,71 @@ export async function QuestionDetailView({
             </div>
           </Card>
 
-          {(row.currentValue !== null || row.previousValue !== null || row.previousResponse) && (
+          {(row.currentValue !== null ||
+            row.previousValue !== null ||
+            row.previousResponse ||
+            isMultiMetric) && (
             <Card>
               <SectionTitle title="前年差分（YoY Diff）" />
-              <div className="grid grid-cols-3 gap-3 px-3 pb-3 text-[12px]">
-                <div>
-                  <div className="text-ink-muted">当年（承認済みデータ）</div>
-                  <div className="tnum text-[16px] font-semibold text-ink">
-                    {formatNumber(row.currentValue)}
+              {isMultiMetric ? (
+                // 複数の指標を求める項目（例: ESRS E1-6）は、異なる指標を足した値に意味が無いため
+                // 合計の YoY を出さず、指標ごとに当年・前年を並べる（W0 O7）
+                <div className="t4d-scroll-x px-3 pb-3">
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>指標</TH>
+                        <TH align="right">当年（承認済み）</TH>
+                        <TH align="right">前年（{workspace.previousPeriod?.code ?? '—'}）</TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {row.metricValues.map((value) => (
+                        <TR key={value.metric.id}>
+                          <TD>{value.metric.name}</TD>
+                          <TD align="right" className="tnum">
+                            {metricValueLabel(value.currentValue, value.metric.unit)}
+                          </TD>
+                          <TD align="right" className="tnum text-ink-muted">
+                            {metricValueLabel(value.previousValue, value.metric.unit)}
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3 px-3 pb-3 text-[12px]">
+                  <div>
+                    <div className="text-ink-muted">当年（承認済みデータ）</div>
+                    <div className="tnum text-[16px] font-semibold text-ink">
+                      {formatNumber(row.currentValue)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-ink-muted">
+                      前年（{workspace.previousPeriod?.code ?? '—'}）
+                    </div>
+                    <div className="tnum text-[16px] font-semibold text-ink-muted">
+                      {formatNumber(row.previousValue)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-ink-muted">増減</div>
+                    <div
+                      className={`tnum text-[16px] font-semibold ${
+                        delta === null
+                          ? 'text-ink-muted'
+                          : delta >= 0
+                            ? 'text-danger'
+                            : 'text-success'
+                      }`}
+                    >
+                      {delta === null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div className="text-ink-muted">
-                    前年（{workspace.previousPeriod?.code ?? '—'}）
-                  </div>
-                  <div className="tnum text-[16px] font-semibold text-ink-muted">
-                    {formatNumber(row.previousValue)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-ink-muted">増減</div>
-                  <div
-                    className={`tnum text-[16px] font-semibold ${
-                      delta === null
-                        ? 'text-ink-muted'
-                        : delta >= 0
-                          ? 'text-danger'
-                          : 'text-success'
-                    }`}
-                  >
-                    {delta === null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`}
-                  </div>
-                </div>
-              </div>
+              )}
               {row.previousResponse?.answerText && (
                 <div className="border-t border-line px-3 py-2">
                   <div className="text-[11px] font-medium text-ink-muted">前年回答</div>
@@ -457,24 +500,44 @@ export async function QuestionDetailView({
             {row.mappedMetrics.length === 0 ? (
               <EmptyState title="マッピングされた指標がありません" />
             ) : (
-              <ul className="divide-y divide-line">
-                {row.mappedMetrics.map((metric) => (
-                  <li key={metric.id} className="px-3 py-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px] text-ink">{metric.name}</span>
-                      <span className="tnum text-[12px] text-ink-muted">
-                        {formatNumber(row.currentValue)} {metric.unit}
-                      </span>
-                    </div>
-                    <Link
-                      href={`/enterprise/data?q=${encodeURIComponent(metric.name)}&status=approved`}
-                      className="text-[11px] text-brand-700 hover:underline"
-                    >
-                      承認済みデータを見る
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <>
+                {row.dataCoverage !== 'not_mapped' && (
+                  <div className="px-3 pb-1.5">
+                    {/* 値は承認済みだけを数えるため、無い場合は「承認済みデータなし」と書く */}
+                    <DataCoverageBadge
+                      coverage={row.dataCoverage}
+                      missingNames={row.missingMetrics.map((m) => m.name)}
+                      noneLabel="承認済みデータなし"
+                    />
+                  </div>
+                )}
+                <ul className="divide-y divide-line">
+                  {/* 指標ごとに自分の値を出す。項目全体の値（currentValue）を各行に繰り返すと、
+                      複数の指標を求める項目で Scope1 の値が Scope2 の行にも出てしまう（W0 O7） */}
+                  {row.metricValues.map((value) => (
+                    <li key={value.metric.id} className="px-3 py-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[12px] text-ink">{value.metric.name}</span>
+                        <span className="tnum text-[12px] text-ink-muted">
+                          {metricValueLabel(value.currentValue, value.metric.unit)}
+                        </span>
+                      </div>
+                      {value.currentEstimate !== null && (
+                        <div className="tnum text-[11px] text-ink-muted">
+                          推計（実績と別）: {formatNumber(value.currentEstimate)}{' '}
+                          {value.metric.unit}
+                        </div>
+                      )}
+                      <Link
+                        href={`/enterprise/data?q=${encodeURIComponent(value.metric.name)}&status=approved`}
+                        className="text-[11px] text-brand-700 hover:underline"
+                      >
+                        承認済みデータを見る
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </Card>
 

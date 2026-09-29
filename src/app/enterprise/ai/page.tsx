@@ -29,6 +29,8 @@ const FEATURE_LABEL: Record<string, string> = {
   copilotChat: 'Copilot 対話',
   assuranceEvidenceSummary: 'Evidence 要約（監査）',
   assuranceChangeSummary: 'Snapshot 後変更要約（監査）',
+  // 開示優先モードの原稿編集画面から実行する。候補は人が段落ごとに採用するまで本文に入らない
+  disclosureBlockDraft: '開示本文の下書き',
 };
 
 const INSIGHT_CATEGORY_LABEL: Record<string, string> = {
@@ -230,10 +232,13 @@ export default async function AiPage({
                 <p className="text-[11px] text-ink-muted">
                   {key === 'cdpDraftGeneration' && 'CDP 質問画面から実行します。'}
                   {key === 'importMapping' && '取込ジョブの解析時に自動実行されます。'}
+                  {key === 'disclosureBlockDraft' &&
+                    '開示プロジェクトの原稿編集画面から実行します（候補は段落ごとに人が採用）。'}
                   {key.startsWith('assurance') && '監査法人ワークスペースで実行します。'}
                   {!key.startsWith('assurance') &&
                     key !== 'cdpDraftGeneration' &&
                     key !== 'importMapping' &&
+                    key !== 'disclosureBlockDraft' &&
                     '対象画面から実行します。'}
                 </p>
               </li>

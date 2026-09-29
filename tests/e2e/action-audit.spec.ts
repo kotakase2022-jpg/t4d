@@ -12,7 +12,7 @@ import { DEMO_USERS, loginAs } from './helpers';
  *
  * 対象（いずれもこれまでテストが無かった）:
  *   bulkTransitionAction / updateDataPointAction / linkEvidenceAction /
- *   uploadEvidenceAction / rejectAiDraftAction / toggleGrantAction /
+ *   uploadEvidenceDocumentAction / rejectAiDraftAction / toggleGrantAction /
  *   respondPbcAction / decidePbcAction / assessSnapshotChangeAction /
  *   createReviewNoteAction / clearReviewNoteAction / summarizeChangesAction
  *

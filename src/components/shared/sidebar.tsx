@@ -7,11 +7,15 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Hint } from '@/components/ui/tooltip';
 import { DemoTour } from './demo-tour';
 import { cn } from '@/lib/utils';
-import { ENTERPRISE_NAV, assuranceNav, type NavItem } from './nav-config';
+import { navTreeFor, type NavItem, type NavVariant } from './nav-config';
 
 const STORAGE_KEY = 't4d.sidebar.collapsed';
 
-export type SidebarVariant = 'enterprise' | 'assurance';
+/**
+ * enterprise = 従来メニュー、enterprise-disclosure = 開示優先モードのメニュー
+ * （組織の機能設定で切り替える。docs/disclosure-first.md §2-1）。
+ */
+export type SidebarVariant = NavVariant;
 
 /** URL から現在の案件 ID を取り出す（監査法人ワークスペース用）。 */
 export function engagementIdFromPath(pathname: string): string | null {
@@ -26,8 +30,7 @@ export function engagementIdFromPath(pathname: string): string | null {
 export function useNavItems(variant: SidebarVariant, hiddenHrefs: string[]): NavItem[] {
   const pathname = usePathname();
   return React.useMemo(() => {
-    const items =
-      variant === 'enterprise' ? ENTERPRISE_NAV : assuranceNav(engagementIdFromPath(pathname));
+    const items = navTreeFor(variant, engagementIdFromPath(pathname));
     // 権限による非表示は全階層に効かせる（例: 管理 > 設定。3 階層目も同じ）
     const filterTree = (nodes: NavItem[]): NavItem[] =>
       nodes
@@ -86,6 +89,7 @@ export function Sidebar({
             item={item}
             pathname={pathname}
             collapsed={collapsed}
+            deferCurrentToSameHrefChild={variant === 'enterprise-disclosure'}
           />
         ))}
       </ul>
@@ -126,19 +130,33 @@ function SidebarEntry({
   item,
   pathname,
   collapsed,
+  deferCurrentToSameHrefChild = false,
 }: {
   item: NavItem;
   pathname: string;
   collapsed: boolean;
+  /**
+   * 子に同じ href の項目（例: 情報・根拠 → 定量データ）があるとき、「現在地」を子だけに付ける。
+   * 2 階層目以降の childClaimsSameHref と同じ規則を最上位にも当て、同じ画面で
+   * aria-current が 2 つ並ばないようにする。開示優先モードのメニューだけに効かせる
+   * （従来メニューの DOM は変えない: A39）。
+   */
+  deferCurrentToSameHrefChild?: boolean;
 }) {
   const active = isActive(pathname, item.href);
   const hasActiveChild = item.children?.some((c) => isSubtreeActive(pathname, c)) ?? false;
+  // 折りたたみ中は子を描画しないため、譲らずに最上位へ「現在地」を残す
+  const childClaimsSameHref =
+    deferCurrentToSameHrefChild &&
+    !collapsed &&
+    (item.children?.some((c) => c.href === item.href) ?? false);
+  const current = active && !childClaimsSameHref;
   const Icon = item.icon;
 
   const link = (
     <Link
       href={item.href}
-      aria-current={active ? 'page' : undefined}
+      aria-current={current ? 'page' : undefined}
       aria-label={collapsed ? item.label : undefined}
       className={cn(
         'flex items-center gap-2 rounded-t4d px-2 py-1.5 text-[13px] transition-colors',

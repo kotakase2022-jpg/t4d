@@ -1,5 +1,10 @@
 import Link from 'next/link';
-import { CircleCheck, Clock, Upload } from 'lucide-react';
+import { CircleAlert, CircleCheck, Clock, Scale, Upload } from 'lucide-react';
+import {
+  AggregationIncompleteBadge,
+  AvailabilityBadge,
+  ValueKindBadge,
+} from '@/components/shared/badges';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,13 +16,39 @@ import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { loadPeriodDataset } from '@/lib/services/enterprise-data';
 import {
   computeConsolidatedAggregation,
-  isCountedInTotals,
   loadConsolidatedTrend,
+  SCOPE3_CATEGORY_CODES,
+  SCOPE3_TOTAL_CODE,
+  summarizeMetricTotals,
+  summarizeScope3,
+  type MetricTotals,
 } from '@/lib/services/aggregation';
-import { loadScope3SupplierBreakdown } from '@/lib/services/scope3-suppliers';
+import {
+  CALCULATION_DATA_CLASS_LABELS,
+  loadScope3SupplierBreakdown,
+  PRIMARY_DATA_RATIO_DEFINITION,
+} from '@/lib/services/scope3-suppliers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import type { AvailabilityStatus, CalculationDataClass } from '@/types/domain';
 
 export const metadata = { title: 'GHG' };
+
+/** 値の無い行の状態のうち、画面に出すもの（人が判断した状態を未入力より優先） */
+function absentStateOf(totals: MetricTotals): AvailabilityStatus {
+  const order: AvailabilityStatus[] = [
+    'not_applicable',
+    'not_calculated',
+    'not_obtained',
+    'not_entered',
+  ];
+  return order.find((state) => (totals.absentByStatus[state] ?? 0) > 0) ?? 'not_entered';
+}
+
+const DATA_CLASS_ORDER: CalculationDataClass[] = [
+  'supplier_specific',
+  'activity_based',
+  'spend_based',
+];
 
 export default async function GhgPage() {
   const shell = await loadEnterpriseShell();
@@ -36,7 +67,7 @@ export default async function GhgPage() {
     orderBy: { column: 'code' },
   });
 
-  // Scope3 Cat.1 のサプライヤー別内訳（一次データ）と提出状況
+  // Scope3 Cat.1 のサプライヤー別内訳（区分: 固有排出量・活動量×係数・金額×係数）と提出状況
   const breakdown = await loadScope3SupplierBreakdown(shell.db, shell.ctx, shell.currentPeriod.id);
   const submittedSuppliers = breakdown.suppliers.filter((s) => s.submitted);
   const missingSuppliers = breakdown.suppliers.filter((s) => !s.submitted);
@@ -56,8 +87,9 @@ export default async function GhgPage() {
 
   // 連結集計（DATA-P0-006）: 合計・持分調整・内部取引控除・推計。
   // 女性管理職比率は GHG と無関係なため 2026-09 の依頼でこの画面から外した
-  // （加重平均の算定自体は aggregation サービスに残っている）
-  const GHG_CONSOLIDATION_CODES = ['scope1', 'scope2', 'scope3_cat1'];
+  // （加重平均の算定自体は aggregation サービスに残っている）。
+  // Scope2 はロケーション基準とマーケット基準を別の行にし、決して足さない（§7.2 / A08）
+  const GHG_CONSOLIDATION_CODES = ['scope1', 'scope2', 'scope2_location', 'scope3_cat1'];
   const consolidation = await computeConsolidatedAggregation(
     shell.db,
     shell.ctx,
@@ -67,7 +99,8 @@ export default async function GhgPage() {
   );
 
   // 直近3年の推移（FY2024 以降の過年度 Fixture を含む）。
-  // 比較可能性のため推計込み連結値で揃える（推計を含む年はバッジで明示）
+  // 比較可能性のため推計込み連結値で揃える（推計を含む年はバッジで明示）。
+  // 値の無い指標（未入力）は 0 のバーを描かず、推移から外す
   const trend = await loadConsolidatedTrend(
     shell.db,
     shell.ctx,
@@ -75,28 +108,30 @@ export default async function GhgPage() {
     GHG_CONSOLIDATION_CODES,
   );
   const trendMetricCodes = GHG_CONSOLIDATION_CODES.filter((code) =>
-    trend.some((entry) => entry.metrics.some((m) => m.metric.code === code)),
+    trend.some((entry) =>
+      entry.metrics.some(
+        (m) => m.metric.code === code && (m.valueCount > 0 || m.estimates.length > 0),
+      ),
+    ),
   );
 
-  const totals = ghgMetrics.map((metric) => {
-    const rows = dataset.dataPoints.filter((dp) => dp.metricId === metric.id);
-    const approved = rows.filter((dp) => dp.status === 'approved');
-    return {
-      metric,
-      total: rows.filter(isCountedInTotals).reduce((sum, dp) => sum + (dp.value ?? 0), 0),
-      approvedTotal: approved
-        .filter(isCountedInTotals)
-        .reduce((sum, dp) => sum + (dp.value ?? 0), 0),
-      count: rows.length,
-      approvedCount: approved.length,
-    };
-  });
+  // Scope 別集計: 未入力・対象外の行を 0 として足さない（W0 O4）
+  const totals = ghgMetrics.map((metric) => ({
+    metric,
+    ...summarizeMetricTotals(dataset.dataPoints.filter((dp) => dp.metricId === metric.id)),
+  }));
+  // Scope3 のカテゴリー 1〜15 と合計の状況（A09・A10）
+  const scope3 = summarizeScope3(shell.metrics, dataset.dataPoints);
+  const scope3CodeSet = new Set<string>([...SCOPE3_CATEGORY_CODES, SCOPE3_TOTAL_CODE]);
+  const scope3PendingLabels = scope3.categories
+    .filter((c) => c.state !== 'value_present' && c.state !== 'not_applicable')
+    .map((c) => `Cat.${c.category}`);
 
   return (
     <>
       <PageHeader
         title="GHG"
-        description={`${shell.currentPeriod.label} ／ Scope1・2・3 Category 1 の算定状況と算定根拠`}
+        description={`${shell.currentPeriod.label} ／ Scope1・2（2 方式）・3 の算定状況と算定根拠。Scope3 はカテゴリー別の登録状況を示します`}
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'GHG' }]}
       />
 
@@ -117,45 +152,63 @@ export default async function GhgPage() {
                 </TR>
               </THead>
               <TBody>
-                {consolidation.metrics.map((agg) => (
-                  <TR key={agg.metric.id}>
-                    <TD className="font-medium">
-                      {agg.metric.name}
-                      <span className="ml-1 text-[11px] text-ink-muted">{agg.metric.unit}</span>
-                    </TD>
-                    <TD align="right" className="tnum">
-                      {formatNumber(agg.simpleSum)}
-                    </TD>
-                    <TD align="right" className="tnum">
-                      {formatNumber(agg.ownershipAdjusted)}
-                    </TD>
-                    <TD align="right" className="tnum">
-                      {agg.intercompanyEliminated > 0
-                        ? `− ${formatNumber(agg.intercompanyEliminated)}`
-                        : '—'}
-                    </TD>
-                    <TD align="right" className="tnum font-semibold">
-                      {formatNumber(agg.consolidated)}
-                    </TD>
-                    <TD align="right" className="tnum">
-                      {agg.estimates.length > 0 ? (
-                        <span>
-                          {formatNumber(agg.consolidatedWithEstimates)}{' '}
-                          <Badge tone="warning">推計 {agg.estimates.length} 件</Badge>
-                        </span>
-                      ) : (
-                        formatNumber(agg.consolidatedWithEstimates)
-                      )}
-                    </TD>
-                    <TD className="text-[11px] text-ink-muted">
-                      {agg.estimates.map((e) => `${e.unitName}: ${e.basis}`).join(' / ') ||
-                        (agg.intercompanyEliminated > 0 ? 'グループ内取引の二重計上を控除' : '—')}
-                    </TD>
-                  </TR>
-                ))}
+                {consolidation.metrics.map((agg) => {
+                  // 承認済みの値が 1 件も無い指標は 0 ではなく「未入力」と出す（W0 O4）
+                  const noValue = agg.valueCount === 0;
+                  return (
+                    <TR key={agg.metric.id}>
+                      <TD className="font-medium">
+                        {agg.metric.name}
+                        <span className="ml-1 text-[11px] text-ink-muted">{agg.metric.unit}</span>
+                      </TD>
+                      <TD align="right" className="tnum">
+                        {noValue ? '—' : formatNumber(agg.simpleSum)}
+                      </TD>
+                      <TD align="right" className="tnum">
+                        {noValue ? '—' : formatNumber(agg.ownershipAdjusted)}
+                      </TD>
+                      <TD align="right" className="tnum">
+                        {agg.intercompanyEliminated > 0
+                          ? `− ${formatNumber(agg.intercompanyEliminated)}`
+                          : '—'}
+                      </TD>
+                      <TD align="right" className="tnum font-semibold">
+                        {noValue ? (
+                          <AvailabilityBadge status="not_entered" />
+                        ) : (
+                          formatNumber(agg.consolidated)
+                        )}
+                      </TD>
+                      <TD align="right" className="tnum">
+                        {agg.estimates.length > 0 ? (
+                          <span>
+                            {formatNumber(agg.consolidatedWithEstimates)}{' '}
+                            <Badge tone="warning">推計 {agg.estimates.length} 件</Badge>
+                          </span>
+                        ) : noValue ? (
+                          '—'
+                        ) : (
+                          formatNumber(agg.consolidatedWithEstimates)
+                        )}
+                      </TD>
+                      <TD className="text-[11px] text-ink-muted">
+                        {agg.estimates.map((e) => `${e.unitName}: ${e.basis}`).join(' / ') ||
+                          (agg.intercompanyEliminated > 0
+                            ? 'グループ内取引の二重計上を控除'
+                            : noValue
+                              ? '承認済みの値がありません（0 ではありません）'
+                              : '—')}
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           </div>
+          <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
+            Scope2 はロケーション基準とマーケット基準を別の行で示し、両者を足した値は出しません。
+            推計は実績と分けて「推計込み」の列にだけ加えます。
+          </p>
           {consolidation.metrics[0] && consolidation.metrics[0].excludedUnits.length > 0 && (
             <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
               連結対象外:{' '}
@@ -262,30 +315,167 @@ export default async function GhgPage() {
               </TR>
             </THead>
             <TBody>
-              {totals.map((row) => (
-                <TR key={row.metric.id}>
-                  <TD>
-                    <Link
-                      href={`/enterprise/data?q=${encodeURIComponent(row.metric.name)}`}
-                      className="text-brand-700 hover:underline"
-                    >
-                      {row.metric.name}
-                    </Link>
-                  </TD>
-                  <TD>{row.metric.unit}</TD>
-                  <TD align="right">{formatNumber(row.total)}</TD>
-                  <TD align="right">{formatNumber(row.approvedTotal)}</TD>
-                  <TD align="right">{row.count}</TD>
-                  <TD align="right">{row.approvedCount}</TD>
-                </TR>
-              ))}
+              {totals
+                .filter((row) => !scope3CodeSet.has(row.metric.code))
+                .map((row) => (
+                  <TR key={row.metric.id}>
+                    <TD>
+                      <Link
+                        href={`/enterprise/data?q=${encodeURIComponent(row.metric.name)}`}
+                        className="text-brand-700 hover:underline"
+                      >
+                        {row.metric.name}
+                      </Link>
+                    </TD>
+                    <TD>{row.metric.unit}</TD>
+                    <TD align="right">
+                      {/* 値の行が無い指標は 0 ではなく状態を出す（実績ゼロと未入力を区別） */}
+                      {row.metric.aggregationMethod !== 'sum' && row.total !== null ? (
+                        <span className="text-[11px] text-ink-muted">合計しない指標</span>
+                      ) : row.total === null ? (
+                        <AvailabilityBadge status={absentStateOf(row)} />
+                      ) : (
+                        formatNumber(row.total)
+                      )}
+                      {row.estimateTotal !== null && (
+                        <span className="ml-1 inline-flex items-center gap-1 text-[11px]">
+                          <ValueKindBadge kind="estimate" />
+                          {formatNumber(row.estimateTotal)}
+                        </span>
+                      )}
+                    </TD>
+                    <TD align="right">
+                      {row.metric.aggregationMethod !== 'sum'
+                        ? '—'
+                        : formatNumber(row.approvedTotal)}
+                    </TD>
+                    <TD align="right">{row.count}</TD>
+                    <TD align="right">{row.approvedCount}</TD>
+                  </TR>
+                ))}
             </TBody>
           </Table>
+          <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
+            「未入力」は Data Point が無い（又は値が入っていない）指標で、排出ゼロではありません。
+            Scope2 の 2 方式は別の指標として並べ、合算しません。Scope3
+            は下のカテゴリー別の表で示します。
+          </p>
+        </Card>
+
+        {/* Scope3: カテゴリー 1〜15 の状況。Cat.1 だけが登録された状態を Scope3 全体として見せない（A09）。
+            合計とカテゴリーが両方あるときは照合するだけで、足さない（A10） */}
+        <Card className="overflow-hidden">
+          <SectionTitle
+            title="Scope3 カテゴリー別の状況（1〜15）"
+            action={
+              <span className="text-[11px] text-ink-muted">
+                値あり {scope3.presentCount} ／ 対象外 {scope3.notApplicableCount} ／ 未登録{' '}
+                {scope3.pendingCount}（全 15 カテゴリー）
+              </span>
+            }
+          />
+          <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[12px]">
+            <span className="font-medium text-ink">Scope3 合計</span>
+            {scope3.total.value !== null ? (
+              <span className="tnum font-semibold text-ink">
+                {formatNumber(scope3.total.value)}
+                <span className="ml-1 text-[11px] font-normal text-ink-muted">t-CO2e</span>
+              </span>
+            ) : scope3.completeness === 'complete' ? (
+              <AvailabilityBadge status="not_entered" />
+            ) : (
+              <AggregationIncompleteBadge
+                detail={`未登録のカテゴリー: ${scope3PendingLabels.join('・')}`}
+              />
+            )}
+            {scope3.completeness !== 'complete' && (
+              <span className="text-[11px] text-ink-muted">
+                未登録のカテゴリーがあるため、Scope3 全体は確定していません
+                {scope3PendingLabels.length > 0 && `（${scope3PendingLabels.join('・')}）`}。
+                カテゴリー 1 の値を Scope3 全体として扱いません。
+              </span>
+            )}
+          </div>
+          {scope3.reconciliation && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[12px]">
+              <Scale className="size-3.5 text-ink-muted" aria-hidden="true" />
+              <span className="text-ink">
+                照合: 合計 {formatNumber(scope3.total.value)} − カテゴリー計{' '}
+                {formatNumber(scope3.reconciliation.categorySum)} = 差{' '}
+                <span className="tnum font-semibold">
+                  {formatNumber(scope3.reconciliation.difference)}
+                </span>{' '}
+                t-CO2e
+              </span>
+              {scope3.reconciliation.withinTolerance ? (
+                <Badge tone="success">
+                  <CircleCheck className="size-3" aria-hidden="true" />
+                  丸め差の範囲内
+                </Badge>
+              ) : (
+                <Badge tone="warning">
+                  <CircleAlert className="size-3" aria-hidden="true" />
+                  要確認（許容 ±{formatNumber(scope3.reconciliation.tolerance)}）
+                </Badge>
+              )}
+              <span className="text-[11px] text-ink-muted">
+                合計とカテゴリーは照合用で、足し合わせません（二重計上の防止）。
+              </span>
+            </div>
+          )}
+          <div className="t4d-scroll-x">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>カテゴリー</TH>
+                  <TH>状態</TH>
+                  <TH align="right">
+                    全体合計<span className="normal-case">(t-CO2e)</span>
+                  </TH>
+                  <TH>理由・備考</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {scope3.categories.map((category) => (
+                  <TR key={category.code}>
+                    <TD className="text-[12px]">
+                      {category.metric ? (
+                        <Link
+                          href={`/enterprise/data?q=${encodeURIComponent(category.metric.name)}`}
+                          className="text-brand-700 hover:underline"
+                        >
+                          {category.metric.name}
+                        </Link>
+                      ) : (
+                        `Category ${category.category}`
+                      )}
+                    </TD>
+                    <TD>
+                      <AvailabilityBadge status={category.state} />
+                    </TD>
+                    <TD align="right" className="tnum">
+                      {category.total === null ? '—' : formatNumber(category.total)}
+                      {category.estimateTotal !== null && (
+                        <span className="ml-1 inline-flex items-center gap-1 text-[11px]">
+                          <ValueKindBadge kind="estimate" />
+                          {formatNumber(category.estimateTotal)}
+                        </span>
+                      )}
+                    </TD>
+                    <TD className="text-[11px] text-ink-muted">
+                      {category.reasons.join(' ／ ') ||
+                        (category.state === 'not_entered' ? 'Data Point がありません' : '—')}
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
         </Card>
 
         <Card className="overflow-hidden">
           <SectionTitle
-            title="Scope3 Category 1 サプライヤー内訳（一次データ）"
+            title="Scope3 Category 1 サプライヤー内訳（算定根拠）"
             action={
               <div className="flex items-center gap-2">
                 {breakdown.dataPoint && (
@@ -326,18 +516,39 @@ export default async function GhgPage() {
                 </div>
               </div>
               <div className="space-y-1 rounded-t4d border border-line bg-surface-muted p-2.5">
-                <p className="text-[11px] text-ink-muted">一次データ排出量</p>
+                <p className="text-[11px] text-ink-muted">内訳合計（区分を問わない）</p>
                 <p className="text-[18px] font-semibold leading-none tabular-nums text-ink">
-                  {formatNumber(breakdown.primaryTotal)}
+                  {formatNumber(breakdown.breakdownTotal)}
                   <span className="ml-1 text-[11px] font-normal text-ink-muted">t-CO2e</span>
                 </p>
+                {/* 金額×係数（推計）を一次データと混ぜない（W0 O6） */}
+                <ul className="space-y-0.5 text-[10px] text-ink-muted">
+                  {DATA_CLASS_ORDER.map((key) => (
+                    <li key={key} className="flex justify-between gap-2">
+                      <span>{CALCULATION_DATA_CLASS_LABELS[key]}</span>
+                      <span className="tabular-nums">
+                        {formatNumber(breakdown.totalsByClass[key])}
+                      </span>
+                    </li>
+                  ))}
+                  {breakdown.totalsByClass.unclassified > 0 && (
+                    <li className="flex justify-between gap-2">
+                      <span>区分不明（旧形式）</span>
+                      <span className="tabular-nums">
+                        {formatNumber(breakdown.totalsByClass.unclassified)}
+                      </span>
+                    </li>
+                  )}
+                </ul>
               </div>
               <div className="space-y-1 rounded-t4d border border-line bg-surface-muted p-2.5">
-                <p className="text-[11px] text-ink-muted">確定値に占める一次データ比率</p>
-                <p className="text-[18px] font-semibold leading-none tabular-nums text-ink">
-                  {breakdown.coveragePercent === null ? '—' : `${breakdown.coveragePercent}%`}
+                <p className="text-[11px] text-ink-muted">
+                  確定値に占める一次データ比率（固有＋活動量ベース）
                 </p>
-                <p className="text-[10px] text-ink-muted">残りは購買金額ベースの推計</p>
+                <p className="text-[18px] font-semibold leading-none tabular-nums text-ink">
+                  {breakdown.primaryDataPercent === null ? '—' : `${breakdown.primaryDataPercent}%`}
+                </p>
+                <p className="text-[10px] text-ink-muted">{PRIMARY_DATA_RATIO_DEFINITION}</p>
               </div>
               <div className="space-y-1 rounded-t4d border border-line bg-surface-muted p-2.5">
                 <p className="text-[11px] text-ink-muted">未提出</p>
@@ -378,7 +589,7 @@ export default async function GhgPage() {
                       排出量<span className="normal-case">(t-CO2e)</span>
                     </TH>
                     <TH align="right">構成比</TH>
-                    <TH>算定根拠（活動量 × 係数）</TH>
+                    <TH>区分・算定根拠</TH>
                     <TH>提出状況</TH>
                   </TR>
                 </THead>
@@ -400,7 +611,12 @@ export default async function GhgPage() {
                         {supplier.sharePercent === null ? '—' : `${supplier.sharePercent}%`}
                       </TD>
                       <TD className="text-[11px] text-ink-muted">
-                        {supplier.inputs.map((input) => input.note).join(' ／ ')}
+                        {supplier.inputs
+                          .map(
+                            (input) =>
+                              `${input.dataClass ? `［${CALCULATION_DATA_CLASS_LABELS[input.dataClass]}］` : ''}${input.note ?? ''}`,
+                          )
+                          .join(' ／ ')}
                       </TD>
                       <TD>
                         <Badge tone="success">
@@ -468,10 +684,10 @@ export default async function GhgPage() {
                   ))}
                   {breakdown.calculation && (
                     <TR>
-                      <TD className="font-medium">一次データ合計</TD>
+                      <TD className="font-medium">内訳合計</TD>
                       <TD />
                       <TD align="right" className="font-medium">
-                        {formatNumber(breakdown.primaryTotal)}
+                        {formatNumber(breakdown.breakdownTotal)}
                       </TD>
                       <TD align="right" className="font-medium">
                         100%
@@ -489,13 +705,14 @@ export default async function GhgPage() {
               <p className="text-[11px] text-ink-muted">
                 算定版: 第 {breakdown.calculationCount} 版（
                 {formatJst(breakdown.calculation.calculatedAt)}
-                ）／ 過去の版は Data Point の詳細で確認できます。 一次データは確定値（
-                {formatNumber(breakdown.dataPoint?.value ?? 0)} t-CO2e）を
-                置き換えません。確定値の変更は承認フローで行います。
+                ）／ 過去の版は Data Point の詳細で確認できます。 内訳は確定値（
+                {formatNumber(breakdown.dataPoint?.value)} t-CO2e・算定方法:{' '}
+                {breakdown.dataPoint?.methodology ?? '—'}）を置き換えません。
+                確定値の変更は承認フローで行います。
               </p>
             ) : (
               <p className="text-[11px] text-ink-muted">
-                算定内訳がまだありません。サプライヤーデータ取込から一次データを取り込んでください。
+                算定内訳がまだありません。サプライヤーデータ取込からサプライヤーのデータを取り込んでください。
               </p>
             )}
           </div>

@@ -3,6 +3,7 @@ import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { ORG_IDS, PERIOD_IDS, UNIT_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import {
+  classifyCalculationInput,
   confirmSupplierImport,
   loadScope3SupplierBreakdown,
   previewSupplierImport,
@@ -83,8 +84,16 @@ describe('Scope3 サプライヤー内訳（50 社）', () => {
     ]);
     expect(breakdown.suppliers.filter((s) => !s.submitted)).toHaveLength(37);
 
-    // 一次データ合計 = 金額 53.3 + 物理量 61.0 + 報告排出量 28.8
-    expect(breakdown.primaryTotal).toBe(143.1);
+    // 内訳合計 = 金額 53.3 + 物理量 61.0 + 報告排出量 28.8（W0 O6 で「一次データ合計」から改名）
+    expect(breakdown.breakdownTotal).toBe(143.1);
+    // 区分別: 金額×係数は推計であり一次データに数えない
+    expect(breakdown.totalsByClass).toEqual({
+      supplier_specific: 28.8,
+      activity_based: 61,
+      spend_based: 53.3,
+      unclassified: 0,
+    });
+    expect(breakdown.primaryDataTotal).toBe(89.8);
     expect(breakdown.dataPoint?.value).toBe(50620.5);
     expect(breakdown.calculationCount).toBe(1);
 
@@ -504,5 +513,108 @@ describe('サプライヤーデータ取込のプレビュー（旧形式との�
     // 見つからないコードは行エラー
     expect(preview.rows[2]?.errors.join('')).toContain('SUP-99');
     expect(preview.validCount).toBe(2);
+  });
+});
+
+describe('算定データの区分と一次データ比率の定義（W0 O6 / 指示書 §2.3）', () => {
+  it('取込の確定で区分が付き、区分別合計・一次データ合計・比率が定義どおりに動く', async () => {
+    const ctx = manager();
+    await confirmSupplierImport(db, ctx, PERIOD_IDS.fy2026, [
+      {
+        supplierCode: 'SUP-06',
+        item: '金属筐体',
+        dataType: 'monetary',
+        amount: 12400,
+        unit: '千円',
+        factorCode: 'EF-PUR-METAL',
+      },
+      {
+        supplierCode: 'SUP-26',
+        item: '購入電力',
+        dataType: 'physical',
+        amount: 1000,
+        unit: 'kWh',
+        factorCode: 'EF-ELEC-JP',
+      },
+      {
+        supplierCode: 'SUP-30',
+        item: '報告排出量',
+        dataType: 'emissions',
+        amount: 5.5,
+        unit: 't-CO2e',
+        factorCode: null,
+      },
+    ]);
+
+    const breakdown = await loadScope3SupplierBreakdown(db, ctx, PERIOD_IDS.fy2026);
+    const classOf = (code: string) =>
+      breakdown.suppliers.find((s) => s.code === code)?.inputs[0]?.dataClass;
+    expect(classOf('SUP-06')).toBe('spend_based');
+    expect(classOf('SUP-26')).toBe('activity_based');
+    expect(classOf('SUP-30')).toBe('supplier_specific');
+
+    // Fixture（固有 28.8・活動量 61.0・金額 53.3）に 5.5・0.4・7.8 が加わる
+    expect(breakdown.totalsByClass).toEqual({
+      supplier_specific: 34.3,
+      activity_based: 61.4,
+      spend_based: 61.1,
+      unclassified: 0,
+    });
+    expect(breakdown.breakdownTotal).toBe(156.8);
+    // 一次データ = 固有 ＋ 活動量ベース（金額×係数は入れない）
+    expect(breakdown.primaryDataTotal).toBe(95.7);
+    // 比率の分母は Data Point の確定値 50,620.5
+    expect(breakdown.primaryDataPercent).toBe(Math.round((95.7 / 50620.5) * 1000) / 10);
+  });
+
+  it('区分を持たない旧形式の行は、単位・note・種別から推定する（決められなければ区分不明）', () => {
+    const base = { label: 'x', value: 1, unit: 't-CO2e', sourceId: null } as const;
+    expect(
+      classifyCalculationInput({
+        ...base,
+        sourceType: 'emission_factor',
+        note: '購買金額 1,000 千円 × 係数 0.001 (2025年度)',
+        activityAmount: 1000,
+        activityUnit: '千円',
+      }),
+    ).toBe('spend_based');
+    expect(
+      classifyCalculationInput({
+        ...base,
+        sourceType: 'emission_factor',
+        note: '活動量 42,000 kWh × 係数 0.000434 (2025年度)',
+        activityAmount: 42000,
+        activityUnit: 'kWh',
+      }),
+    ).toBe('activity_based');
+    expect(classifyCalculationInput({ ...base, sourceType: 'constant', note: '報告値' })).toBe(
+      'supplier_specific',
+    );
+    expect(classifyCalculationInput({ ...base, sourceType: 'data_point', note: null })).toBeNull();
+    // 明示された区分は推定より優先する
+    expect(
+      classifyCalculationInput({
+        ...base,
+        sourceType: 'emission_factor',
+        note: '活動量',
+        dataClass: 'spend_based',
+      }),
+    ).toBe('spend_based');
+  });
+
+  it('再紐づけしても行の区分は変わらない', async () => {
+    const ctx = manager();
+    // SUP-11 鋼材（物理量 kg）をアルミ係数へ紐づけ直しても、活動量ベースのまま
+    await relinkSupplierFactor(db, ctx, PERIOD_IDS.fy2026, {
+      supplierCode: 'SUP-11',
+      item: '鋼材',
+      factorCode: 'EF-ALU-KG',
+    });
+    const latest = fixture.calculations.at(-1)!;
+    const relinked = latest.inputs.find((i) => i.label.startsWith('SUP-11'))!;
+    expect(relinked.dataClass).toBe('activity_based');
+    const breakdown = await loadScope3SupplierBreakdown(db, ctx, PERIOD_IDS.fy2026);
+    // 金額ベースの合計は変わらない（区分が入れ替わらない）
+    expect(breakdown.totalsByClass.spend_based).toBe(53.3);
   });
 });

@@ -474,7 +474,26 @@ export interface CalculationInput {
    */
   activityAmount?: number | null;
   activityUnit?: string | null;
+  /**
+   * 算定データの区分（Scope3 の一次データ比率の定義に使う。W0 O6）。
+   * 旧形式の行は未設定で、読み出し側が note・activityUnit から推定する。
+   */
+  dataClass?: CalculationDataClass;
 }
+
+/**
+ * 算定データの区分。
+ * - supplier_specific: サプライヤー固有の排出量（報告排出量）
+ * - activity_based:    活動量（物理量）× 排出係数
+ * - spend_based:       購買金額 × 排出係数（推計）
+ * 金額ベースを一次データとして数えないために分ける。
+ */
+export const CALCULATION_DATA_CLASSES = [
+  'supplier_specific',
+  'activity_based',
+  'spend_based',
+] as const;
+export type CalculationDataClass = (typeof CALCULATION_DATA_CLASSES)[number];
 
 export const VALIDATION_SEVERITIES = ['error', 'warning', 'info'] as const;
 export type ValidationSeverity = (typeof VALIDATION_SEVERITIES)[number];
@@ -1952,6 +1971,8 @@ export const AI_FEATURE_TYPES = [
   'copilotChat',
   'assuranceEvidenceSummary',
   'assuranceChangeSummary',
+  // 開示優先モード: 節の下書き候補（docs/disclosure-first.md §2-3）
+  'disclosureBlockDraft',
 ] as const;
 export type AiFeatureType = (typeof AI_FEATURE_TYPES)[number];
 
@@ -2001,7 +2022,13 @@ export interface AiSourceReference {
     | 'previous_response'
     | 'disclosure_response'
     | 'metric_definition'
-    | 'snapshot_item';
+    | 'snapshot_item'
+    // 開示本文の下書き（disclosureBlockDraft）が引用する版・位置
+    | 'narrative_version'
+    | 'source_anchor'
+    | 'metric_version'
+    | 'prior_block'
+    | 'requirement';
   id: Uuid | null;
   label: string;
   locator: string | null;

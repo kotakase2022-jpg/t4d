@@ -90,14 +90,31 @@ export function validateDataPoints(input: ValidationInput): DataPointValidationR
     }
 
     // 2. 必須
+    // 未取得・対象外・未算定は、人が理由を添えて「値が無い」と判断した状態（0039）。
+    // 空欄（未入力）と同じエラーにすると、正しく判断した行まで入力漏れに見える。
+    // 理由が無いものだけを指摘する（§7.4: 未取得・対象外・未算定には理由を求める）
     if (dp.value === null && dp.textValue === null && dp.status !== 'not_started') {
-      hits.push({
-        dataPointId: dp.id,
-        ruleKey: 'required',
-        severity: 'error',
-        message: `${unitName} の「${metric.name}」に値が入力されていません。`,
-        details: {},
-      });
+      const declaredAbsence =
+        dp.availabilityStatus !== undefined &&
+        dp.availabilityStatus !== 'value_present' &&
+        dp.availabilityStatus !== 'not_entered';
+      if (!declaredAbsence) {
+        hits.push({
+          dataPointId: dp.id,
+          ruleKey: 'required',
+          severity: 'error',
+          message: `${unitName} の「${metric.name}」に値が入力されていません。`,
+          details: {},
+        });
+      } else if (!dp.absenceReason?.trim()) {
+        hits.push({
+          dataPointId: dp.id,
+          ruleKey: 'required',
+          severity: 'warning',
+          message: `${unitName} の「${metric.name}」は値が無い状態として登録されていますが、理由が入力されていません。`,
+          details: { availabilityStatus: dp.availabilityStatus },
+        });
+      }
     }
 
     if (dp.value !== null) {

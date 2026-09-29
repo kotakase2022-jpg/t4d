@@ -24,6 +24,14 @@ import type { Uuid } from '@/types/domain';
  * 取込マッピングの出力は行数ぶんの対応表で最も大きいが、
  * プレビューが読むのは ingestionRows のほうで、この出力は使わない。
  * 残しておくと同じ Cookie に載っている取込結果を押し出してしまう。
+ *
+ * 開示本文の下書き（featureType 'disclosureBlockDraft'）は**そのまま残す**。
+ * 候補（outputJson）も、許可リスト・土台の本文ハッシュ・段落ハッシュを持つ inputReferenceIds も、
+ * 別インスタンスで候補を検証し直して採用するのに必要で、落とせる大きな列が無い
+ * （sourceReferences は outputJson.sources と同じ内容だが、辞書圧縮で重複はほぼ無料）。
+ * 実測（2026-09-29）: 根拠 3 件の実行で生 JSON 約 4.4KB → Cookie 上 約 2.2KB、
+ * 根拠 9 件で 約 11.7KB → 約 3.5KB。1 件で 1 チャンク（3.8KB）を超えると Cookie に載らず、
+ * 実行したインスタンスのメモリにだけ残る（docs/known-limitations.md D-3）。
  */
 function persistedColumns(table: TableName, row: unknown): Record<string, unknown> {
   const record = row as Record<string, unknown>;

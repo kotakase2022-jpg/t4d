@@ -1,19 +1,28 @@
 import {
   AlertTriangle,
+  Ban,
   Bot,
+  Calculator,
   Check,
+  CircleAlert,
+  CircleCheck,
   CircleDashed,
   CircleDot,
+  CircleHelp,
   FileWarning,
   FlaskConical,
+  Hourglass,
   Loader2,
   Lock,
   Send,
+  Target,
   Undo2,
   XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { AVAILABILITY_STATUS_LABELS, VALUE_KIND_LABELS } from '@/lib/domain/disclosure-status';
 import type {
+  AvailabilityStatus,
   MembershipStatus,
   DataPointStatus,
   IssueSeverity,
@@ -24,6 +33,7 @@ import type {
   ScopeInclusion,
   TestStatus,
   ValidationSeverity,
+  ValueKind,
 } from '@/types/domain';
 
 type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'outline';
@@ -45,12 +55,128 @@ const DATA_POINT_STATUS_MAP: Record<
   approved: { label: '承認済み', tone: 'success', Icon: Check },
 };
 
-export function DataPointStatusBadge({ status }: { status: DataPointStatus }) {
+/**
+ * Data Point の状態。`needsRecheck` は「承認済みだが、承認後に証跡不足が見つかった」
+ * （src/lib/validation/display-state.ts）。DB の状態は承認済みのまま、表示だけ変える（W0 O3）
+ */
+export function DataPointStatusBadge({
+  status,
+  needsRecheck = false,
+}: {
+  status: DataPointStatus;
+  needsRecheck?: boolean;
+}) {
+  if (status === 'approved' && needsRecheck) {
+    return (
+      <Badge
+        tone="warning"
+        title="承認後に証跡不足が見つかりました。承認は取り消されていません。証跡を確認してください。"
+      >
+        <AlertTriangle className="size-3" aria-hidden="true" />
+        承認済み・要再確認
+      </Badge>
+    );
+  }
   const s = DATA_POINT_STATUS_MAP[status];
   return (
     <Badge tone={s.tone}>
       <s.Icon className="size-3" aria-hidden="true" />
       {s.label}
+    </Badge>
+  );
+}
+
+const AVAILABILITY_MAP: Record<AvailabilityStatus, { tone: Tone; Icon: typeof Check }> = {
+  value_present: { tone: 'success', Icon: CircleCheck },
+  not_entered: { tone: 'warning', Icon: CircleDashed },
+  not_obtained: { tone: 'warning', Icon: Hourglass },
+  not_applicable: { tone: 'neutral', Icon: Ban },
+  not_calculated: { tone: 'warning', Icon: Calculator },
+};
+
+/**
+ * 値の有無（値あり／未入力／未取得／対象外／未算定）。空欄を 0 と見せないために使う（§7.1）。
+ * `reason` は未取得・対象外・未算定の理由（title で補足する）
+ */
+export function AvailabilityBadge({
+  status,
+  reason,
+}: {
+  status: AvailabilityStatus;
+  reason?: string | null;
+}) {
+  const s = AVAILABILITY_MAP[status];
+  return (
+    <Badge tone={s.tone} title={reason ?? undefined}>
+      <s.Icon className="size-3" aria-hidden="true" />
+      {AVAILABILITY_STATUS_LABELS[status]}
+    </Badge>
+  );
+}
+
+/** 値の区分（実績／推計／目標）。推計・目標を実績と取り違えないために使う（§7.1） */
+export function ValueKindBadge({ kind }: { kind: ValueKind }) {
+  const map: Record<ValueKind, { tone: Tone; Icon: typeof Check }> = {
+    actual: { tone: 'neutral', Icon: Check },
+    estimate: { tone: 'warning', Icon: CircleHelp },
+    target: { tone: 'brand', Icon: Target },
+  };
+  const s = map[kind];
+  return (
+    <Badge tone={s.tone}>
+      <s.Icon className="size-3" aria-hidden="true" />
+      {VALUE_KIND_LABELS[kind]}
+    </Badge>
+  );
+}
+
+/**
+ * 合計を出せない状態（例: Scope3 合計が未登録で、カテゴリーも揃っていない）。
+ * 0 と表示すると「排出ゼロ」と読めてしまうため、ラベルで示す（W0 O4）
+ */
+export function AggregationIncompleteBadge({ detail }: { detail?: string }) {
+  return (
+    <Badge tone="warning" title={detail}>
+      <Hourglass className="size-3" aria-hidden="true" />
+      集計未完了
+    </Badge>
+  );
+}
+
+/**
+ * 要求事項に対応付いた指標のデータの揃い具合（W0 O7）。
+ * 1 つの指標に値があるだけで、複数の指標を求める項目を「データあり」としない。
+ */
+export function DataCoverageBadge({
+  coverage,
+  missingNames = [],
+  noneLabel = 'データなし',
+}: {
+  coverage: 'full' | 'partial' | 'none';
+  missingNames?: string[];
+  /** 「データなし」の表記（承認済みの値だけを見る画面では「承認済みデータなし」） */
+  noneLabel?: string;
+}) {
+  if (coverage === 'full') {
+    return (
+      <Badge tone="success">
+        <CircleCheck className="size-3" aria-hidden="true" />
+        データあり
+      </Badge>
+    );
+  }
+  if (coverage === 'partial') {
+    return (
+      <Badge tone="warning">
+        <CircleAlert className="size-3" aria-hidden="true" />
+        一部データあり（不足: {missingNames.join('・')}）
+      </Badge>
+    );
+  }
+  return (
+    <Badge tone="warning">
+      <CircleDashed className="size-3" aria-hidden="true" />
+      {noneLabel}
     </Badge>
   );
 }

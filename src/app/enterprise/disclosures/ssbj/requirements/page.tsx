@@ -13,6 +13,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { runSsbjGapAnalysisBulkAction } from '@/app/enterprise/actions';
+import { DataCoverageBadge } from '@/components/shared/badges';
 import { FilterBar, type FilterGroup } from '@/components/shared/filter-bar';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -38,8 +39,10 @@ import {
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import {
   filterRequirements,
+  isOpenHighPriority,
   loadSsbjRequirementViews,
   loadSsbjScopeMapping,
+  OPEN_HIGH_PRIORITY_QUERY,
 } from '@/lib/services/ssbj-gap';
 
 export const metadata = { title: 'SSBJ 要求事項の評価' };
@@ -94,7 +97,15 @@ export default async function SsbjRequirementsPage({
 
   // CSV は画面の絞り込みをそのまま引き継ぐ（見えている一覧と同じ行が出る）
   const exportParams = new URLSearchParams({ period: shell.currentPeriod.id });
-  for (const key of ['area', 'coverage', 'materiality', 'priority', 'department', 'linkage']) {
+  for (const key of [
+    'area',
+    'coverage',
+    'materiality',
+    'priority',
+    'department',
+    'linkage',
+    'scope',
+  ]) {
     for (const value of toList(query[key])) exportParams.append(key, value);
   }
   if (typeof query.q === 'string' && query.q !== '') exportParams.set('q', query.q);
@@ -106,6 +117,7 @@ export default async function SsbjRequirementsPage({
     priority: toList(query.priority),
     department: toList(query.department),
     linkage: toList(query.linkage),
+    scope: toList(query.scope),
     search: typeof query.q === 'string' ? query.q : undefined,
   });
 
@@ -142,9 +154,11 @@ export default async function SsbjRequirementsPage({
       step: '工程 4',
       title: 'ギャップの優先順位付け',
       icon: Target,
-      count: filterRequirements(loaded.views, { priority: ['high'] }).length,
-      countLabel: '優先度「高」',
-      query: 'priority=high',
+      // 母集団は対応状況画面と同じ「評価対象・未対応」。以前は対象外を含む全件から数えており、
+      // 対応状況画面（上位 8 件から数えていた）と数が食い違っていた（W0 O1）
+      count: loaded.views.filter(isOpenHighPriority).length,
+      countLabel: '優先度「高」（評価対象・未対応）',
+      query: OPEN_HIGH_PRIORITY_QUERY,
       description: '重要性・期限・データの有無から着手順を決めます。',
     },
   ];
@@ -204,6 +218,11 @@ export default async function SsbjRequirementsPage({
         { value: 'unanalyzed', label: '未分析' },
         { value: 'none', label: '紐づけできず' },
       ],
+    },
+    {
+      key: 'scope',
+      label: '評価対象',
+      options: [{ value: 'in_scope', label: '評価対象のみ（対象外・重要性なしを除く）' }],
     },
     ...(departments.length > 0
       ? [
@@ -433,7 +452,7 @@ export default async function SsbjRequirementsPage({
                 count: mapping.linkage.data,
                 query: 'linkage=data',
                 icon: Database,
-                note: '要求する指標に当期の値が登録されている要求事項',
+                note: '要求する指標のすべてに当期の値が登録されている要求事項（一部だけの項目は含めない）',
               },
               {
                 label: '未分析',
@@ -481,9 +500,9 @@ export default async function SsbjRequirementsPage({
               description: '対応できていない要求事項',
             },
             {
-              label: '優先度「高」',
-              query: 'priority=high',
-              description: '初年度対応を優先する項目',
+              label: '優先度「高」（評価対象・未対応）',
+              query: OPEN_HIGH_PRIORITY_QUERY,
+              description: '初年度対応を優先する項目（対象外・重要性なし・対応済みを除く）',
             },
             {
               label: '確認待ち',
@@ -589,13 +608,15 @@ export default async function SsbjRequirementsPage({
                                 資料
                               </Badge>
                             )}
-                            {view.hasDataLink && (
-                              <Badge tone="neutral">
-                                <Database className="size-3" aria-hidden="true" />
-                                データ
-                              </Badge>
+                            {/* 指標を求める要求事項は、全指標の値が揃って初めて「データあり」。
+                                一部だけなら不足する指標を名指しする（W0 O7。CSRD と同じ表記） */}
+                            {view.dataCoverage !== 'not_mapped' && (
+                              <DataCoverageBadge
+                                coverage={view.dataCoverage}
+                                missingNames={view.missingMetrics.map((m) => m.name)}
+                              />
                             )}
-                            {!view.hasDocumentLink && !view.hasDataLink && (
+                            {!view.hasDocumentLink && view.dataCoverage === 'not_mapped' && (
                               <Badge tone="warning">
                                 <CircleAlert className="size-3" aria-hidden="true" />
                                 なし

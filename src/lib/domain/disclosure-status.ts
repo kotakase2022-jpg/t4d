@@ -156,9 +156,14 @@ export const RECHECK_DECISION_LABELS: Record<RecheckDecisionKind, string> = {
   return_to_owner: '担当者へ差戻し',
 };
 
+/**
+ * スナップショット種別の表示。画面・出力ファイルはすべてこれを通す（表記を 1 か所に保つ）。
+ * approved は社内の最終承認を経た版であり、保証・提出を意味しない。
+ * 「確定版」「保証済み」「提出済み」と書くと第三者保証や提出と取り違えられるため使わない（§6.10）
+ */
 export const REPORT_SNAPSHOT_KIND_LABELS: Record<ReportSnapshotKind, string> = {
   review_draft: 'レビュー用草稿',
-  approved: '承認済み確定版',
+  approved: '社内承認済み版',
 };
 
 export const EXPORT_ARTIFACT_FORMAT_LABELS: Record<ExportArtifactFormat, string> = {
@@ -562,4 +567,50 @@ export function evaluateBlockBlockers(input: BlockBlockerInput): BlockBlocker[] 
   }
 
   return blockers;
+}
+
+// ----------------------------------------------------------------------
+// 開示ホームのカードと原稿一覧の絞り込み（指示書 §6.1「クリックすると根拠となる項目一覧へ移動」）
+//
+// カードの件数と、クリックした先の一覧の件数が食い違わないよう、判定をここ 1 か所に置く。
+// ホーム（disclosure-home.ts）と原稿一覧（disclosure-block.ts の listProjectBlocks）が同じ関数を通す。
+// ----------------------------------------------------------------------
+
+/**
+ * 「未解決の必須情報」がある節か。承認済みの節は数えない。
+ *  - 保存済みの版を読めない（デモの別インスタンスなど）
+ *  - 引用した定性情報に未記入の項目がある
+ *  - 阻害条件（本文なし・未解決の要対応コメント・適用判断が未判定）がある
+ * 引用の鮮度は「承認後に変更が発生」側で数える。未採用の AI 候補は原稿画面の阻害条件として扱い、
+ * ここでは数えない（ホームは AI 候補を数えないため。数えるとカードと一覧が食い違う）。
+ */
+export function hasUnresolvedRequiredInfo(input: {
+  status: BlockStatus;
+  versionMissing: boolean;
+  narrativeGapCount: number;
+  blockers: readonly BlockBlocker[];
+}): boolean {
+  if (input.status === 'approved') return false;
+  return (
+    input.versionMissing ||
+    input.narrativeGapCount > 0 ||
+    input.blockers.some(
+      (b) => b.code !== 'stale_metric_refs' && b.code !== 'unadopted_ai_candidate',
+    )
+  );
+}
+
+/**
+ * 「承認後に変更が発生」した節か。一度承認された節で、
+ *  - 承認済みの版が引用した数値・定性情報に新しい版がある（維持と判断済みの組み合わせを除く）
+ *  - または、承認後に修正を始めた（現在の版が承認済みの版と違う）
+ * 承認済みの版そのものは変えない（A25）。
+ */
+export function isChangedAfterApproval(input: {
+  approvedVersionId: string | null;
+  currentVersionId: string | null;
+  approvedVersionHasStaleRefs: boolean;
+}): boolean {
+  if (input.approvedVersionId === null) return false;
+  return input.approvedVersionHasStaleRefs || input.currentVersionId !== input.approvedVersionId;
 }

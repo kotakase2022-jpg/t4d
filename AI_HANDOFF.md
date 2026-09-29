@@ -2291,3 +2291,134 @@ docs の導線表記も更新。
   ダッシュボードの「最近の更新」に Scope1 v2 が出る、本社 Scope1 の履歴が 2 版になる。
 - 監査ログの行は作っていない（必要なら件数を見ている spec と調整のうえで追加）。
 - 画面・Service は未実装。定性情報の画面はテンプレート項目を `narrative-template.ts` から引くこと。
+
+## 2026-09-29 開示優先モード W2 統合（6 作業単位の結合）
+
+W2 の 6 作業単位（S-a 表示不具合 O1〜O7・S-b メニュー/ホーム/役割切替/リセット・S-c プロジェクト/定性情報/資料・
+S-d 原稿編集/レビュー/再確認/AI 下書き・S-e スナップショット/出力/ESG経営・S-f 標準 CSV 取込）を同じ作業ツリーで結合した。
+各単位の詳細・判断・未解決は各単位の報告（W2 レポート）にある。ここには結合で直した点だけを書く。
+
+**変更（結合で直したもの）**
+
+- 基準日: `workflows/page.tsx` が `src/lib/clock.ts` 経由になったため `tests/unit/reference-date-usage.test.ts` の除外を削除。
+  従来ホームは `loadEnterpriseDashboard` に同じ `today` を渡す（件数と「あと N 日」を同じ日で判定）。
+  `src/` で `FIXTURE_TODAY` を import するのは config.ts・clock.ts・Fixture だけ。
+- 従来ホーム: 「SSBJ 未対応」のリンクに `scope=in_scope` を付けた（件数は評価対象だけを数えている）。
+  承認済み・要再確認が 1 件以上あるときだけ注意帯を出す（Fixture では 0 件なので表示は従来どおり）。
+- `/api/exports/ssbj-requirements` が `scope` を受け取る（無いと CSV に対象外の行が入っていた）。CSV の「データとの紐づけ」は一部だけ値がある項目を「一部」と出す。
+- CDP/CSRD 質問詳細（`question-view.tsx`）: 複数指標の項目（ESRS E1-6）は指標ごとの当年・前年を表で出し、
+  Data Mapping に指標ごとの値と DataCoverageBadge を出す（以前は全指標に同じ値を繰り返していた）。値が無い指標は「値なし」。
+- `evidence-documents.ts` に架空の `safety-record`（労働災害記録）の紙面を追加。拠点別の度数率が Fixture の LTIFR と一致する（単体テストで検査）。
+- 指標マスターで証跡必須を false→true にしたら、締めていない期間の検証を再計算（`master-data.ts`、`enterprise.data.write` があるとき）。
+- AI 画面の機能名に `disclosureBlockDraft` = 「開示本文の下書き」。未使用の `uploadEvidenceAction` を削除（docs/api-contract.md も更新）。
+- 表記: `REPORT_SNAPSHOT_KIND_LABELS.approved` を「社内承認済み版」に変更し、`SNAPSHOT_KIND_DISPLAY` と出力（DOCX/XLSX）は
+  このラベルを使う。出力と出力タブに「ファイル作成は提出ではありません」を明記。保証済み・提出済み・確定の語を使わないことを単体テストで検査。
+- 再確認の判断: 原稿画面（disclosure-recheck.ts）とレポート確定（report-snapshot.ts）の規則が違っていた
+  （確定側は判断した時点の節の版に縛り、後の差戻しも無視していた）。`domain/disclosure-block.ts` の
+  `latestRecheckDecision` / `isOldRefKept` に 1 本化した（節単位・組み合わせごとに最後の判断が有効）。開示ホームも同じ規則を使う
+  （以前は維持と判断しても「承認後に変更」「再確認する」に残っていた）。
+- ホームのカードとクリック先の原稿一覧の件数を揃えた（指示書 §6.1）。「未解決の必須情報」→ `filter=unresolved`、
+  「承認後に変更が発生」→ `filter=changed_after_approval`（原稿一覧に絞り込みを 2 つ追加。判定は `domain/disclosure-status.ts` の
+  `hasUnresolvedRequiredInfo` / `isChangedAfterApproval` を両方が使う）。以前は「本文なし」「再確認が必要」へ飛び、
+  Fixture でカード 1 件・一覧 0 件になっていた。一覧は定性情報の未記入も理由として表示する。
+  `unresolvedNarrativeFields` は `domain/narrative-template.ts` へ移した（ホームは再公開）。
+- Demo の Cookie: `disclosureBlockDraft` の実行は列を削らずに持ち回す（候補と `input_reference_ids` の両方が別インスタンスでの採用に要る）。
+  実測: 根拠 3 件で生 JSON 約 4.4KB → Cookie 上 約 2.2KB、根拠 9 件で 約 11.7KB → 約 3.5KB。known-limitations D-3 と demo-client.ts に記載。
+- `supabase/seed.sql` 再生成（1660 行。S-a の Fixture 変更と労働災害記録の紙面を反映）。
+
+**意図した期待値の変更**: `tests/integration/disclosure-home.test.ts` のカードの遷移先（`filter=missing` → `unresolved`、
+`filter=recheck` → `changed_after_approval`）。`reference-date-usage.test.ts` の除外リスト削除。
+
+**追加したテスト**: SSBJ 要求事項 CSV の Route（scope）、労働災害記録の紙面、証跡必須化の再計算、再確認の規則（単体 6 件）、
+維持→確定可・採用→再承認まで確定不可・節の版を作り直しても維持が有効・維持の後の差戻し（結合 4 件）、カードと一覧の件数一致、
+維持後のホーム、Cookie 経由で別インスタンスから候補を採用、出力の注意書き、スナップショット種別の表記。
+Route の 2 件・再確認の規則の結合 2 件・証跡必須化の再計算 1 件は、修正前の実装に戻すと落ちることを確認した。
+
+**テスト結果**（2026-09-29、ローカル）: `pnpm lint` 合格、`pnpm format:check` 合格、`pnpm typecheck` 合格、
+`pnpm test` 93 ファイル・1081 件合格、`pnpm test:rls` 2 ファイル・228 件合格、`pnpm check:rls` 100 表・ポリシー 228 件で合格、
+`pnpm build` 合格。**E2E は未実行**（この段階の指示）。画面はブラウザで確認していない。
+
+**未解決・次作業**
+
+- E2E と画面の目視確認（1366px のヘッダー、原稿編集の 3 ペイン、出力タブ、標準 CSV 取込、ESG経営）。S-a の変更でホームの件数
+  （Validation Error 8→3、Evidence 不足 11→1、アラート 4 件）・CSRD・SSBJ 気候-47(3) の表示が変わっている。
+- ホームは未採用の AI 候補を数えない（0 のまま）。AI 下書きの Service に節ごとの件数を返す関数が無いため。阻害条件としては原稿画面・レビュー依頼で効く。
+- 財務的影響の「算定方法・前提」: ホームと原稿一覧は影響額が無ければ未記入のまま数え、スナップショットの不足情報（report-snapshot.ts の
+  narrativeGaps）は理由があれば外す。件数には影響しない（影響額が未記入なのでどちらも不足扱い）が、表示が揃っていない。
+- `NARRATIVE_DETAIL_FIELDS` は narrative.ts のまま（`unknownTemplateKeys` は実行経路で使われておらず、詳細項目を誤検出しない）。
+- 証跡必須化の再計算は締めた期間（closed）を対象外にした。締めた期間の承認済み行は次にその期間を再計算するまで要再確認にならない。
+- 定量 CSV（スナップショットの数値）には注意書きを入れていない（機械可読のデータのため）。DOCX・XLSX・画面には入れた。
+- `/enterprise/disclosures/ssbj/requirements/[itemId]` はヘッダーの選択期間で開くため、FY2025 プロジェクトからのリンクで FY2026 の評価が出る（S-c の報告）。
+- docs/disclosure-first.md の「実施結果」と、各単位が挙げた既知の制約（Supabase の非トランザクション書込み、A26 の最善努力、
+  AI の取消なし、スナップショット・取込バッチはインスタンスメモリ、2MB/2000 行の上限など）の known-limitations への記載は未了。
+
+## 2026-09-29 開示優先モード E2E（D0 デモの一連の操作）と全件回帰
+
+指示書 §15 の P1 E2E を D0 デモ向けに組み替え、同じプロジェクト（FY2026）の上で最後まで通す E2E を追加した。
+AI 下書きは MockAIProvider（決定論的）での動作確認であり、本番モデルの試験ではない。
+
+**追加した E2E**
+
+- `tests/e2e/zz-disclosure-project.spec.ts`（serial・8 テスト。共有状態を変えるので zz-）:
+  管理者が開示優先モードを ON（A01: 新メニュー・ホーム 4 カード・自分の作業・分母付き進捗）→
+  海野が標準 CSV（訂正行 1 行）を検証 → 差分確認 → 確定、同じ内容を名前を変えて再検証すると「変更なし」（A03）、
+  台帳に新しい版と変更理由・旧版が残る（A04）→ 提出し、承認の道筋 5 段階を役割切替で承認（数値確認）→
+  定性情報を新規登録し、委員会資料の段落の一部を引用位置として登録・人が確認 →
+  ホーム → FY2026 プロジェクト → 原稿 → リスク及び機会で、数値参照（取り込んで承認した版）と定性情報の引用を挿入、
+  AI「選択した根拠から下書き」（Mock）の 1 段落を採用して残りは確認を終える → 版 2 → レビュー依頼 →
+  ESRS-40a 準備の節も依頼、指標の節は再確認で「引用中の版を維持」（理由付き）→
+  検見川が参考コメントを残し段落指定で差戻し → 海野が修正して版 3 → 再提出 → 検見川がレビュー完了 →
+  海野には最終承認ボタンが出ない → 承が最終承認（ESRS-40a 準備の節も）→ 承がレポート確定 →
+  対外用 DOCX を `parseDocx` で読み、承認した本文・単位付きの数値（23,480.5 m3）があり社内コメントが無いこと、
+  社内確認用には社内コメントがあることを確認 → 同じ CSV 経路で元データを訂正 → 原稿は「再確認が必要」
+  （目次・参照の鮮度・再確認画面・原稿一覧の絞り込み）、承認済みスナップショットの DOCX は内容ハッシュも本文も不変 →
+  開示デモのリセット → 開示優先モード OFF。途中で失敗しても `afterAll` でリセットと OFF を行う。
+  DOCX の本文と訂正後の原稿のスクリーンショットは試験結果の添付に残す。
+- `tests/e2e/disclosure-first-nav.spec.ts`（読み取りのみ・4 テスト）: OFF（既定）では従来メニュー・従来ホームのまま、
+  新しい画面は URL で開け、Scope3 取込・データ取込・SSBJ ドラフトは従来メニューから同じ URL（A01・A39）。
+  キーボードだけで 一覧 → プロジェクト → 原稿 → 根拠パネル（矢印キーでタブ切替）→ レビュー依頼 まで辿れ、
+  フォーカスが見える（A37）。一覧・原稿一覧・原稿編集に axe の serious/critical 違反なし。
+  1366×768 で本文・主 CTA・状態が画面内・横スクロールなし、1280px では根拠パネルがドロワーになり、
+  閉じる・Esc で閉じてフォーカスが戻り編集できる（A38）。
+- `tests/e2e/helpers.ts` に `switchDemoRole`（ヘッダーの役割切替）を追加。
+
+**E2E で見つけて直した実装の不具合**
+
+- 役割切替（デモ）のメニューが切替後も開いたまま残り、画面の他の部分が aria-hidden のまま操作できなかった
+  （戻り先が同じ Layout のため閉じない。`onSelect` の `preventDefault` を外した）。`header-demo-role-switcher.tsx`
+- 開示優先モードのホームの見出しで報告期間の日付が 2 回出ていた（期間名に日付が入っている）。
+  期間名に開始日が含まれていれば重ねない。`dashboard/page.tsx`
+- `parseDocx` を server-only の無い `src/lib/imports/docx-text.ts` へ移し、`parsers.ts` から再輸出
+  （E2E の Node プロセスから同じ実装で出力 DOCX を読むため。挙動は変えていない）。
+
+**W2 の意図した変更に合わせた期待値（2 件）**
+
+- `tests/e2e/vertical-slices.spec.ts`「7. CDP の AI ドラフト…」: 回答の「承認」ボタンを `exact: true` で指定
+  （ヘッダーの役割切替の名前「役割切替（デモ） 現在: 承 花子・最終承認者」も「承認」を含むため strict mode 違反になった）。
+- `tests/e2e/import-drag-drop.spec.ts`「自由記述の .txt は根拠資料の画面で中身を読める」: 資料の画面に
+  「引用できる箇所」（抽出した断片の一覧）が増え、同じ文言が 2 か所に出るようになった。プレビューの行を完全一致で
+  確かめ、断片一覧に抽出が 1 件以上あることも確かめるよう変更。
+
+**テスト結果**（2026-09-29、ローカル。E2E は `E2E_PORT=3217 pnpm test:e2e`、他の重い処理と並走させず単独実行）
+
+- 新規 2 spec: 12 件合格（zz-disclosure-project 8・disclosure-first-nav 4）。修正後に単独で zz 2 回・nav 1 回、
+  加えて全件の 2 回とも 12 件合格。
+- 全件 1 回目: 253 合格・2 失敗・26 未実行（vertical-slices の serial が止まったため）・8.9 分。失敗は上の 2 件で、
+  どちらも strict mode 違反（同じ名前・文言が 2 つ）という決定論的な原因。
+- 全件 2 回目（修正後）: **281 件すべて合格・9.3 分**（`next build` を含む実時間 556 秒）。retries は 0 のため
+  再試行で通ったもの（フレーク）は無い。
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` 合格、`pnpm test` 93 ファイル・1081 件合格、
+  `pnpm test:rls` 2 ファイル・228 件合格、`pnpm build` 合格。
+
+**未解決・次作業**
+
+- A38 の解釈: 1366px ちょうどでは 3 列（目次・本文・根拠）を並べる設計のため、右ペインを閉じる操作は無い。
+  E2E は「1366px で本文と根拠が読める」「それより狭い幅（アプリの最小幅 1280px）ではドロワーを閉じて編集できる」
+  として確かめた。1366px でも右ペインを閉じたいという要望なら、画面の変更が必要。
+- レポート確定には引用した数値が承認済みである必要があるため、E2E は取り込んだ値を承認の道筋 5 段階で承認してから
+  原稿へ挿入している。元データの訂正（数値の版）は開示デモのリセットの対象外で、欧州販売子会社の水使用量（FY2026）は
+  E2E 後に訂正後の値のまま残る（後続の zz-human-capital-boundary・zz-murata-demo は影響を受けないことを全件で確認）。
+- Mock の下書き候補は根拠の本文をそのまま使うため、同じ定性情報を引用した段落と採用した段落の本文が重なる
+  （デモの見え方の問題。E2E では 1 段落の採用だけを確かめている）。
+- Playwright の `page.request` は Secure 属性のセッション Cookie を http://127.0.0.1 へ送らないため、
+  出力 API の再取得はブラウザ内の fetch で行っている。

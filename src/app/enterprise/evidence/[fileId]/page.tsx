@@ -1,19 +1,30 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Download, FileText, Highlighter } from 'lucide-react';
+import { Download, FileText, Highlighter, Lock, Quote } from 'lucide-react';
+import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { DocumentPreview } from '@/components/shared/document-preview';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input, Textarea } from '@/components/ui/input';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
-import { formatJst } from '@/lib/format/datetime';
+import { can } from '@/lib/authorization/can';
+import { formatJst, formatJstDate } from '@/lib/format/datetime';
 import { parseUploadedFile } from '@/lib/imports/parsers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import {
+  CONFIDENTIALITY_LABELS,
+  isManualExcerpt,
+  listAnchorUsagesForFile,
+  usagePurposeLabel,
+} from '@/lib/services/source-anchor';
 import { readOwnedFileBytes } from '@/lib/storage';
+import { addManualExcerptAction } from '../actions';
 
-export const metadata = { title: 'Evidence Viewer' };
+export const metadata = { title: '資料・証跡の表示' };
 
 /**
  * Evidence Viewer（EVID-P0-002）。
@@ -102,6 +113,12 @@ export default async function EvidenceViewerPage({
   const inlineSrc = `/api/files/inline?fileVersionId=${current.id}`;
   const pdfPages = [...new Set(links.map((l) => l.page).filter((p): p is number => p !== null))];
 
+  // 引用の利用先（定性情報・原稿）の逆引きと、手動抜粋の可否
+  const anchorUsages = await listAnchorUsagesForFile(db, ctx, file.id);
+  const canWriteEvidence = can(ctx, 'enterprise.evidence.write');
+  const manualCount = fragments.filter((f) => isManualExcerpt(f)).length;
+  const extractedCount = fragments.length - manualCount;
+
   /** 列番号・行番号 → "C12" 形式。表ハイライトの照合に使う（データ行はヘッダーの次＝2 行目から） */
   const cellOf = (colIndex: number, rowIndex: number) =>
     `${String.fromCharCode(65 + colIndex)}${rowIndex + 2}`;
@@ -113,15 +130,27 @@ export default async function EvidenceViewerPage({
         description={
           <span className="flex flex-wrap items-center gap-2">
             <Badge tone="neutral">{file.mimeType}</Badge>
-            <Badge tone={file.confidentiality === 'confidential' ? 'warning' : 'neutral'}>
-              {file.confidentiality}
+            <Badge
+              tone={
+                file.confidentiality === 'restricted'
+                  ? 'danger'
+                  : file.confidentiality === 'confidential'
+                    ? 'warning'
+                    : 'neutral'
+              }
+            >
+              <Lock className="size-3" aria-hidden="true" />
+              {CONFIDENTIALITY_LABELS[file.confidentiality]}
+            </Badge>
+            <Badge tone={file.usagePurpose === 'current_fact' ? 'success' : 'neutral'}>
+              利用目的: {usagePurposeLabel(file.usagePurpose)}
             </Badge>
             <span>Version {current.versionNo}</span>
           </span>
         }
         breadcrumbs={[
           { label: '企業ワークスペース' },
-          { label: 'Evidence', href: '/enterprise/evidence' },
+          { label: '資料・証跡', href: '/enterprise/evidence' },
           { label: file.originalName },
         ]}
         actions={
@@ -134,9 +163,15 @@ export default async function EvidenceViewerPage({
         }
       />
 
+      {(typeof query.flash === 'string' || typeof query.error === 'string') && (
+        <div className="px-4 pt-3">
+          <FlashMessage searchParams={query} />
+        </div>
+      )}
+
       <div className="grid grid-cols-[1fr_360px] gap-3 p-4">
         {/* 左: ビューア本体 */}
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <Card className="overflow-hidden">
             <SectionTitle title="プレビュー" />
             {!stored ? (
@@ -274,6 +309,80 @@ export default async function EvidenceViewerPage({
               </div>
             </Card>
           )}
+
+          <Card id="extracted" className="scroll-mt-4">
+            <SectionTitle
+              title={`引用できる箇所（抽出 ${extractedCount} ／ 手動抜粋 ${manualCount}）`}
+            />
+            {fragments.length === 0 ? (
+              <p className="px-3 pb-3 text-[12px] text-ink-muted">
+                テキストを抽出できた箇所がありません（抽出の成功としては扱っていません）。
+                引用に使う箇所は、下の「手動抜粋を登録」で文言を写して登録してください。
+              </p>
+            ) : (
+              <ol className="max-h-[420px] divide-y divide-line overflow-y-auto">
+                {fragments.map((f) => (
+                  <li key={f.id} className="px-3 py-1.5 text-[12px]">
+                    <p className="flex items-center gap-1 text-[11px] font-medium text-ink-muted">
+                      {f.locator ?? `p.${f.page}`}
+                      {isManualExcerpt(f) && <Badge tone="neutral">手動の抜粋</Badge>}
+                    </p>
+                    <p className="line-clamp-3 whitespace-pre-wrap text-ink">{f.text}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Card>
+
+          {canWriteEvidence && (
+            <Card id="manual-excerpt" className="scroll-mt-4">
+              <SectionTitle title="手動抜粋を登録" />
+              <form action={addManualExcerptAction} className="space-y-2 px-3 pb-3">
+                <input type="hidden" name="fileId" value={file.id} />
+                <p className="text-[12px] text-ink-muted">
+                  テキストを抽出できないページ（画像の PDF
+                  など）は、該当箇所の文言を手で写して登録します。 OCR
+                  は行いません。登録した抜粋は「手動の抜粋」として区別され、定性情報の根拠に引用できます。
+                </p>
+                <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)]">
+                  <div>
+                    <label htmlFor="mx-page" className="block text-[12px] text-ink">
+                      ページ
+                    </label>
+                    <Input
+                      id="mx-page"
+                      name="page"
+                      type="number"
+                      min={1}
+                      step={1}
+                      className="mt-0.5"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="mx-locator" className="block text-[12px] text-ink">
+                      位置（見出し・段落・表など）
+                    </label>
+                    <Input
+                      id="mx-locator"
+                      name="locator"
+                      placeholder="例: 第2章 2.1 第1段落／表3 の注記"
+                      className="mt-0.5"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="mx-text" className="block text-[12px] text-ink">
+                    抜粋する文言（必須）
+                  </label>
+                  <Textarea id="mx-text" name="text" rows={4} required className="mt-0.5" />
+                </div>
+                <SubmitButton size="sm" variant="outline" pendingLabel="保存中…">
+                  <Quote aria-hidden="true" />
+                  抜粋を追加
+                </SubmitButton>
+              </form>
+            </Card>
+          )}
         </div>
 
         {/* 右: メタデータ・関連・Version */}
@@ -290,6 +399,22 @@ export default async function EvidenceViewerPage({
                 <dd className="text-ink">
                   {shell.periods.find((p) => p.id === file.reportingPeriodId)?.code ?? '—'}
                 </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-ink-muted">版</dt>
+                <dd className="text-right text-ink">{file.editionLabel ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-ink-muted">発行日</dt>
+                <dd className="text-ink">{formatJstDate(file.issuedOn)}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-ink-muted">利用目的</dt>
+                <dd className="text-ink">{usagePurposeLabel(file.usagePurpose)}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-ink-muted">機密区分</dt>
+                <dd className="text-ink">{CONFIDENTIALITY_LABELS[file.confidentiality]}</dd>
               </div>
               <div className="flex justify-between gap-2">
                 <dt className="text-ink-muted">サイズ</dt>
@@ -339,6 +464,50 @@ export default async function EvidenceViewerPage({
                       {link.cellRef && <span className="ml-1">{link.cellRef}</span>}
                       {link.note && <span className="ml-1">／ {link.note}</span>}
                     </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <SectionTitle title={`引用の利用先（${anchorUsages.length} 箇所）`} />
+            {anchorUsages.length === 0 ? (
+              <p className="px-3 pb-3 text-[12px] text-ink-muted">
+                この資料を引用している定性情報・原稿はありません。
+              </p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {anchorUsages.map((u) => (
+                  <li key={u.anchorId} className="px-3 py-1.5 text-[12px]">
+                    <p className="text-[11px] font-medium text-ink-muted">{u.locationLabel}</p>
+                    <p className="line-clamp-2 text-ink">「{u.quoteText}」</p>
+                    <ul className="mt-0.5 space-y-0.5 text-[11px]">
+                      {u.narratives.map((n) => (
+                        <li key={n.recordId}>
+                          定性情報:{' '}
+                          <Link
+                            href={`/enterprise/narratives/${n.recordId}`}
+                            className="text-brand-800 underline"
+                          >
+                            {n.title}
+                          </Link>
+                          （版 {n.versionNos.join('・')}）
+                        </li>
+                      ))}
+                      {u.blocks.map((b) => (
+                        <li key={b.blockId}>
+                          原稿:{' '}
+                          <Link
+                            href={`/enterprise/disclosure-projects/${b.projectId}/blocks/${b.blockId}`}
+                            className="text-brand-800 underline"
+                          >
+                            {b.title}
+                          </Link>
+                          （版 {b.versionNos.join('・')}）
+                        </li>
+                      ))}
+                    </ul>
                   </li>
                 ))}
               </ul>

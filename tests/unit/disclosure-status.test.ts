@@ -122,6 +122,16 @@ describe('表示ラベル', () => {
     ]);
     expect(Object.values(status.VALUE_KIND_LABELS)).toEqual(['実績', '推計', '目標']);
   });
+
+  it('スナップショット種別は社内承認であり、保証・提出・確定と読める語を使わない（§6.10）', () => {
+    expect(status.REPORT_SNAPSHOT_KIND_LABELS).toEqual({
+      review_draft: 'レビュー用草稿',
+      approved: '社内承認済み版',
+    });
+    for (const label of Object.values(status.REPORT_SNAPSHOT_KIND_LABELS)) {
+      expect(label).not.toMatch(/保証|提出|確定/);
+    }
+  });
 });
 
 describe('値の有無（0039 の backfill と同じ規則）', () => {

@@ -1,9 +1,10 @@
 import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
-import { assertCan, NotFoundError } from '@/lib/authorization/can';
+import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
 import { fid } from '@/lib/fixtures/ids';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { recomputePeriodValidations } from '@/lib/services/validation-store';
 import type { DbClient } from '@/lib/repositories/types';
 import {
   AGGREGATION_METHODS,
@@ -225,6 +226,19 @@ export async function updateMetricDefinition(
     resourceId: metric.id,
     afterSummary: `指標マスターを更新: ${input.code} ${input.name}`,
   });
+
+  // 証跡必須に変えたら、締めていない報告期間の検証をやり直す。承認済みで証跡の無い行を
+  // すぐ「承認済み・要再確認」として見せるため（W0 O3: 後発の証跡不足。SSBJ の対応計画から
+  // 証跡必須にしたときと同じ扱い）。締めた期間は確定済みの記録なので触らない。
+  // 検証結果の書き込みは enterprise.data.write の RLS なので、権限が無ければ次のデータ更新時に回す
+  if (!metric.requiresEvidence && input.requiresEvidence && can(ctx, 'enterprise.data.write')) {
+    const periods = await db.select('periods', {
+      where: { organizationId: metric.organizationId },
+    });
+    for (const period of periods.filter((p) => p.status !== 'closed')) {
+      await recomputePeriodValidations(db, ctx, period);
+    }
+  }
   return updated;
 }
 

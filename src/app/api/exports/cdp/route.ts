@@ -14,7 +14,11 @@ import {
 } from '@/lib/exports';
 import { SSBJ_FRAMEWORK_INFO } from '@/lib/frameworks/ssbj-2026';
 import { getDb } from '@/lib/repositories';
-import { loadDisclosureWorkspace, type DisclosureQuestionRow } from '@/lib/services/disclosure';
+import {
+  buildSsbjDocxSections,
+  loadDisclosureWorkspace,
+  type DisclosureQuestionRow,
+} from '@/lib/services/disclosure';
 import { FRAMEWORK_KEYS, type FrameworkKey } from '@/types/domain';
 
 const CHANGE_LABEL: Record<string, string> = {
@@ -69,9 +73,29 @@ export async function GET(request: Request) {
   await recordAuditEvent(db, ctx, {
     eventType: 'export_created',
     resourceType: 'disclosure_responses',
-    afterSummary: `${frameworkLabel} ${workspace.rows.length} 問を ${format.toUpperCase()} で出力`,
+    afterSummary:
+      framework === 'ssbj' && format === 'docx'
+        ? 'SSBJ 開示ドラフト（節別本文・定量指標）を DOCX で出力'
+        : `${frameworkLabel} ${workspace.rows.length} 問を ${format.toUpperCase()} で出力`,
     metadata: { period: period.code, format, framework },
   });
+
+  if (format === 'docx' && framework === 'ssbj') {
+    // SSBJ は要求事項ごとの回答を持たない。開示ドラフト画面の節別の本文を
+    // 確定／未確定を明記して出す（以前は 133 件の空欄だけが出ていた。W0 棚卸し）
+    const built = await buildSsbjDocxSections(db, ctx, period, periods, metrics);
+    if (!built) return NextResponse.json({ error: 'no_framework' }, { status: 404 });
+    const buffer = await toDocx(built.title, built.sections);
+    return new NextResponse(buffer as unknown as BodyInit, {
+      headers: {
+        'Content-Type': EXPORT_CONTENT_TYPES.docx,
+        'Content-Disposition': contentDisposition(
+          `T4D_SSBJ開示ドラフト_${ctx.workspace.organizationName}_${period.code}.docx`,
+        ),
+        'Cache-Control': 'no-store',
+      },
+    });
+  }
 
   if (format === 'docx') {
     const sections: DocxSection[] = workspace.sections.map((section) => ({

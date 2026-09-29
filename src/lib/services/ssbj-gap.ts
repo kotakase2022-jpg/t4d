@@ -3,7 +3,7 @@ import 'server-only';
 import { runAi } from '@/lib/ai';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
-import { FIXTURE_TODAY } from '@/lib/config';
+import { getReferenceDate } from '@/lib/clock';
 import { suggestMaterialityCategory } from '@/lib/domain/materiality-suggest';
 import {
   areaOfSection,
@@ -16,10 +16,18 @@ import {
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import { daysUntilJst } from '@/lib/format/datetime';
+import {
+  evaluateDataCoverage,
+  hasUsableValue,
+  type DataCoverage,
+} from '@/lib/services/aggregation';
+import { recomputePeriodValidations } from '@/lib/services/validation-store';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
+  DataPoint,
   DisclosureItem,
+  IsoDate,
   MaterialityCategory,
   MaterialityLevel,
   MetricDefinition,
@@ -65,8 +73,15 @@ export interface SsbjRequirementView {
   plans: SsbjActionPlan[];
   /** 人工知能の分析で既存資料に該当箇所が見つかったか（取込資料との紐づけ） */
   hasDocumentLink: boolean;
-  /** 要求する指標に当期の値があるか（データとの紐づけ） */
+  /**
+   * 要求する指標の**すべて**に当期の値があるか（データとの紐づけ）。
+   * 1 つの指標に値があるだけでは true にしない（W0 O7）
+   */
   hasDataLink: boolean;
+  /** 対応付いた指標の値の揃い具合（データあり／一部データあり／データなし／記述式） */
+  dataCoverage: DataCoverage;
+  /** 値の無い指標（一部データあり・データなしのときの不足分） */
+  missingMetrics: MetricDefinition[];
   /** 人工知能の分析を実行済みか */
   analyzed: boolean;
 }
@@ -98,9 +113,18 @@ export interface SsbjOverview {
     notMaterial: number;
     notApplicable: number;
     awaitingReview: number;
+    /**
+     * 優先度「高」の件数。母集団は「評価対象（対象外・重要性なしを除く）かつ未対応
+     * （対応済み以外）」。表示用に切り詰めた topPriorities から数えない（W0 O1:
+     * 上位 8 件から数えていたため 8 を超えなかった）
+     */
+    highPriority: number;
   };
   areas: SsbjAreaSummary[];
-  /** 優先度が高いギャップ（全体状況画面で目立たせる） */
+  /**
+   * 優先度が高いギャップ（全体状況画面で目立たせる）。
+   * 表示のため上位 TOP_PRIORITY_LIMIT 件に切り詰めている。件数は counts.highPriority を使う
+   */
   topPriorities: SsbjRequirementView[];
   /** 対応計画の進捗 */
   planCounts: Record<SsbjActionStatus, number>;
@@ -253,21 +277,37 @@ function buildView(
     plans: plans.filter((p) => p.assessmentId === assessment.id),
     hasDocumentLink: assessment.sourceDocument !== null,
     hasDataLink: false,
+    dataCoverage: 'not_mapped',
+    missingMetrics: [],
     analyzed: assessment.aiEvaluatedAt !== null,
   };
 }
 
-/** 期限までの残り日数（報告期間の提出期限を使う） */
-function deadlineDays(period: ReportingPeriod): number | null {
+/**
+ * 期限までの残り日数（報告期間の提出期限を使う）。
+ * 基準日は src/lib/clock.ts（デモは FIXTURE_TODAY、Supabase Mode は実時計）。
+ */
+function deadlineDays(period: ReportingPeriod, referenceDate: IsoDate): number | null {
   const due = period.submissionDueDate;
   if (!due) return null;
-  return daysUntilJst(due, FIXTURE_TODAY);
+  return daysUntilJst(due, referenceDate);
+}
+
+/** 期限判定の基準日を差し替える（テスト・画面が同じ日を使うため） */
+export interface SsbjReferenceDateOption {
+  referenceDate?: IsoDate;
+}
+
+/** 指標ごとに「当期の値がある」か。値あり（未入力・対象外・目標値を除く）の行があるものだけ */
+function metricIdsWithUsableValue(dataPoints: DataPoint[]): Set<Uuid> {
+  return new Set(dataPoints.filter(hasUsableValue).map((dp) => dp.metricId));
 }
 
 export async function loadSsbjRequirementViews(
   db: DbClient,
   ctx: AuthorizationContext,
   period: ReportingPeriod,
+  options: SsbjReferenceDateOption = {},
 ): Promise<{ views: SsbjRequirementView[]; versionLabel: string; isFixture: boolean } | null> {
   const master = await loadSsbjItems(db, ctx.workspace.organizationId, period.id);
   if (!master) return null;
@@ -277,12 +317,12 @@ export async function loadSsbjRequirementViews(
     where: { organizationId: ctx.workspace.organizationId, reportingPeriodId: period.id },
   });
   const byItem = new Map(assessments.map((a) => [a.itemId, a]));
-  const days = deadlineDays(period);
+  const days = deadlineDays(period, options.referenceDate ?? getReferenceDate());
 
   // 要求事項が求める指標に、当期の値が実際にあるか（データとの紐づけ）。
   // 要求事項 → 指標の対応は disclosure_mappings が持つ。
   // 「資料の取込・データ収集でこの項目を埋められるか」を一覧で見せるために持つ
-  const [mappings, dataPoints] = await Promise.all([
+  const [mappings, dataPoints, metrics] = await Promise.all([
     db.select('disclosureMappings', {
       where: { organizationId: ctx.workspace.organizationId },
     }),
@@ -293,20 +333,34 @@ export async function loadSsbjRequirementViews(
         deletedAt: { isNull: true },
       },
     }),
+    db.select('metrics', {
+      where: { organizationId: ctx.workspace.organizationId, deletedAt: { isNull: true } },
+    }),
   ]);
-  const metricIdsWithValue = new Set(
-    dataPoints.filter((dp) => dp.value !== null).map((dp) => dp.metricId),
-  );
-  const itemIdsWithData = new Set(
-    mappings.filter((m) => metricIdsWithValue.has(m.metricId)).map((m) => m.itemId),
-  );
+  const metricById = new Map(metrics.map((m) => [m.id, m]));
+  const withValue = metricIdsWithUsableValue(dataPoints);
+  const metricsByItem = new Map<Uuid, MetricDefinition[]>();
+  for (const mapping of mappings) {
+    const metric = metricById.get(mapping.metricId);
+    if (!metric) continue;
+    const list = metricsByItem.get(mapping.itemId) ?? [];
+    if (!list.some((m) => m.id === metric.id)) list.push(metric);
+    metricsByItem.set(mapping.itemId, list);
+  }
 
   const views = master.items
     .map((item) => {
       const assessment = byItem.get(item.id);
       if (!assessment) return null;
       const view = buildView(item, assessment, plans, days);
-      view.hasDataLink = itemIdsWithData.has(item.id);
+      // 複数の指標を求める要求事項は、すべてに値があって初めて「データあり」（W0 O7）
+      const { coverage, missing } = evaluateDataCoverage(
+        metricsByItem.get(item.id) ?? [],
+        withValue,
+      );
+      view.dataCoverage = coverage;
+      view.missingMetrics = missing;
+      view.hasDataLink = coverage === 'full';
       return view;
     })
     .filter((v): v is SsbjRequirementView => v !== null);
@@ -563,21 +617,41 @@ export async function loadSsbjHeadline(
   };
 }
 
+/** 全体状況画面に並べる優先ギャップの件数（表示の上限。件数の集計には使わない） */
+export const TOP_PRIORITY_LIMIT = 8;
+
+/** 評価対象（対象外・重要性なしを除く）か。整備度・優先度「高」の件数の母集団 */
+export function isInScope(view: SsbjRequirementView): boolean {
+  return (
+    view.assessment.applicability === 'applicable' && view.assessment.materiality !== 'not_material'
+  );
+}
+
+/**
+ * 優先度「高」の母集団: 評価対象かつ未対応（対応済み以外）。
+ * 全体状況画面の件数・要求事項画面の工程 4 の件数・その絞り込みリンクが同じ関数を通る
+ */
+export function isOpenHighPriority(view: SsbjRequirementView): boolean {
+  return isInScope(view) && view.combined !== 'covered' && view.priority.priority === 'high';
+}
+
+/** 優先度「高」の工程リンク。filterRequirements で同じ母集団になる絞り込み */
+export const OPEN_HIGH_PRIORITY_QUERY =
+  'priority=high&scope=in_scope&coverage=mostly_covered&coverage=partial&coverage=not_covered&coverage=unconfirmed';
+
 export async function loadSsbjOverview(
   db: DbClient,
   ctx: AuthorizationContext,
   period: ReportingPeriod,
   attribution: string,
+  options: SsbjReferenceDateOption = {},
 ): Promise<SsbjOverview | null> {
-  const loaded = await loadSsbjRequirementViews(db, ctx, period);
+  const loaded = await loadSsbjRequirementViews(db, ctx, period, options);
   if (!loaded) return null;
   const { views, versionLabel, isFixture } = loaded;
 
   // 対象外・重要性なしは整備度の分母から外す（対応する必要が無いため）
-  const inScope = views.filter(
-    (v) =>
-      v.assessment.applicability === 'applicable' && v.assessment.materiality !== 'not_material',
-  );
+  const inScope = views.filter(isInScope);
 
   const counts = {
     total: views.length,
@@ -588,6 +662,7 @@ export async function loadSsbjOverview(
     notMaterial: 0,
     notApplicable: 0,
     awaitingReview: 0,
+    highPriority: views.filter(isOpenHighPriority).length,
   };
   for (const v of views) {
     if (v.assessment.applicability === 'not_applicable') {
@@ -633,7 +708,7 @@ export async function loadSsbjOverview(
   const topPriorities = inScope
     .filter((v) => v.combined !== 'covered')
     .sort((a, b) => b.priority.score - a.priority.score || a.item.sortOrder - b.item.sortOrder)
-    .slice(0, 8);
+    .slice(0, TOP_PRIORITY_LIMIT);
 
   const plans = await db.select('ssbjActionPlans', {
     where: { organizationId: ctx.workspace.organizationId, reportingPeriodId: period.id },
@@ -664,6 +739,8 @@ export interface SsbjRequirementFilters {
   department?: string[];
   /** 取込資料・データとの紐づけ（document / data / unanalyzed / none） */
   linkage?: string[];
+  /** in_scope = 評価対象（対象外・重要性なしを除く）だけ */
+  scope?: string[];
   search?: string;
 }
 
@@ -681,6 +758,7 @@ export function filterRequirements(
       return false;
     }
     if (has(filters.priority) && !filters.priority!.includes(v.priority.priority)) return false;
+    if (has(filters.scope) && filters.scope!.includes('in_scope') && !isInScope(v)) return false;
     if (has(filters.linkage)) {
       const states: string[] = [];
       if (v.hasDocumentLink) states.push('document');
@@ -838,12 +916,13 @@ export async function runSsbjGapAnalysis(
     },
   });
   const mappedMetricIds = new Set(mappings.map((m) => m.metricId));
+  // 値の無い行（未入力・対象外など）を 0 として AI に渡さない（W0 O4）
   const metricValues = dataPoints
-    .filter((dp) => mappedMetricIds.has(dp.metricId))
+    .filter((dp) => mappedMetricIds.has(dp.metricId) && hasUsableValue(dp))
     .slice(0, 10)
     .map((dp) => ({
       label: metricById.get(dp.metricId)?.name ?? '指標',
-      value: dp.value ?? 0,
+      value: dp.value as number,
       unit: dp.unitOfMeasure,
     }));
 
@@ -1072,8 +1151,10 @@ export async function loadActionPlans(
   db: DbClient,
   ctx: AuthorizationContext,
   period: ReportingPeriod,
+  options: SsbjReferenceDateOption = {},
 ): Promise<ActionPlanView[]> {
   const organizationId = ctx.workspace.organizationId;
+  const referenceDate = options.referenceDate ?? getReferenceDate();
   const plans = await db.select('ssbjActionPlans', {
     where: { organizationId, reportingPeriodId: period.id },
   });
@@ -1094,7 +1175,7 @@ export async function loadActionPlans(
       plan,
       item: assessment ? (items.get(assessment.itemId) ?? null) : null,
       assigneeName: plan.assigneeUserId ? (nameById.get(plan.assigneeUserId) ?? null) : null,
-      daysLeft: plan.dueDate ? daysUntilJst(plan.dueDate, FIXTURE_TODAY) : null,
+      daysLeft: plan.dueDate ? daysUntilJst(plan.dueDate, referenceDate) : null,
     };
   });
 }
@@ -1193,6 +1274,15 @@ export async function createDataCollectionItem(
     if (Object.keys(patch).length > 0) {
       await db.update('metrics', metricId!, { ...patch, updatedAt: now, updatedBy: ctx.userId });
     }
+    // 証跡必須にしたら、その期間の検証をやり直す。承認済みで証跡の無い行が
+    // 「承認済み・要再確認」として見えるようにするため（W0 O3: 後発の証跡不足）。
+    // 検証結果の書き込みは enterprise.data.write の RLS なので、権限が無ければ次のデータ更新時に回す
+    if (patch.requiresEvidence && can(ctx, 'enterprise.data.write')) {
+      const period = await db.findById('periods', plan.reportingPeriodId);
+      if (period && period.organizationId === organizationId) {
+        await recomputePeriodValidations(db, ctx, period);
+      }
+    }
   }
 
   // 同じ指標 × 拠点 × 期間の割当が既にあれば作り直さない
@@ -1263,8 +1353,10 @@ export async function loadDataCollection(
   db: DbClient,
   ctx: AuthorizationContext,
   period: ReportingPeriod,
+  options: SsbjReferenceDateOption = {},
 ): Promise<DataCollectionRow[]> {
   const organizationId = ctx.workspace.organizationId;
+  const referenceDate = options.referenceDate ?? getReferenceDate();
   const plans = (
     await db.select('ssbjActionPlans', { where: { organizationId, reportingPeriodId: period.id } })
   ).filter((p) => p.linkedMetricCode !== null);
@@ -1302,7 +1394,7 @@ export async function loadDataCollection(
         unit: metric.unit,
         ownerName: assignment.ownerUserId ? (nameById.get(assignment.ownerUserId) ?? null) : null,
         dueDate: assignment.dueDate,
-        daysLeft: assignment.dueDate ? daysUntilJst(assignment.dueDate, FIXTURE_TODAY) : null,
+        daysLeft: assignment.dueDate ? daysUntilJst(assignment.dueDate, referenceDate) : null,
         collectedValue: dp?.value ?? null,
         collectedStatus: dp?.status ?? null,
         dataPointId: dp?.id ?? null,

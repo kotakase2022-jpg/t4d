@@ -141,6 +141,32 @@ const INVOCATION_INPUTS: Record<AiFeature, Record<string, unknown>> = {
     changes: [{ subject: 'dp-1', before: '100 t (v1)', after: '120 t (v2)' }],
     sources: [],
   },
+  disclosureBlockDraft: {
+    operation: 'draft_from_sources',
+    blockTitle: 'ガバナンス',
+    periodLabel: '2026年度',
+    currentParagraphIds: ['gov-1'],
+    sources: [
+      {
+        kind: 'source_anchor',
+        id: 'anchor-1',
+        label: '委員会資料（架空） 第2章 2.1',
+        usage: 'current_fact',
+        periodLabel: '2026年度',
+        locator: '第2章 2.1 第1段落',
+        text: '取締役会は、気候関連の課題を含むリスク及び機会への対応を監督する。',
+      },
+      {
+        kind: 'source_anchor',
+        id: 'anchor-prior',
+        label: '前年の有価証券報告書（架空）',
+        usage: 'prior_year_text',
+        periodLabel: '2025年度',
+        locator: 'p.12',
+        text: '取締役会は年1回報告を受けています。',
+      },
+    ],
+  },
 };
 
 const FEATURES = Object.keys(AI_SCHEMAS) as AiFeature[];

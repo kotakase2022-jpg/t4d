@@ -111,10 +111,14 @@ export default async function GhgSuppliersPage({
             </p>
           </Card>
           <Card className="space-y-1 p-2.5">
-            <p className="text-[11px] text-ink-muted">一次データ合計</p>
+            {/* 金額×係数（推計）を含むため「一次データ合計」とは呼ばない（W0 O6） */}
+            <p className="text-[11px] text-ink-muted">内訳合計</p>
             <p className="text-[20px] font-semibold leading-none tabular-nums text-ink">
-              {formatNumber(breakdown.primaryTotal)}
+              {formatNumber(breakdown.breakdownTotal)}
               <span className="ml-1 text-[11px] font-normal text-ink-muted">t-CO2e</span>
+            </p>
+            <p className="text-[10px] text-ink-muted">
+              うち一次データ（固有＋活動量ベース） {formatNumber(breakdown.primaryDataTotal)}
             </p>
           </Card>
           <Card className="space-y-1.5 p-2.5">

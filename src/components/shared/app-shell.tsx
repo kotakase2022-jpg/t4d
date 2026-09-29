@@ -3,15 +3,21 @@ import { Bell } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { logoutAction, selectWorkspaceAction } from '@/lib/auth/actions';
+import { switchDemoRoleAction } from '@/lib/auth/demo-role-actions';
 import { selectPeriodAction } from '@/lib/auth/preferences';
 import { can } from '@/lib/authorization/can';
-import type { AuthorizationContext } from '@/types/domain';
+import { describeReferenceDate } from '@/lib/clock';
+import { formatJstDate } from '@/lib/format/datetime';
+import type { AuthorizationContext, IsoDate } from '@/types/domain';
 import { BrandLogo } from './brand-logo';
 import { DemoDataBadge } from './badges';
 import { CommandPalette } from './command-palette';
+import { HeaderProjectContext, type HeaderProject } from './header-context';
+import { ReferenceDateBadge } from './header-badges';
+import { DemoRoleSwitcher, type DemoRoleChoiceView } from './header-demo-role-switcher';
 import { HelpDialog } from './help-dialog';
 import { RecordShortcuts } from './record-shortcuts';
-import { ENTERPRISE_NAV, assuranceNav } from './nav-config';
+import { navTreeFor, type NavVariant } from './nav-config';
 import {
   EngagementSelector,
   ReportingPeriodSelector,
@@ -23,12 +29,34 @@ import {
 } from './selectors';
 import { Sidebar } from './sidebar';
 
+/** ヘッダーに出すプロジェクト（AppShell が期間を整形して HeaderProject にする） */
+export interface AppShellProject {
+  id: string;
+  name: string;
+  reportingEntity: string;
+  scopeOrgNote: string;
+  scopeConsolidationNote: string;
+  scopeGhgBoundaryNote: string;
+  scopeValueChainNote: string;
+  periodStart: IsoDate;
+  periodEnd: IsoDate;
+  reportingPeriodId: string;
+}
+
 export interface AppShellProps {
   ctx: AuthorizationContext;
   workspaces: WorkspaceChoice[];
   /** 企業ワークスペースのみ */
   periods?: PeriodChoice[];
   currentPeriodId?: string;
+  /** 企業ワークスペースのみ: 選択中の報告期間の開始日・終了日（FY だけでなく日付で示す。指示書 §4.2） */
+  currentPeriodRange?: { startDate: IsoDate; endDate: IsoDate };
+  /** 企業ワークスペースのみ: 開示優先モード（組織の機能設定）。true なら開示業務中心のメニュー */
+  disclosureFirst?: boolean;
+  /** 企業ワークスペースのみ: プロジェクトの画面でヘッダーに名前・対象範囲を出すための一覧 */
+  projects?: AppShellProject[];
+  /** Demo Mode のみ: 役割切替の候補（同じ組織の @demo.local 利用者）。空なら出さない */
+  demoRoleChoices?: DemoRoleChoiceView[];
   /** 監査法人ワークスペースのみ */
   engagements?: EngagementChoice[];
   unreadNotifications: number;
@@ -38,10 +66,10 @@ export interface AppShellProps {
 /**
  * 権限が無いために非表示にするナビ項目の href を返す。
  * NavItem 自体は Client 側で解決する（LucideIcon が RSC 境界を越えられないため）。
+ * 判定には画面に出すのと同じツリー（従来／開示優先）を使う。
  */
-function hiddenNavHrefs(ctx: AuthorizationContext): string[] {
-  const source =
-    ctx.workspace.organizationType === 'enterprise' ? ENTERPRISE_NAV : assuranceNav(null);
+function hiddenNavHrefs(ctx: AuthorizationContext, variant: NavVariant): string[] {
+  const source = navTreeFor(variant, null);
   // 子項目（例: 管理 > 設定）にも権限が付くため、階層をたどって集める
   const collect = (items: typeof source): string[] =>
     items.flatMap((item) => [
@@ -49,6 +77,34 @@ function hiddenNavHrefs(ctx: AuthorizationContext): string[] {
       ...collect(item.children ?? []),
     ]);
   return collect(source);
+}
+
+function periodText(start: IsoDate, end: IsoDate): string {
+  return `${formatJstDate(start)}〜${formatJstDate(end)}`;
+}
+
+function toHeaderProject(
+  project: AppShellProject,
+  periods: PeriodChoice[] | undefined,
+): HeaderProject {
+  const scope = [
+    project.scopeOrgNote,
+    project.scopeConsolidationNote,
+    project.scopeGhgBoundaryNote,
+    project.scopeValueChainNote,
+  ]
+    .map((note) => note.trim())
+    .filter(Boolean)
+    .join(' ');
+  return {
+    id: project.id,
+    name: project.name,
+    reportingEntity: project.reportingEntity,
+    scopeDetail: scope || project.reportingEntity,
+    periodText: periodText(project.periodStart, project.periodEnd),
+    reportingPeriodId: project.reportingPeriodId,
+    reportingPeriodCode: periods?.find((p) => p.id === project.reportingPeriodId)?.code ?? null,
+  };
 }
 
 /**
@@ -60,13 +116,24 @@ export function AppShell({
   workspaces,
   periods,
   currentPeriodId,
+  currentPeriodRange,
+  disclosureFirst = false,
+  projects = [],
+  demoRoleChoices = [],
   engagements,
   unreadNotifications,
   children,
 }: AppShellProps) {
   const isEnterprise = ctx.workspace.organizationType === 'enterprise';
-  const variant = isEnterprise ? 'enterprise' : 'assurance';
-  const hidden = hiddenNavHrefs(ctx);
+  const variant: NavVariant = isEnterprise
+    ? disclosureFirst
+      ? 'enterprise-disclosure'
+      : 'enterprise'
+    : 'assurance';
+  const hidden = hiddenNavHrefs(ctx, variant);
+  // 期限判定の基準日。デモでは「デモ基準日」を出す（実時計の Supabase Mode では null）
+  const referenceLabel = ctx.demo ? describeReferenceDate().label : null;
+  const currentPeriodCode = periods?.find((p) => p.id === currentPeriodId)?.code ?? null;
 
   return (
     <div className="t4d-min-canvas flex h-screen flex-col overflow-hidden bg-surface-muted">
@@ -87,17 +154,39 @@ export function AppShell({
             onSelectAction={selectWorkspaceAction}
           />
           {isEnterprise && periods && periods.length > 0 && currentPeriodId && (
-            <ReportingPeriodSelector
-              periods={periods}
-              currentId={currentPeriodId}
-              onSelectAction={selectPeriodAction}
+            <div className="flex shrink-0 items-center gap-1">
+              <ReportingPeriodSelector
+                periods={periods}
+                currentId={currentPeriodId}
+                onSelectAction={selectPeriodAction}
+              />
+              {currentPeriodRange && (
+                <span
+                  className="tnum whitespace-nowrap text-[11px] text-ink-muted"
+                  data-testid="header-period-range"
+                >
+                  <span className="sr-only">報告期間の開始日と終了日: </span>
+                  {periodText(currentPeriodRange.startDate, currentPeriodRange.endDate)}
+                </span>
+              )}
+            </div>
+          )}
+          {isEnterprise && projects.length > 0 && (
+            <HeaderProjectContext
+              projects={projects.map((p) => toHeaderProject(p, periods))}
+              currentPeriodId={currentPeriodId ?? null}
+              currentPeriodCode={currentPeriodCode}
             />
           )}
           {!isEnterprise && engagements && <EngagementSelector engagements={engagements} />}
           {ctx.demo && <DemoDataBadge />}
+          {referenceLabel && <ReferenceDateBadge label={referenceLabel} />}
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          {ctx.demo && demoRoleChoices.length > 1 && (
+            <DemoRoleSwitcher choices={demoRoleChoices} onSwitchAction={switchDemoRoleAction} />
+          )}
           <Button variant="ghost" size="sm" asChild>
             <Link href="/notifications" aria-label={`通知（未読 ${unreadNotifications} 件）`}>
               <Bell aria-hidden="true" />

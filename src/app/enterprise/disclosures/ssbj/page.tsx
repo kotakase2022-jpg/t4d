@@ -29,7 +29,11 @@ import {
 import { SSBJ_FRAMEWORK_INFO } from '@/lib/frameworks/ssbj-2026';
 import { CATEGORY_LABEL, loadMateriality, MATERIALITY_LABEL } from '@/lib/services/materiality';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { loadSsbjOverview } from '@/lib/services/ssbj-gap';
+import {
+  loadSsbjOverview,
+  OPEN_HIGH_PRIORITY_QUERY,
+  TOP_PRIORITY_LIMIT,
+} from '@/lib/services/ssbj-gap';
 import { loadSsbjSettings } from '@/lib/services/ssbj-settings';
 import type { MaterialityLevel } from '@/types/domain';
 
@@ -133,7 +137,9 @@ export default async function SsbjPage({
       description:
         '対象判定・重要性判断、人工知能によるギャップ分析、担当者による確認、優先順位付けを 1 画面で進めます。',
       state: counts.awaitingReview > 0 || remaining > 0 ? 'current' : 'done',
-      detail: `対象外 ${counts.notApplicable} 件／確認待ち ${counts.awaitingReview} 件／優先度「高」${overview.topPriorities.filter((v) => v.priority.priority === 'high').length} 件`,
+      // 優先度「高」は下の「上位 N 件」から数えない（以前は 8 件を超えなかった。W0 O1）。
+      // 母集団（評価対象・未対応）を件数の横に書き、要求事項画面の工程 4 と同じ数にする
+      detail: `対象外 ${counts.notApplicable} 件／確認待ち ${counts.awaitingReview} 件／優先度「高」${counts.highPriority} 件（評価対象・未対応）`,
       href: '/enterprise/disclosures/ssbj/requirements',
     },
     {
@@ -253,6 +259,10 @@ export default async function SsbjPage({
             </li>
           ))}
         </ul>
+        <p className="text-[11px] leading-relaxed text-ink-muted">
+          件数の母集団: 「全要求事項」は適用基準の全件（対象外・重要性なしを含む）。
+          対応済み〜未対応・確認待ち・優先度「高」は、評価対象（対象外・重要性なしを除く）で数えています。
+        </p>
 
         <div className="grid grid-cols-[1fr_1.4fr] gap-3">
           {/* 領域別の対応状況 */}
@@ -308,13 +318,19 @@ export default async function SsbjPage({
             </Table>
           </Card>
 
-          {/* 優先度の高いギャップ */}
+          {/* 優先度の高いギャップ。表示は上位 N 件に切り詰めるため、件数（全体）を別に示す */}
           <Card className="overflow-hidden">
             <SectionTitle
-              title="優先して対応するギャップ"
+              title={`優先して対応するギャップ（上位 ${TOP_PRIORITY_LIMIT} 件を表示）`}
               action={
-                <span className="text-[11px] text-ink-muted">
-                  優先度「高」= {PRIORITY_MEANING.high}
+                <span className="flex flex-wrap items-center justify-end gap-x-2 text-[11px] text-ink-muted">
+                  <Link
+                    href={`/enterprise/disclosures/ssbj/requirements?${OPEN_HIGH_PRIORITY_QUERY}`}
+                    className="font-medium text-brand-700 underline-offset-2 hover:underline"
+                  >
+                    優先度「高」は全 {counts.highPriority} 件（評価対象・未対応）
+                  </Link>
+                  <span>優先度「高」= {PRIORITY_MEANING.high}</span>
                 </span>
               }
             />

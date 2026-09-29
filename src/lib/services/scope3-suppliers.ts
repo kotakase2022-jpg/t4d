@@ -26,6 +26,7 @@ import { DemoDbClient } from '@/lib/repositories/demo-client';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
+  CalculationDataClass,
   CalculationInput,
   DataPoint,
   DataPointCalculation,
@@ -63,6 +64,45 @@ export const SUPPLIER_DATA_TYPE_LABELS: Record<SupplierDataType, string> = {
   physical: '物理データ',
   monetary: '金額データ',
 };
+
+// ----------------------------------------------------------------------
+// 算定データの区分（W0 O6）
+//
+// 以前は内訳のすべて（購買金額 × 係数の推計を含む）を「一次データ」と表示していた。
+// 金額ベースは汎用係数による推計であり、サプライヤー固有のデータではない。
+// 区分を分けて持ち、一次データ比率の定義を画面に明示する。
+// ----------------------------------------------------------------------
+
+export const CALCULATION_DATA_CLASS_LABELS: Record<CalculationDataClass, string> = {
+  supplier_specific: 'サプライヤー固有排出量',
+  activity_based: '活動量×係数',
+  spend_based: '金額×係数（推計）',
+};
+
+/** 一次データ比率の分子に入れる区分（金額ベースの推計は入れない） */
+export const PRIMARY_DATA_CLASSES: readonly CalculationDataClass[] = [
+  'supplier_specific',
+  'activity_based',
+];
+
+/** 一次データ比率の定義（画面にそのまま出す） */
+export const PRIMARY_DATA_RATIO_DEFINITION =
+  '一次データ比率 =（サプライヤー固有排出量 ＋ 活動量×係数）÷ 確定値。金額×係数（推計）は含めない';
+
+/**
+ * 内訳行の区分。`dataClass` を持つ行はそれを使い、持たない旧形式の行は
+ * 活動量の単位・note・sourceType から推定する（千円＝金額、係数あり＝活動量、
+ * 係数なしの報告値＝サプライヤー固有）。決められない行は null（どの区分にも数えない）
+ */
+export function classifyCalculationInput(input: CalculationInput): CalculationDataClass | null {
+  if (input.dataClass) return input.dataClass;
+  if (input.activityUnit === '千円' || (input.note ?? '').startsWith('購買金額')) {
+    return 'spend_based';
+  }
+  if (input.sourceType === 'emission_factor') return 'activity_based';
+  if (input.sourceType === 'constant') return 'supplier_specific';
+  return null;
+}
 
 // ----------------------------------------------------------------------
 // 単位の正規化（規則の実体は domain/supplier-units.ts。フォームの再計算と共用）
@@ -885,6 +925,7 @@ function buildInput({ supplier, factor, decision }: ValidatedDecision): Calculat
       note: 'サプライヤー報告排出量（一次データ）',
       activityAmount: null,
       activityUnit: null,
+      dataClass: 'supplier_specific',
     };
   }
   const f = factor as EmissionFactor;
@@ -900,6 +941,7 @@ function buildInput({ supplier, factor, decision }: ValidatedDecision): Calculat
         : `活動量 ${decision.amount.toLocaleString('ja-JP')} ${decision.unit} × 係数 ${f.factorValue} (${f.factorYear}年度)`,
     activityAmount: decision.amount,
     activityUnit: decision.unit,
+    dataClass: decision.dataType === 'monetary' ? 'spend_based' : 'activity_based',
   };
 }
 
@@ -1170,6 +1212,8 @@ export async function relinkSupplierFactor(
       value: roundEmissions(input.activityAmount * factor.factorValue),
       sourceId: factor.id,
       note: `${isMonetary ? '購買金額' : '活動量'} ${input.activityAmount.toLocaleString('ja-JP')} ${isMonetary ? '千円' : input.activityUnit} × 係数 ${factor.factorValue} (${factor.factorYear}年度)`,
+      // 係数を付け替えても区分は変わらない（単位が係数と一致することは上で確かめた）
+      dataClass: isMonetary ? 'spend_based' : 'activity_based',
     };
     relinkedRows.push(next);
     return next;
@@ -1285,6 +1329,8 @@ export interface SupplierBreakdownInput {
   activityUnit: string | null;
   /** 紐づいている原単位の ID（報告排出量は null） */
   factorId: Uuid | null;
+  /** 算定データの区分（旧形式の行は推定。決められなければ null） */
+  dataClass: CalculationDataClass | null;
 }
 
 export interface SupplierBreakdownEntry {
@@ -1295,7 +1341,7 @@ export interface SupplierBreakdownEntry {
   inputs: SupplierBreakdownInput[];
   /** この社の排出量合計（t-CO2e） */
   total: number;
-  /** 一次データ合計に占める構成比（%）。未提出は null */
+  /** 内訳合計に占める構成比（%）。未提出は null */
   sharePercent: number | null;
 }
 
@@ -1307,12 +1353,22 @@ export interface Scope3SupplierBreakdown {
   calculationCount: number;
   suppliers: SupplierBreakdownEntry[];
   submittedCount: number;
-  /** 一次データ（サプライヤー実績）の合計 t-CO2e */
-  primaryTotal: number;
+  /**
+   * 内訳合計 t-CO2e（区分を問わない算定内訳の合計）。
+   * 金額×係数の推計を含むため「一次データ合計」ではない（W0 O6 で改名）
+   */
+  breakdownTotal: number;
+  /** 区分別の合計 t-CO2e（区分を決められない旧形式の行は unclassified） */
+  totalsByClass: Record<CalculationDataClass, number> & { unclassified: number };
+  /** 一次データの合計 = サプライヤー固有排出量 ＋ 活動量×係数（金額×係数は含めない） */
+  primaryDataTotal: number;
   /** どのサプライヤーにも紐付かない内訳行（規約外ラベル） */
   otherInputs: CalculationInput[];
-  /** Data Point 確定値に対する一次データの割合（%）。確定値が無ければ null */
-  coveragePercent: number | null;
+  /**
+   * 一次データ比率（%）= primaryDataTotal ÷ Data Point 確定値。
+   * 定義は PRIMARY_DATA_RATIO_DEFINITION。確定値が無ければ null
+   */
+  primaryDataPercent: number | null;
   /** 排出量原単位（排出係数）マスター全件（金額・物理量ベース両方） */
   factors: EmissionFactor[];
 }
@@ -1343,6 +1399,7 @@ export async function loadScope3SupplierBreakdown(
         activityAmount: input.activityAmount ?? null,
         activityUnit: input.activityUnit ?? null,
         factorId: input.sourceType === 'emission_factor' ? input.sourceId : null,
+        dataClass: classifyCalculationInput(input),
       });
       inputsByCode.set(matched.supplier.code, list);
     } else {
@@ -1350,7 +1407,20 @@ export async function loadScope3SupplierBreakdown(
     }
   }
 
-  const primaryTotal = roundEmissions(inputs.reduce((sum, input) => sum + input.value, 0));
+  const breakdownTotal = roundEmissions(inputs.reduce((sum, input) => sum + input.value, 0));
+  const classSums = { supplier_specific: 0, activity_based: 0, spend_based: 0, unclassified: 0 };
+  for (const input of inputs) {
+    classSums[classifyCalculationInput(input) ?? 'unclassified'] += input.value;
+  }
+  const totalsByClass = {
+    supplier_specific: roundEmissions(classSums.supplier_specific),
+    activity_based: roundEmissions(classSums.activity_based),
+    spend_based: roundEmissions(classSums.spend_based),
+    unclassified: roundEmissions(classSums.unclassified),
+  };
+  const primaryDataTotal = roundEmissions(
+    PRIMARY_DATA_CLASSES.reduce((sum, key) => sum + classSums[key], 0),
+  );
   const entries: SupplierBreakdownEntry[] = suppliers.map((unit) => {
     const supplierInputs = inputsByCode.get(unit.code) ?? [];
     const total = roundEmissions(supplierInputs.reduce((sum, input) => sum + input.value, 0));
@@ -1362,12 +1432,13 @@ export async function loadScope3SupplierBreakdown(
       inputs: supplierInputs,
       total,
       sharePercent:
-        supplierInputs.length > 0 && primaryTotal > 0
-          ? Math.round((total / primaryTotal) * 1000) / 10
+        supplierInputs.length > 0 && breakdownTotal > 0
+          ? Math.round((total / breakdownTotal) * 1000) / 10
           : null,
     };
   });
 
+  const confirmed = scope3.dataPoint?.value ?? null;
   return {
     metric: scope3.metric,
     dataPoint: scope3.dataPoint,
@@ -1375,11 +1446,17 @@ export async function loadScope3SupplierBreakdown(
     calculationCount: scope3.calculations.length,
     suppliers: entries,
     submittedCount: entries.filter((entry) => entry.submitted).length,
-    primaryTotal,
+    breakdownTotal,
+    totalsByClass,
+    primaryDataTotal,
     otherInputs,
-    coveragePercent:
-      scope3.dataPoint && scope3.dataPoint.value !== null && scope3.dataPoint.value > 0
-        ? Math.round((primaryTotal / scope3.dataPoint.value) * 1000) / 10
+    // 分母は承認フローで確定した値。値の無い（未入力など）確定値に対しては比率を出さない
+    // （0039 より前に Cookie へ残った行は状態を持たないため、値ありとして扱う）
+    primaryDataPercent:
+      confirmed !== null &&
+      confirmed > 0 &&
+      (scope3.dataPoint?.availabilityStatus ?? 'value_present') === 'value_present'
+        ? Math.round((primaryDataTotal / confirmed) * 1000) / 10
         : null,
     factors,
   };

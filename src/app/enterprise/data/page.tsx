@@ -1,6 +1,12 @@
 import Link from 'next/link';
 import { CopyPlus, Database, Download } from 'lucide-react';
-import { DataPointStatusBadge, EvidenceBadge, ValidationBadge } from '@/components/shared/badges';
+import {
+  AvailabilityBadge,
+  DataPointStatusBadge,
+  EvidenceBadge,
+  ValidationBadge,
+  ValueKindBadge,
+} from '@/components/shared/badges';
 import { FilterBar } from '@/components/shared/filter-bar';
 import {
   CONSOLIDATED_UNIT_TAG,
@@ -287,7 +293,25 @@ export default async function DataListPage({
                         )}
                         {show('period') && <TD>{row.period.code}</TD>}
                         {show('value') && (
-                          <TD align="right">{formatNumber(row.dataPoint.value)}</TD>
+                          <TD align="right">
+                            {/* 値の無い行は「—」や 0 ではなく状態（未入力・対象外など）を出す。
+                                推計・目標は実績と取り違えないよう区分を併記する（§7.1） */}
+                            {row.dataPoint.availabilityStatus !== 'value_present' ? (
+                              <AvailabilityBadge
+                                status={row.dataPoint.availabilityStatus}
+                                reason={row.dataPoint.absenceReason}
+                              />
+                            ) : row.dataPoint.value === null ? (
+                              <span className="text-[12px]">{row.dataPoint.textValue ?? '—'}</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1">
+                                {formatNumber(row.dataPoint.value)}
+                                {row.dataPoint.valueKind !== 'actual' && (
+                                  <ValueKindBadge kind={row.dataPoint.valueKind} />
+                                )}
+                              </span>
+                            )}
+                          </TD>
                         )}
                         {show('unitOfMeasure') && (
                           <TD>
@@ -304,7 +328,10 @@ export default async function DataListPage({
                         )}
                         {show('status') && (
                           <TD>
-                            <DataPointStatusBadge status={row.dataPoint.status} />
+                            <DataPointStatusBadge
+                              status={row.dataPoint.status}
+                              needsRecheck={row.needsRecheck}
+                            />
                           </TD>
                         )}
                         {show('validation') && (

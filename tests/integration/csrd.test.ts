@@ -66,15 +66,34 @@ describe('CSRD ワークスペース', () => {
 
   it('指標マッピング済みの項目は承認済みデータの当年値を持つ', async () => {
     const ws = await loadDisclosureWorkspace(db, manager(), 'csrd', current, periods, metrics);
+    // 1 指標だけを求める項目は、その指標の承認済み当年値を持つ
+    const e15 = ws!.rows.find((r) => r.item.code === 'ESRS-E1-5');
+    expect(e15!.mappedMetrics.map((m) => m.code)).toEqual(['energy']);
+    expect(e15!.currentValue).not.toBeNull();
+    expect(e15!.dataCoverage).toBe('full');
+
+    // E1-6 は Scope1・2・3 を求める（W0 O7）。Scope1 に値があるだけで項目全体を
+    // 「データあり」にしない。指標ごとの値を持ち、異なる指標は足さない
     const e16 = ws!.rows.find((r) => r.item.code === 'ESRS-E1-6');
     expect(e16).toBeDefined();
-    expect(e16!.mappedMetrics.length).toBeGreaterThan(0);
+    expect(e16!.mappedMetrics.map((m) => m.code)).toEqual([
+      'scope1',
+      'scope2',
+      'scope2_location',
+      'scope3_total',
+    ]);
+    const scope1 = e16!.metricValues.find((v) => v.metric.code === 'scope1');
     // Scope1 は Fixture で承認済みデータがあるため当年値が入る
-    expect(e16!.currentValue).not.toBeNull();
+    expect(scope1!.currentValue).not.toBeNull();
+    // 複数指標の項目に「合計の当年値」は出さない
+    expect(e16!.currentValue).toBeNull();
+    expect(e16!.dataCoverage).toBe('partial');
+    expect(e16!.missingMetrics.map((m) => m.code)).toEqual(['scope2_location', 'scope3_total']);
 
     // 記述式（マッピングなし）の項目も存在する
     const gov1 = ws!.rows.find((r) => r.item.code === 'ESRS2-GOV-1');
     expect(gov1!.mappedMetrics).toHaveLength(0);
+    expect(gov1!.dataCoverage).toBe('not_mapped');
   });
 
   it('AI ドラフト生成 → 人の編集保存が CDP と同じ経路で動く', async () => {

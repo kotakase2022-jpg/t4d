@@ -90,7 +90,9 @@ export const SSBJ_REQUIREMENT_EXPORT_COLUMNS: ExportColumn<SsbjRequirementView>[
   {
     key: 'dataLink',
     header: 'データとの紐づけ',
-    value: (v) => (v.hasDataLink ? 'あり' : 'なし'),
+    // 複数の指標を求める要求事項で一部だけ値があるものを「なし」と出すと、
+    // 画面（一部データあり）と CSV が食い違う（W0 O7）
+    value: (v) => (v.hasDataLink ? 'あり' : v.dataCoverage === 'partial' ? '一部' : 'なし'),
   },
   { key: 'sourceDocument', header: '出典資料', value: (v) => v.assessment.sourceDocument ?? '' },
   { key: 'priority', header: '優先度', value: (v) => PRIORITY_LABEL[v.priority.priority] },

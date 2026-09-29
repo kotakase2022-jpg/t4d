@@ -7,7 +7,14 @@
  */
 
 import { contentHash } from '@/lib/fixtures/ids';
-import type { BlockBody, BlockInline, BlockParagraph, Uuid } from '@/types/domain';
+import type {
+  BlockBody,
+  BlockInline,
+  BlockParagraph,
+  RecheckDecision,
+  RecheckRefKind,
+  Uuid,
+} from '@/types/domain';
 
 export type { BlockBody, BlockInline, BlockParagraph } from '@/types/domain';
 
@@ -98,6 +105,62 @@ export function canonicalJson(value: unknown): string {
 /** 本文の内容ハッシュ（disclosure_block_versions.content_hash）。キー順に依存しない */
 export function contentHashOf(body: BlockBody): string {
   return contentHash(canonicalJson(body));
+}
+
+// ----------------------------------------------------------------------
+// 再確認の判断（recheck_decisions）の効き方
+//
+// 原稿編集・レビュー依頼（disclosure-recheck.ts）とレポートの確定（report-snapshot.ts）が
+// 同じ規則で「再確認済み」を判定しないと、編集側では承認まで進めたのに確定だけが止まる
+// （またはその逆）ことが起きる。規則はここ 1 か所に置く。
+// ----------------------------------------------------------------------
+
+export type RecheckDecisionFacts = Pick<
+  RecheckDecision,
+  'id' | 'blockId' | 'refKind' | 'oldRefId' | 'newRefId' | 'decision' | 'decidedAt'
+>;
+
+/**
+ * 節が「旧版 → 現在の版」の組み合わせについて最後に下した再確認の判断。
+ *
+ * - 判断は節（block）単位で効く。判断した時点の節の版（block_version_id）には縛らない。
+ *   同じ旧版を引用し続ける限り、その後に節の版を作り直しても判断は有効（判断の対象は
+ *   本文の書きぶりではなく、どの版の数値・定性情報を引用するかだから）。
+ * - 上流にさらに新しい版ができれば組み合わせが変わるので、改めて判断が要る。
+ * - 同じ組み合わせに複数の判断があれば最後の判断が有効（維持の後に差戻しなら、維持は無効）。
+ *   同時刻は id の小さい方を採る（画面・確定で並びが揺れないように）。
+ */
+export function latestRecheckDecision<T extends RecheckDecisionFacts>(
+  decisions: readonly T[],
+  target: { blockId: Uuid; refKind: RecheckRefKind; oldRefId: Uuid; newRefId: Uuid },
+): T | null {
+  let latest: T | null = null;
+  for (const d of decisions) {
+    if (
+      d.blockId !== target.blockId ||
+      d.refKind !== target.refKind ||
+      d.oldRefId !== target.oldRefId ||
+      d.newRefId !== target.newRefId
+    ) {
+      continue;
+    }
+    if (
+      latest === null ||
+      d.decidedAt > latest.decidedAt ||
+      (d.decidedAt === latest.decidedAt && d.id < latest.id)
+    ) {
+      latest = d;
+    }
+  }
+  return latest;
+}
+
+/** 旧版の引用を理由付きで維持すると判断済みか（再確認済み。承認・確定を止めない） */
+export function isOldRefKept(
+  decisions: readonly RecheckDecisionFacts[],
+  target: { blockId: Uuid; refKind: RecheckRefKind; oldRefId: Uuid; newRefId: Uuid },
+): boolean {
+  return latestRecheckDecision(decisions, target)?.decision === 'keep_old';
 }
 
 // ----------------------------------------------------------------------

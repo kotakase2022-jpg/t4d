@@ -1555,8 +1555,12 @@ interface DisclosureItemSpec {
   options?: string[];
   required: boolean;
   changeType2026: DisclosureItem['changeType'];
-  /** マッピング対象の指標コード */
-  metricCode?: string;
+  /**
+   * マッピング対象の指標コード。複数の指標を求める項目（例: ESRS E1-6 の Scope1・2・3）は
+   * すべて並べる。1 つだけ対応付けると、その 1 指標の値で項目全体が「データあり」に
+   * 見えていた（W0 O7）
+   */
+  metricCodes?: string[];
   /** FY2025 の回答（Carry Forward の元） */
   previousAnswer?: string;
   previousNumeric?: number;
@@ -1614,7 +1618,7 @@ export const CDP_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'new',
-    metricCode: 'female_officer_ratio',
+    metricCodes: ['female_officer_ratio'],
     previousNumeric: 16.7,
   },
   {
@@ -1636,7 +1640,7 @@ export const CDP_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'carry_forward',
-    metricCode: 'scope1',
+    metricCodes: ['scope1'],
     previousNumeric: 9052.7,
   },
   {
@@ -1647,7 +1651,7 @@ export const CDP_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'carry_forward',
-    metricCode: 'scope2',
+    metricCodes: ['scope2'],
     previousNumeric: 22579.4,
   },
   {
@@ -1659,7 +1663,7 @@ export const CDP_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'changed',
-    metricCode: 'scope3_cat1',
+    metricCodes: ['scope3_cat1'],
     previousNumeric: 48210.0,
   },
   {
@@ -1670,7 +1674,7 @@ export const CDP_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'carry_forward',
-    metricCode: 'energy',
+    metricCodes: ['energy'],
     previousNumeric: 46864.0,
   },
   {
@@ -2277,18 +2281,19 @@ export const CSRD_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'new',
-    metricCode: 'energy',
+    metricCodes: ['energy'],
   },
   {
     code: 'ESRS-E1-6',
     section: 'ESRS E1 気候変動',
     questionText: 'Scope1・Scope2・Scope3 の GHG 総排出量（t-CO2e）を開示してください。',
     guidance:
-      'GHG プロトコルに基づく算定方法を併記してください。（本デモの当年値表示は Scope1 の承認済み集計。Scope2/3 は各データ画面を参照）',
+      'GHG プロトコルに基づく算定方法を併記してください。Scope2 はロケーション基準とマーケット基準を区別し、合算しないでください。',
     answerType: 'numeric',
     required: true,
     changeType2026: 'new',
-    metricCode: 'scope1',
+    // Scope2 は 2 方式を別指標として求める。Scope3 は合計（カテゴリ 1 だけでは足りない）
+    metricCodes: ['scope1', 'scope2', 'scope2_location', 'scope3_total'],
   },
   {
     code: 'ESRS-E3-4',
@@ -2298,7 +2303,7 @@ export const CSRD_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: false,
     changeType2026: 'new',
-    metricCode: 'water',
+    metricCodes: ['water'],
   },
   {
     code: 'ESRS-E5-5',
@@ -2308,7 +2313,7 @@ export const CSRD_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: false,
     changeType2026: 'new',
-    metricCode: 'waste',
+    metricCodes: ['waste'],
   },
   {
     code: 'ESRS-S1-6',
@@ -2318,7 +2323,7 @@ export const CSRD_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'new',
-    metricCode: 'employees',
+    metricCodes: ['employees'],
   },
   {
     code: 'ESRS-S1-9',
@@ -2328,7 +2333,7 @@ export const CSRD_ITEM_SPECS: DisclosureItemSpec[] = [
     answerType: 'numeric',
     required: true,
     changeType2026: 'new',
-    metricCode: 'female_manager_ratio',
+    metricCodes: ['female_manager_ratio'],
   },
   {
     code: 'ESRS-G1-1',

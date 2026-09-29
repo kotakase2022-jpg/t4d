@@ -173,6 +173,72 @@ export async function toDocx(title: string, sections: DocxSection[]): Promise<Ui
 }
 
 // ----------------------------------------------------------------------
+// レポート画面の出力カード
+// ----------------------------------------------------------------------
+
+/** 出力カード 1 枚。links は出力形式のボタンだけを持つ（カードを入れ子にしない） */
+export interface ReportExportCard {
+  title: string;
+  description: string;
+  links: Array<{ label: string; href: string }>;
+}
+
+/**
+ * レポート画面（/enterprise/reports）に並べる出力の一覧。
+ *
+ * 以前は画面側で配列を書いており、CDP のカードが SSBJ カードの links に入れ子になって
+ * 画面に出ていなかった。CSRD の DOCX は経路（/api/exports/cdp?framework=csrd&format=docx）が
+ * あるのにリンクが無かった（W0 棚卸し）。構造を 1 か所にしてテストで確かめる。
+ */
+export function buildReportExportCards(periodId: string): ReportExportCard[] {
+  const disclosure = (framework: 'ssbj' | 'cdp' | 'csrd', format: ExportFormat) =>
+    framework === 'cdp'
+      ? `/api/exports/cdp?period=${periodId}&format=${format}`
+      : `/api/exports/cdp?framework=${framework}&period=${periodId}&format=${format}`;
+
+  return [
+    {
+      title: '非財務データ台帳',
+      description: '組織 × 期間 × 指標 × 値 × 単位 × 状態 × 検証結果 × Evidence 件数を出力します。',
+      links: [
+        { label: 'CSV', href: `/api/exports/data-points?period=${periodId}&format=csv` },
+        { label: 'XLSX', href: `/api/exports/data-points?period=${periodId}&format=xlsx` },
+      ],
+    },
+    {
+      title: 'SSBJ 開示ドラフト',
+      description:
+        'CSV / XLSX は SSBJ の開示要求ごとの一覧（マッピング指標・当年値／前年値）。DOCX は開示ドラフト画面の節別の本文（確定／未確定を明記）と、定量指標の承認済みの値を出力します。',
+      links: [
+        { label: 'CSV', href: disclosure('ssbj', 'csv') },
+        { label: 'XLSX', href: disclosure('ssbj', 'xlsx') },
+        { label: 'DOCX（節別ドラフト）', href: disclosure('ssbj', 'docx') },
+      ],
+    },
+    {
+      title: 'CDP 回答一覧',
+      description:
+        '質問コード・質問文・前年差分区分・状態・回答本文・マッピング指標を出力します（一問一答転記用）。',
+      links: [
+        { label: 'CSV', href: disclosure('cdp', 'csv') },
+        { label: 'XLSX', href: disclosure('cdp', 'xlsx') },
+        { label: 'DOCX（開示ドラフト）', href: disclosure('cdp', 'docx') },
+      ],
+    },
+    {
+      title: 'CSRD 開示ドラフト',
+      description:
+        'CSRD（ESRS・架空の縮小マスター）の開示要求ごとに、回答本文とマッピング指標を出力します。',
+      links: [
+        { label: 'CSV', href: disclosure('csrd', 'csv') },
+        { label: 'XLSX', href: disclosure('csrd', 'xlsx') },
+        { label: 'DOCX（開示ドラフト）', href: disclosure('csrd', 'docx') },
+      ],
+    },
+  ];
+}
+
+// ----------------------------------------------------------------------
 // 共通
 // ----------------------------------------------------------------------
 

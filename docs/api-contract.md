@@ -83,21 +83,21 @@ Service を呼びます。Action 自体は業務ロジックを持ちません�
 
 ### 企業（`src/app/enterprise/actions.ts`）
 
-| Action                        | 入力（FormData）                                             | 主な副作用                                         |
-| ----------------------------- | ------------------------------------------------------------ | -------------------------------------------------- |
-| `uploadFilesAction`           | reportingPeriodId, unitId, files[]                           | ファイル保存 ＋ ジョブ作成 → ジョブ画面へ redirect |
-| `confirmImportAction`         | jobId, rowId[], include/metricId/unitId/value/unitOfMeasure  | Data Point の作成・版追加                          |
-| `transitionDataPointAction`   | dataPointId, to, comment                                     | 状態遷移 ＋ approvals ＋ comments ＋ 監査ログ      |
-| `bulkTransitionAction`        | selected[], to                                               | 一括遷移（失敗行はスキップ）                       |
-| `updateDataPointAction`       | dataPointId, value, unitOfMeasure, methodology, changeReason | 版追加 ＋ 承認後変更フラグ                         |
-| `linkEvidenceAction`          | dataPointId, fileVersionId, page, cellRef, note              | evidence_links                                     |
-| `uploadEvidenceAction`        | file, documentType, reportingPeriodId                        | files / file_versions                              |
-| `generateCdpDraftAction`      | responseId                                                   | AI 実行 ＋ draft 版追加（承認しない）              |
-| `saveCdpResponseAction`       | responseId, answerText/Numeric/Choice, aiRunId, editedFromAi | 版追加（AI 由来フラグを外す）＋ AI 採否記録        |
-| `rejectAiDraftAction`         | aiRunId, comment                                             | ai_runs.status = rejected                          |
-| `transitionCdpResponseAction` | responseId, to                                               | 状態遷移（AI 由来の approved は拒否）              |
-| `toggleGrantAction`           | grantId, revoke                                              | 許諾の取消・再付与 ＋ 監査ログ                     |
-| `respondPbcAction`            | requestId, body, file                                        | pbc_request_responses ＋ 監査ログ                  |
+| Action                         | 入力（FormData）                                             | 主な副作用                                                   |
+| ------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| `uploadFilesAction`            | reportingPeriodId, unitId, files[]                           | ファイル保存 ＋ ジョブ作成 → ジョブ画面へ redirect           |
+| `confirmImportAction`          | jobId, rowId[], include/metricId/unitId/value/unitOfMeasure  | Data Point の作成・版追加                                    |
+| `transitionDataPointAction`    | dataPointId, to, comment                                     | 状態遷移 ＋ approvals ＋ comments ＋ 監査ログ                |
+| `bulkTransitionAction`         | selected[], to                                               | 一括遷移（失敗行はスキップ）                                 |
+| `updateDataPointAction`        | dataPointId, value, unitOfMeasure, methodology, changeReason | 版追加 ＋ 承認後変更フラグ                                   |
+| `linkEvidenceAction`           | dataPointId, fileVersionId, page, cellRef, note              | evidence_links                                               |
+| `uploadEvidenceDocumentAction` | file, title, kind, usagePurpose, confidentiality, …          | files / file_versions ＋ テキスト抽出（evidence/actions.ts） |
+| `generateCdpDraftAction`       | responseId                                                   | AI 実行 ＋ draft 版追加（承認しない）                        |
+| `saveCdpResponseAction`        | responseId, answerText/Numeric/Choice, aiRunId, editedFromAi | 版追加（AI 由来フラグを外す）＋ AI 採否記録                  |
+| `rejectAiDraftAction`          | aiRunId, comment                                             | ai_runs.status = rejected                                    |
+| `transitionCdpResponseAction`  | responseId, to                                               | 状態遷移（AI 由来の approved は拒否）                        |
+| `toggleGrantAction`            | grantId, revoke                                              | 許諾の取消・再付与 ＋ 監査ログ                               |
+| `respondPbcAction`             | requestId, body, file                                        | pbc_request_responses ＋ 監査ログ                            |
 
 ### 監査法人（`src/app/assurance/actions.ts`）
 

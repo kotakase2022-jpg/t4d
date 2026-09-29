@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
-import { FIXTURE_TODAY } from '@/lib/config';
+import { describeReferenceDate } from '@/lib/clock';
 import { isOverdue } from '@/lib/format/datetime';
 import { loadPeriodDataset } from '@/lib/services/enterprise-data';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -30,7 +30,10 @@ export default async function AlertsPage() {
       status: { notIn: ['done', 'cancelled'] },
     },
   });
-  const overdueTasks = tasks.filter((t) => isOverdue(t.dueDate, FIXTURE_TODAY));
+  // 期限の基準日は 1 か所（デモは FIXTURE_TODAY、Supabase Mode は実時計）
+  const referenceDate = describeReferenceDate();
+  const today = referenceDate.date;
+  const overdueTasks = tasks.filter((t) => isOverdue(t.dueDate, today));
 
   const errors = dataset.validations.filter((v) => v.severity === 'error');
   const warnings = dataset.validations.filter((v) => v.severity === 'warning');
@@ -134,7 +137,7 @@ export default async function AlertsPage() {
                   >
                     {request.code} {request.title}
                   </Link>
-                  <Badge tone={isOverdue(request.dueDate, FIXTURE_TODAY) ? 'danger' : 'neutral'}>
+                  <Badge tone={isOverdue(request.dueDate, today) ? 'danger' : 'neutral'}>
                     期限 {request.dueDate}
                   </Badge>
                 </li>
@@ -189,7 +192,15 @@ export default async function AlertsPage() {
         </Card>
 
         <Card className="overflow-hidden">
-          <SectionTitle title={`期限超過（${overdueTasks.length}）`} />
+          <SectionTitle
+            title={`期限超過（${overdueTasks.length}）`}
+            action={
+              // デモでは期限の判定が固定の基準日によることを示す（実時計では出さない）
+              referenceDate.label ? (
+                <span className="text-[11px] text-ink-muted">{referenceDate.label} で判定</span>
+              ) : undefined
+            }
+          />
           {overdueTasks.length === 0 ? (
             <EmptyState title="期限超過はありません" />
           ) : (

@@ -296,7 +296,7 @@ describe('村田デモ: リセットと再現性', () => {
     expect(fixture.approvals).toHaveLength(approvalsBefore);
 
     const breakdown = await loadScope3SupplierBreakdown(db, ctx, PERIOD_IDS.fy2026);
-    expect(breakdown.primaryTotal).toBe(143.1); // 初期状態へ戻る
+    expect(breakdown.breakdownTotal).toBe(143.1); // 初期状態へ戻る（内訳合計）
   });
 
   it('リセット → 同じ 20 ファイルを再投入すると同じ結果になる', async () => {

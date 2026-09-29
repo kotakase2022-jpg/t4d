@@ -221,6 +221,23 @@ const INPUTS: Record<AiFeature, unknown> = {
       },
     ],
   },
+  disclosureBlockDraft: {
+    operation: 'draft_from_sources',
+    blockTitle: 'ガバナンス',
+    periodLabel: '2026年度',
+    currentParagraphIds: [],
+    sources: [
+      {
+        kind: 'source_anchor',
+        id: '00000000-0000-4000-8000-000000000010',
+        label: 'サステナビリティ委員会資料（架空） 第2章 2.1',
+        usage: 'current_fact',
+        periodLabel: '2026年度',
+        locator: '第2章 2.1 第1段落',
+        text: '取締役会は、気候関連の課題を含むサステナビリティ関連のリスク及び機会への対応を監督する。',
+      },
+    ],
+  },
 };
 
 const CONTEXT = {

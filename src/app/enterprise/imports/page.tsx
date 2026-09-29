@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ClipboardPaste, FileSpreadsheet, FileText } from 'lucide-react';
+import { Calculator, ChevronRight, ClipboardPaste, FileSpreadsheet, FileText } from 'lucide-react';
 import { JobStatusBadge } from '@/components/shared/badges';
 import { UploadForm } from './upload-form';
 import { DemoSimulationNotice } from '@/components/shared/demo-simulation-notice';
@@ -55,6 +55,42 @@ export default async function ImportsPage() {
       />
 
       <div className="space-y-3 p-4">
+        {/* 情報取り込みの入り口は 2 つ（§6.4）。数値は決まった形で登録し、定性情報は資料として登録する */}
+        <nav aria-label="登録の入り口" className="grid gap-3 md:grid-cols-2">
+          {[
+            {
+              href: '/enterprise/imports/standard',
+              title: '数値を登録（CSV・手入力）',
+              description:
+                '標準 CSV・貼り付け・手入力で登録します。検証 → 差分の確認 → 登録確定の順に進みます。',
+              Icon: Calculator,
+            },
+            {
+              href: '/enterprise/evidence?purpose=qualitative',
+              title: '定性情報の資料を登録',
+              description:
+                '方針・体制・リスクの説明などの資料を、利用目的（当年度の根拠・過年度の記載など）を指定して登録します。',
+              Icon: FileText,
+            },
+          ].map((entry) => (
+            <Link
+              key={entry.href}
+              href={entry.href}
+              className="group flex items-start gap-3 rounded-t4d-lg border border-line bg-surface px-4 py-3 transition-colors hover:border-brand-300 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
+            >
+              <entry.Icon className="mt-0.5 size-5 shrink-0 text-brand-600" aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-semibold text-ink">{entry.title}</span>
+                <span className="mt-0.5 block text-[12px] text-ink-muted">{entry.description}</span>
+              </span>
+              <ChevronRight
+                className="mt-1 size-4 shrink-0 text-ink-muted group-hover:text-brand-700"
+                aria-hidden="true"
+              />
+            </Link>
+          ))}
+        </nav>
+
         {getAppMode() === 'demo' && <DemoSimulationNotice />}
         {can(ctx, 'enterprise.import.run') && (
           <Card>

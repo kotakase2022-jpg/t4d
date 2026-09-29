@@ -20,8 +20,9 @@ test('GHG 画面にサプライヤー内訳（提出状況・構成比・一次�
   await page.goto('/enterprise/ghg');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
+  // 見出しは「一次データ」から改名（金額×係数の推計を含むため。W0 O6）
   await expect(
-    page.getByRole('heading', { name: 'Scope3 Category 1 サプライヤー内訳（一次データ）' }),
+    page.getByRole('heading', { name: 'Scope3 Category 1 サプライヤー内訳（算定根拠）' }),
   ).toBeVisible();
 
   // 提出済みの社は構成比付きで並ぶ（Fixture: 常盤精密工業 18.0 / 143.1 ≒ 12.6%）
@@ -40,9 +41,10 @@ test('GHG 画面にサプライヤー内訳（提出状況・構成比・一次�
   await expect(missing.getByText('未提出')).toBeVisible();
   await expect(missing.getByRole('link', { name: 'サプライヤーデータ取込へ' })).toBeVisible();
 
-  // 一次データ比率（確定値 50,620.5 に対する 143.1）を数値で併記する
+  // 一次データ比率は定義を明示する: （固有 28.8 ＋ 活動量ベース 61.0）÷ 確定値 50,620.5。
+  // 金額×係数（推計）は分子に入れない（W0 O6）
   await expect(page.getByText('確定値に占める一次データ比率')).toBeVisible();
-  await expect(page.getByText('残りは購買金額ベースの推計')).toBeVisible();
+  await expect(page.getByText(/金額×係数（推計）は含めない/)).toBeVisible();
 });
 
 test('CSV テンプレートがダウンロードでき、未提出の社と 3 種別の記入例が並ぶ', async ({ page }) => {

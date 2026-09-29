@@ -138,11 +138,17 @@ export async function loadActiveValidations(
   });
 }
 
-/** 未解消の検証結果を持つ Data Point の ID を返す（一覧の絞り込みに使う）。 */
+/**
+ * 未解消の検証結果を持つ Data Point の ID を返す（一覧の絞り込みに使う）。
+ *
+ * 検証結果の表は報告期間を持たない。`reportingPeriodId` を渡すと、その期間の
+ * （削除されていない）Data Point に限る。渡さないと過年度の結果まで混ざり、
+ * FY2026 のホームの件数・アラートに FY2025 の行が出ていた（W0 O2）。
+ */
 export async function findDataPointIdsWithValidation(
   db: DbClient,
   organizationId: Uuid,
-  options: { severity?: 'error' | 'warning'; ruleKey?: string },
+  options: { severity?: 'error' | 'warning'; ruleKey?: string; reportingPeriodId?: Uuid },
 ): Promise<Uuid[]> {
   const rows = await db.select('validations', {
     where: {
@@ -152,5 +158,18 @@ export async function findDataPointIdsWithValidation(
       ...(options.ruleKey ? { ruleKey: options.ruleKey } : {}),
     },
   });
-  return [...new Set(rows.map((r) => r.dataPointId))];
+  const ids = [...new Set(rows.map((r) => r.dataPointId))];
+  if (!options.reportingPeriodId || ids.length === 0) return ids;
+
+  // 一覧（loadDataPointPage）と同じ条件で数えるため、削除済みも除く
+  const inPeriod = await db.select('dataPoints', {
+    where: {
+      organizationId,
+      reportingPeriodId: options.reportingPeriodId,
+      deletedAt: { isNull: true },
+      id: { in: ids },
+    },
+  });
+  const keep = new Set(inPeriod.map((dp) => dp.id));
+  return ids.filter((id) => keep.has(id));
 }

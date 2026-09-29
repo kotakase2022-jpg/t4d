@@ -4,6 +4,8 @@ import {
   BadgeCheck,
   Bot,
   Boxes,
+  ChartLine,
+  ClipboardCheck,
   ClipboardList,
   Database,
   FileSearch,
@@ -11,6 +13,7 @@ import {
   FileStack,
   FileText,
   Filter,
+  FolderKanban,
   FolderOpen,
   Gauge,
   Home,
@@ -18,6 +21,7 @@ import {
   Layers,
   ListChecks,
   MessageSquareWarning,
+  NotebookPen,
   PenLine,
   ScrollText,
   Settings,
@@ -227,6 +231,118 @@ export const ENTERPRISE_NAV: NavItem[] = [
     ],
   },
 ];
+
+/**
+ * 従来メニューの項目を名指しで取り出す（検索語・アイコンを二重管理しないため）。
+ * 見つからなければモジュール読込時に止める（黙って項目が消えるより早く気付ける）。
+ */
+function legacyItem(href: string, label: string): NavItem {
+  const walk = (items: NavItem[]): NavItem | undefined => {
+    for (const item of items) {
+      if (item.href === href && item.label === label) return item;
+      const found = walk(item.children ?? []);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  const found = walk(ENTERPRISE_NAV);
+  if (!found) throw new Error(`ENTERPRISE_NAV に ${label}（${href}）がありません`);
+  return found;
+}
+
+/**
+ * 開示優先モード（organization_feature_settings.disclosure_first）の左メニュー
+ * （指示書 §4.1・docs/disclosure-first.md §2-1）。
+ *
+ * 「開示を完成へ進める仕事」から入れるよう、開示プロジェクトを先頭に置き、
+ * データ・定性情報・資料は「情報・根拠」へまとめる。従来メニューの画面は削除せず、
+ * すべてこのツリーのどこかから開けるようにする（A01: 既存 URL を使い続けられる）。
+ *  - CDP・MSCI・FTSE は「その他の開示」へ格納する
+ *  - GHG 算定・Scope3 は「情報・根拠」の関連導線に置き、既存の直リンクは変えない
+ *  - AI Copilot は補助メニューとして最後に残す（AI は各作業画面の補助として出す）
+ *
+ * 機能設定が false の組織には ENTERPRISE_NAV（従来ツリー）をそのまま使う（A39）。
+ */
+export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
+  {
+    ...legacyItem('/enterprise/dashboard', 'ホーム'),
+    keywords: ['dashboard', 'ダッシュボード', '自分の作業'],
+  },
+  {
+    label: '開示プロジェクト',
+    href: '/enterprise/disclosure-projects',
+    icon: FolderKanban,
+    keywords: ['開示', 'プロジェクト', '原稿', 'レビュー', '承認', '出力'],
+    children: [
+      legacyItem('/enterprise/disclosures/ssbj', 'SSBJ'),
+      legacyItem('/enterprise/disclosures/csrd', 'CSRD'),
+      {
+        label: 'その他の開示',
+        href: '/enterprise/disclosures/cdp',
+        icon: FileStack,
+        keywords: ['CDP', 'MSCI', 'FTSE', '評価機関'],
+        children: [
+          legacyItem('/enterprise/disclosures/cdp', 'CDP'),
+          legacyItem('/enterprise/disclosures/msci', 'MSCI'),
+          legacyItem('/enterprise/disclosures/ftse', 'FTSE'),
+        ],
+      },
+      { ...legacyItem('/enterprise/reports', 'レポート'), label: 'レポート出力' },
+    ],
+  },
+  {
+    label: '情報・根拠',
+    href: '/enterprise/data',
+    icon: Database,
+    keywords: ['情報', '根拠', 'データ'],
+    children: [
+      { ...legacyItem('/enterprise/data', '非財務データ'), label: '定量データ' },
+      {
+        label: '定性情報',
+        href: '/enterprise/narratives',
+        icon: NotebookPen,
+        keywords: ['定性', 'ガバナンス', 'リスク', '機会', '財務的影響', '戦略'],
+      },
+      { ...legacyItem('/enterprise/evidence', 'Evidence'), label: '資料・証跡' },
+      { ...legacyItem('/enterprise/imports', 'データ取込'), label: '取込' },
+      {
+        label: '数値を登録（標準CSV）',
+        href: '/enterprise/imports/standard',
+        icon: FileSpreadsheet,
+        keywords: ['CSV', '標準', '手入力', '数値', '登録'],
+      },
+      { ...legacyItem('/enterprise/ghg', '算定サマリー'), label: 'GHG算定' },
+      legacyItem('/enterprise/ghg/suppliers', 'Scope3データ取込'),
+    ],
+  },
+  {
+    label: 'ESG経営',
+    href: '/enterprise/esg',
+    icon: ChartLine,
+    keywords: ['KPI', '目標', '推移', '経営'],
+  },
+  {
+    label: 'タスク・承認',
+    href: '/enterprise/workflows',
+    icon: ClipboardCheck,
+    keywords: ['タスク', '承認', 'レビュー', '差戻し', '期限', 'PBC'],
+    children: [
+      { ...legacyItem('/enterprise/workflows', 'ワークフロー'), label: '自分の作業・レビュー' },
+      legacyItem('/enterprise/alerts', 'アラート'),
+    ],
+  },
+  legacyItem('/enterprise/organizations', '管理'),
+  legacyItem('/enterprise/ai', 'AI Copilot'),
+];
+
+export type NavVariant = 'enterprise' | 'enterprise-disclosure' | 'assurance';
+
+/** メニューの種類ごとのツリー。Sidebar・Command Palette・非表示判定が同じツリーを使う */
+export function navTreeFor(variant: NavVariant, engagementId: string | null): NavItem[] {
+  if (variant === 'enterprise') return ENTERPRISE_NAV;
+  if (variant === 'enterprise-disclosure') return ENTERPRISE_NAV_DISCLOSURE_FIRST;
+  return assuranceNav(engagementId);
+}
 
 export function assuranceNav(engagementId: string | null): NavItem[] {
   const base = engagementId ? `/assurance/engagements/${engagementId}` : null;

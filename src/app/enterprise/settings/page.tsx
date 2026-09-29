@@ -1,4 +1,4 @@
-import { ShieldCheck, UserPlus } from 'lucide-react';
+import { CheckCircle2, CircleOff, LayoutPanelLeft, ShieldCheck, UserPlus } from 'lucide-react';
 import { MembershipStatusBadge } from '@/components/shared/badges';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -12,7 +12,9 @@ import { roleLabel } from '@/lib/authorization/roles';
 import { Input } from '@/components/ui/input';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
 import { getAppMode } from '@/lib/config';
+import { getFeatureSettings } from '@/lib/services/feature-settings';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { setDisclosureFirstAction } from './actions';
 import { MfaEnrollCard } from './security-card';
 import {
   createInvitationAction,
@@ -60,6 +62,7 @@ export default async function SettingsPage({
 
   const supabaseMode = getAppMode() === 'supabase';
   const organizationId = ctx.workspace.organizationId;
+  const featureSettings = await getFeatureSettings(db, ctx);
   const [memberships, engagements, grants, invitations] = await Promise.all([
     db.select('memberships', { where: { organizationId } }),
     db.select('engagements', { where: { clientOrganizationId: organizationId } }),
@@ -113,6 +116,63 @@ export default async function SettingsPage({
         <FlashMessage searchParams={params} />
       </div>
       <div className="space-y-3 p-4">
+        <Card className="overflow-hidden">
+          <SectionTitle
+            title="機能設定（開示優先モード）"
+            action={
+              featureSettings.disclosureFirst ? (
+                <Badge tone="success">
+                  <CheckCircle2 className="size-3" aria-hidden="true" />
+                  有効
+                </Badge>
+              ) : (
+                <Badge tone="neutral">
+                  <CircleOff className="size-3" aria-hidden="true" />
+                  無効（従来の構成）
+                </Badge>
+              )
+            }
+          />
+          <form action={setDisclosureFirstAction} className="space-y-2 px-3 pb-3">
+            <p className="flex items-start gap-1.5 text-[12px] text-ink-muted">
+              <LayoutPanelLeft className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                有効にすると、左メニューとホームが開示業務を中心とした構成（開示プロジェクト／情報・根拠／ESG経営／タスク・承認）に切り替わります。
+                既存の画面はすべてメニューから開け、URL
+                も変わりません。設定は組織単位で、この組織の全メンバーに反映されます。
+                {shell.ctx.demo &&
+                  ' デモ環境では、同じサーバーで表示している他の閲覧者にも反映される場合があります。'}
+              </span>
+            </p>
+            <fieldset className="flex flex-wrap items-center gap-3 text-[12px] text-ink">
+              <legend className="sr-only">開示優先モード</legend>
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="disclosureFirst"
+                  value="on"
+                  defaultChecked={featureSettings.disclosureFirst}
+                  className="size-3.5"
+                />
+                有効にする
+              </label>
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="disclosureFirst"
+                  value="off"
+                  defaultChecked={!featureSettings.disclosureFirst}
+                  className="size-3.5"
+                />
+                無効にする（従来の構成）
+              </label>
+              <Button type="submit" size="sm">
+                保存
+              </Button>
+            </fieldset>
+          </form>
+        </Card>
+
         <Card className="overflow-hidden">
           <SectionTitle title={`メンバー（${memberships.length}）`} />
           <Table>

@@ -1,0 +1,6 @@
+﻿metric_code,period_start,period_end,entity_code,boundary_code,value,unit,value_kind,availability_status,absence_reason,methodology_code,breakdown_key,source_reference
+scope2_location,2026-04-01,2027-03-31,HQ,連結,2950.4,t-CO2e,actual,value_present,,location_based,,電力会社の請求書（架空）
+scope3_cat6,2026-04-01,2027-03-31,HQ,連結,85.2,t-CO2e,estimate,value_present,,spend_based,,出張旅費の精算データ（架空）
+scope3_cat5,2026-04-01,2027-03-31,HQ,連結,,t-CO2e,actual,not_calculated,算定方法を検討中（架空）,,,
+scope3_cat14,2026-04-01,2027-03-31,HQ,連結,,t-CO2e,actual,not_applicable,フランチャイズ事業なし（架空）,,,
+work_related_injuries,2026-04-01,2027-03-31,EAST,連結,0,件,actual,value_present,,,,安全衛生委員会資料（架空）

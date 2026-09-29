@@ -17,6 +17,12 @@ export const aiSourceSchema = z.object({
     'disclosure_response',
     'metric_definition',
     'snapshot_item',
+    // 開示本文の下書き（disclosureBlockDraft）が引用する版・位置
+    'narrative_version',
+    'source_anchor',
+    'metric_version',
+    'prior_block',
+    'requirement',
   ]),
   id: z.string().nullable(),
   label: z.string(),
@@ -250,6 +256,77 @@ export const copilotChatSchema = z.object({
 });
 export type CopilotChatOutput = z.infer<typeof copilotChatSchema>;
 
+// 11. disclosureBlockDraft — 開示本文（節）の下書き候補（docs/disclosure-first.md §2-3、指示書 §9）
+//
+// 操作は 3 つに絞る（選択した根拠から下書き／前年からの変更案／文章を整える）。
+// 返すのは段落ごとの「候補」と、その段落が根拠にした入力の ID だけ。
+// サーバーは sourceRefs を入力の許可リストと突き合わせ、入力に無い ID を引いた段落は
+// 採用させずに不足情報へ回す（disclosure-ai-draft.ts の validateDraftOutput）。
+// 実行 ID・モデル・開始終了などの生成メタデータはモデルに書かせず、ai_runs の行から組み立てる。
+export const DISCLOSURE_DRAFT_OPERATIONS = [
+  'draft_from_sources',
+  'update_from_prior_year',
+  'polish',
+] as const;
+export type DisclosureDraftOperation = (typeof DISCLOSURE_DRAFT_OPERATIONS)[number];
+
+export const DISCLOSURE_DRAFT_SOURCE_KINDS = [
+  'narrative_version',
+  'source_anchor',
+  'metric_version',
+  'prior_block',
+  'requirement',
+  'block_paragraph',
+] as const;
+export type DisclosureDraftSourceKind = (typeof DISCLOSURE_DRAFT_SOURCE_KINDS)[number];
+
+export const disclosureDraftSourceRefSchema = z.object({
+  kind: z.enum(DISCLOSURE_DRAFT_SOURCE_KINDS),
+  id: z.string(),
+  /** 資料内の位置・段落 ID など。表示用（検証は kind と id で行う） */
+  locator: z.string().nullable(),
+});
+export type DisclosureDraftSourceRef = z.infer<typeof disclosureDraftSourceRefSchema>;
+
+export const disclosureBlockDraftSchema = z.object({
+  operation: z.enum(DISCLOSURE_DRAFT_OPERATIONS),
+  /** 段落ごとの本文候補。既存段落の置き換え候補なら paragraphId に段落 ID、新しい段落は null */
+  draftBlocks: z.array(
+    z.object({
+      paragraphId: z.string().nullable(),
+      kind: z.enum(['paragraph', 'heading']),
+      text: z.string(),
+      sourceRefs: z.array(disclosureDraftSourceRefSchema),
+    }),
+  ),
+  /** 書けない内容・足りない情報・次に確認する対象（事実らしい文章で埋めない） */
+  missingInformation: z.array(
+    z.object({
+      item: z.string(),
+      reason: z.string(),
+      nextCheck: z.string().nullable(),
+    }),
+  ),
+  /** 相反する根拠。人が判断するまで本文へ書かない */
+  conflicts: z.array(
+    z.object({
+      subject: z.string(),
+      detail: z.string(),
+      sourceRefs: z.array(disclosureDraftSourceRefSchema),
+    }),
+  ),
+  /** 対象にした要求事項と基準の版 */
+  usedRequirementVersions: z.array(
+    z.object({
+      requirementId: z.string(),
+      code: z.string(),
+      frameworkVersionId: z.string(),
+    }),
+  ),
+  ...base,
+});
+export type DisclosureBlockDraftOutput = z.infer<typeof disclosureBlockDraftSchema>;
+
 export const AI_SCHEMAS = {
   importMapping: importMappingSchema,
   anomalyExplanation: anomalyExplanationSchema,
@@ -263,6 +340,7 @@ export const AI_SCHEMAS = {
   copilotChat: copilotChatSchema,
   assuranceEvidenceSummary: assuranceEvidenceSummarySchema,
   assuranceChangeSummary: assuranceChangeSummarySchema,
+  disclosureBlockDraft: disclosureBlockDraftSchema,
 } as const;
 
 export type AiFeature = keyof typeof AI_SCHEMAS;
@@ -282,4 +360,5 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   copilotChat: 'copilot-chat@2026-08-18.1',
   assuranceEvidenceSummary: 'assurance-evidence-summary@2026-08-14.1',
   assuranceChangeSummary: 'assurance-change-summary@2026-08-14.1',
+  disclosureBlockDraft: 'disclosure-block-draft@2026-09-29.1',
 };

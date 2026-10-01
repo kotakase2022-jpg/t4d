@@ -177,6 +177,11 @@ export interface PriorityInput {
   assuranceRelevant: boolean;
   /** 報告期限までの残り日数（null = 期限未設定） */
   daysToDeadline: number | null;
+  /**
+   * 「制度上の重要性」の説明に出す基準名（既定は SSBJ）。
+   * CSRD の要求事項にも同じ評価を使うため、説明の文言だけを差し替えられるようにする
+   */
+  standardLabel?: string;
 }
 
 export interface PriorityResult {
@@ -206,7 +211,7 @@ export function evaluatePriority(input: PriorityInput): PriorityResult {
     judgement: input.required ? '開示が求められる項目' : '状況により開示する項目',
     score: regulatory,
     note: input.required
-      ? 'SSBJ が「開示しなければならない」と定めている項目です。'
+      ? `${input.standardLabel ?? 'SSBJ'} が「開示しなければならない」と定めている項目です。`
       : '条件に該当する場合に開示する項目です。',
   });
 

@@ -137,6 +137,47 @@ const INPUTS: Record<AiFeature, unknown> = {
     ],
     sources: [],
   },
+  csrdGapAnalysis: {
+    itemCode: 'ESRS-E1-6',
+    title: 'Scope1・Scope2・Scope3 の GHG 総排出量（t-CO2e）を開示してください。',
+    requirementText: 'GHG プロトコルに基づく算定方法を併記してください（架空サンプル）。',
+    required: true,
+    section: 'E1',
+    sectionLabel: 'E1 気候変動',
+    applicability: { kind: 'material', perspectives: ['impact', 'financial'], provisional: false },
+    dma: { outcome: 'both', outcomeLabel: '両面で重要' },
+    responseStatus: 'draft',
+    mappedMetricCount: 4,
+    metricValues: [{ label: 'Scope1 排出量', value: 7859.8, unit: 't-CO2e' }],
+    hasApprovalWorkflow: true,
+    sources: [],
+  },
+  csrdDisclosureDraft: {
+    section: 'E1',
+    sectionLabel: 'E1 気候変動',
+    organizationName: '青海テクノロジー株式会社',
+    periodLabel: '2026年度',
+    applicabilityKind: 'material',
+    perspectives: ['impact', 'financial'],
+    provisional: false,
+    topic: {
+      iros: [
+        { typeLabel: 'インパクト', description: '製造拠点の GHG 排出（架空）', score: 4 },
+        { typeLabel: 'リスク', description: '炭素価格の上昇（架空）', score: 4 },
+      ],
+    },
+    requirements: [
+      {
+        code: 'ESRS-E1-5',
+        title: 'エネルギー消費量とエネルギーミックス',
+        finalStatus: 'mostly_covered',
+        reviewed: true,
+      },
+      { code: 'ESRS-E1-4', title: 'GHG 排出削減目標', finalStatus: null, reviewed: false },
+    ],
+    metricValues: [{ label: 'エネルギー消費量', value: 41000, unit: 'MWh' }],
+    sources: [],
+  },
   evidenceMapping: {
     fragments: [
       {

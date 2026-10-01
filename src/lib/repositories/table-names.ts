@@ -58,6 +58,14 @@ export const SQL_TABLE_NAMES: Record<TableName, string> = {
   ssbjAnalysisSettings: 'ssbj_analysis_settings',
   ssbjDisclosureDrafts: 'ssbj_disclosure_drafts',
 
+  // CSRD のダブル・マテリアリティと要求事項の評価（docs/disclosure-first.md §9.3）
+  csrdAnalysisSettings: 'csrd_analysis_settings',
+  csrdDmaMatters: 'csrd_dma_matters',
+  csrdDmaIros: 'csrd_dma_iros',
+  csrdAssessments: 'csrd_assessments',
+  csrdActionPlans: 'csrd_action_plans',
+  csrdDisclosureDrafts: 'csrd_disclosure_drafts',
+
   organizationFeatureSettings: 'organization_feature_settings',
   disclosureProjects: 'disclosure_projects',
   projectFrameworks: 'project_frameworks',

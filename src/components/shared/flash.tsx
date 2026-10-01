@@ -138,6 +138,38 @@ const MESSAGES: Record<string, (params: URLSearchParams) => string> = {
       return '担当者へ差し戻しました（通知済み）。再確認は未了のままです。';
     return '新しい版を採用した次の版を作りました。承認済みの版はそのまま残っています。再レビューしてください。';
   },
+  // CSRD（docs/disclosure-first.md §9.4）。DMA に関わる保存は確定を外すため、その旨を必ず伝える
+  csrdBoundarySaved: () =>
+    '報告範囲を保存しました。ダブル・マテリアリティ評価（DMA）を確定していた場合は、確定を取り消しました。',
+  csrdMethodSaved: () =>
+    '評価方法・閾値・ステークホルダー関与を保存しました（自社の評価方法・デモ既定）。DMA を確定していた場合は、確定を取り消しました。',
+  csrdIroSaved: () =>
+    'IRO を保存しました。算定結果は提案で、重要性は人が判断します。DMA を確定していた場合は、確定を取り消しました。',
+  csrdIroDeleted: () =>
+    'IRO を削除しました（論理削除。履歴は残ります）。DMA を確定していた場合は、確定を取り消しました。',
+  csrdMatterDecided: () =>
+    'サステナビリティ事項の判断を保存しました（判断者と日時を記録しました）。DMA を確定していた場合は、確定を取り消しました。',
+  csrdDmaConfirmed: () =>
+    'ダブル・マテリアリティ評価（DMA）を確定しました。要求事項の適用から「暫定」が外れました。',
+  csrdAssessmentSaved: () => '要求事項の 3 観点を保存し、担当者の入力として確定しました。',
+  csrdGapAnalyzed: () =>
+    'AI ギャップ分析を実行しました（デモ生成）。結果は候補です。「候補を採用」か「修正して確定」で担当者が確定してください。',
+  csrdReviewSaved: (params) =>
+    params.get('decision') === 'modified'
+      ? '担当者が修正して確定しました（修正の理由を記録しました）。'
+      : 'AI の候補を採用して確定しました（確認者と日時を記録しました）。',
+  csrdPlanCreated: () => '対応計画を追加しました（未着手）。',
+  csrdPlanUpdated: () => '対応計画を更新しました。',
+  csrdCollectionCreated: (params) => {
+    const code = params.get('code');
+    return `データ収集項目を作成しました${code ? `（${code}）` : ''}。対応計画は「対応中」になりました。`;
+  },
+  csrdDraftGenerated: () =>
+    'AI 草案を作成しました（デモ生成）。本文には入っていません。「本文に採用」してから編集・確定してください。',
+  csrdDraftAdopted: () =>
+    'AI 草案を本文に採用しました。内容を確認・編集して保存し、確定してください（確定はしていません）。',
+  csrdDraftSaved: () => '本文を保存しました。確定していた場合は、確定を取り消しました。',
+  csrdDraftConfirmed: () => '本文を確定しました（確定者と日時を記録しました）。',
 };
 
 export function FlashMessage({

@@ -10,6 +10,12 @@ import { permissionsFor } from '@/lib/authorization/can';
 import { availabilityFromValue } from '@/lib/domain/disclosure-status';
 import type { FixtureDb } from '@/lib/fixtures/store';
 import { expandRow, isCompactedTable, type ReplayBudget } from './demo-compact';
+import {
+  CSRD_DEFERRED_ORDER,
+  CSRD_PERSISTED_TABLES,
+  acceptCsrdEdit,
+  isCsrdCheckedTable,
+} from './demo-csrd-checks';
 import type {
   Approval,
   DataPoint,
@@ -291,6 +297,14 @@ const PERSISTED_TABLES = new Set<TableName>([
   'reviewComments',
   'recheckDecisions',
   'kpiTargets',
+  // CSRD のダブル・マテリアリティ・評価・計画・開示ドラフト（docs/disclosure-first.md §9.3）。
+  // 差分だけを記録する。FY2026 の評価 12 行は Fixture に全部置き、表示時に行を作らない
+  // （ssbjAssessments の一括作成の問題を持ち込まない）。草案（AI のデモ生成）は 1 節 600 字以内。
+  // 戻すときは DB の規則と同じ検査を通す（demo-csrd-checks.ts）
+  ...CSRD_PERSISTED_TABLES,
+  // 収集項目（指標 × 拠点 × 期間の割当）。作った直後の収集画面の行が別インスタンスで消えないように。
+  // 割当を作るのは collection-item.ts の 1 か所だけで、1 回の操作で 1 行
+  'metricAssignments',
 ]);
 
 /**
@@ -375,6 +389,8 @@ const DEFERRED_ORDER: Readonly<Record<string, number>> = {
   reportSnapshots: 6,
   exportArtifacts: 7,
   quantitativeImportBatches: 8,
+  // CSRD: 事項 → IRO、評価 → 計画、事項 → 分析条件（DMA の確定の条件）。割当は指標・拠点の後
+  ...CSRD_DEFERRED_ORDER,
 };
 
 /**
@@ -428,6 +444,9 @@ const SNAPSHOT_INDEPENDENT_TABLES: ReadonlySet<string> = new Set([
   'reportSnapshots',
   'exportArtifacts',
   'quantitativeImportBatches',
+  // CSRD の表と割当は開示プロジェクトのスナップショットに含まれない
+  ...CSRD_PERSISTED_TABLES,
+  'metricAssignments',
 ]);
 
 /**
@@ -1586,6 +1605,12 @@ function acceptEdit(
         ctx,
       );
     default:
+      // CSRD の表と割当（0044〜0046・収集項目）は DB の規則と同じ検査を通す
+      if (isCsrdCheckedTable(table)) {
+        return acceptCsrdEdit(db, table, existing, next, (organizationId, userId, permission) =>
+          hasPermission(db, organizationId, userId, permission),
+        );
+      }
       return true;
   }
 }

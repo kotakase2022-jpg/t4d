@@ -1899,6 +1899,226 @@ export interface QuantitativeImportBatch {
 }
 
 // ======================================================================
+// CSRD（ESRS サンプル）のダブル・マテリアリティと要求事項の評価
+// （docs/disclosure-first.md §9。migration 0044〜0046）
+//
+// SSBJ は財務的重要性（シングル）で、重要性は ssbj_assessments の 1 軸で持つ。
+// CSRD はインパクトと財務の 2 軸（ダブル・マテリアリティ）で、サステナビリティ事項ごとに
+// 人が判断した結果から要求事項の適用を毎回導出する（適用・重要性の列は持たない）。
+// 表示ラベルは src/lib/domain/csrd.ts と src/lib/domain/dma.ts に集約する。
+// ======================================================================
+
+/** ESRS のテーマ別基準（サステナビリティ事項）。サブトピックは IRO の subTopic（自由記述）で表す */
+export const ESRS_TOPICS = ['E1', 'E2', 'E3', 'E4', 'E5', 'S1', 'S2', 'S3', 'S4', 'G1'] as const;
+export type EsrsTopic = (typeof ESRS_TOPICS)[number];
+
+/** 開示ドラフトの節。ESRS 2（全般開示）とテーマ別基準 10 個 */
+export const CSRD_SECTIONS = ['ESRS2', ...ESRS_TOPICS] as const;
+export type CsrdSection = (typeof CSRD_SECTIONS)[number];
+
+/** 1 つの軸（インパクト／財務）についての人の判断 */
+export const DMA_AXIS_ASSESSMENTS = ['material', 'not_material', 'not_assessed'] as const;
+export type DmaAxisAssessment = (typeof DMA_AXIS_ASSESSMENTS)[number];
+
+/** 2 軸の判断から導く事項の結果（保存しない） */
+export const DMA_OUTCOMES = [
+  'both',
+  'impact_only',
+  'financial_only',
+  'not_material',
+  'not_assessed',
+] as const;
+export type DmaOutcome = (typeof DMA_OUTCOMES)[number];
+
+/** 重要と判断された観点（要求事項がどの観点で適用になったか） */
+export const DMA_PERSPECTIVES = ['impact', 'financial'] as const;
+export type DmaPerspective = (typeof DMA_PERSPECTIVES)[number];
+
+/** 要求事項の適用の区分（保存しない。DMA から導出） */
+export const CSRD_APPLICABILITY_KINDS = [
+  'always',
+  'material',
+  'not_material',
+  'undetermined',
+] as const;
+export type CsrdApplicabilityKind = (typeof CSRD_APPLICABILITY_KINDS)[number];
+
+/** IRO（影響・リスク・機会）の種類 */
+export const IRO_TYPES = ['impact', 'risk', 'opportunity'] as const;
+export type IroType = (typeof IRO_TYPES)[number];
+
+/** インパクトが既に生じているか（実在）、生じうるか（潜在） */
+export const IMPACT_OCCURRENCES = ['actual', 'potential'] as const;
+export type ImpactOccurrence = (typeof IMPACT_OCCURRENCES)[number];
+
+export const IMPACT_DIRECTIONS = ['negative', 'positive'] as const;
+export type ImpactDirection = (typeof IMPACT_DIRECTIONS)[number];
+
+/** バリューチェーンのどこで生じるか */
+export const VALUE_CHAIN_STAGES = ['own_operations', 'upstream', 'downstream'] as const;
+export type ValueChainStage = (typeof VALUE_CHAIN_STAGES)[number];
+
+/** 期間（短期=報告期間／中期=〜5 年／長期=5 年超） */
+export const TIME_HORIZONS = ['short', 'medium', 'long'] as const;
+export type TimeHorizon = (typeof TIME_HORIZONS)[number];
+
+/** 採点方法。ESRS は閾値・採点方法を定めないため、会社が決めて開示する（デモ既定） */
+export const DMA_SCORING_METHODS = ['dma-demo-v1'] as const;
+export type DmaScoringMethod = (typeof DMA_SCORING_METHODS)[number];
+
+/**
+ * CSRD の分析条件（0044）。組織 × 報告期間で 1 件。
+ * 行が無い期間は既定値の仮想行として読み、最初の保存で作る（読込で行を作らない）。
+ * DMA の確定（dmaConfirmedAt）は人の操作でのみ入り、DMA に関わる書込で外れる。
+ */
+export interface CsrdAnalysisSettings extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  /** 報告の範囲（値の意味は SSBJ の分析条件と同じ） */
+  consolidationScope: SsbjConsolidationScope;
+  consolidationNote: string;
+  /** 報告対象に含める組織・拠点。空配列は全社（未指定） */
+  includedUnitIds: Uuid[];
+  valueChainScope: SsbjValueChainScope;
+  valueChainNote: string;
+  scoringMethod: DmaScoringMethod;
+  /** インパクト側の閾値（1.0〜5.0、小数 1 桁）。算定結果がこれ以上なら「重要」を提案する */
+  impactThreshold: number;
+  financialThreshold: number;
+  methodNote: string;
+  /** ステークホルダー関与の記載（DMA の確定条件） */
+  stakeholderEngagementNote: string;
+  dmaConfirmedAt: IsoDateTime | null;
+  dmaConfirmedBy: Uuid | null;
+}
+
+/**
+ * サステナビリティ事項（ESRS のテーマ別基準）ごとの人の判断（0044）。
+ * 算定結果は提案にすぎず、各軸の「重要／重要でない」は人が根拠付きで決める。
+ * 結果（DmaOutcome）は列にせず 2 軸から導出する。
+ */
+export interface CsrdDmaMatter extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  esrsTopic: EsrsTopic;
+  impactAssessment: DmaAxisAssessment;
+  financialAssessment: DmaAxisAssessment;
+  /** 評価済みの軸は根拠が必須 */
+  impactRationale: string;
+  financialRationale: string;
+  stakeholderNote: string;
+  decidedAt: IsoDateTime | null;
+  decidedBy: Uuid | null;
+}
+
+/**
+ * IRO（影響・リスク・機会）（0044）。すべて 1〜5 の整数入力。
+ * 形の規則（src/lib/domain/dma.ts の validateIroShape と migration の CHECK）:
+ *  - impact … 発生・方向・規模・範囲あり、財務 2 列なし。負 ⇔ 回復困難性あり、潜在 ⇔ 可能性あり
+ *  - risk / opportunity … インパクト系 6 列なし・人権フラグなし、財務 2 列と期間あり
+ */
+export interface CsrdDmaIro extends AuditColumns, SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  matterId: Uuid;
+  iroType: IroType;
+  subTopic: string;
+  description: string;
+  valueChainStage: ValueChainStage;
+  timeHorizon: TimeHorizon | null;
+  impactOccurrence: ImpactOccurrence | null;
+  impactDirection: ImpactDirection | null;
+  impactScale: number | null;
+  impactScope: number | null;
+  impactIrremediability: number | null;
+  impactLikelihood: number | null;
+  financialLikelihood: number | null;
+  financialMagnitude: number | null;
+  humanRights: boolean;
+  affectedStakeholders: string;
+  /** リスク・機会が関連するインパクト IRO（任意。同じ組織の行だけ） */
+  relatedImpactIroId: Uuid | null;
+}
+
+/**
+ * CSRD 要求事項ごとの評価（0045）。組織 × 報告期間 × 要求事項で一意。
+ * 適用区分・重要性は持たない（DMA から毎回導出する）。
+ * AI の候補（ai*）と人の確定（3 観点・final・reviewed*）を別の列で持ち、AI は ai* だけを書く。
+ */
+export interface CsrdAssessment extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  /** disclosure_items.id（CSRD の版の要求事項に限る。DB トリガで強制） */
+  itemId: Uuid;
+  /** 人が入力・確定した 3 観点 */
+  disclosureStatus: SsbjCoverageStatus;
+  dataStatus: SsbjCoverageStatus;
+  processStatus: SsbjCoverageStatus;
+  /** AI の候補（人が採用するまで確定値にならない） */
+  aiDisclosureStatus: SsbjCoverageStatus | null;
+  aiDataStatus: SsbjCoverageStatus | null;
+  aiProcessStatus: SsbjCoverageStatus | null;
+  aiStatus: SsbjCoverageStatus | null;
+  aiComment: string;
+  aiMissingInfo: string[];
+  aiRecommendation: string;
+  aiRunId: Uuid | null;
+  aiEvaluatedAt: IsoDateTime | null;
+  /** 人の確認（AI 候補の採用か、修正か。AI 候補なしで人が入れたときは null） */
+  reviewDecision: SsbjReviewDecision | null;
+  reviewedBy: Uuid | null;
+  reviewedAt: IsoDateTime | null;
+  reviewComment: string;
+  /** 人が確定した総合（3 観点を combineCoverage でまとめたもの）。確認して初めて入る */
+  finalStatus: SsbjCoverageStatus | null;
+  ownerDepartment: string;
+  ownerUserId: Uuid | null;
+}
+
+/** CSRD の対応計画（0045）。列は SSBJ の対応計画（0025）と同じ */
+export interface CsrdActionPlan extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  assessmentId: Uuid;
+  gapKind: SsbjGapKind;
+  title: string;
+  detail: string;
+  actionType: SsbjActionType;
+  department: string;
+  assigneeUserId: Uuid | null;
+  dueDate: IsoDate | null;
+  priority: SsbjPriority;
+  status: SsbjActionStatus;
+  linkedMetricCode: string | null;
+}
+
+/**
+ * CSRD 開示ドラフトの節（0046）。AI の草案（aiBody）と人の本文（body）を分けて持つ。
+ * AI は aiBody 等の候補列だけを書き、本文への採用・確定は人が行う。
+ */
+export interface CsrdDisclosureDraft extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  section: CsrdSection;
+  body: string;
+  aiBody: string;
+  coveredItemCodes: string[];
+  gaps: Array<{ itemCode: string; reason: string }>;
+  aiRunId: Uuid | null;
+  aiConfidence: number | null;
+  aiWarnings: string[];
+  aiGeneratedAt: IsoDateTime | null;
+  confirmedAt: IsoDateTime | null;
+  confirmedBy: Uuid | null;
+}
+
+// ======================================================================
 // 10.7 Import / AI
 // ======================================================================
 
@@ -1999,6 +2219,9 @@ export const AI_FEATURE_TYPES = [
   'assuranceChangeSummary',
   // 開示優先モード: 節の下書き候補（docs/disclosure-first.md §2-3）
   'disclosureBlockDraft',
+  // CSRD（docs/disclosure-first.md §9.4）: 要求事項のギャップ分析と節の草案。どちらも候補列にだけ書く
+  'csrdGapAnalysis',
+  'csrdDisclosureDraft',
 ] as const;
 export type AiFeatureType = (typeof AI_FEATURE_TYPES)[number];
 
@@ -2054,7 +2277,10 @@ export interface AiSourceReference {
     | 'source_anchor'
     | 'metric_version'
     | 'prior_block'
-    | 'requirement';
+    | 'requirement'
+    // CSRD の草案・ギャップ分析が根拠にした DMA の事項・IRO
+    | 'dma_matter'
+    | 'dma_iro';
   id: Uuid | null;
   label: string;
   locator: string | null;

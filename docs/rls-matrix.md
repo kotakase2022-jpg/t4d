@@ -3,8 +3,8 @@
 `supabase/migrations/0012_rls_core.sql` / `0013_rls_assurance.sql`
 （＋ `0016_storage_bucket_read.sql` / `0017_rls_counterparty_organization.sql` /
 `0025_ssbj_gap_analysis.sql` / `0028_ssbj_analysis_settings.sql` / `0029_approval_routes.sql` /
-`0030_ssbj_disclosure_drafts.sql` / 開示優先モードの `0033`〜`0040`）の要約です。
-**100 テーブルすべてで RLS を有効化**しており（ポリシー 228 件）、`pnpm check:rls` が未設定を検出します。
+`0030_ssbj_disclosure_drafts.sql` / 開示優先モードの `0033`〜`0040` / CSRD の `0044`〜`0046`）の要約です。
+**106 テーブルすべてで RLS を有効化**しており（ポリシー 240 件）、`pnpm check:rls` が未設定を検出します。
 
 凡例
 
@@ -132,6 +132,25 @@
 - `returned` … `reason` と `paragraph_id` が必須
 - すべて … `target_version_id` は依頼で固定した版と一致（別の版を名乗って作成者の判定をすり抜けさせない）
 
+### 6.2 CSRD のダブル・マテリアリティと要求事項の評価（0044〜0046）
+
+権限キーは新設していない（docs/disclosure-first.md §9.3）。参照は組織メンバー、書込（for all）は `enterprise.disclosure.write`（0028 / 0030 と同じ）。
+追記専用の表は無い（判断・閾値は書き換えられ、DMA の確定は同じ処理で外れる）。子の `organization_id` は親と一致しなければならず、
+報告期間・事項・評価・AI の実行・関連するインパクト IRO を `(id, organization_id)` の複合外部キーで固定している（Service Role でも他社の行を指せない）。
+
+| テーブル               | SELECT | INSERT / UPDATE                                                                                                                  | DELETE |
+| ---------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| csrd_analysis_settings | own    | perm:disclosure.write。閾値 1.0〜5.0・DMA の確定は確定者と日時が対（CHECK）                                                      | —      |
+| csrd_dma_matters       | own    | perm:disclosure.write。評価済みの軸は根拠必須・判断者と日時が対（CHECK）                                                         | —      |
+| csrd_dma_iros          | own    | perm:disclosure.write。インパクト／リスク・機会の形（CHECK）。事項・関連するインパクトは同じ組織（複合外部キー）。削除は論理削除 | —      |
+| csrd_assessments       | own    | perm:disclosure.write。**CSRD の版の要求事項だけ**（トリガ）。最終判定は人の確認と対・AI の候補は一式でそろう（CHECK）           | —      |
+| csrd_action_plans      | own    | perm:disclosure.write。評価は同じ組織（複合外部キー）                                                                            | —      |
+| csrd_disclosure_drafts | own    | perm:disclosure.write。本文の無い節は確定できない・確定者と日時が対（CHECK）                                                     | —      |
+
+`t4d.csrd_assessment_item_guard`（`csrd_assessments` の BEFORE INSERT OR UPDATE OF item_id、Service Role にも効く）:
+要求事項の版の基準（`disclosure_frameworks.key`）が `csrd` でなければ `T4D_CSRD_ITEM_ONLY` で拒否する
+（SSBJ・CDP の要求事項を CSRD の評価として登録させない。読むのは全利用者が読めるマスターだけ）。
+
 ## 7. Import / AI
 
 | テーブル                          | SELECT | 更新系                                        |
@@ -202,6 +221,7 @@ RLS は「通常ユーザー」に対する防御です。Service Role は RLS �
 | disclosure_blocks                                                              | `enforce_disclosure_block_update`（承認の遷移権限）      |
 | review_comments                                                                | `review_comment_guard`（解決の記録のみ更新可）           |
 | quantitative_import_batches                                                    | `quantitative_import_batch_guard`（確定・却下後は不変）  |
+| csrd_assessments                                                               | `csrd_assessments_item_guard`（CSRD の要求事項だけ）     |
 
 ---
 
@@ -232,8 +252,9 @@ RLS は「通常ユーザー」に対する防御です。Service Role は RLS �
 ## 12. 検証（`pnpm test:rls`）
 
 PGlite（インプロセス Postgres）へ `supabase/migrations/*.sql` をそのまま適用し、
-`SET LOCAL ROLE authenticated` ＋ `request.jwt.claims` を切り替えて **227 件**（2026-09-29 時点。
-開示優先モードの 17 表の越権・追記専用・職務分離・更新ガード、0039 の backfill を含む）を検証します。
+`SET LOCAL ROLE authenticated` ＋ `request.jwt.claims` を切り替えて **304 件**（2026-10-01 時点。
+開示優先モードの 17 表の越権・追記専用・職務分離・更新ガード、0039 の backfill、CSRD の 6 表の越権・
+書込権限・ガードトリガ・複合外部キー・CHECK を含む）を検証します。
 
 指示書 11 章「RLS Test に必ず含める」10 項目はすべて含まれています。
 

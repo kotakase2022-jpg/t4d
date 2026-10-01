@@ -29,6 +29,14 @@ export const DISCLOSURE_DEMO_RESET_TABLES = [
   'reportSnapshots',
   'exportArtifacts',
   'kpiTargets',
+  // CSRD のダブル・マテリアリティ・評価・計画・開示ドラフト（docs/disclosure-first.md §9.3）。
+  // 収集項目の割当（metricAssignments）は数値の収集の領域なので戻さない
+  'csrdAnalysisSettings',
+  'csrdDmaMatters',
+  'csrdDmaIros',
+  'csrdAssessments',
+  'csrdActionPlans',
+  'csrdDisclosureDrafts',
 ] as const satisfies readonly TableName[];
 
 export type DisclosureDemoResetTable = (typeof DISCLOSURE_DEMO_RESET_TABLES)[number];
@@ -54,6 +62,16 @@ export function isDataPointApproval(row: { targetType?: string | null }): boolea
 
 /** 原稿の AI 下書き（ai_runs の featureType）。ai_runs は共有の表なので、この種類の行だけを戻す */
 export const DISCLOSURE_AI_FEATURE: AiFeatureType = 'disclosureBlockDraft';
+
+/**
+ * 開示デモのリセットで戻す AI の実行の種類（原稿の下書きと、CSRD のギャップ分析・草案）。
+ * 戻した評価・節が指さなくなった CSRD の実行を、実行の一覧に残さない
+ */
+export const DISCLOSURE_RESET_AI_FEATURES: ReadonlySet<string> = new Set<AiFeatureType>([
+  DISCLOSURE_AI_FEATURE,
+  'csrdGapAnalysis',
+  'csrdDisclosureDraft',
+]);
 
 /** 開示の画面を指す通知（依頼・差戻し・再確認の知らせ）。リセットで消えた依頼・節を指し続けないよう戻す */
 export function isDisclosureNotification(row: { href?: string | null }): boolean {
@@ -124,7 +142,10 @@ export function restoreDisclosureDemoTables(
     target.aiRuns as unknown as OrgRow[],
     pristine.aiRuns as unknown as OrgRow[],
     organizationId,
-    (row) => (row as unknown as { featureType?: string }).featureType === DISCLOSURE_AI_FEATURE,
+    (row) =>
+      DISCLOSURE_RESET_AI_FEATURES.has(
+        (row as unknown as { featureType?: string }).featureType ?? '',
+      ),
   );
   restoreTable(
     target.notifications as unknown as OrgRow[],

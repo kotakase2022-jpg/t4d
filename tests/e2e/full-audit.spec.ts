@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { CSRD_IDS } from '@/lib/fixtures/csrd';
 import { DEMO_USERS, loginAs } from './helpers';
 
 /**
@@ -43,10 +44,27 @@ const ENTERPRISE_PATHS = [
   '/enterprise/disclosures/ssbj/collection',
   '/enterprise/disclosures/ssbj/draft',
   '/enterprise/disclosures/csrd',
+  // CSRD（ダブル・マテリアリティ。docs/disclosure-first.md §9.4）: 設定・事項・要求事項（絞込を含む）・
+  // 詳細・回答画面・対応計画・データ収集・開示ドラフト
+  '/enterprise/disclosures/csrd/settings',
+  '/enterprise/disclosures/csrd/settings/matters/E1',
+  '/enterprise/disclosures/csrd/requirements',
+  '/enterprise/disclosures/csrd/requirements?review=awaiting',
+  '/enterprise/disclosures/csrd/requirements?applicability=always&applicability=material&coverage=not_covered&coverage=unconfirmed',
+  `/enterprise/disclosures/csrd/requirements/${CSRD_IDS.items['ESRS-E1-6']}`,
+  `/enterprise/disclosures/csrd/${CSRD_IDS.items['ESRS-E1-6']}`,
+  '/enterprise/disclosures/csrd/plans',
+  '/enterprise/disclosures/csrd/collection',
+  '/enterprise/disclosures/csrd/draft',
   '/enterprise/disclosures/msci',
   '/enterprise/disclosures/ftse',
   '/enterprise/alerts',
   '/enterprise/ai',
+  // 分析（閲覧専用。§9.5・§9.6）。/enterprise/analysis は現状診断へ redirect する
+  '/enterprise/analysis',
+  '/enterprise/analysis/diagnosis',
+  '/enterprise/analysis/regulations',
+  '/enterprise/analysis/benchmark',
   '/enterprise/reports',
   '/enterprise/settings',
   '/enterprise/roadmap',
@@ -135,6 +153,9 @@ test('拠点担当: 権限外の画面へ入れず、権限内の画面は描画
     '/enterprise/data',
     '/enterprise/imports',
     '/enterprise/evidence',
+    // 分析の現状診断・他社比較は data.read で開ける（開示の領域は出さない）
+    '/enterprise/analysis/diagnosis',
+    '/enterprise/analysis/benchmark',
   ]);
   expect(allowed.map((p) => `${p.kind} ${p.path} — ${p.detail}`).join('\n')).toBe('');
 

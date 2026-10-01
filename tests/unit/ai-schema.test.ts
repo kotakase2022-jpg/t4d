@@ -81,6 +81,50 @@ const INVOCATION_INPUTS: Record<AiFeature, Record<string, unknown>> = {
     ],
     sources: [],
   },
+  csrdGapAnalysis: {
+    itemCode: 'ESRS-E1-6',
+    title: 'Scope1・Scope2・Scope3 の GHG 総排出量（t-CO2e）を開示してください。',
+    requirementText: 'GHG プロトコルに基づく算定方法を併記してください。',
+    required: true,
+    section: 'E1',
+    sectionLabel: 'E1 気候変動',
+    applicability: { kind: 'material', perspectives: ['impact', 'financial'], provisional: true },
+    dma: { outcome: 'both', outcomeLabel: '両面で重要' },
+    responseStatus: 'not_started',
+    mappedMetricCount: 4,
+    metricValues: [
+      { label: 'Scope1 排出量', value: 7859.8, unit: 't-CO2e' },
+      { label: 'Scope2 排出量（マーケット基準）', value: 15200, unit: 't-CO2e' },
+    ],
+    hasApprovalWorkflow: true,
+    sources: [],
+  },
+  csrdDisclosureDraft: {
+    section: 'E1',
+    sectionLabel: 'E1 気候変動',
+    organizationName: '青海テクノロジー株式会社',
+    periodLabel: '2026年度',
+    applicabilityKind: 'material',
+    perspectives: ['impact', 'financial'],
+    provisional: false,
+    topic: {
+      iros: [
+        { typeLabel: 'インパクト', description: '製造拠点の GHG 排出（架空）', score: 4 },
+        { typeLabel: 'リスク', description: '炭素価格の上昇（架空）', score: 4 },
+      ],
+    },
+    requirements: [
+      {
+        code: 'ESRS-E1-5',
+        title: 'エネルギー消費量とエネルギーミックスを開示してください。',
+        finalStatus: 'mostly_covered',
+        reviewed: true,
+      },
+      { code: 'ESRS-E1-4', title: 'GHG 排出削減目標', finalStatus: null, reviewed: false },
+    ],
+    metricValues: [{ label: 'エネルギー消費量', value: 41000, unit: 'MWh' }],
+    sources: [],
+  },
   evidenceMapping: {
     targetCode: 'scope1',
     fragments: [
@@ -231,6 +275,68 @@ describe('MockAIProvider', () => {
     });
     expect(result.output.pointsToVerify.length).toBeGreaterThan(0);
     expect(result.output.warnings.join(' ')).toContain('保証結論ではありません');
+  });
+
+  it('CSRD ギャップ分析は資料位置を作らず、根拠の無い観点を対応済みにしない（候補・デモ生成）', async () => {
+    const result = await provider.run({
+      feature: 'csrdGapAnalysis',
+      context: { organizationName: 'テスト企業', reportingPeriodLabel: 'FY2026' },
+      inputReferenceIds: [],
+      input: INVOCATION_INPUTS.csrdGapAnalysis,
+    });
+    expect(result.output.itemCode).toBe('ESRS-E1-6');
+    // 回答が未着手なので開示は未対応、承認済みの値は 4 指標中 2 件なので一部対応
+    expect(result.output.disclosureStatus).toBe('not_covered');
+    expect(result.output.dataStatus).toBe('partial');
+    expect(result.output.sourceDocument).toBeNull();
+    expect(result.output.comment).toContain('デモ生成');
+    expect(result.output.warnings.join(' ')).toContain('担当者が確認して確定');
+    expect(result.output.warnings.join(' ')).toContain('架空サンプル');
+    // DMA が未確定（暫定）であることを伝える
+    expect(result.output.warnings.join(' ')).toContain('暫定');
+  });
+
+  it('CSRD 開示ドラフトは観点を明示し、600 字以内・架空と明記した草案を返す', async () => {
+    const result = await provider.run({
+      feature: 'csrdDisclosureDraft',
+      context: { organizationName: 'テスト企業', reportingPeriodLabel: 'FY2026' },
+      inputReferenceIds: [],
+      input: INVOCATION_INPUTS.csrdDisclosureDraft,
+    });
+    expect(result.output.section).toBe('E1');
+    expect(result.output.perspectives).toEqual(['impact', 'financial']);
+    expect(result.output.body).toContain('インパクトと財務の両面で重要と判断');
+    expect(result.output.body).toContain('（架空）');
+    expect(result.output.body.length).toBeLessThanOrEqual(600);
+    // 確認済みで対応済み／おおむね対応のものだけを書き、残りは gaps へ
+    expect(result.output.coveredItemCodes).toEqual(['ESRS-E1-5']);
+    expect(result.output.gaps.map((g) => g.itemCode)).toEqual(['ESRS-E1-4']);
+    expect(result.output.warnings.join(' ')).toContain('草案');
+  });
+
+  it('CSRD 開示ドラフトは材料が多くても 600 字を超えない', async () => {
+    const many = {
+      ...INVOCATION_INPUTS.csrdDisclosureDraft,
+      requirements: Array.from({ length: 30 }, (_, i) => ({
+        code: `ESRS-E1-${i}`,
+        title: 'とても長い要求事項の題名'.repeat(6),
+        finalStatus: 'covered',
+        reviewed: true,
+      })),
+      metricValues: Array.from({ length: 10 }, (_, i) => ({
+        label: `指標${i}`.repeat(10),
+        value: 123456789,
+        unit: 't-CO2e',
+      })),
+    };
+    const result = await provider.run({
+      feature: 'csrdDisclosureDraft',
+      context: { organizationName: 'テスト企業', reportingPeriodLabel: 'FY2026' },
+      inputReferenceIds: [],
+      input: many,
+    });
+    expect(result.output.body.length).toBeLessThanOrEqual(600);
+    expect(result.output.body).toContain('（架空）');
   });
 
   it('Snapshot 後変更の要約は影響評価を確定しない', async () => {

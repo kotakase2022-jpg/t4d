@@ -128,7 +128,8 @@ export const CSRD_SAMPLE_VERSION_METADATA: FrameworkVersionMetadata = {
   issuedAt: null,
   effectiveAt: null,
   jurisdiction: null,
-  materialityBasis: null,
+  // CSRD の要求事項はダブル・マテリアリティ（docs/disclosure-first.md §9.2）で適用を決める
+  materialityBasis: 'double',
   sourceUrl: null,
   verifiedAt: null,
   verifiedBy: null,

@@ -557,6 +557,9 @@ function revalidateDisclosure(itemId: string | null): void {
     if (itemId) revalidatePath(`${base}/${itemId}`);
     revalidatePath(base);
   }
+  // CSRD の回答の状態は、要求事項の一覧・詳細と分析（規制対応度）にも出る（docs/disclosure-first.md §9.4）
+  revalidatePath('/enterprise/disclosures/csrd', 'layout');
+  revalidatePath('/enterprise/analysis', 'layout');
 }
 
 export async function generateCdpDraftAction(formData: FormData): Promise<void> {

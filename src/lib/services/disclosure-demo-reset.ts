@@ -13,8 +13,8 @@ import {
 import type { DemoEdit } from '@/lib/repositories/demo-edit-codec';
 import {
   DATA_DEMO_RESET_TABLES,
-  DISCLOSURE_AI_FEATURE,
   DISCLOSURE_DEMO_RESET_TABLES,
+  DISCLOSURE_RESET_AI_FEATURES,
   isDataPointApproval,
   isDisclosureNotification,
 } from '@/lib/repositories/demo-reset-sync';
@@ -30,7 +30,9 @@ import type { AuthorizationContext } from '@/types/domain';
  * 開示優先モードのデモを初期状態へ戻す（指示書 §14.2「明示したデモ領域だけに作用する」）。
  *
  * 対象は開示優先モードの表（プロジェクト・基準の適用判断・定性情報・引用位置・原稿・レビュー・
- * スナップショット・出力記録・KPI 目標）と、原稿の AI 下書きの実行記録だけ。いまの組織の行に限る。
+ * スナップショット・出力記録・KPI 目標）と CSRD の 6 表（分析条件・DMA の事項と IRO・評価・計画・
+ * 開示ドラフト。docs/disclosure-first.md §9.3）、原稿の AI 下書きと CSRD の AI の実行記録だけ。
+ * いまの組織の行に限る。
  *  - デモ中に作られた行（Fixture に無い ID）は物理削除する（DemoDbClient.hardDeleteDemoRows）
  *  - Fixture の行が書き換えられていれば、Fixture の値へ戻す
  *  - Cookie の持ち回り（t4d.demo-edits）からも同じ行だけを取り除く（他の画面のデモ操作は残す）
@@ -173,12 +175,12 @@ export async function resetDisclosureDemoData(
     restoredRows += restored;
   }
 
-  // 原稿の AI 下書き（デモ中の実行分）。Fixture の実行記録は残す
+  // 原稿の AI 下書きと CSRD のギャップ分析・草案（デモ中の実行分）。Fixture の実行記録は残す
   const fixtureAiRunIds = new Set(pristine.aiRuns.map((r) => r.id));
   const aiRuns = await db.select('aiRuns', { where: { organizationId } });
   const demoAiRuns = new Set(
     aiRuns
-      .filter((r) => r.featureType === DISCLOSURE_AI_FEATURE && !fixtureAiRunIds.has(r.id))
+      .filter((r) => DISCLOSURE_RESET_AI_FEATURES.has(r.featureType) && !fixtureAiRunIds.has(r.id))
       .map((r) => r.id),
   );
   const removedAiRuns = demoAiRuns.size > 0 ? await db.hardDeleteDemoRows('aiRuns', demoAiRuns) : 0;

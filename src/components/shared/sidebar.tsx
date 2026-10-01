@@ -7,7 +7,15 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Hint } from '@/components/ui/tooltip';
 import { DemoTour } from './demo-tour';
 import { cn } from '@/lib/utils';
-import { navTreeFor, type NavItem, type NavVariant } from './nav-config';
+import {
+  isNavPathActive,
+  isNavSubtreeActive,
+  navItemKey,
+  navTreeFor,
+  resolveNavCurrent,
+  type NavItem,
+  type NavVariant,
+} from './nav-config';
 
 const STORAGE_KEY = 't4d.sidebar.collapsed';
 
@@ -51,6 +59,17 @@ export function Sidebar({
   const items = useNavItems(variant, hiddenHrefs);
   const [collapsed, setCollapsed] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
+  // 現在地は描画するツリー全体で 1 か所で決める（リストごとに判定すると、同じ href が
+  // 別の枝に出たときに aria-current が 2 つ並ぶ。docs/disclosure-first.md §9.1）。
+  // 開示優先モードは最上位も含めて 1 つ、従来メニューは「最上位＋葉」の既存仕様を保つ（A39）
+  const currentKeys = React.useMemo(
+    () =>
+      resolveNavCurrent(items, pathname, {
+        mode: variant === 'enterprise-disclosure' ? 'single' : 'top-and-leaf',
+        collapsed,
+      }),
+    [items, pathname, variant, collapsed],
+  );
 
   React.useEffect(() => {
     setHydrated(true);
@@ -83,13 +102,14 @@ export function Sidebar({
       )}
     >
       <ul className="flex-1 overflow-y-auto p-1.5">
-        {items.map((item) => (
+        {items.map((item, index) => (
           <SidebarEntry
             key={`${item.href}-${item.label}`}
             item={item}
+            itemKey={navItemKey(null, index)}
+            currentKeys={currentKeys}
             pathname={pathname}
             collapsed={collapsed}
-            deferCurrentToSameHrefChild={variant === 'enterprise-disclosure'}
           />
         ))}
       </ul>
@@ -115,42 +135,23 @@ export function Sidebar({
   );
 }
 
-function isActive(pathname: string, href: string): boolean {
-  if (pathname === href) return true;
-  return pathname.startsWith(`${href}/`);
-}
-
-/** 自分または子孫のどこかが現在地か（3 階層対応） */
-function isSubtreeActive(pathname: string, item: NavItem): boolean {
-  if (isActive(pathname, item.href)) return true;
-  return item.children?.some((child) => isSubtreeActive(pathname, child)) ?? false;
-}
-
 function SidebarEntry({
   item,
+  itemKey,
+  currentKeys,
   pathname,
   collapsed,
-  deferCurrentToSameHrefChild = false,
 }: {
   item: NavItem;
+  /** ツリー内の位置（navItemKey）。現在地は位置で判定する */
+  itemKey: string;
+  currentKeys: Set<string>;
   pathname: string;
   collapsed: boolean;
-  /**
-   * 子に同じ href の項目（例: 情報・根拠 → 定量データ）があるとき、「現在地」を子だけに付ける。
-   * 2 階層目以降の childClaimsSameHref と同じ規則を最上位にも当て、同じ画面で
-   * aria-current が 2 つ並ばないようにする。開示優先モードのメニューだけに効かせる
-   * （従来メニューの DOM は変えない: A39）。
-   */
-  deferCurrentToSameHrefChild?: boolean;
 }) {
-  const active = isActive(pathname, item.href);
-  const hasActiveChild = item.children?.some((c) => isSubtreeActive(pathname, c)) ?? false;
-  // 折りたたみ中は子を描画しないため、譲らずに最上位へ「現在地」を残す
-  const childClaimsSameHref =
-    deferCurrentToSameHrefChild &&
-    !collapsed &&
-    (item.children?.some((c) => c.href === item.href) ?? false);
-  const current = active && !childClaimsSameHref;
+  const active = isNavPathActive(pathname, item.href);
+  const hasActiveChild = item.children?.some((c) => isNavSubtreeActive(pathname, c)) ?? false;
+  const current = currentKeys.has(itemKey);
   const Icon = item.icon;
 
   const link = (
@@ -175,7 +176,14 @@ function SidebarEntry({
     <li>
       {collapsed ? <Hint label={item.label}>{link}</Hint> : link}
       {!collapsed && item.children && (
-        <SidebarChildList items={item.children} pathname={pathname} depth={1} />
+        <SidebarChildList
+          items={item.children}
+          parentKey={itemKey}
+          parentLabel={item.label}
+          currentKeys={currentKeys}
+          pathname={pathname}
+          depth={1}
+        />
       )}
     </li>
   );
@@ -185,36 +193,36 @@ function SidebarEntry({
  * 2 階層目以降の入れ子リスト。
  * 「開示対応 > SSBJ > 対応状況」のような 3 階層目は、さらに一段インデントして
  * 左罫線を重ねることで、どこまでがどのグループかを線で追えるようにする。
+ * リストには親のラベルで名前を付ける（SSBJ と CSRD に同名のリンクが並ぶため、
+ * 支援技術でも E2E でもどのグループのリンクか区別できるように）。
  */
 function SidebarChildList({
   items,
+  parentKey,
+  parentLabel,
+  currentKeys,
   pathname,
   depth,
 }: {
   items: NavItem[];
+  parentKey: string;
+  parentLabel: string;
+  currentKeys: Set<string>;
   pathname: string;
   depth: number;
 }) {
   return (
-    <ul className={cn('border-l border-line pl-1.5', depth === 1 ? 'ml-6' : 'ml-2.5')}>
-      {items.map((child) => {
+    <ul
+      aria-label={parentLabel}
+      className={cn('border-l border-line pl-1.5', depth === 1 ? 'ml-6' : 'ml-2.5')}
+    >
+      {items.map((child, index) => {
+        const key = navItemKey(parentKey, index);
         const hasChildren = (child.children?.length ?? 0) > 0;
-        // グループ行（例: SSBJ）と、兄弟の親パスを持つ入口行（例: 算定サマリー = /enterprise/ghg）は
-        // 配下・兄弟すべてに前方一致してしまうため、完全一致のときだけ「現在地」にする。
-        // そうしないと兄弟ページで aria-current="page" が複数並ぶ
-        const overlapsSibling = items.some(
-          (other) => other !== child && other.href.startsWith(`${child.href}/`),
-        );
-        // 親子が同一 href（SSBJ→対応状況、Scope3データ取込→Cat.1）のとき、
-        // 「現在地」は葉側だけに付ける（同一画面で aria-current が 2 つ並ばない）
-        const childClaimsSameHref =
-          hasChildren && (child.children?.some((c) => c.href === child.href) ?? false);
-        const selfActive =
-          !childClaimsSameHref &&
-          (hasChildren || overlapsSibling
-            ? pathname === child.href
-            : isActive(pathname, child.href));
-        const childActive = !selfActive && hasChildren && isSubtreeActive(pathname, child);
+        // 現在地の判定規則（グループ行・兄弟と重なる入口行は完全一致のみ、親子が同じ href なら子、
+        // 別導線は付けない）は resolveNavCurrent にまとめてある
+        const selfActive = currentKeys.has(key);
+        const childActive = !selfActive && hasChildren && isNavSubtreeActive(pathname, child);
         return (
           <li key={`${child.href}-${child.label}`}>
             <Link
@@ -232,7 +240,14 @@ function SidebarChildList({
               {child.label}
             </Link>
             {hasChildren && child.children && (
-              <SidebarChildList items={child.children} pathname={pathname} depth={depth + 1} />
+              <SidebarChildList
+                items={child.children}
+                parentKey={key}
+                parentLabel={child.label}
+                currentKeys={currentKeys}
+                pathname={pathname}
+                depth={depth + 1}
+              />
             )}
           </li>
         );

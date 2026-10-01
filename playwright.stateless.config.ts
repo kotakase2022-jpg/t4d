@@ -25,11 +25,14 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
-  // 実演の流れ（zz-disclosure-project）と読み取りだけの導線、この構成でだけ意味のある作業本文の控えの確認
+  // 実演の流れ（zz-disclosure-project）と読み取りだけの導線、この構成でだけ意味のある作業本文の控えの確認、
+  // CSRD の流れ（zzz-csrd-chain。DMA の判断・確定 → AI 分析の採用 → 計画 → 収集項目 → 草案の確定。
+  // docs/disclosure-first.md §9.7）。CSRD の流れは前の spec の Cookie を捨てて初期状態から始める
   testMatch: [
     'disclosure-first-nav.spec.ts',
     'editor-draft-restore.stateless.ts',
     'zz-disclosure-project.spec.ts',
+    'zzz-csrd-chain.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

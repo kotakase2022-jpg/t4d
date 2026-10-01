@@ -2,7 +2,8 @@ import { createRng, stableHash } from '@/lib/fixtures/ids';
 import { normalizeLabel } from '@/lib/imports/learning';
 import { classifyColumns, pickValueCell } from '@/lib/imports/column-roles';
 import { parseFlexibleNumber } from '@/lib/imports/number';
-import type { SsbjCoverageStatus as SsbjCoverage } from '@/types/domain';
+import { perspectiveSentence } from '@/lib/domain/csrd';
+import type { DmaPerspective, SsbjCoverageStatus as SsbjCoverage } from '@/types/domain';
 import { buildMockDisclosureDraft, type DraftInvocationInput } from './mock-disclosure-draft';
 import { AI_SCHEMAS, PROMPT_VERSIONS, type AiFeature, type AiOutputOf } from './schemas';
 import { AiProviderError, type AiInvocation, type AiProvider, type AiResult } from './types';
@@ -646,6 +647,191 @@ function buildMockOutput<F extends AiFeature>(
             ? [
                 'マテリアリティにリスク・機会が記入されていません。SSBJ の戦略開示は識別したリスク及び機会の説明を求めるため（一般-12・14）、先に「①マテリアリティ・分析条件の設定」で記入することを推奨します。',
               ]
+            : []),
+        ],
+        sources,
+      };
+    }
+
+    case 'csrdGapAnalysis': {
+      const itemCode = String(input.itemCode ?? '');
+      const title = String(input.title ?? '');
+      const sectionLabel = String(input.sectionLabel ?? '');
+      const required = input.required === true;
+      const applicability = (input.applicability as {
+        kind?: string;
+        perspectives?: DmaPerspective[];
+        provisional?: boolean;
+      }) ?? { kind: 'undetermined', perspectives: [] };
+      const responseStatus = typeof input.responseStatus === 'string' ? input.responseStatus : null;
+      const mappedMetricCount = Number(input.mappedMetricCount ?? 0);
+      const metricValues =
+        (input.metricValues as Array<{ label: string; value: number; unit: string }>) ?? [];
+      const hasProcess = input.hasApprovalWorkflow === true;
+      const sources = (input.sources as never[]) ?? [];
+
+      // 資料は渡さない（入力は要求事項・回答の状態・承認済みの値・DMA の結果だけ）。
+      // 開示は回答の状態から、データは承認済みの値の揃い具合から、根拠の無いものを対応済みにしない
+      const disclosureStatus: SsbjCoverage =
+        responseStatus === 'approved'
+          ? 'mostly_covered'
+          : responseStatus === 'draft' ||
+              responseStatus === 'in_review' ||
+              responseStatus === 'returned'
+            ? 'partial'
+            : 'not_covered';
+      const dataStatus: SsbjCoverage =
+        mappedMetricCount === 0
+          ? 'unconfirmed'
+          : metricValues.length === 0
+            ? 'not_covered'
+            : metricValues.length >= mappedMetricCount
+              ? 'covered'
+              : 'partial';
+      const processStatus: SsbjCoverage = hasProcess ? 'partial' : 'not_covered';
+
+      const basis =
+        applicability.kind === 'always'
+          ? 'ESRS 2（重要性に関わらず適用）'
+          : `ダブル・マテリアリティで${perspectiveSentence(applicability.perspectives ?? [])}した事項`;
+      const missing: string[] = [];
+      if (disclosureStatus !== 'mostly_covered') {
+        missing.push(`${title}について、承認済みの回答が確認できません（架空）。`);
+      }
+      if (dataStatus === 'not_covered') {
+        missing.push('開示に必要な数値の承認済みの値がありません（データ収集が必要）。');
+      }
+      if (dataStatus === 'unconfirmed') {
+        missing.push('数値の指標が対応付いていないため、データの観点は人が確認してください。');
+      }
+      if (processStatus === 'not_covered') {
+        missing.push('情報を継続的に収集・確認・承認する仕組みが確認できません。');
+      }
+
+      return {
+        itemCode,
+        disclosureStatus,
+        dataStatus,
+        processStatus,
+        comment: `ESRS（サンプル）${itemCode}（${sectionLabel}）を、${basis}として評価しました（デモ生成）。承認済みの値 ${metricValues.length} 件・回答の状態を根拠にしています。`,
+        missingInformation: missing,
+        recommendation:
+          dataStatus === 'not_covered'
+            ? '対応計画で必要な数値の収集項目を作り、担当部署へ依頼してください（デモ生成）。'
+            : disclosureStatus === 'not_covered'
+              ? '回答の下書きを作り、版・承認の手続きへ進めてください（デモ生成）。'
+              : '不足している事項を補い、根拠資料と承認履歴を残せる運用にしてください（デモ生成）。',
+        sourceDocument: null,
+        sourcePage: null,
+        sourceExcerpt: null,
+        confidence: 0.42 + rng() * 0.2,
+        warnings: [
+          'AI による判定の候補です（デモ生成）。担当者が確認して確定してください。',
+          'CSRD の要求事項はデモ用の架空サンプルです（正式な ESRS ではありません）。',
+          ...(applicability.provisional
+            ? ['ダブル・マテリアリティ評価（DMA）が未確定のため、適用は暫定です。']
+            : []),
+          ...(required ? [] : ['条件付きの要求事項です。自社が対象かを先に確認してください。']),
+        ],
+        sources,
+      };
+    }
+
+    case 'csrdDisclosureDraft': {
+      const section = String(input.section ?? 'ESRS2');
+      const sectionLabel = String(input.sectionLabel ?? section);
+      const organizationName = String(input.organizationName ?? '当社');
+      const periodLabel = String(input.periodLabel ?? '当年度');
+      const always = input.applicabilityKind === 'always';
+      const perspectives = (input.perspectives as DmaPerspective[] | undefined) ?? [];
+      const topic = input.topic as {
+        iros?: Array<{ typeLabel: string; description: string; score: number | null }>;
+      } | null;
+      const requirements =
+        (input.requirements as Array<{
+          code: string;
+          title: string;
+          finalStatus: string | null;
+          reviewed: boolean;
+        }>) ?? [];
+      const metricValues =
+        (input.metricValues as Array<{ label: string; value: number; unit: string }>) ?? [];
+      const sources = (input.sources as never[]) ?? [];
+
+      // 書けるのは、担当者が確認して「対応済み／おおむね対応」とした要求事項だけ
+      const writable = requirements.filter(
+        (r) => r.reviewed && (r.finalStatus === 'covered' || r.finalStatus === 'mostly_covered'),
+      );
+      const gaps = requirements
+        .filter((r) => !writable.includes(r))
+        .map((r) => ({
+          itemCode: r.code,
+          reason: !r.reviewed
+            ? '担当者の確認が済んでいないため、草案に含めていません。'
+            : r.finalStatus === 'not_covered'
+              ? '現在の開示資料に該当する記述が無いため、書ける材料がありません。'
+              : '対応が一部にとどまるため、そのまま開示できる水準に達していません。',
+        }));
+
+      const opening = always
+        ? `${organizationName}は、ESRS 2 全般開示として、重要性に関わらず求められるガバナンスと重要性の評価の方法を開示します（架空）。`
+        : `${organizationName}は、${sectionLabel}を${perspectiveSentence(perspectives)}しました（架空）。`;
+      const iroLine =
+        topic?.iros && topic.iros.length > 0
+          ? `主な IRO は、${topic.iros
+              .slice(0, 2)
+              .map(
+                (iro) =>
+                  `${iro.typeLabel}「${iro.description}」（スコア ${iro.score === null ? '—' : iro.score.toFixed(1)}）`,
+              )
+              .join('、')}です。`
+          : null;
+      const writableLine =
+        writable.length > 0
+          ? `${periodLabel}においては、${writable
+              .slice(0, 3)
+              .map((r) => `${r.title}（${r.code}）`)
+              .join('、')}について開示しています。`
+          : `${periodLabel}時点で、この節に記載できる確認済みの要求事項はありません。`;
+      const numbers =
+        metricValues.length > 0
+          ? `主要な指標は${metricValues
+              .slice(0, 3)
+              .map((m) => `${m.label} ${m.value.toLocaleString('ja-JP')} ${m.unit}`)
+              .join('、')}です。`
+          : null;
+      const gapLine =
+        gaps.length > 0 ? `なお、${gaps.length} 件の要求事項は記載を保留しています。` : null;
+      const closing = '本文はデモ生成の草案です（架空）。';
+
+      // 1 節 600 字以内に収める。冒頭と結びは必ず残し、収まらない文から落とす
+      const LIMIT = 600;
+      let body = opening;
+      for (const part of [writableLine, iroLine, numbers, gapLine]) {
+        if (part && body.length + part.length + closing.length <= LIMIT) body += part;
+      }
+      body = `${body}${closing}`.slice(0, LIMIT);
+
+      return {
+        section,
+        perspectives,
+        body,
+        coveredItemCodes: writable.map((r) => r.code),
+        gaps,
+        confidence:
+          requirements.length === 0
+            ? 0.2
+            : Math.min(0.85, 0.3 + (writable.length / requirements.length) * 0.5 + rng() * 0.05),
+        warnings: [
+          'これは草案です（デモ生成）。そのまま開示せず、担当者が本文に採用して内容を確認してから確定してください。',
+          'CSRD の要求事項はデモ用の架空サンプルです（正式な ESRS ではありません）。',
+          ...(input.provisional === true
+            ? [
+                'ダブル・マテリアリティ評価（DMA）が未確定です。確定後に適用が変わる場合があります。',
+              ]
+            : []),
+          ...(gaps.length > 0
+            ? [`${gaps.length} 件の要求事項は根拠が足りず、草案に含めていません。`]
             : []),
         ],
         sources,

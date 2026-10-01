@@ -4,6 +4,8 @@ import {
   BadgeCheck,
   Bot,
   Boxes,
+  Building2,
+  ChartColumnBig,
   ChartLine,
   ClipboardCheck,
   ClipboardList,
@@ -18,6 +20,7 @@ import {
   Gauge,
   Home,
   Inbox,
+  Landmark,
   Layers,
   ListChecks,
   MessageSquareWarning,
@@ -27,6 +30,7 @@ import {
   Settings,
   ShieldCheck,
   Signature,
+  Stethoscope,
   Upload,
   Workflow,
 } from 'lucide-react';
@@ -41,7 +45,26 @@ export interface NavItem {
   children?: NavItem[];
   /** Command Palette 用の追加検索語 */
   keywords?: string[];
+  /**
+   * 同じ画面への別導線（docs/disclosure-first.md §9.1）。現在地（aria-current）・強調表示を付けず、
+   * 親の「配下が現在地」にも数えず、Command Palette の候補にも重ねない。
+   * 正規の位置が同じツリーの別の枝にあるときだけ使う。
+   */
+  secondary?: true;
+  /**
+   * 葉だけに付ける。href の配下ではないが、この項目を現在地とする画面のパス
+   * （例: CSRD の回答編集 `/csrd/{UUID}` は「要求事項」から入る画面なので、要求事項を現在地にする）。
+   */
+  alsoCurrentFor?: RegExp[];
 }
+
+/** 定性情報は SSBJ 専用ではなく全基準共通の資産（§9.1 ①）。両ツリーで同じ検索語を使う */
+const NARRATIVES_ITEM: NavItem = {
+  label: '定性情報',
+  href: '/enterprise/narratives',
+  icon: NotebookPen,
+  keywords: ['定性', 'ガバナンス', 'リスク', '機会', '財務的影響', '戦略'],
+};
 
 /**
  * 企業ワークスペースの左メニュー。
@@ -56,6 +79,12 @@ export interface NavItem {
  * 開示対応の配下は基準ごとにまとめる（SSBJ → 対応状況/要求事項/…）。
  * SSBJ の画面が 5 つに増え、CDP 以降と同じ階層に並べると
  * どこまでが SSBJ なのか読み取れなくなったため 3 階層にした。
+ *
+ * 2026-10-01 の追加要望（docs/disclosure-first.md §9.1）:
+ *  ① SSBJ の データ収集 と 開示ドラフト の間に「定性情報」（集めた事実を文章へ移す前の工程）
+ *  ② AI Copilot と 管理 の間に「分析」（閲覧専用の横断画面）
+ *  ③ CSRD を SSBJ と同じ 5 画面のグループへ。定性情報は入れない（共通資産であり、同じ href が
+ *     2 つの枝に出て現在地が 2 つ付くのを避ける。CSRD 開示ドラフト画面から定性情報へリンクする）
  */
 export const ENTERPRISE_NAV: NavItem[] = [
   {
@@ -101,6 +130,7 @@ export const ENTERPRISE_NAV: NavItem[] = [
             icon: Database,
             keywords: ['SSBJ', 'データ収集', '不足データ'],
           },
+          NARRATIVES_ITEM,
           {
             // 会議での指摘「ドラフト作成を左メニューに明示する」
             label: '開示ドラフト',
@@ -111,7 +141,47 @@ export const ENTERPRISE_NAV: NavItem[] = [
         ],
       },
       { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
-      { label: 'CSRD', href: '/enterprise/disclosures/csrd', icon: FileSpreadsheet },
+      {
+        // SSBJ と同じ画面構成。ただし重要性はダブル・マテリアリティ（設定は対応状況の工程①から入る）
+        label: 'CSRD',
+        href: '/enterprise/disclosures/csrd',
+        icon: FileSpreadsheet,
+        keywords: ['CSRD', 'ESRS', 'ダブル・マテリアリティ', 'DMA'],
+        children: [
+          {
+            label: '対応状況',
+            href: '/enterprise/disclosures/csrd',
+            icon: Gauge,
+            keywords: ['CSRD', 'ESRS', '全体状況', 'ダブル・マテリアリティ', 'DMA', '重要性'],
+          },
+          {
+            label: '要求事項',
+            href: '/enterprise/disclosures/csrd/requirements',
+            icon: ListChecks,
+            keywords: ['CSRD', 'ESRS', '要求事項', 'ギャップ分析', '適用'],
+            // 既存の回答編集画面（csrd/[questionId]）は要求事項の詳細から入るため、ここを現在地にする
+            alsoCurrentFor: [/^\/enterprise\/disclosures\/csrd\/[0-9a-f-]{36}$/],
+          },
+          {
+            label: '対応計画',
+            href: '/enterprise/disclosures/csrd/plans',
+            icon: ClipboardList,
+            keywords: ['CSRD', 'ESRS', '対応計画', '担当', '期限'],
+          },
+          {
+            label: 'データ収集',
+            href: '/enterprise/disclosures/csrd/collection',
+            icon: Database,
+            keywords: ['CSRD', 'ESRS', 'データ収集', '不足データ'],
+          },
+          {
+            label: '開示ドラフト',
+            href: '/enterprise/disclosures/csrd/draft',
+            icon: FileText,
+            keywords: ['CSRD', 'ESRS', 'ドラフト', '草案', '開示文書'],
+          },
+        ],
+      },
       { label: 'MSCI', href: '/enterprise/disclosures/msci', icon: FileSpreadsheet },
       { label: 'FTSE', href: '/enterprise/disclosures/ftse', icon: FileSpreadsheet },
     ],
@@ -211,6 +281,35 @@ export const ENTERPRISE_NAV: NavItem[] = [
   },
   { label: 'AI Copilot', href: '/enterprise/ai', icon: Bot, keywords: ['AI', '生成'] },
   {
+    // 閲覧専用の横断画面。単一の総合点は作らない（§9.6）。入口は現状診断
+    label: '分析',
+    href: '/enterprise/analysis/diagnosis',
+    icon: ChartColumnBig,
+    keywords: ['分析', 'analysis', '診断', '比較'],
+    children: [
+      {
+        label: '現状診断',
+        href: '/enterprise/analysis/diagnosis',
+        icon: Stethoscope,
+        keywords: ['分析', '診断', '現状', '不足', 'データ品質', '網羅性'],
+      },
+      {
+        label: '規制対応度',
+        href: '/enterprise/analysis/regulations',
+        icon: Landmark,
+        // 開示の評価を読むため、開示の閲覧権限が無い役割（拠点担当など）には出さない
+        permission: 'enterprise.disclosure.read',
+        keywords: ['分析', '規制', '対応度', '基準', 'SSBJ', 'CSRD', 'ESRS', 'CDP', 'MSCI', 'FTSE'],
+      },
+      {
+        label: '他社比較',
+        href: '/enterprise/analysis/benchmark',
+        icon: Building2,
+        keywords: ['分析', '他社', '比較', 'ベンチマーク', 'benchmark', '同業', 'ピア'],
+      },
+    ],
+  },
+  {
     label: '管理',
     href: '/enterprise/organizations',
     icon: Settings,
@@ -251,6 +350,24 @@ function legacyItem(href: string, label: string): NavItem {
 }
 
 /**
+ * 従来メニューの項目の複製で、子のうち `secondaryHref` のものだけを別導線（secondary）にする。
+ * 従来メニューの項目そのものは書き換えない（従来ツリーでは同じ子が通常の葉として現在地を持つ）。
+ */
+function legacyItemWithSecondaryChild(href: string, label: string, secondaryHref: string): NavItem {
+  const item = legacyItem(href, label);
+  const children = item.children ?? [];
+  if (!children.some((child) => child.href === secondaryHref)) {
+    throw new Error(`${label} の子に ${secondaryHref} がありません`);
+  }
+  return {
+    ...item,
+    children: children.map((child) =>
+      child.href === secondaryHref ? { ...child, secondary: true } : child,
+    ),
+  };
+}
+
+/**
  * 開示優先モード（organization_feature_settings.disclosure_first）の左メニュー
  * （指示書 §4.1・docs/disclosure-first.md §2-1）。
  *
@@ -260,6 +377,9 @@ function legacyItem(href: string, label: string): NavItem {
  *  - CDP・MSCI・FTSE は「その他の開示」へ格納する
  *  - GHG 算定・Scope3 は「情報・根拠」の関連導線に置き、既存の直リンクは変えない
  *  - AI Copilot は補助メニューとして最後に残す（AI は各作業画面の補助として出す）
+ *  - 分析は 管理 の直前（従来ツリーと同じく「管理の直上」。§9.1 ②）
+ *  - 定性情報の正規の位置は「情報・根拠」。SSBJ 配下の定性情報は従来ツリーと同じ並びを保つための
+ *    別導線（secondary）で、現在地を付けない（同じ画面で aria-current が 2 つ並ばない。§9.1 ①）
  *
  * 機能設定が false の組織には ENTERPRISE_NAV（従来ツリー）をそのまま使う（A39）。
  */
@@ -274,7 +394,7 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
     icon: FolderKanban,
     keywords: ['開示', 'プロジェクト', '原稿', 'レビュー', '承認', '出力'],
     children: [
-      legacyItem('/enterprise/disclosures/ssbj', 'SSBJ'),
+      legacyItemWithSecondaryChild('/enterprise/disclosures/ssbj', 'SSBJ', NARRATIVES_ITEM.href),
       legacyItem('/enterprise/disclosures/csrd', 'CSRD'),
       {
         label: 'その他の開示',
@@ -297,12 +417,7 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
     keywords: ['情報', '根拠', 'データ'],
     children: [
       { ...legacyItem('/enterprise/data', '非財務データ'), label: '定量データ' },
-      {
-        label: '定性情報',
-        href: '/enterprise/narratives',
-        icon: NotebookPen,
-        keywords: ['定性', 'ガバナンス', 'リスク', '機会', '財務的影響', '戦略'],
-      },
+      NARRATIVES_ITEM,
       { ...legacyItem('/enterprise/evidence', 'Evidence'), label: '資料・証跡' },
       { ...legacyItem('/enterprise/imports', 'データ取込'), label: '取込' },
       {
@@ -331,6 +446,7 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
       legacyItem('/enterprise/alerts', 'アラート'),
     ],
   },
+  legacyItem('/enterprise/analysis/diagnosis', '分析'),
   legacyItem('/enterprise/organizations', '管理'),
   legacyItem('/enterprise/ai', 'AI Copilot'),
 ];
@@ -342,6 +458,118 @@ export function navTreeFor(variant: NavVariant, engagementId: string | null): Na
   if (variant === 'enterprise') return ENTERPRISE_NAV;
   if (variant === 'enterprise-disclosure') return ENTERPRISE_NAV_DISCLOSURE_FIRST;
   return assuranceNav(engagementId);
+}
+
+/**
+ * 現在地（aria-current）の付け方（docs/disclosure-first.md §9.1）。
+ *  - `top-and-leaf`: 従来ツリー・監査法人。最上位は自分の href の前方一致で付ける既存仕様（A39。
+ *    例: GHG と Cat.1 の 2 つ）を保ち、2 階層目以下は木全体で 1 つ以下にする。
+ *  - `single`: 開示優先ツリー。最上位も含めて木全体で 1 つにする（メニューにある画面ならちょうど 1 つ）。
+ */
+export type NavCurrentMode = 'top-and-leaf' | 'single';
+
+/**
+ * ツリー内の位置（添字の列。例 "1.0.4"）。同じ href・同じ項目が別の枝に出ても区別できるよう、
+ * 現在地は href ではなく位置で持つ。
+ */
+export function navItemKey(parentKey: string | null, index: number): string {
+  return parentKey === null ? String(index) : `${parentKey}.${index}`;
+}
+
+/** href と一致するか、その配下の画面か */
+export function isNavPathActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function aliasMatches(pathname: string, item: NavItem): boolean {
+  return item.alsoCurrentFor?.some((pattern) => pattern.test(pathname)) ?? false;
+}
+
+/**
+ * 自分または子孫のどこかが現在の画面か（強調表示に使う。3 階層対応）。
+ * 別導線（secondary）は数えない: 正規の位置の親だけを強調する。
+ */
+export function isNavSubtreeActive(pathname: string, item: NavItem): boolean {
+  if (item.secondary) return false;
+  if (isNavPathActive(pathname, item.href) || aliasMatches(pathname, item)) return true;
+  return item.children?.some((child) => isNavSubtreeActive(pathname, child)) ?? false;
+}
+
+// 一致の強さ。完全一致 > 別名（alsoCurrentFor）> 前方一致（href が長いほど強い）
+const RANK_EXACT = Number.MAX_SAFE_INTEGER;
+const RANK_ALIAS = Number.MAX_SAFE_INTEGER - 1;
+
+function matchRank(
+  pathname: string,
+  item: NavItem,
+  siblings: NavItem[],
+  topLevel: boolean,
+): number {
+  if (item.secondary) return 0;
+  if (pathname === item.href) return RANK_EXACT;
+  const prefix = pathname.startsWith(`${item.href}/`);
+  // 最上位は配下の画面すべてで一致させる（開示プロジェクト → 原稿編集 など。既存仕様）
+  if (topLevel) return prefix ? item.href.length : 0;
+  // 2 階層目以下のグループ行（例: SSBJ）は配下すべてに前方一致してしまうため、完全一致のときだけ
+  if ((item.children?.length ?? 0) > 0) return 0;
+  if (aliasMatches(pathname, item)) return RANK_ALIAS;
+  // 兄弟の親パスを持つ入口行（例: 算定サマリー = /enterprise/ghg）も兄弟の画面で光らないよう完全一致のみ
+  const overlapsSibling = siblings.some(
+    (other) => other !== item && other.href.startsWith(`${item.href}/`),
+  );
+  return prefix && !overlapsSibling ? item.href.length : 0;
+}
+
+interface NavCandidate {
+  key: string;
+  topKey: string;
+  depth: number;
+  rank: number;
+}
+
+/**
+ * 現在地にする項目の位置（navItemKey）を返す。描画するのと同じ（権限で絞った後の）ツリーを渡す。
+ *
+ * 候補が複数あれば、一致が強いもの → 深いもの（親子が同じ href のときは子。例: SSBJ → 対応状況）→
+ * 木の順で先のもの、の順で 1 つに決める。どの順で呼んでも同じ結果になる（決定的）。
+ * 折りたたみ中は子を描画しないため、`single` は現在地の項目を含む最上位に付け、
+ * `top-and-leaf` は最上位の前方一致だけを残す（従来どおり）。
+ */
+export function resolveNavCurrent(
+  items: NavItem[],
+  pathname: string,
+  { mode, collapsed }: { mode: NavCurrentMode; collapsed: boolean },
+): Set<string> {
+  const candidates: NavCandidate[] = [];
+  const visit = (siblings: NavItem[], parentKey: string | null, topKey: string | null) => {
+    siblings.forEach((item, index) => {
+      const key = navItemKey(parentKey, index);
+      const depth = parentKey === null ? 0 : parentKey.split('.').length;
+      const isTop = parentKey === null;
+      // top-and-leaf の最上位は下で別に決める（2 階層目以下の 1 つとは独立に付く既存仕様）
+      if (!(isTop && mode === 'top-and-leaf')) {
+        const rank = matchRank(pathname, item, siblings, isTop);
+        if (rank > 0) candidates.push({ key, topKey: topKey ?? key, depth, rank });
+      }
+      if (item.children) visit(item.children, key, topKey ?? key);
+    });
+  };
+  visit(items, null, null);
+
+  // Array.prototype.sort は安定ソートなので、同点は木の順（先に見つけたもの）が残る
+  const best = [...candidates].sort((a, b) => b.rank - a.rank || b.depth - a.depth)[0];
+  const current = new Set<string>();
+
+  if (mode === 'top-and-leaf') {
+    items.forEach((item, index) => {
+      if (isNavPathActive(pathname, item.href)) current.add(navItemKey(null, index));
+    });
+    if (!collapsed && best) current.add(best.key);
+    return current;
+  }
+
+  if (best) current.add(collapsed ? best.topKey : best.key);
+  return current;
 }
 
 export function assuranceNav(engagementId: string | null): NavItem[] {

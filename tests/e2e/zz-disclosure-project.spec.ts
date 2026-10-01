@@ -9,6 +9,8 @@ import {
   carryDemoState,
   loginAs,
   peakCarriedCookieHeader,
+  resetDisclosureDemo,
+  setDisclosureFirst,
   switchDemoRole,
 } from './helpers';
 
@@ -150,25 +152,6 @@ async function attachText(name: string, text: string): Promise<void> {
 let approvedExternalDocxHref = '';
 let approvedExternalContentHash = '';
 
-async function setDisclosureFirst(page: Page, on: boolean): Promise<void> {
-  await page.goto('/enterprise/settings');
-  await page.getByLabel(on ? '有効にする' : '無効にする（従来の構成）').check();
-  await page
-    .locator('form')
-    .filter({ has: page.getByRole('group', { name: '開示優先モード' }) })
-    .getByRole('button', { name: '保存' })
-    .click();
-  await page.waitForURL(new RegExp(`flash=disclosureFirstChanged&state=${on ? 'on' : 'off'}`));
-}
-
-/** 開示デモのリセット（ホームの開示業務タブにある。開示優先モードが ON のときだけ表示される） */
-async function resetDisclosureDemo(page: Page): Promise<void> {
-  await page.getByLabel('上記の範囲だけを初期状態へ戻すことを確認しました').check();
-  await page.getByRole('button', { name: '開示デモを初期状態に戻す' }).click();
-  await page.waitForURL(/flash=disclosureDemoReset/);
-  await expect(page.getByText(/開示デモのデータを初期状態に戻しました/)).toBeVisible();
-}
-
 // 状態がリクエストごとに消えるサーバーの E2E（playwright.stateless.config.ts）では、前の手順の結果を
 // Cookie だけで次の手順へ渡す（実演の発表者と同じく 1 つのブラウザを使い続ける）。通常の E2E では何もしない
 test.afterEach(async ({ context }, testInfo) => {
@@ -248,6 +231,22 @@ test('A01: 管理者が開示優先モードを有効にすると、新しいメ
   await expect(page.getByText(/^青海テクノロジー株式会社 ／ 2026年度/)).toHaveText(
     '青海テクノロジー株式会社 ／ 2026年度（2026-04-01〜2027-03-31）',
   );
+
+  // 定性情報の正規の位置は「情報・根拠」。SSBJ 配下の同じ画面への別導線（secondary）には現在地を
+  // 付けない（docs/disclosure-first.md §9.1 ①: 開示優先ツリーは現在地がちょうど 1 つ）
+  await page.goto('/enterprise/narratives');
+  const mainNav = page.getByRole('navigation', { name: 'メインナビゲーション' });
+  await expect(mainNav.locator('a[aria-current="page"]')).toHaveCount(1);
+  await expect(
+    mainNav
+      .getByRole('list', { name: '情報・根拠', exact: true })
+      .locator('a[aria-current="page"]'),
+  ).toHaveText('定性情報');
+  await expect(
+    mainNav
+      .getByRole('list', { name: 'SSBJ', exact: true })
+      .getByRole('link', { name: '定性情報' }),
+  ).not.toHaveAttribute('aria-current', 'page');
 });
 
 test('CSV 登録（訂正行）→ 数値確認（旧版と変更理由・二重登録なし・提出と承認）', async ({

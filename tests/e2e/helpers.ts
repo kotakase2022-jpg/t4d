@@ -94,6 +94,17 @@ export function peakCarriedCookieHeader(): { bytes: number; editsBytes: number; 
   return peakCookieHeader;
 }
 
+/**
+ * 持ち回した Demo Mode の Cookie と最大値の記録を捨てる（別の流れを初期状態の Fixture から始めるとき）。
+ * 同じワーカーで続けて流れる spec は、前の spec の終わりの Cookie（リセットの印・機能設定・操作の記録）を
+ * 受け取ってしまう。前の spec の結果を次の流れの前提にせず、Cookie の大きさも流れごとに測るため。
+ * 持ち回さない構成（通常の E2E）では、何も持ち回していないので影響しない
+ */
+export function resetCarriedDemoState(): void {
+  carriedDemoCookies = [];
+  peakCookieHeader = { bytes: 0, editsBytes: 0, label: '' };
+}
+
 /** デモアカウントでログインし、ワークスペースを選択する。 */
 export async function loginAs(page: Page, displayName: string): Promise<void> {
   if (carriesDemoState()) {
@@ -162,4 +173,31 @@ export async function gotoEngagementPage(page: Page, pageName: string): Promise<
   await page.goto(`/assurance/engagements/${engagementId}/${pageName}`);
   await expect(page.locator('#t4d-main')).toBeVisible();
   return engagementId;
+}
+
+// ----------------------------------------------------------------------
+// 開示優先モードの切替と開示デモのリセット（変更する spec が最後に既定の状態へ戻すため）
+// ----------------------------------------------------------------------
+
+/** 管理者の設定画面で開示優先モードを切り替える（enterprise.org.manage が要る） */
+export async function setDisclosureFirst(page: Page, on: boolean): Promise<void> {
+  await page.goto('/enterprise/settings');
+  await page.getByLabel(on ? '有効にする' : '無効にする（従来の構成）').check();
+  await page
+    .locator('form')
+    .filter({ has: page.getByRole('group', { name: '開示優先モード' }) })
+    .getByRole('button', { name: '保存' })
+    .click();
+  await page.waitForURL(new RegExp(`flash=disclosureFirstChanged&state=${on ? 'on' : 'off'}`));
+}
+
+/**
+ * 開示デモのリセット（ホームの開示業務タブにある。開示優先モードが ON のときだけ表示される）。
+ * 開示優先モードの表と CSRD の 6 表（DMA・評価・計画・開示ドラフト）を Fixture の値へ戻す
+ */
+export async function resetDisclosureDemo(page: Page): Promise<void> {
+  await page.getByLabel('上記の範囲だけを初期状態へ戻すことを確認しました').check();
+  await page.getByRole('button', { name: '開示デモを初期状態に戻す' }).click();
+  await page.waitForURL(/flash=disclosureDemoReset/);
+  await expect(page.getByText(/開示デモのデータを初期状態に戻しました/)).toBeVisible();
 }

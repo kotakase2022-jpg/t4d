@@ -522,9 +522,17 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   ).toBeVisible();
   await expect(sidebar.getByRole('link', { name: 'データ取込', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('link', { name: 'SSBJ', exact: true })).toBeVisible();
-  for (const child of ['対応状況', '要求事項', '対応計画', 'データ収集', '開示ドラフト']) {
-    await expect(sidebar.getByRole('link', { name: child, exact: true })).toBeVisible();
-  }
+  // CSRD にも同名のリンクが並ぶため、SSBJ のリストに絞る（2026-10-01 に定性情報を追加。
+  // docs/disclosure-first.md §9.1）
+  const ssbjList = sidebar.getByRole('list', { name: 'SSBJ', exact: true });
+  await expect(ssbjList.getByRole('link')).toHaveText([
+    '対応状況',
+    '要求事項',
+    '対応計画',
+    'データ収集',
+    '定性情報',
+    '開示ドラフト',
+  ]);
   await expect(sidebar.getByRole('link', { name: 'Scope3データ取込', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('link', { name: 'Cat.1', exact: true })).toBeVisible();
 });
@@ -894,4 +902,69 @@ test('本番: 開示優先モードを ON にするとメニューとホーム�
   }
   await page.goto(`${BASE}/enterprise/dashboard`);
   await expect(page.getByRole('link', { name: '開示業務' })).toHaveCount(0);
+});
+
+test('本番: CSRD の 6 画面と分析の 3 画面が開き、サンプル・架空の表示がある（閲覧のみ）', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const problems: string[] = [];
+  page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  page.on('response', (r) => {
+    if (r.status() >= 500 && r.url().startsWith(BASE)) {
+      problems.push(`network: ${r.status()} ${r.url().replace(BASE, '')}`);
+    }
+  });
+  await prodLogin(page, '海野 みどり');
+  const main = page.locator('#t4d-main');
+
+  // docs/disclosure-first.md §9.4（CSRD）・§9.5〜9.6（分析）。どれも状態を変えない
+  for (const [path, heading] of [
+    ['/enterprise/disclosures/csrd', /^CSRD 開示対応（ESRS）/],
+    ['/enterprise/disclosures/csrd/settings', /^CSRD 設定/],
+    ['/enterprise/disclosures/csrd/requirements', /^CSRD 要求事項の評価/],
+    ['/enterprise/disclosures/csrd/plans', /^CSRD 対応計画/],
+    ['/enterprise/disclosures/csrd/collection', /^CSRD データ収集/],
+    ['/enterprise/disclosures/csrd/draft', /^CSRD 開示ドラフト/],
+    ['/enterprise/analysis/diagnosis', /^現状診断/],
+    ['/enterprise/analysis/regulations', /^規制対応度/],
+    ['/enterprise/analysis/benchmark', /^他社比較/],
+  ] as const) {
+    const res = await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });
+    expect(res?.status(), `${path} が ${res?.status()}`).toBeLessThan(400);
+    await expect(
+      page.getByRole('heading', { level: 1, name: heading }),
+      `${path} が描画されない`,
+    ).toBeVisible();
+  }
+
+  // CSRD は架空のサンプル・マスター。設定ではダブル・マテリアリティと SSBJ との違いを示す
+  await page.goto(`${BASE}/enterprise/disclosures/csrd`);
+  await expect(main.getByText('サンプル（架空）').first()).toBeVisible();
+  await expect(page.getByRole('table', { name: 'ESRS 要求事項とデータの対応' })).toBeVisible();
+  await page.goto(`${BASE}/enterprise/disclosures/csrd/settings`);
+  await expect(main.getByText('CSRD: ダブル・マテリアリティ')).toBeVisible();
+  await expect(main.getByText('SSBJ: シングル・マテリアリティ')).toBeVisible();
+  await expect(
+    main.getByRole('table', { name: 'サステナビリティ事項のダブル・マテリアリティ評価' }),
+  ).toBeVisible();
+
+  // 他社比較は架空の比較データ（先頭のバナーと表の caption の両方）
+  const notice = '架空の比較データ（デモ用）。実在企業の数値ではありません';
+  await page.goto(`${BASE}/enterprise/analysis/benchmark`);
+  await expect(page.getByRole('note', { name: '比較データについて' })).toContainText(notice);
+  await expect(page.getByRole('table', { name: new RegExp(`^${notice}`) })).toBeVisible();
+  // 分析には単一の総合点・準拠率を出さない
+  await expect(main).not.toContainText('準拠率');
+
+  // 左メニュー: CSRD の 5 画面と分析の 3 画面（同名の項目があるのでリストに絞る）
+  const sidebar = page.getByRole('navigation', { name: 'メインナビゲーション' });
+  await expect(
+    sidebar.getByRole('list', { name: 'CSRD', exact: true }).getByRole('link'),
+  ).toHaveText(['対応状況', '要求事項', '対応計画', 'データ収集', '開示ドラフト']);
+  await expect(
+    sidebar.getByRole('list', { name: '分析', exact: true }).getByRole('link'),
+  ).toHaveText(['現状診断', '規制対応度', '他社比較']);
+
+  expect(problems.join('\n')).toBe('');
 });

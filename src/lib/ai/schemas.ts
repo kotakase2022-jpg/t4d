@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CSRD_SECTIONS, DMA_PERSPECTIVES } from '@/types/domain';
 
 /**
  * AI の構造化出力スキーマ（指示書 14 章）。
@@ -23,6 +24,9 @@ export const aiSourceSchema = z.object({
     'metric_version',
     'prior_block',
     'requirement',
+    // CSRD のギャップ分析・草案が根拠にした DMA の事項・IRO（docs/disclosure-first.md §9.4）
+    'dma_matter',
+    'dma_iro',
   ]),
   id: z.string().nullable(),
   label: z.string(),
@@ -150,6 +154,36 @@ export const ssbjDisclosureDraftSchema = z.object({
   ...base,
 });
 export type SsbjDisclosureDraftOutput = z.infer<typeof ssbjDisclosureDraftSchema>;
+
+// 4.7 csrdGapAnalysis — CSRD（ESRS サンプル）要求事項のギャップ分析（docs/disclosure-first.md §9.4）
+//
+// 形は ssbjGapAnalysis と同じ（3 観点・コメント・不足情報・推奨・資料位置）。
+// 書く先は csrd_assessments.ai_* だけで、人が「候補を採用」「修正して確定」するまで確定値にならない。
+// 入力は許可された要求事項・承認済みの値・DMA の結果だけ（Secret・権限外の資料を含めない）。
+export const csrdGapAnalysisSchema = ssbjGapAnalysisSchema.extend({});
+export type CsrdGapAnalysisOutput = z.infer<typeof csrdGapAnalysisSchema>;
+
+// 4.8 csrdDisclosureDraft — CSRD 開示ドラフトの節の草案（docs/disclosure-first.md §9.4）
+//
+// どの観点（インパクト／財務）で重要と判断した節かを perspectives で返し、本文にも明示させる。
+// 書く先は csrd_disclosure_drafts.ai_body 等だけ。本文への採用・確定は人が行う（CLAUDE.md §0.4）。
+export const csrdDisclosureDraftSchema = z.object({
+  section: z.enum(CSRD_SECTIONS),
+  perspectives: z.array(z.enum(DMA_PERSPECTIVES)),
+  /** 開示書類に載せる文章の草案（候補） */
+  body: z.string(),
+  /** 草案が根拠にした要求事項のコード */
+  coveredItemCodes: z.array(z.string()),
+  /** 書けなかった箇所（人が埋めないと開示にできない部分） */
+  gaps: z.array(
+    z.object({
+      itemCode: z.string(),
+      reason: z.string(),
+    }),
+  ),
+  ...base,
+});
+export type CsrdDisclosureDraftOutput = z.infer<typeof csrdDisclosureDraftSchema>;
 
 // 5. evidenceMapping — Evidence 該当箇所の候補
 export const evidenceMappingSchema = z.object({
@@ -334,6 +368,8 @@ export const AI_SCHEMAS = {
   cdpDraftGeneration: cdpDraftGenerationSchema,
   ssbjGapAnalysis: ssbjGapAnalysisSchema,
   ssbjDisclosureDraft: ssbjDisclosureDraftSchema,
+  csrdGapAnalysis: csrdGapAnalysisSchema,
+  csrdDisclosureDraft: csrdDisclosureDraftSchema,
   evidenceMapping: evidenceMappingSchema,
   inconsistencyCheck: inconsistencyCheckSchema,
   insightDiscovery: insightDiscoverySchema,
@@ -354,6 +390,8 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   cdpDraftGeneration: 'cdp-draft-generation@2026-08-14.1',
   ssbjGapAnalysis: 'ssbj-gap-analysis@2026-08-26.1',
   ssbjDisclosureDraft: 'ssbj-disclosure-draft@2026-08-27.1',
+  csrdGapAnalysis: 'csrd-gap-analysis@2026-10-01.1',
+  csrdDisclosureDraft: 'csrd-disclosure-draft@2026-10-01.1',
   evidenceMapping: 'evidence-mapping@2026-08-14.1',
   inconsistencyCheck: 'inconsistency-check@2026-08-17.1',
   insightDiscovery: 'insight-discovery@2026-08-17.1',

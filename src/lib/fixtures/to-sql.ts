@@ -40,6 +40,7 @@ const JSONB_COLUMNS = new Set([
 const JSONB_COLUMNS_BY_TABLE: Partial<Record<TableName, ReadonlySet<string>>> = {
   // JS 配列を持つ jsonb。ここに無いと Postgres 配列リテラルとして書かれて投入に失敗する
   ssbjDisclosureDrafts: new Set(['gaps']),
+  csrdDisclosureDrafts: new Set(['gaps']),
   projectFrameworks: new Set(['conditions']),
   projectFrameworkDecisions: new Set(['conditions_snapshot']),
   narrativeVersions: new Set(['fields']),
@@ -102,6 +103,14 @@ export const SEED_ORDER: TableName[] = [
   'ingestionJobFiles',
   'aiRuns',
   'ingestionRows',
+  // CSRD（docs/disclosure-first.md §9.3）。評価・節は ai_runs を (id, organization_id) で参照するため
+  // それより後に置く。IRO は事項を、計画は評価を参照する
+  'csrdAnalysisSettings',
+  'csrdDmaMatters',
+  'csrdDmaIros',
+  'csrdAssessments',
+  'csrdActionPlans',
+  'csrdDisclosureDrafts',
   // 開示優先モード。版・判断は ai_runs・file_versions・extracted_fragments を参照するため
   // それらより後に置く（current_* のポインタは遅延可能な外部キー）。
   'organizationFeatureSettings',

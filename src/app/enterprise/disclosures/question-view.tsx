@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Bot, Check, Send, Undo2 } from 'lucide-react';
+import { ArrowLeft, Bot, Check, Send, Undo2 } from 'lucide-react';
 import {
   AiGeneratedBadge,
   DataCoverageBadge,
@@ -37,17 +37,22 @@ function metricValueLabel(value: number | null, unit: string): string {
 /**
  * 開示質問の詳細（三ペイン）。CDP と CSRD で共有する。
  * フレームワーク固有なのはキー・ラベル・リンク先だけなので Props で受ける。
+ *
+ * `backLink` は任意。CSRD は要求事項の評価（適用・3 観点）から回答へ来るため、
+ * 「要求事項の評価へ戻る」を出す（docs/disclosure-first.md §9.4）。CDP は渡さず表示は変わらない。
  */
 export async function QuestionDetailView({
   frameworkKey,
   frameworkLabel,
   basePath,
   questionId,
+  backLink,
 }: {
   frameworkKey: FrameworkKey;
   frameworkLabel: string;
   basePath: string;
   questionId: string;
+  backLink?: { href: string; label: string };
 }) {
   const shell = await loadEnterpriseShell();
   const { db, ctx } = shell;
@@ -129,6 +134,14 @@ export async function QuestionDetailView({
         ]}
         actions={
           <>
+            {backLink && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={backLink.href}>
+                  <ArrowLeft aria-hidden="true" />
+                  {backLink.label}
+                </Link>
+              </Button>
+            )}
             {previousRow && (
               <Button variant="outline" size="sm" asChild>
                 <Link href={`${basePath}/${previousRow.item.id}`}>← 前の質問</Link>

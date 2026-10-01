@@ -43,6 +43,7 @@ import {
   applyScope1Correction,
   seedDisclosureFirst,
 } from './disclosure-first';
+import { seedCsrd } from './csrd';
 import { contentHash, fid } from './ids';
 import type {
   Alert,
@@ -60,6 +61,12 @@ import type {
   CalculationInput,
   ClientAccessGrant,
   Comment,
+  CsrdActionPlan,
+  CsrdAnalysisSettings,
+  CsrdAssessment,
+  CsrdDisclosureDraft,
+  CsrdDmaIro,
+  CsrdDmaMatter,
   DataPoint,
   DataPointApprovalStep,
   DataPointCalculation,
@@ -195,6 +202,14 @@ export interface FixtureDb {
   ssbjAnalysisSettings: SsbjAnalysisSettings[];
   ssbjDisclosureDrafts: SsbjDisclosureDraft[];
 
+  // CSRD のダブル・マテリアリティと要求事項の評価（docs/disclosure-first.md §9.3）
+  csrdAnalysisSettings: CsrdAnalysisSettings[];
+  csrdDmaMatters: CsrdDmaMatter[];
+  csrdDmaIros: CsrdDmaIro[];
+  csrdAssessments: CsrdAssessment[];
+  csrdActionPlans: CsrdActionPlan[];
+  csrdDisclosureDrafts: CsrdDisclosureDraft[];
+
   // 開示優先モード（docs/disclosure-first.md §3）
   organizationFeatureSettings: OrganizationFeatureSettings[];
   disclosureProjects: DisclosureProject[];
@@ -326,6 +341,12 @@ export function createFixtureDb(): FixtureDb {
     ssbjActionPlans: [],
     ssbjAnalysisSettings: [],
     ssbjDisclosureDrafts: [],
+    csrdAnalysisSettings: [],
+    csrdDmaMatters: [],
+    csrdDmaIros: [],
+    csrdAssessments: [],
+    csrdActionPlans: [],
+    csrdDisclosureDrafts: [],
     organizationFeatureSettings: [],
     disclosureProjects: [],
     projectFrameworks: [],
@@ -1580,6 +1601,10 @@ export function createFixtureDb(): FixtureDb {
       });
     }
   });
+
+  // CSRD のダブル・マテリアリティ・要求事項の評価・対応計画・開示ドラフト（docs/disclosure-first.md §9.3）。
+  // 中身は csrd.ts（要求事項の行が先に要る）
+  seedCsrd(db);
 
   // ------------------------------------------------------------------
   // 開示優先モード（docs/disclosure-first.md §7）: ESRS-40a・根拠資料・定性情報・

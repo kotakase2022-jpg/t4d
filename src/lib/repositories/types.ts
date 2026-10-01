@@ -26,6 +26,12 @@ import type {
   AuditEvent,
   ClientAccessGrant,
   Comment,
+  CsrdActionPlan,
+  CsrdAnalysisSettings,
+  CsrdAssessment,
+  CsrdDisclosureDraft,
+  CsrdDmaIro,
+  CsrdDmaMatter,
   DataPoint,
   DataPointApprovalStep,
   DataPointCalculation,
@@ -156,6 +162,14 @@ export interface TableMap {
   ssbjActionPlans: SsbjActionPlan;
   ssbjAnalysisSettings: SsbjAnalysisSettings;
   ssbjDisclosureDrafts: SsbjDisclosureDraft;
+
+  // CSRD のダブル・マテリアリティと要求事項の評価（docs/disclosure-first.md §9.3）
+  csrdAnalysisSettings: CsrdAnalysisSettings;
+  csrdDmaMatters: CsrdDmaMatter;
+  csrdDmaIros: CsrdDmaIro;
+  csrdAssessments: CsrdAssessment;
+  csrdActionPlans: CsrdActionPlan;
+  csrdDisclosureDrafts: CsrdDisclosureDraft;
 
   // 開示優先モード（docs/disclosure-first.md §3）
   organizationFeatureSettings: OrganizationFeatureSettings;

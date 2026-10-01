@@ -3123,6 +3123,399 @@ describe('12. 開示優先モードのテーブル（0033〜0040）', () => {
   });
 });
 
+describe('13. CSRD のダブル・マテリアリティと要求事項の評価（0044〜0046）', () => {
+  // Fixture の CSRD の行（FY2026）に頼らず、行の無い FY2025 に検証用の行を RLS をバイパスして作る
+  // （デモの筋書きを直しても越権テストの前提が変わらないように）。越権の INSERT は RLS 以外では通る内容にする
+  const ORG_A = ORG_IDS.aomi;
+  const ORG_B = ORG_IDS.soten;
+  const PERIOD = PERIOD_IDS.fy2025;
+  const AUTHOR = userId('sustainability@demo.local'); // disclosure.write
+  // 拠点担当（site_contributor）: 組織のメンバーだが disclosure.write を持たない
+  const NO_WRITE = ENT_A_SITE;
+  const RLS_ERROR = /row-level security/;
+  const CSRD_ITEM = fid('disclosure_item', 'csrd/2026/ESRS-E1-6');
+  const CSRD_ITEM_2 = fid('disclosure_item', 'csrd/2026/ESRS-E1-5');
+  const CSRD_ITEM_3 = fid('disclosure_item', 'csrd/2026/ESRS-S1-6');
+
+  const ids: Record<string, string> = {};
+  const id = (key: string): string => {
+    const value = ids[key];
+    if (!value) throw new Error(`テスト用の行 ${key} が作られていない`);
+    return value;
+  };
+
+  async function one(sql: string, params: unknown[] = []): Promise<string> {
+    const rows = await h.asSuperuser<{ id: string }>(sql, params);
+    const value = rows[0]?.id;
+    if (!value) throw new Error(`行を作れませんでした: ${sql.slice(0, 80)}`);
+    return value;
+  }
+
+  beforeAll(async () => {
+    ids.ssbjItem = await one(
+      `select i.id from disclosure_items i
+         join disclosure_framework_versions v on v.id = i.framework_version_id
+         join disclosure_frameworks f on f.id = v.framework_id
+        where f.key = 'ssbj' order by i.code limit 1`,
+    );
+    ids.settings = await one(
+      `insert into csrd_analysis_settings (organization_id, reporting_period_id, created_by)
+       values ($1, $2, $3) returning id`,
+      [ORG_A, PERIOD, AUTHOR],
+    );
+    ids.matter = await one(
+      `insert into csrd_dma_matters
+         (organization_id, reporting_period_id, esrs_topic, impact_assessment, impact_rationale)
+       values ($1, $2, 'E1', 'material', '算定結果が閾値以上（RLS テスト）') returning id`,
+      [ORG_A, PERIOD],
+    );
+    ids.iro = await one(
+      `insert into csrd_dma_iros
+         (organization_id, reporting_period_id, matter_id, iro_type, description, value_chain_stage,
+          impact_occurrence, impact_direction, impact_scale, impact_scope, impact_irremediability)
+       values ($1, $2, $3, 'impact', '製造拠点の排出（RLS テスト）', 'own_operations',
+               'actual', 'negative', 4, 4, 4) returning id`,
+      [ORG_A, PERIOD, id('matter')],
+    );
+    ids.assessment = await one(
+      `insert into csrd_assessments (organization_id, reporting_period_id, item_id)
+       values ($1, $2, $3) returning id`,
+      [ORG_A, PERIOD, CSRD_ITEM],
+    );
+    ids.plan = await one(
+      `insert into csrd_action_plans
+         (organization_id, reporting_period_id, assessment_id, gap_kind, title, action_type)
+       values ($1, $2, $3, 'data', '収集方法を決める（RLS テスト）', 'data_collection') returning id`,
+      [ORG_A, PERIOD, id('assessment')],
+    );
+    ids.draft = await one(
+      `insert into csrd_disclosure_drafts (organization_id, reporting_period_id, section, body)
+       values ($1, $2, 'ESRS2', '本文（RLS テスト）') returning id`,
+      [ORG_A, PERIOD],
+    );
+    // 企業 B の事項（他社の行を指す複合外部キーの検査に使う）
+    ids.matterB = await one(
+      `insert into csrd_dma_matters (organization_id, reporting_period_id, esrs_topic)
+       values ($1, $2, 'E1') returning id`,
+      [ORG_B, PERIOD_IDS.sotenFy2026],
+    );
+  });
+
+  /** 表ごとの越権の INSERT（RLS 以外は通る内容）と更新 */
+  const SPECS: Array<{
+    table: string;
+    key: string;
+    insert: (actor: string) => [string, unknown[]];
+    update: string;
+  }> = [
+    {
+      table: 'csrd_analysis_settings',
+      key: 'settings',
+      insert: (actor) => [
+        `insert into csrd_analysis_settings (organization_id, reporting_period_id, created_by)
+         values ($1, $2, $3) returning id`,
+        [ORG_A, PERIOD_IDS.fy2024, actor],
+      ],
+      update: `update csrd_analysis_settings set method_note = '改ざん'`,
+    },
+    {
+      table: 'csrd_dma_matters',
+      key: 'matter',
+      insert: (actor) => [
+        `insert into csrd_dma_matters (organization_id, reporting_period_id, esrs_topic, created_by)
+         values ($1, $2, 'E2', $3) returning id`,
+        [ORG_A, PERIOD, actor],
+      ],
+      update: `update csrd_dma_matters set stakeholder_note = '改ざん'`,
+    },
+    {
+      table: 'csrd_dma_iros',
+      key: 'iro',
+      insert: (actor) => [
+        `insert into csrd_dma_iros
+           (organization_id, reporting_period_id, matter_id, iro_type, description, value_chain_stage,
+            time_horizon, financial_likelihood, financial_magnitude, created_by)
+         values ($1, $2, $3, 'risk', '炭素価格（RLS テスト）', 'own_operations', 'medium', 4, 4, $4)
+         returning id`,
+        [ORG_A, PERIOD, id('matter'), actor],
+      ],
+      update: `update csrd_dma_iros set description = '改ざん'`,
+    },
+    {
+      table: 'csrd_assessments',
+      key: 'assessment',
+      insert: (actor) => [
+        `insert into csrd_assessments (organization_id, reporting_period_id, item_id, created_by)
+         values ($1, $2, $3, $4) returning id`,
+        [ORG_A, PERIOD, CSRD_ITEM_2, actor],
+      ],
+      update: `update csrd_assessments set review_comment = '改ざん'`,
+    },
+    {
+      table: 'csrd_action_plans',
+      key: 'plan',
+      insert: (actor) => [
+        `insert into csrd_action_plans
+           (organization_id, reporting_period_id, assessment_id, gap_kind, title, action_type, created_by)
+         values ($1, $2, $3, 'process', '承認の仕組み（RLS テスト）', 'internal_control', $4)
+         returning id`,
+        [ORG_A, PERIOD, id('assessment'), actor],
+      ],
+      update: `update csrd_action_plans set title = '乗っ取り'`,
+    },
+    {
+      table: 'csrd_disclosure_drafts',
+      key: 'draft',
+      insert: (actor) => [
+        `insert into csrd_disclosure_drafts (organization_id, reporting_period_id, section, created_by)
+         values ($1, $2, 'E1', $3) returning id`,
+        [ORG_A, PERIOD, actor],
+      ],
+      update: `update csrd_disclosure_drafts set body = '改ざん'`,
+    },
+  ];
+
+  for (const spec of SPECS) {
+    describe(spec.table, () => {
+      it('企業 A のメンバーは自社の行を取得できる（空振りテストでないことの確認）', async () => {
+        const rows = await h.asUser(NO_WRITE, `select id from ${spec.table} where id = $1`, [
+          id(spec.key),
+        ]);
+        expect(rows).toHaveLength(1);
+      });
+
+      it('企業 B の管理者は企業 A の行を取得できない', async () => {
+        const rows = await h.asUser(
+          ENT_B_ADMIN,
+          `select id from ${spec.table} where organization_id = $1`,
+          [ORG_A],
+        );
+        expect(rows).toHaveLength(0);
+      });
+
+      it('企業 B の管理者は企業 A の名義で行を作れない（RLS で拒否）', async () => {
+        const [sql, params] = spec.insert(ENT_B_ADMIN);
+        await expect(h.asUser(ENT_B_ADMIN, sql, params)).rejects.toThrow(RLS_ERROR);
+      });
+
+      it('企業 B の管理者は企業 A の行を更新できない（0 行）', async () => {
+        const rows = await h.asUser(ENT_B_ADMIN, `${spec.update} where id = $1 returning id`, [
+          id(spec.key),
+        ]);
+        expect(rows).toHaveLength(0);
+      });
+
+      it('開示の編集権限の無い役割（拠点担当）は、同じ組織でも作成・更新できない', async () => {
+        const [sql, params] = spec.insert(NO_WRITE);
+        await expect(h.asUser(NO_WRITE, sql, params)).rejects.toThrow(RLS_ERROR);
+        const rows = await h.asUser(NO_WRITE, `${spec.update} where id = $1 returning id`, [
+          id(spec.key),
+        ]);
+        expect(rows).toHaveLength(0);
+      });
+
+      it('同じ組織の開示の編集権限者は作成・更新できる', async () => {
+        const [sql, params] = spec.insert(AUTHOR);
+        const created = await h.asUser<{ id: string }>(AUTHOR, sql, params);
+        expect(created).toHaveLength(1);
+        const rows = await h.asUser(AUTHOR, `${spec.update} where id = $1 returning id`, [
+          id(spec.key),
+        ]);
+        expect(rows).toHaveLength(1);
+      });
+
+      it('DELETE は権限自体が無い（論理削除・確定の取り消しで扱う）', async () => {
+        const denied = await h.expectDenied(AUTHOR, `delete from ${spec.table} where id = $1`, [
+          id(spec.key),
+        ]);
+        expect(denied).toMatch(/permission denied/i);
+      });
+    });
+  }
+
+  describe('要求事項は CSRD の版のものに限る（t4d.csrd_assessment_item_guard）', () => {
+    it('SSBJ の要求事項を CSRD の評価として登録できない（利用者）', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into csrd_assessments (organization_id, reporting_period_id, item_id)
+           values ($1, $2, $3)`,
+          [ORG_A, PERIOD, id('ssbjItem')],
+        ),
+      ).rejects.toThrow(/T4D_CSRD_ITEM_ONLY/);
+    });
+
+    it('Service Role 相当（RLS バイパス）でもトリガで止まる', async () => {
+      await expect(
+        h.asSuperuser(
+          `insert into csrd_assessments (organization_id, reporting_period_id, item_id)
+           values ($1, $2, $3)`,
+          [ORG_A, PERIOD, id('ssbjItem')],
+        ),
+      ).rejects.toThrow(/T4D_CSRD_ITEM_ONLY/);
+    });
+
+    it('既存の評価の要求事項を SSBJ のものへ差し替えられない', async () => {
+      await expect(
+        h.asUser(AUTHOR, `update csrd_assessments set item_id = $1 where id = $2`, [
+          id('ssbjItem'),
+          id('assessment'),
+        ]),
+      ).rejects.toThrow(/T4D_CSRD_ITEM_ONLY/);
+    });
+
+    it('CSRD の要求事項なら登録できる（空振りテストでないことの確認）', async () => {
+      const rows = await h.asUser<{ id: string }>(
+        AUTHOR,
+        `insert into csrd_assessments (organization_id, reporting_period_id, item_id)
+         values ($1, $2, $3) returning id`,
+        [ORG_A, PERIOD, CSRD_ITEM_3],
+      );
+      expect(rows).toHaveLength(1);
+    });
+  });
+
+  describe('他組織の行は複合外部キーで指せない', () => {
+    it('他組織の事項（matter_id）に IRO を付けられない（自社名義でも、RLS バイパスでも）', async () => {
+      const sql = `insert into csrd_dma_iros
+          (organization_id, reporting_period_id, matter_id, iro_type, description, value_chain_stage,
+           time_horizon, financial_likelihood, financial_magnitude)
+        values ($1, $2, $3, 'risk', '越権（他社の事項）', 'own_operations', 'short', 2, 2)`;
+      const params = [ORG_B, PERIOD_IDS.sotenFy2026, id('matter')];
+      await expect(h.asUser(ENT_B_ADMIN, sql, params)).rejects.toThrow(/foreign key/);
+      await expect(h.asSuperuser(sql, params)).rejects.toThrow(/foreign key/);
+    });
+
+    it('他組織の評価（assessment_id）に対応計画を付けられない', async () => {
+      const sql = `insert into csrd_action_plans
+          (organization_id, reporting_period_id, assessment_id, gap_kind, title, action_type)
+        values ($1, $2, $3, 'data', '越権（他社の評価）', 'data_collection')`;
+      const params = [ORG_B, PERIOD_IDS.sotenFy2026, id('assessment')];
+      await expect(h.asUser(ENT_B_ADMIN, sql, params)).rejects.toThrow(/foreign key/);
+      await expect(h.asSuperuser(sql, params)).rejects.toThrow(/foreign key/);
+    });
+
+    it('他組織の報告期間を名乗る行を作れない', async () => {
+      await expect(
+        h.asUser(
+          ENT_B_ADMIN,
+          `insert into csrd_analysis_settings (organization_id, reporting_period_id)
+           values ($1, $2)`,
+          [ORG_B, PERIOD_IDS.fy2026],
+        ),
+      ).rejects.toThrow(/foreign key/);
+    });
+
+    it('他組織のインパクト IRO を関連先にできない', async () => {
+      await expect(
+        h.asSuperuser(
+          `insert into csrd_dma_iros
+             (organization_id, reporting_period_id, matter_id, iro_type, description, value_chain_stage,
+              time_horizon, financial_likelihood, financial_magnitude, related_impact_iro_id)
+           values ($1, $2, $3, 'risk', '越権（他社の IRO）', 'own_operations', 'short', 2, 2, $4)`,
+          [ORG_B, PERIOD_IDS.sotenFy2026, id('matterB'), id('iro')],
+        ),
+      ).rejects.toThrow(/foreign key/);
+    });
+  });
+
+  describe('形の制約（CHECK）', () => {
+    it('評価済みの軸は根拠が無いと保存できない', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `update csrd_dma_matters set financial_assessment = 'not_material', financial_rationale = ' '
+            where id = $1`,
+          [id('matter')],
+        ),
+      ).rejects.toThrow(/check constraint/);
+    });
+
+    it('インパクトに規模が無い・リスクに人権フラグがある IRO は保存できない', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into csrd_dma_iros
+             (organization_id, reporting_period_id, matter_id, iro_type, description, value_chain_stage,
+              impact_occurrence, impact_direction, impact_scope, impact_irremediability)
+           values ($1, $2, $3, 'impact', '規模なし', 'own_operations', 'actual', 'negative', 3, 3)`,
+          [ORG_A, PERIOD, id('matter')],
+        ),
+      ).rejects.toThrow(/check constraint/);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into csrd_dma_iros
+             (organization_id, reporting_period_id, matter_id, iro_type, description, value_chain_stage,
+              time_horizon, financial_likelihood, financial_magnitude, human_rights)
+           values ($1, $2, $3, 'risk', '人権フラグ付きのリスク', 'own_operations', 'short', 2, 2, true)`,
+          [ORG_A, PERIOD, id('matter')],
+        ),
+      ).rejects.toThrow(/check constraint/);
+    });
+
+    it('閾値は 1.0〜5.0、DMA の確定は確定者と日時が対', async () => {
+      await expect(
+        h.asUser(AUTHOR, `update csrd_analysis_settings set impact_threshold = 5.5 where id = $1`, [
+          id('settings'),
+        ]),
+      ).rejects.toThrow(/check constraint|out of range/);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `update csrd_analysis_settings set dma_confirmed_at = now() where id = $1`,
+          [id('settings')],
+        ),
+      ).rejects.toThrow(/check constraint/);
+    });
+
+    it('最終判定は人の確認（reviewed_at）なしに入らない', async () => {
+      await expect(
+        h.asUser(AUTHOR, `update csrd_assessments set final_status = 'covered' where id = $1`, [
+          id('assessment'),
+        ]),
+      ).rejects.toThrow(/check constraint/);
+    });
+
+    it('本文が空の節は確定できない', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `update csrd_disclosure_drafts set body = '', confirmed_at = now(), confirmed_by = $1
+            where id = $2`,
+          [AUTHOR, id('draft')],
+        ),
+      ).rejects.toThrow(/check constraint/);
+    });
+
+    it('Fixture の CSRD の行（FY2026）は制約を満たして投入され、他テナントからは見えない', async () => {
+      const counts = await h.asUser<{ tbl: string; count: string }>(
+        AUTHOR,
+        `select 'matters' as tbl, count(*)::text as count from csrd_dma_matters
+          where organization_id = $1 and reporting_period_id = $2
+         union all
+         select 'iros', count(*)::text from csrd_dma_iros
+          where organization_id = $1 and reporting_period_id = $2
+         union all
+         select 'assessments', count(*)::text from csrd_assessments
+          where organization_id = $1 and reporting_period_id = $2`,
+        [ORG_A, PERIOD_IDS.fy2026],
+      );
+      expect(Object.fromEntries(counts.map((r) => [r.tbl, Number(r.count)]))).toEqual({
+        matters: 10,
+        iros: 20,
+        assessments: 12,
+      });
+      const other = await h.asUser(
+        ENT_B_ADMIN,
+        `select id from csrd_assessments where reporting_period_id = $1`,
+        [PERIOD_IDS.fy2026],
+      );
+      expect(other).toHaveLength(0);
+    });
+  });
+});
+
 /** 検証用の AI 実行を 1 件作る（seed には無いため） */
 async function seedAiRun(): Promise<string> {
   const [row] = await h.asSuperuser<{ id: string }>(

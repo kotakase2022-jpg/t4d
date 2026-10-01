@@ -31,6 +31,9 @@ const FEATURE_LABEL: Record<string, string> = {
   assuranceChangeSummary: 'Snapshot 後変更要約（監査）',
   // 開示優先モードの原稿編集画面から実行する。候補は人が段落ごとに採用するまで本文に入らない
   disclosureBlockDraft: '開示本文の下書き',
+  // CSRD の要求事項詳細・開示ドラフトの画面から実行する。結果は候補の列にだけ入り、人が採用・確定する
+  csrdGapAnalysis: 'CSRD ギャップ分析',
+  csrdDisclosureDraft: 'CSRD 開示ドラフト',
 };
 
 const INSIGHT_CATEGORY_LABEL: Record<string, string> = {
@@ -234,11 +237,14 @@ export default async function AiPage({
                   {key === 'importMapping' && '取込ジョブの解析時に自動実行されます。'}
                   {key === 'disclosureBlockDraft' &&
                     '開示プロジェクトの原稿編集画面から実行します（候補は段落ごとに人が採用）。'}
+                  {key.startsWith('csrd') &&
+                    'CSRD の要求事項詳細・開示ドラフトの画面から実行します（候補は人が採用・確定）。'}
                   {key.startsWith('assurance') && '監査法人ワークスペースで実行します。'}
                   {!key.startsWith('assurance') &&
                     key !== 'cdpDraftGeneration' &&
                     key !== 'importMapping' &&
                     key !== 'disclosureBlockDraft' &&
+                    !key.startsWith('csrd') &&
                     '対象画面から実行します。'}
                 </p>
               </li>

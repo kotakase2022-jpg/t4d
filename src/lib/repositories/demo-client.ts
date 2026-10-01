@@ -44,9 +44,20 @@ function persistedColumns(
   if (isCompactedTable(table)) return compactRow(table, record, db);
   if (table === 'disclosureBlocks') return withoutWorkingBody(record);
   if (isDisclosureReviewNotification(table, row)) return { ...record, body: '' };
-  if (table !== 'aiRuns' || record.featureType !== 'importMapping') return record;
+  if (table !== 'aiRuns' || !OUTPUT_NOT_REREAD.has(String(record.featureType))) return record;
   return { ...record, outputJson: {} };
 }
+
+/**
+ * Cookie では出力（outputJson）を空にする AI の実行。読み直しに出力を使わないもの。
+ * CSRD のギャップ分析・草案は、出力を評価の ai_* 列・節の ai_body に写し終えており、
+ * 画面はそちらを読む（docs/disclosure-first.md §9.3。出力を載せると同じ文章を 2 回持ち回す）
+ */
+const OUTPUT_NOT_REREAD: ReadonlySet<string> = new Set([
+  'importMapping',
+  'csrdGapAnalysis',
+  'csrdDisclosureDraft',
+]);
 
 /**
  * 節の自動保存本文（workingBody）は Cookie へ載せない。

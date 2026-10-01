@@ -21,7 +21,7 @@ import {
   hasUsableValue,
   type DataCoverage,
 } from '@/lib/services/aggregation';
-import { recomputePeriodValidations } from '@/lib/services/validation-store';
+import { ensureMetricAssignment } from '@/lib/services/collection-item';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -1254,102 +1254,22 @@ export async function createDataCollectionItem(
     throw new ValidationError('データ項目のコードと名称を入力してください。');
   }
 
-  const code = input.metricCode.trim();
-  const existing = await db.select('metrics', { where: { organizationId, code }, limit: 1 });
-  const now = new Date().toISOString();
-
-  let metricId = existing[0]?.id ?? null;
-  if (!metricId) {
-    metricId = fid('metric_definition', `${organizationId}/${code}`);
-    await db.insert('metrics', [
-      {
-        id: metricId,
-        organizationId,
-        code,
-        name: input.metricName.trim(),
-        description: `SSBJ 対応計画「${plan.title}」から作成したデータ項目`,
-        category: 'ghg',
-        unit: input.unit.trim() || '—',
-        baseUnit: input.unit.trim() || '—',
-        dataType: 'number',
-        aggregationMethod: 'sum',
-        numeratorMetricCode: null,
-        denominatorMetricCode: null,
-        formula: null,
-        requiresEvidence: input.requiresEvidence,
-        hqOnly: false,
-        // SSBJ の対応計画から作られた指標なので、出所は SSBJ
-        frameworks: ['ssbj'],
-        materiality: 'high',
-        reportingFrequency: 'annual',
-        responsibleDepartment: input.department.trim() || null,
-        yoyWarningRatio: null,
-        minValue: null,
-        maxValue: null,
-        deletedAt: null,
-        createdAt: now,
-        updatedAt: now,
-        createdBy: ctx.userId,
-        updatedBy: ctx.userId,
-      },
-    ]);
-  } else {
-    // 指標マスターは SSBJ・CDP・CSRD の要求から作ってあるため、SSBJ の対応計画で
-    // 集めようとする指標は既に定義済みのことが多い。同じコードで作り直すと
-    // 重複してしまうので、既存の定義を使い、まだ埋まっていない運用項目だけ補う。
-    const current = existing[0]!;
-    const patch: Partial<typeof current> = {};
-    // 担当部署は、対応計画で人が明示的に指定したものを優先する。
-    // マスター側の値はカテゴリーからの初期値でしかなく、実際に誰が集めるかは
-    // 計画を立てた人のほうが分かっている（例: Scope3 の輸送は物流部）
-    const department = input.department.trim();
-    if (department !== '' && department !== current.responsibleDepartment) {
-      patch.responsibleDepartment = department;
-    }
-    // 根拠資料が要ると計画側で判断したなら、それを弱めない
-    if (input.requiresEvidence && !current.requiresEvidence) patch.requiresEvidence = true;
-    if (Object.keys(patch).length > 0) {
-      await db.update('metrics', metricId!, { ...patch, updatedAt: now, updatedBy: ctx.userId });
-    }
-    // 証跡必須にしたら、その期間の検証をやり直す。承認済みで証跡の無い行が
-    // 「承認済み・要再確認」として見えるようにするため（W0 O3: 後発の証跡不足）。
-    // 検証結果の書き込みは enterprise.data.write の RLS なので、権限が無ければ次のデータ更新時に回す
-    if (patch.requiresEvidence && can(ctx, 'enterprise.data.write')) {
-      const period = await db.findById('periods', plan.reportingPeriodId);
-      if (period && period.organizationId === organizationId) {
-        await recomputePeriodValidations(db, ctx, period);
-      }
-    }
-  }
-
-  // 同じ指標 × 拠点 × 期間の割当が既にあれば作り直さない
-  const assignments = await db.select('metricAssignments', {
-    where: {
-      organizationId,
-      metricId,
-      unitId: input.unitId,
-      reportingPeriodId: plan.reportingPeriodId,
-    },
-    limit: 1,
+  // 指標の作成（無ければ）と割当の作成は CSRD の対応計画と共通（collection-item.ts）。
+  // SSBJ の計画から作る指標の出所は SSBJ
+  const { metricId, metricCode: code } = await ensureMetricAssignment(db, ctx, {
+    frameworks: ['ssbj'],
+    description: `SSBJ 対応計画「${plan.title}」から作成したデータ項目`,
+    reportingPeriodId: plan.reportingPeriodId,
+    metricCode: input.metricCode,
+    metricName: input.metricName,
+    unit: input.unit,
+    unitId: input.unitId,
+    ownerUserId: input.ownerUserId,
+    dueDate: input.dueDate,
+    requiresEvidence: input.requiresEvidence,
+    department: input.department,
   });
-  if (assignments.length === 0) {
-    await db.insert('metricAssignments', [
-      {
-        id: fid('metric_assignment', `${metricId}/${input.unitId}/${plan.reportingPeriodId}`),
-        organizationId,
-        metricId,
-        unitId: input.unitId,
-        reportingPeriodId: plan.reportingPeriodId,
-        ownerUserId: input.ownerUserId,
-        reviewerUserId: null,
-        dueDate: input.dueDate,
-        createdAt: now,
-        updatedAt: now,
-        createdBy: ctx.userId,
-        updatedBy: ctx.userId,
-      },
-    ]);
-  }
+  const now = new Date().toISOString();
 
   await db.update('ssbjActionPlans', input.planId, {
     linkedMetricCode: code,

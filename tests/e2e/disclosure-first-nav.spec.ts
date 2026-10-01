@@ -164,6 +164,7 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/dashboard');
 
+  // 「分析」は 2026-10-01 の追加要望で従来メニューにも足した（docs/disclosure-first.md §9.1 ②）
   for (const label of [
     'ホーム',
     '開示対応',
@@ -171,6 +172,7 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
     'GHG',
     '業務管理',
     'AI Copilot',
+    '分析',
     '管理',
   ]) {
     await expect(sidebar(page).getByRole('link', { name: label, exact: true })).toBeVisible();
@@ -197,13 +199,17 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
     await expect(page.getByRole('heading', { level: 1, name: heading }), path).toBeVisible();
   }
 
-  // 既存の Scope3・データ取込・SSBJ ドラフトは従来のメニューから同じ URL で開ける（A39）
-  for (const [label, href] of [
-    ['Scope3データ取込', '/enterprise/ghg/suppliers'],
-    ['データ取込', '/enterprise/imports'],
-    ['開示ドラフト', '/enterprise/disclosures/ssbj/draft'],
+  // 既存の Scope3・データ取込・SSBJ ドラフトは従来のメニューから同じ URL で開ける（A39）。
+  // 定性情報は従来メニューの SSBJ 配下にも出る（§9.1 ①）。「開示ドラフト」は CSRD にも同名があるため
+  // SSBJ のリストに絞る
+  const ssbjList = sidebar(page).getByRole('list', { name: 'SSBJ', exact: true });
+  for (const [label, href, scope] of [
+    ['Scope3データ取込', '/enterprise/ghg/suppliers', sidebar(page)],
+    ['データ取込', '/enterprise/imports', sidebar(page)],
+    ['開示ドラフト', '/enterprise/disclosures/ssbj/draft', ssbjList],
+    ['定性情報', '/enterprise/narratives', ssbjList],
   ] as const) {
-    const link = sidebar(page).getByRole('link', { name: label, exact: true });
+    const link = scope.getByRole('link', { name: label, exact: true });
     await expect(link).toHaveAttribute('href', href);
     await link.click();
     await page.waitForURL(new RegExp(`${href}$`));

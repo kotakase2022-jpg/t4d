@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import type { NavItem } from './nav-config';
 import { useNavItems, type SidebarVariant } from './sidebar';
 
 export interface CommandEntry {
@@ -12,6 +13,28 @@ export interface CommandEntry {
   href: string;
   group: string;
   keywords?: string[];
+}
+
+/**
+ * メニューのツリーを候補に展開する。3 階層対応: 「開示対応 / SSBJ / 対応状況」のように
+ * 経路をラベルにして全階層を拾う。別導線（secondary）は正規の位置と同じ画面なので候補に重ねない。
+ */
+export function navCommandEntries(items: NavItem[]): CommandEntry[] {
+  const out: CommandEntry[] = [];
+  const walk = (nodes: NavItem[], trail: string[]) => {
+    for (const item of nodes) {
+      if (item.secondary) continue;
+      out.push({
+        label: [...trail, item.label].join(' / '),
+        href: item.href,
+        group: 'ナビゲーション',
+        keywords: item.keywords,
+      });
+      if (item.children) walk(item.children, [...trail, item.label]);
+    }
+  };
+  walk(items, []);
+  return out;
 }
 
 /**
@@ -33,23 +56,10 @@ export function CommandPalette({
   const [query, setQuery] = React.useState('');
   const [activeIndex, setActiveIndex] = React.useState(0);
 
-  const entries = React.useMemo<CommandEntry[]>(() => {
-    const out: CommandEntry[] = [];
-    // 3 階層対応: 「開示対応 / SSBJ / 対応状況」のように経路をラベルにして全階層を拾う
-    const walk = (items: typeof navItems, trail: string[]) => {
-      for (const item of items) {
-        out.push({
-          label: [...trail, item.label].join(' / '),
-          href: item.href,
-          group: 'ナビゲーション',
-          keywords: item.keywords,
-        });
-        if (item.children) walk(item.children, [...trail, item.label]);
-      }
-    };
-    walk(navItems, []);
-    return [...out, ...extraEntries];
-  }, [navItems, extraEntries]);
+  const entries = React.useMemo<CommandEntry[]>(
+    () => [...navCommandEntries(navItems), ...extraEntries],
+    [navItems, extraEntries],
+  );
 
   React.useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {

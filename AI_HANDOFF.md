@@ -2784,3 +2784,64 @@ commit・push・deploy はしていない。`docs/disclosure-first.md` は編集
   - 実演の流れを本番に流すと、数値（欧州販売子会社の水使用量 FY2026）の訂正がそのインスタンスのメモリに残るため、最後に同じコミットを再デプロイしてインスタンスを入れ替えた。
 - ローカル最終: lint / format / typecheck 合格、unit+integration 1,259、RLS 248、check:rls 100 表、build 合格、E2E 282/282、stateless 16/16。
 - 未解決（発注者の判断が必要）: 取込画面のデモ信頼度表示（80〜97%）と指示書 §9.3 の関係。A30 資料 ACL、A36 は未対応・未検証。0041〜0043 は本番 Supabase へ未適用。
+
+---
+
+## 2026-10-01 追加要望（定性情報メニュー・分析・CSRD のダブル・マテリアリティ）Stage C 統合（単独・未コミット）
+
+設計: `docs/disclosure-first.md` §9（本作業では編集していない。実施結果の記入は統括が行う）。Stage A（基盤）・B1〜B4（ナビ・分析・CSRD 2 スライス）の
+成果を結合し、スライス間の依頼（crossSliceNeeds）を適用して E2E・本番スモーク・文書を足した。commit・push・deploy はしていない。
+
+### 1. スライス間の依頼の適用
+
+| 依頼元   | 内容                                                                                           | 対応                                                                                                                                                                                                                               |
+| -------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B4       | 開示ドラフトのカードから要求事項の詳細へリンクしたい（`CsrdDraftItemView` に項目 ID が無い）   | `src/lib/services/csrd/draft.ts` の `CsrdDraftItemView` に `itemId` を追加。カードの「この節の要求事項」と「書けなかった箇所」のコードを `/csrd/requirements/{itemId}` へのリンクにした（一覧への総称リンクは削除）。unit 1 件追加 |
+| B3       | SSBJ 設定画面の `UnitScopeSelector` を共通部品にし、CSRD 側の複製を消す                        | `src/app/enterprise/disclosures/_components/unit-scope-selector.tsx` に移し、SSBJ・CSRD の設定画面が使う。束ごとの見出しは CSRD 版の fieldset／legend に揃えた（SSBJ の文言は `supplierNote` で従来のまま）                        |
+| B3/B4    | データ収集の状況バッジが 2 つ（要求事項の詳細と収集画面で見た目が違う）                        | `csrd/_components/csrd-badges.tsx` の `CsrdDataStateBadge` 1 つにまとめ、両画面が使う（ラベル＋アイコン 4 種）。unit 1 件追加                                                                                                      |
+| B2       | 他社比較の「この指標のデータ」はヘッダーの年度を開く（比較の年度 FY2025 と違い得る）           | リンク名に比較の年度を明記（「この指標のデータ（FY2025。年度は画面上部で選択）」）。年度を URL で渡す一覧は P1（known-limitations C-4）。integration の期待値を 1 行追加                                                           |
+| B2       | `/csrd/requirements` が `?review=awaiting` と複数値の `?applicability=…&coverage=…` を受けるか | 確認済み（`parseRequirementQuery` は複数値を配列で受け、`filterCsrdRequirements` が絞る）。full-audit に両 URL を追加                                                                                                              |
+| B1       | 開示優先モードで `/enterprise/narratives` の現在地が「情報・根拠」側の 1 つだけ（E2E）         | `zz-disclosure-project.spec.ts` の A01 に追加（メインナビの `a[aria-current=page]` が 1 つ・情報・根拠のリスト内・SSBJ 側の定性情報には付かない）                                                                                  |
+| B1       | ナビのリンク先が実在すること                                                                   | ナビの 40 の href すべてに `page.tsx` があることを確認（MSCI・FTSE は `[framework]`）。分析の権限（規制対応度のみ `enterprise.disclosure.read`）は B2 のページ側の検査と一致                                                       |
+| B2/B3/B4 | full-audit・本番スモーク・stateless・文書                                                      | 下記 2・3                                                                                                                                                                                                                          |
+
+### 2. E2E・本番スモーク
+
+- `tests/e2e/zzz-csrd-chain.spec.ts`（新規・serial・9 件。通常 E2E と `playwright.stateless.config.ts` の両方）: 対応状況（DMA 未確定・暫定 10/12・評価対象 9/12）→
+  設定 G1 でインパクト=重要でない・財務=重要＋根拠 → DMA 確定 → 要求事項で G1-1/G1-4 が「適用（財務）」・暫定が消える（11/12）→ E1-6 で AI 分析（デモ生成）→
+  候補を採用 → 対応計画を追加 → 計画画面で対応中へ → 収集画面の状況の表から scope2_location の収集項目を作成 → 開示ドラフト E1 を生成 → 本文に採用 → 加筆・保存 → 確定
+  （「両面で重要」の文言、E5 は対象外、G1 は作成可能に）→ 要求事項の詳細から回答画面（左メニューの現在地は CSRD の「要求事項」）→ 戻る → 開示デモのリセットで初期状態へ。
+  開始時に持ち回しの Cookie を捨てる `resetCarriedDemoState()` を `tests/e2e/helpers.ts` に追加。`setDisclosureFirst`・`resetDisclosureDemo` を helpers へ移し、
+  `zz-disclosure-project.spec.ts` もそれを使う（挙動は同じ）。途中で失敗しても afterAll で戻す。
+- `tests/e2e/csrd-screens.spec.ts`（新規・閲覧のみ・6 件）: 対応計画（CSRD の 2 件だけ・SSBJ を混ぜない・現在地 1 つ）、データ収集（対象外を並べない・未入力・S1-9 の収集項目）、
+  開示ドラフト（6 節の領域・候補と本文の分離・作れない理由・コードのリンク・定性情報へのリンク）、DMA の事項 E1（IRO・提案 4.0・人の判断・設定画面では現在地なし）、
+  権限（レビュー担当には AI 生成・収集項目の作成を出さない／拠点担当には CSRD 6 画面とも「アクセス権限がありません」で表を出さない）、axe（計画・収集・草案・事項 G1）。
+- `tests/e2e/full-audit.spec.ts`: CSRD 10 URL（設定・事項・要求事項〔絞込 2 種〕・詳細・回答・計画・収集・草案）と分析 4 URL（redirect を含む）を追加。拠点担当の許可画面に現状診断・他社比較。
+- `playwright.stateless.config.ts`: `testMatch` に `zzz-csrd-chain.spec.ts`。
+- `tests/e2e-production/production-smoke.spec.ts`: 「CSRD の 6 画面と分析の 3 画面が開き、サンプル・架空の表示がある（閲覧のみ）」を追加（見出し、サンプル（架空）、
+  ダブル・マテリアリティと SSBJ の違い、他社比較のバナーと caption、準拠率なし、CSRD 5 子・分析 3 子）。本番は未反映のため、ローカルのサーバーへ
+  `PROD_BASE_URL=http://127.0.0.1:3217` で流して合格を確認した（本番では未実行）。
+
+### 3. 文書
+
+- `docs/known-limitations.md`: D-3 の CSRD 節に E2E の実測と「流し直すときはサーバーを起動し直す」を追記、§3 に「CSRD と分析の範囲」C-1〜C-6
+  （節ドラフトの DOCX は P1・草案の行が無い節は手書き不可・ESRS 2 の Fixture は確定済みで DMA は未確定・他社比較のリンクの年度・計画の更新の隠し項目・比較データは架空の静的データ）。
+  0044〜0046 のロールバック方針は Stage A が記入済み。
+
+### 4. テスト結果（2026-10-01 ローカル。E2E はほかの重い処理と並走させず単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` 合格。`pnpm seed:generate` は差分なし（Fixture は変えていない）。
+- `pnpm test`: 133 ファイル・**1,643 件**合格（Stage C 開始時 1,641 件 + 本作業の 2 件）。
+- `pnpm test:rls`: 2 ファイル・**304 件**合格。`pnpm check:rls`: **106 表**・RLS 有効 106・ポリシー 240 で合格。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`（リクエストごとに新しい Fixture）: **25 件すべて合格・1.3 分**（16 → 25。CSRD の流れ 9 件を追加）。
+  押し出し 0。Cookie ヘッダーの最大は 実演の流れ 8,849B（操作の記録 8,701B）、CSRD の流れ 4,077B（操作の記録 3,948B）。
+- `E2E_PORT=3217 pnpm test:e2e`（通常・全件・単独実行）: **307 件すべて合格・9.7 分**（retries 0・flaky 0）。
+- 本番スモークの追加分（CSRD・分析）と SSBJ のリストに絞った既存の 1 件は、ローカルのサーバーへ向けて 2 件合格（本番では未実行）。
+
+### 5. 未解決・次作業（統括・発注者の判断が必要なもの）
+
+- Fixture の ESRS 2 の節が「確定済み」で DMA が「未確定」（§9.3 の Fixture どおり）。いまの規則では画面の操作で作れない状態。Fixture を規則に合わせるか（ESRS 2 の草案を未確定にする等）は設計の判断を待つ（known-limitations C-3）。
+- 他社比較の自社値は各指標の最新確定年度ではなく比較データの年度（FY2025）の確定値。取水量は自社の `water`（水使用量）に対応付け（B2 の判断。§9 の実施結果へ記録してほしい）。
+- 本番へは未反映。反映後に `pnpm test:e2e:prod`（追加した 1 件を含む）と、CSRD の流れを本番の 1 ブラウザで流すこと。
+- CSRD 計画の更新が隠し項目を送り直す（SSBJ と同じ。C-5）。草案の無い節への手書き（C-2）・節ドラフトの DOCX（C-1）は P1。
+- `zzz-csrd-chain.spec.ts` は収集項目の割当を残すため、同じサーバーでの流し直しにはサーバーの再起動が要る。

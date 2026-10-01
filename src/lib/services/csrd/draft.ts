@@ -4,17 +4,17 @@ import { runAi } from '@/lib/ai';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
 import {
+  CSRD_DRAFT_AI_BODY_TARGET,
   CSRD_DRAFT_BODY_MAX,
   CSRD_SECTION_LABEL,
   csrdSectionOfItem,
-  deriveCsrdApplicability,
   isCsrdInScope,
   type CsrdApplicability,
 } from '@/lib/domain/csrd';
 import { csrdRowIds } from '@/lib/domain/csrd-ids';
 import { IRO_TYPE_LABEL, iroFinancialScore, iroImpactScore } from '@/lib/domain/dma';
 import { ValidationError } from '@/lib/errors/user-facing';
-import { hasUsableValue } from '@/lib/services/aggregation';
+import { hasUsableValue, valueKindOf } from '@/lib/services/aggregation';
 import type { DbClient } from '@/lib/repositories/types';
 import {
   CSRD_SECTIONS,
@@ -28,6 +28,9 @@ import {
 } from '@/types/domain';
 import {
   assertCsrdWrite,
+  assertSameBase,
+  countsAsConfirmedDraft,
+  csrdSectionApplicability,
   displayNameOf,
   findCsrdPeriod,
   loadCsrdContext,
@@ -42,6 +45,8 @@ import {
  *  - AI は ai_body 等の候補の列だけを書く（本文 body は変えない。CLAUDE.md §0.4）
  *  - 草案を作れるのは評価対象（常に適用・重要と判断した事項）の節だけ。確定済みの節は作り直せない
  *  - 本文を直すと確定は外れる。確定は DMA の確定後・本文ありのときだけ
+ *  - 採用・保存・確定は、画面が表示したときの版（updatedAt）を受け取り、別のタブ・別の利用者の操作で
+ *    変わっていれば断る（見ていない AI 草案・本文を、採用・上書き・確定しない）
  *  - 読込関数は書かない
  */
 
@@ -67,10 +72,20 @@ export interface CsrdDraftSectionView {
   generatable: boolean;
   /** 作れない理由（作れるなら null） */
   generateBlockedReason: string | null;
+  /**
+   * 本文を手で書けるか（編集権限あり、かつ草案の行がある・または評価対象の節）。
+   * AI の実行権限が無い編集者も、草案の行が無い評価対象の節に本文を書ける
+   */
+  canWriteBody: boolean;
   /** 確定できるか */
   confirmable: boolean;
   confirmBlockedReason: string | null;
   confirmedByName: string | null;
+  /**
+   * 確定済みのまま、事項の判断が変わって対象外・未判定になった節（以前のデータ）。
+   * 確定の条件を満たさないため、確定済みの数には入れず、画面で再確認を促す
+   */
+  staleConfirmation: boolean;
 }
 
 export interface CsrdDraftOverview {
@@ -78,15 +93,10 @@ export interface CsrdDraftOverview {
   dmaConfirmed: boolean;
   /** マスターに要求事項がある節だけ（ESRS2・E1・E3・E5・S1・G1） */
   sections: CsrdDraftSectionView[];
+  /** 確定済みの節（評価対象の節だけを数える） */
   confirmedCount: number;
   canWrite: boolean;
   canRunAi: boolean;
-}
-
-function sectionApplicability(context: CsrdContext, section: CsrdSection): CsrdApplicability {
-  if (section === 'ESRS2') return deriveCsrdApplicability('ESRS2', null, context.dmaConfirmed);
-  const matter = context.matters.find((m) => m.topic === section)?.matter ?? null;
-  return deriveCsrdApplicability(section, matter, context.dmaConfirmed);
 }
 
 /** マスターに要求事項がある節（CSRD_SECTIONS の順） */
@@ -95,6 +105,10 @@ function sectionsWithItems(context: CsrdContext): CsrdSection[] {
     context.items.map((i) => csrdSectionOfItem(i)).filter((s): s is CsrdSection => s !== null),
   );
   return CSRD_SECTIONS.filter((s) => present.has(s));
+}
+
+function isCsrdSection(value: unknown): value is CsrdSection {
+  return typeof value === 'string' && (CSRD_SECTIONS as readonly string[]).includes(value);
 }
 
 function generateBlockedReason(
@@ -144,7 +158,8 @@ export async function loadCsrdDrafts(
 
   const sections: CsrdDraftSectionView[] = [];
   for (const section of sectionsWithItems(context)) {
-    const applicability = sectionApplicability(context, section);
+    const applicability = csrdSectionApplicability(context, section);
+    const inScope = isCsrdInScope(applicability);
     const draft = bySection.get(section) ?? null;
     const blocked = generateBlockedReason(applicability, draft);
     const confirmBlocked = confirmBlockedReason(context, applicability, draft);
@@ -152,7 +167,7 @@ export async function loadCsrdDrafts(
       section,
       label: CSRD_SECTION_LABEL[section],
       applicability,
-      inScope: isCsrdInScope(applicability),
+      inScope,
       items: context.items
         .filter((i) => csrdSectionOfItem(i) === section)
         .map((i) => {
@@ -170,16 +185,18 @@ export async function loadCsrdDrafts(
         draft !== null && draft.aiBody !== '' && draft.body !== '' && draft.body !== draft.aiBody,
       generatable: canRunAi && blocked === null,
       generateBlockedReason: blocked,
+      canWriteBody: canWrite && (draft !== null || inScope),
       confirmable: canWrite && confirmBlocked === null,
       confirmBlockedReason: confirmBlocked,
       confirmedByName: await displayNameOf(db, draft?.confirmedBy ?? null),
+      staleConfirmation: draft !== null && draft.confirmedAt !== null && !inScope,
     });
   }
   return {
     period,
     dmaConfirmed: context.dmaConfirmed,
     sections,
-    confirmedCount: drafts.filter((d) => d.confirmedAt !== null).length,
+    confirmedCount: drafts.filter((d) => countsAsConfirmedDraft(context, d)).length,
     canWrite,
     canRunAi,
   };
@@ -208,7 +225,7 @@ export async function generateCsrdDraft(
   assertCsrdWrite(ctx);
   assertCan(ctx, 'enterprise.ai.run');
   const ownPeriod = await findCsrdPeriod(db, ctx, period.id);
-  if (!(CSRD_SECTIONS as readonly string[]).includes(section)) {
+  if (!isCsrdSection(section)) {
     throw new NotFoundError('開示ドラフトの節が見つかりません。');
   }
   const context = await loadCsrdContext(db, ctx, ownPeriod);
@@ -218,7 +235,7 @@ export async function generateCsrdDraft(
   if (sectionItems.length === 0) {
     throw new ValidationError(`「${CSRD_SECTION_LABEL[section]}」には要求事項がありません。`);
   }
-  const applicability = sectionApplicability(context, section);
+  const applicability = csrdSectionApplicability(context, section);
   const existingRows = await db.select('csrdDisclosureDrafts', {
     where: { organizationId, reportingPeriodId: ownPeriod.id, section },
     limit: 1,
@@ -260,10 +277,12 @@ export async function generateCsrdDraft(
   const values = approved
     .filter((dp) => metricIds.has(dp.metricId) && hasUsableValue(dp))
     .slice(0, 10);
+  // 推計は推計のまま渡す（AI が実績のように書かないよう、値ごとに区分を付ける）
   const metricValues = values.map((dp) => ({
     label: `${metricById.get(dp.metricId)?.name ?? '指標'}（${unitName.get(dp.unitId) ?? '—'}）`,
     value: dp.value as number,
     unit: dp.unitOfMeasure,
+    kind: valueKindOf(dp) === 'estimate' ? ('estimate' as const) : ('actual' as const),
   }));
   const matterState =
     section === 'ESRS2' ? undefined : context.matters.find((m) => m.topic === section);
@@ -336,15 +355,65 @@ export async function generateCsrdDraft(
     },
   });
 
+  // AI の出力はスキーマの形だけを満たしている。保存する前に、この節の規則で確かめる
+  // （別の節の文章・節の外の要求事項・担当者が確定していない要求事項を「根拠」として出さない）
+  if (output.section !== section) {
+    throw new ValidationError(
+      `AI の出力が別の節（${output.section}）を指していたため、草案を保存しませんでした。もう一度作成してください。`,
+    );
+  }
+  if (output.body.length > CSRD_DRAFT_BODY_MAX) {
+    throw new ValidationError(
+      `AI の草案が本文の上限（${CSRD_DRAFT_BODY_MAX} 字）を超えたため、保存しませんでした。もう一度作成してください。`,
+    );
+  }
+  const sectionCodes = new Set(sectionItems.map((i) => i.code));
+  const writableCodes = new Set(
+    requirements
+      .filter(
+        (r) => r.reviewed && (r.finalStatus === 'covered' || r.finalStatus === 'mostly_covered'),
+      )
+      .map((r) => r.code),
+  );
+  const coveredItemCodes = [...new Set(output.coveredItemCodes)].filter((c) =>
+    writableCodes.has(c),
+  );
+  const droppedCovered = [...new Set(output.coveredItemCodes)].filter((c) => !writableCodes.has(c));
+  const seenGaps = new Set<string>();
+  const gaps = output.gaps.filter((gap) => {
+    if (!sectionCodes.has(gap.itemCode) || seenGaps.has(gap.itemCode)) return false;
+    seenGaps.add(gap.itemCode);
+    return true;
+  });
+  const droppedGaps = output.gaps.filter((gap) => !sectionCodes.has(gap.itemCode));
+  const warnings = [
+    ...output.warnings,
+    ...(droppedCovered.length > 0
+      ? [
+          `AI が根拠に挙げた要求事項のうち、この節の担当者確認済み（対応済み・おおむね対応）でないもの（${droppedCovered.join('、')}）は根拠から外しました。本文に該当する記述が無いか確認してください。`,
+        ]
+      : []),
+    ...(droppedGaps.length > 0
+      ? [
+          `この節の要求事項ではないコード（${[...new Set(droppedGaps.map((g) => g.itemCode))].join('、')}）を「書けなかった箇所」から外しました。`,
+        ]
+      : []),
+    ...(output.body.length > CSRD_DRAFT_AI_BODY_TARGET
+      ? [
+          `草案が目安の ${CSRD_DRAFT_AI_BODY_TARGET} 字を超えています。採用する前に長さを確認してください。`,
+        ]
+      : []),
+  ];
+
   const now = new Date().toISOString();
   const patch = {
     aiBody: output.body,
-    coveredItemCodes: output.coveredItemCodes,
-    gaps: output.gaps,
+    coveredItemCodes,
+    gaps,
     aiRunId: run.id,
     // numeric(4,3) にそろえる（Demo と Supabase で値を変えない）
     aiConfidence: Math.round(output.confidence * 1000) / 1000,
-    aiWarnings: output.warnings,
+    aiWarnings: warnings,
     aiGeneratedAt: now,
     updatedAt: now,
     updatedBy: ctx.userId,
@@ -380,26 +449,54 @@ export async function generateCsrdDraft(
 async function findDraft(
   db: DbClient,
   ctx: AuthorizationContext,
-  draftId: Uuid,
+  draftId: unknown,
 ): Promise<CsrdDisclosureDraft> {
-  const draft = await db.findById('csrdDisclosureDrafts', draftId);
+  const draft =
+    typeof draftId === 'string' ? await db.findById('csrdDisclosureDrafts', draftId) : null;
   if (!draft || draft.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('開示ドラフトが見つかりません。');
   }
   return draft;
 }
 
-/** AI 草案を本文に採用する（人の操作）。本文が変わるので確定は外れる */
+export interface CsrdDraftOperationInput {
+  draftId: Uuid;
+  /** 画面が表示したときの節の updatedAt（別の操作で変わっていれば断る） */
+  baseUpdatedAt: string;
+}
+
+/**
+ * AI 草案を本文に採用する（人の操作）。本文が変わるので確定は外れる。
+ * 画面が表示した草案（updatedAt）のままのときだけ採用する（作り直された見ていない草案を本文に入れない）。
+ * AI の実行の採否（ai_runs）は、AI の実行権限を持つ人の採用だけを記録する（recordAiDecision と同じ規則。
+ * 0023 の RLS も ai.run を求める）。権限が無い編集者の採用は、監査ログの「本文に採用」だけに残す。
+ * 権限の判定は書込の前に行い、途中で失敗して本文だけが変わる状態を作らない
+ */
 export async function adoptCsrdDraft(
   db: DbClient,
   ctx: AuthorizationContext,
-  draftId: Uuid,
+  input: CsrdDraftOperationInput,
 ): Promise<CsrdDisclosureDraft> {
   assertCsrdWrite(ctx);
-  const draft = await findDraft(db, ctx, draftId);
+  const draft = await findDraft(db, ctx, input.draftId);
+  assertSameBase(draft.updatedAt, input.baseUpdatedAt);
   if (draft.aiBody.trim() === '') {
     throw new ValidationError('採用できる AI 草案がありません。先に草案を作成してください。');
   }
+  if (draft.aiBody.length > CSRD_DRAFT_BODY_MAX) {
+    throw new ValidationError(
+      `AI 草案が本文の上限（${CSRD_DRAFT_BODY_MAX} 字）を超えているため、採用できません。草案を作り直してください。`,
+    );
+  }
+  const run =
+    draft.aiRunId && can(ctx, 'enterprise.ai.run')
+      ? await db.findById('aiRuns', draft.aiRunId)
+      : null;
+  const recordRun =
+    run !== null &&
+    run.organizationId === ctx.workspace.organizationId &&
+    run.status === 'succeeded';
+
   const now = new Date().toISOString();
   const updated = await db.update('csrdDisclosureDrafts', draft.id, {
     body: draft.aiBody,
@@ -413,64 +510,144 @@ export async function adoptCsrdDraft(
     resourceType: 'csrd_disclosure_draft',
     resourceId: draft.id,
     afterSummary: `「${CSRD_SECTION_LABEL[draft.section]}」の AI 草案を本文に採用（人の操作。確定はしていない）`,
+    metadata: { aiRunId: draft.aiRunId, aiDecisionRecorded: recordRun },
   });
-  if (draft.aiRunId) {
+  if (recordRun && run) {
     // 採否の記録（ai_runs の状態）。他の実行の記録には触れない
-    const run = await db.findById('aiRuns', draft.aiRunId);
-    if (run && run.organizationId === ctx.workspace.organizationId && run.status === 'succeeded') {
-      await db.update('aiRuns', run.id, {
-        status: 'accepted',
-        reviewedBy: ctx.userId,
-        acceptedAt: now,
-      });
-    }
+    await db.update('aiRuns', run.id, {
+      status: 'accepted',
+      reviewedBy: ctx.userId,
+      acceptedAt: now,
+    });
   }
   return updated;
 }
 
-/** 本文を人が保存する。保存すると確定は外れる */
+export interface SaveCsrdDraftBodyInput {
+  /** 草案の行。行の無い節に初めて書くときは null（reportingPeriodId と section で節を指す） */
+  draftId: Uuid | null;
+  reportingPeriodId?: Uuid;
+  section?: CsrdSection;
+  body: string;
+  /** 画面が表示したときの updatedAt。行の無い節に書くときは null */
+  baseUpdatedAt: string | null;
+}
+
+/**
+ * 本文を人が保存する。保存すると確定は外れる。
+ * 画面が表示した版のままのときだけ上書きする（別のタブ・別の利用者の保存・採用を黙って消さない）。
+ * 草案の行が無い評価対象の節は、ここで行を作る（AI の実行権限の無い編集者も本文を書ける）
+ */
 export async function saveCsrdDraftBody(
   db: DbClient,
   ctx: AuthorizationContext,
-  draftId: Uuid,
-  body: string,
+  input: SaveCsrdDraftBodyInput,
 ): Promise<CsrdDisclosureDraft> {
   assertCsrdWrite(ctx);
-  const draft = await findDraft(db, ctx, draftId);
+  const body = input.body;
   if (typeof body !== 'string' || body.length > CSRD_DRAFT_BODY_MAX) {
     throw new ValidationError(`本文は ${CSRD_DRAFT_BODY_MAX} 字以内で入力してください。`);
   }
   const now = new Date().toISOString();
-  const updated = await db.update('csrdDisclosureDrafts', draft.id, {
+
+  if (input.draftId) {
+    const draft = await findDraft(db, ctx, input.draftId);
+    assertSameBase(draft.updatedAt, input.baseUpdatedAt);
+    const updated = await db.update('csrdDisclosureDrafts', draft.id, {
+      body,
+      confirmedAt: null,
+      confirmedBy: null,
+      updatedAt: now,
+      updatedBy: ctx.userId,
+    });
+    await recordAuditEvent(db, ctx, {
+      eventType: 'data_updated',
+      resourceType: 'csrd_disclosure_draft',
+      resourceId: draft.id,
+      afterSummary: `「${CSRD_SECTION_LABEL[draft.section]}」の本文を保存${draft.confirmedAt ? '（確定は取り消し）' : ''}`,
+    });
+    return updated;
+  }
+
+  // 行の無い節に初めて書く
+  if (!isCsrdSection(input.section)) {
+    throw new NotFoundError('開示ドラフトの節が見つかりません。');
+  }
+  const section = input.section;
+  const period = await findCsrdPeriod(db, ctx, input.reportingPeriodId ?? '');
+  const context = await loadCsrdContext(db, ctx, period);
+  if (!context) throw new NotFoundError('CSRD の要求事項マスターが見つかりません。');
+  if (!context.items.some((i) => csrdSectionOfItem(i) === section)) {
+    throw new ValidationError(`「${CSRD_SECTION_LABEL[section]}」には要求事項がありません。`);
+  }
+  const applicability = csrdSectionApplicability(context, section);
+  if (!isCsrdInScope(applicability)) {
+    throw new ValidationError(
+      applicability.kind === 'not_material'
+        ? '重要でないと判断した事項の節のため、本文は書けません（対象外）。'
+        : '事項の重要性が未評価のため、本文は書けません（ダブル・マテリアリティ評価で判断してください）。',
+    );
+  }
+  const organizationId = ctx.workspace.organizationId;
+  const existing = await db.select('csrdDisclosureDrafts', {
+    where: { organizationId, reportingPeriodId: period.id, section },
+    limit: 1,
+  });
+  if (existing.length > 0) {
+    // 画面を表示した後に、別の操作で行ができた（その内容を見ずに上書きしない）
+    assertSameBase(existing[0]!.updatedAt, input.baseUpdatedAt);
+  }
+  if (body.trim() === '') {
+    throw new ValidationError('本文を入力してください。');
+  }
+  const row: CsrdDisclosureDraft = {
+    id: csrdRowIds.draft(organizationId, period.id, section),
+    organizationId,
+    reportingPeriodId: period.id,
+    section,
     body,
+    aiBody: '',
+    coveredItemCodes: [],
+    gaps: [],
+    aiRunId: null,
+    aiConfidence: null,
+    aiWarnings: [],
+    aiGeneratedAt: null,
     confirmedAt: null,
     confirmedBy: null,
+    createdAt: now,
     updatedAt: now,
+    createdBy: ctx.userId,
     updatedBy: ctx.userId,
-  });
+  };
+  await db.insert('csrdDisclosureDrafts', [row]);
   await recordAuditEvent(db, ctx, {
-    eventType: 'data_updated',
+    eventType: 'data_created',
     resourceType: 'csrd_disclosure_draft',
-    resourceId: draft.id,
-    afterSummary: `「${CSRD_SECTION_LABEL[draft.section]}」の本文を保存${draft.confirmedAt ? '（確定は取り消し）' : ''}`,
+    resourceId: row.id,
+    afterSummary: `「${CSRD_SECTION_LABEL[section]}」の本文を担当者が書いて保存（AI 草案なし）`,
   });
-  return updated;
+  return row;
 }
 
-/** 節を確定する（人の操作）。DMA の確定後・評価対象の節・本文ありのときだけ */
+/**
+ * 節を確定する（人の操作）。DMA の確定後・評価対象の節・本文ありのときだけ。
+ * 画面が表示した本文（updatedAt）のままのときだけ確定する（見ていない本文を確定しない）
+ */
 export async function confirmCsrdDraft(
   db: DbClient,
   ctx: AuthorizationContext,
-  draftId: Uuid,
+  input: CsrdDraftOperationInput,
 ): Promise<CsrdDisclosureDraft> {
   assertCsrdWrite(ctx);
-  const draft = await findDraft(db, ctx, draftId);
+  const draft = await findDraft(db, ctx, input.draftId);
+  assertSameBase(draft.updatedAt, input.baseUpdatedAt);
   const period = await findCsrdPeriod(db, ctx, draft.reportingPeriodId);
   const context = await loadCsrdContext(db, ctx, period);
   if (!context) throw new NotFoundError('CSRD の要求事項マスターが見つかりません。');
   const blocked = confirmBlockedReason(
     context,
-    sectionApplicability(context, draft.section),
+    csrdSectionApplicability(context, draft.section),
     draft,
   );
   if (blocked) throw new ValidationError(blocked);

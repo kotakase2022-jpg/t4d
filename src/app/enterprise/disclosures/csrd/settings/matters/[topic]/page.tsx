@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -358,7 +359,7 @@ export default async function CsrdMatterPage({
             }
           />
           {detail.canEdit ? (
-            <form action={decideCsrdDmaMatterAction} className="space-y-3 p-3">
+            <PreservingForm action={decideCsrdDmaMatterAction} className="space-y-3 p-3">
               <input type="hidden" name="reportingPeriodId" value={shell.currentPeriod.id} />
               <input type="hidden" name="topic" value={state.topic} />
               <div className="grid grid-cols-2 gap-3">
@@ -396,7 +397,7 @@ export default async function CsrdMatterPage({
                   DMA の確定は取り消されます。AI は判断しません。
                 </span>
               </div>
-            </form>
+            </PreservingForm>
           ) : (
             <div className="space-y-2 p-3">
               <dl className="grid grid-cols-2 gap-3 text-[12px]">
@@ -473,7 +474,14 @@ function AxisDecision({
       </div>
       <label className="block space-y-1 text-[11px] text-ink-muted">
         <span className="block">根拠（重要／重要でないを選んだときは必須）</span>
-        <Textarea name={`${name}Rationale`} rows={3} defaultValue={rationale} maxLength={600} />
+        {/* 「重要」「重要でない」を選んだときだけ必須にする（送る前にブラウザが止める。最終の検査はサーバー） */}
+        <Textarea
+          name={`${name}Rationale`}
+          rows={3}
+          defaultValue={rationale}
+          maxLength={600}
+          data-required-if={`${name}Assessment=material|not_material`}
+        />
       </label>
     </fieldset>
   );

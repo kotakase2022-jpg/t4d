@@ -92,9 +92,13 @@ const INVOCATION_INPUTS: Record<AiFeature, Record<string, unknown>> = {
     dma: { outcome: 'both', outcomeLabel: '両面で重要' },
     responseStatus: 'not_started',
     mappedMetricCount: 4,
+    metricsWithValueCount: 2,
+    metricsWithActualValueCount: 2,
+    missingMetricNames: ['Scope2 排出量（ロケーション基準）', 'Scope3 排出量'],
+    estimateOnlyMetricNames: [],
     metricValues: [
-      { label: 'Scope1 排出量', value: 7859.8, unit: 't-CO2e' },
-      { label: 'Scope2 排出量（マーケット基準）', value: 15200, unit: 't-CO2e' },
+      { label: 'Scope1 排出量', value: 7859.8, unit: 't-CO2e', kind: 'actual' },
+      { label: 'Scope2 排出量（マーケット基準）', value: 15200, unit: 't-CO2e', kind: 'actual' },
     ],
     hasApprovalWorkflow: true,
     sources: [],
@@ -294,6 +298,62 @@ describe('MockAIProvider', () => {
     expect(result.output.warnings.join(' ')).toContain('架空サンプル');
     // DMA が未確定（暫定）であることを伝える
     expect(result.output.warnings.join(' ')).toContain('暫定');
+  });
+
+  it('CSRD ギャップ分析のデータの観点は、値の行の数ではなく値のある指標の数で判定する', async () => {
+    const run = (input: Record<string, unknown>) =>
+      provider.run({
+        feature: 'csrdGapAnalysis',
+        context: { organizationName: 'テスト企業', reportingPeriodLabel: 'FY2026' },
+        inputReferenceIds: [],
+        input: { ...INVOCATION_INPUTS.csrdGapAnalysis, ...input },
+      });
+    // 4 指標のうち 2 指標の拠点別の値が 6 行（行の数は指標の数以上）→ 対応済みにしない
+    const rows = Array.from({ length: 6 }, (_, i) => ({
+      label: `${i < 3 ? 'Scope1' : 'Scope2'}（拠点${i}）`,
+      value: 100 + i,
+      unit: 't-CO2e',
+      kind: 'actual',
+    }));
+    const partial = await run({ metricValues: rows });
+    expect(partial.output.dataStatus).toBe('partial');
+    expect(partial.output.missingInformation.join(' ')).toContain('Scope3 排出量');
+    // すべての指標に実績値があるときだけ対応済み
+    const covered = await run({
+      metricsWithValueCount: 4,
+      metricsWithActualValueCount: 4,
+      missingMetricNames: [],
+    });
+    expect(covered.output.dataStatus).toBe('covered');
+    // 推計だけの指標があれば一部対応（推計は実績として扱わない）
+    const estimate = await run({
+      metricsWithValueCount: 4,
+      metricsWithActualValueCount: 3,
+      missingMetricNames: [],
+      estimateOnlyMetricNames: ['Scope3 排出量'],
+    });
+    expect(estimate.output.dataStatus).toBe('partial');
+    expect(estimate.output.missingInformation.join(' ')).toContain('推計だけの指標');
+    // 値のある指標が無ければ未対応
+    const none = await run({
+      metricsWithValueCount: 0,
+      metricsWithActualValueCount: 0,
+      metricValues: [],
+    });
+    expect(none.output.dataStatus).toBe('not_covered');
+  });
+
+  it('CSRD 開示ドラフトは推計値を「推計値」と明記する（実績のように書かない）', async () => {
+    const result = await provider.run({
+      feature: 'csrdDisclosureDraft',
+      context: { organizationName: 'テスト企業', reportingPeriodLabel: 'FY2026' },
+      inputReferenceIds: [],
+      input: {
+        ...INVOCATION_INPUTS.csrdDisclosureDraft,
+        metricValues: [{ label: 'Scope1 排出量', value: 1234, unit: 't-CO2e', kind: 'estimate' }],
+      },
+    });
+    expect(result.output.body).toContain('1,234 t-CO2e（推計値）');
   });
 
   it('CSRD 開示ドラフトは観点を明示し、600 字以内・架空と明記した草案を返す', async () => {

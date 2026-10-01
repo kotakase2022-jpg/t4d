@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,7 +40,11 @@ import {
 } from '@/lib/services/csrd/plans';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { MetricDefinition, Uuid } from '@/types/domain';
-import { CsrdDataStateBadge, SampleMasterBadge } from '../_components/csrd-badges';
+import {
+  CsrdDataStateBadge,
+  EstimateValueBadge,
+  SampleMasterBadge,
+} from '../_components/csrd-badges';
 import { createCsrdCollectionItemAction } from './actions';
 
 export const metadata = { title: 'CSRD データ収集' };
@@ -136,18 +141,22 @@ function ApprovedValue({
   state,
   value,
   unit,
+  valueKind,
 }: {
   state: CsrdDataState;
   value: number | null;
   unit: string;
+  /** 推計は推計と示す（承認済みでも実績と見誤らせない） */
+  valueKind: 'actual' | 'estimate' | null;
 }) {
   if (state !== 'approved') return <span className="text-ink-muted">—</span>;
   if (value === null) return <span className="text-[11px] text-ink-muted">数値なし</span>;
   return (
-    <>
+    <span className="inline-flex items-center gap-1">
       {formatNumber(value)}
-      <span className="ml-1 text-[11px] text-ink-muted">{unit}</span>
-    </>
+      <span className="text-[11px] text-ink-muted">{unit}</span>
+      {valueKind === 'estimate' && <EstimateValueBadge />}
+    </span>
   );
 }
 
@@ -391,6 +400,7 @@ export default async function CsrdCollectionPage({
                               state={row.state}
                               value={row.value}
                               unit={row.unitOfMeasure}
+                              valueKind={row.valueKind}
                             />
                           </TD>
                           <TD className="text-[11px]">
@@ -487,6 +497,7 @@ export default async function CsrdCollectionPage({
                           state={row.state}
                           value={row.collectedValue}
                           unit={row.unit}
+                          valueKind={row.valueKind}
                         />
                       </TD>
                       <TD>
@@ -544,7 +555,11 @@ export default async function CsrdCollectionPage({
               </p>
             </div>
           ) : (
-            <form key={formKey} action={createCsrdCollectionItemAction} className="space-y-2.5 p-3">
+            <PreservingForm
+              key={formKey}
+              action={createCsrdCollectionItemAction}
+              className="space-y-2.5 p-3"
+            >
               <div className="grid grid-cols-4 gap-2">
                 <label className="col-span-2 space-y-1">
                   <span className="block text-[11px] text-ink-muted">対象の対応計画</span>
@@ -666,7 +681,7 @@ export default async function CsrdCollectionPage({
                 証跡資料の添付を必須にする（第三者保証に備える）
               </label>
               <p className="text-[11px] text-ink-muted">
-                既にある指標のコードを選ぶと、指標は作り直さず、この拠点・期間の担当と期限だけを作ります。新しいコードは
+                既にある指標のコードを選ぶと、指標は作り直さず、この拠点・期間の担当と期限だけを作ります。同じ指標・拠点・期間の割当が既にあれば、割当は作り直さず（担当・期限は変えず）計画に結び付けます。新しいコードは
                 CSRD を出所とする指標として作ります。
               </p>
               <SubmitButton
@@ -676,7 +691,7 @@ export default async function CsrdCollectionPage({
               >
                 収集項目を作成
               </SubmitButton>
-            </form>
+            </PreservingForm>
           )}
         </Card>
       </div>

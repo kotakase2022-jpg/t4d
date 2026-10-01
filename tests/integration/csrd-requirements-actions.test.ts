@@ -5,12 +5,14 @@ import { CSRD_IDS } from '@/lib/fixtures/csrd';
 import { ORG_IDS, PERIOD_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
+import { IDLE_FORM_STATE, type FormActionState } from '@/lib/errors/form-action-state';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
 
 /**
  * CSRD 要求事項の Server Action（docs/disclosure-first.md §9.4）。
  *  - 担当者の入力・AI ギャップ分析（候補）・候補を採用／修正して確定・対応計画の追加
- *  - 成功したら要求事項の詳細へフラッシュ付きで戻る。利用者向けのエラーは ?error= で戻し、何も書かない
+ *  - 成功したら要求事項の詳細へフラッシュ付きで戻る。利用者向けのエラーは ?error= で戻し、何も書かない。
+ *    入力を伴う確定（担当者の入力・修正して確定）は、リダイレクトせず理由と送った値を返す（画面が入力を残す）
  *  - AI は ai_* だけを書く（最終判定は人の操作で入る）
  *  - 戻り先には UUID の要求事項 ID だけを使う
  */
@@ -74,6 +76,23 @@ async function redirectOf(run: () => Promise<unknown>): Promise<URL> {
   throw new Error('リダイレクトしなかった');
 }
 
+/** 入力を残すフォームの Action が断ったときの状態（遷移したら失敗） */
+async function failureOf(
+  run: (previous: FormActionState, formData: FormData) => Promise<FormActionState>,
+  formData: FormData,
+): Promise<FormActionState> {
+  try {
+    return await run(IDLE_FORM_STATE, formData);
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw new Error(`断られずに遷移しました: ${getURLFromRedirectError(error)}`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
+
 const item = (code: string) => CSRD_IDS.items[code]!;
 const assessment = (code: string) =>
   fixture.csrdAssessments.find((a) => a.id === CSRD_IDS.assessments[code])!;
@@ -90,6 +109,7 @@ describe('担当者の入力', () => {
   it('3 観点を保存して最終判定を入れ、詳細へ戻る', async () => {
     const url = await redirectOf(() =>
       actions.saveCsrdAssessmentAction(
+        IDLE_FORM_STATE,
         form([
           ['reportingPeriodId', PERIOD_IDS.fy2026],
           ['itemId', item('ESRS-E3-4')],
@@ -114,40 +134,62 @@ describe('担当者の入力', () => {
     ]);
   });
 
-  it('閲覧だけの役割は入力できない（?error= で戻り、書かない）', async () => {
+  it('閲覧だけの役割は入力できない（理由と入力を返し、書かない）', async () => {
     state.ctx = ctxFor('approver@demo.local', ['approver']);
     const before = structuredClone(assessment('ESRS-E3-4'));
-    const url = await redirectOf(() =>
-      actions.saveCsrdAssessmentAction(
-        form([
-          ['reportingPeriodId', PERIOD_IDS.fy2026],
-          ['itemId', item('ESRS-E3-4')],
-          ['disclosureStatus', 'covered'],
-          ['dataStatus', 'covered'],
-          ['processStatus', 'covered'],
-          ['comment', ''],
-        ]),
-      ),
+    const failed = await failureOf(
+      actions.saveCsrdAssessmentAction,
+      form([
+        ['reportingPeriodId', PERIOD_IDS.fy2026],
+        ['itemId', item('ESRS-E3-4')],
+        ['disclosureStatus', 'covered'],
+        ['dataStatus', 'covered'],
+        ['processStatus', 'covered'],
+        ['comment', ''],
+      ]),
     );
-    expect(url.pathname).toBe(detailPath('ESRS-E3-4'));
-    expect(url.searchParams.get('error')).not.toBeNull();
+    expect(failed.status).toBe('error');
+    expect(failed.message).not.toBeNull();
     expect(assessment('ESRS-E3-4')).toEqual(before);
   });
 
-  it('要求事項 ID が UUID でなければ一覧へ戻す（URL に使わない）', async () => {
-    const url = await redirectOf(() =>
-      actions.saveCsrdAssessmentAction(
-        form([
-          ['reportingPeriodId', PERIOD_IDS.fy2026],
-          ['itemId', '../../settings'],
-          ['disclosureStatus', 'covered'],
-          ['dataStatus', 'covered'],
-          ['processStatus', 'covered'],
-        ]),
-      ),
+  it('要求事項 ID が UUID でなければ書かず、理由を返す（URL に使わない）', async () => {
+    const failed = await failureOf(
+      actions.saveCsrdAssessmentAction,
+      form([
+        ['reportingPeriodId', PERIOD_IDS.fy2026],
+        ['itemId', '../../settings'],
+        ['disclosureStatus', 'covered'],
+        ['dataStatus', 'covered'],
+        ['processStatus', 'covered'],
+      ]),
     );
-    expect(url.pathname).toBe('/enterprise/disclosures/csrd/requirements');
-    expect(url.searchParams.get('error')).not.toBeNull();
+    expect(failed.status).toBe('error');
+    expect(failed.message).not.toBeNull();
+  });
+
+  it('AI の候補と違う値を理由なしで確定しようとすると、選んだ値を残して理由を求める（書かない）', async () => {
+    const before = structuredClone(assessment('ESRS2-SBM-3'));
+    const failed = await failureOf(
+      actions.saveCsrdAssessmentAction,
+      form([
+        ['reportingPeriodId', PERIOD_IDS.fy2026],
+        ['itemId', item('ESRS2-SBM-3')],
+        ['disclosureStatus', 'covered'],
+        ['dataStatus', 'covered'],
+        ['processStatus', 'covered'],
+        ['comment', ''],
+      ]),
+    );
+    expect(failed.message).toContain('修正の理由（コメント）');
+    expect(failed.values).toEqual(
+      expect.arrayContaining([
+        ['disclosureStatus', 'covered'],
+        ['dataStatus', 'covered'],
+        ['processStatus', 'covered'],
+      ]),
+    );
+    expect(assessment('ESRS2-SBM-3')).toEqual(before);
   });
 });
 
@@ -163,10 +205,27 @@ describe('AI ギャップ分析と担当者の確認', () => {
     );
     expect(analyzed.pathname).toBe(detailPath('ESRS-E1-6'));
     expect(analyzed.searchParams.get('flash')).toBe('csrdGapAnalyzed');
+    // 実行した提供元（Mock）をフラッシュに渡す（「デモ生成」と書くのは Mock のときだけ）
+    expect(analyzed.searchParams.get('ai')).toBe('mock');
     const candidate = assessment('ESRS-E1-6');
     expect(candidate.aiStatus).not.toBeNull();
     expect(candidate.finalStatus).toBeNull();
     expect(candidate.reviewedAt).toBeNull();
+
+    // 表示した候補の実行日時が違えば（分析がやり直された後）、採用しない
+    const stale = await redirectOf(() =>
+      actions.reviewCsrdAssessmentAction(
+        form([
+          ['assessmentId', candidate.id],
+          ['itemId', item('ESRS-E1-6')],
+          ['decision', 'approved'],
+          ['comment', ''],
+          ['aiEvaluatedAt', '2000-01-01T00:00:00.000Z'],
+        ]),
+      ),
+    );
+    expect(stale.searchParams.get('error')).toContain('AI の候補が更新されています');
+    expect(assessment('ESRS-E1-6').finalStatus).toBeNull();
 
     const reviewed = await redirectOf(() =>
       actions.reviewCsrdAssessmentAction(
@@ -175,6 +234,7 @@ describe('AI ギャップ分析と担当者の確認', () => {
           ['itemId', item('ESRS-E1-6')],
           ['decision', 'approved'],
           ['comment', ''],
+          ['aiEvaluatedAt', candidate.aiEvaluatedAt!],
         ]),
       ),
     );
@@ -224,6 +284,48 @@ describe('AI ギャップ分析と担当者の確認', () => {
       finalStatus: 'partial',
       reviewDecision: 'modified',
     });
+  });
+
+  it('「修正して確定」のフォームは、理由が無ければ選んだ 3 観点を残して理由を求める（書かない）', async () => {
+    const before = structuredClone(assessment('ESRS-E1-4'));
+    const failed = await failureOf(
+      actions.reviewCsrdAssessmentFormAction,
+      form([
+        ['assessmentId', before.id],
+        ['itemId', item('ESRS-E1-4')],
+        ['decision', 'modified'],
+        ['disclosureStatus', 'covered'],
+        ['dataStatus', 'partial'],
+        ['processStatus', 'mostly_covered'],
+        ['comment', '   '],
+      ]),
+    );
+    expect(failed.message).toContain('修正の理由');
+    expect(failed.values).toEqual(
+      expect.arrayContaining([
+        ['disclosureStatus', 'covered'],
+        ['dataStatus', 'partial'],
+        ['processStatus', 'mostly_covered'],
+      ]),
+    );
+    expect(assessment('ESRS-E1-4')).toEqual(before);
+    // 理由があれば確定して詳細へ戻る（空振りテストでないことの確認）
+    const url = await redirectOf(() =>
+      actions.reviewCsrdAssessmentFormAction(
+        IDLE_FORM_STATE,
+        form([
+          ['assessmentId', before.id],
+          ['itemId', item('ESRS-E1-4')],
+          ['decision', 'modified'],
+          ['disclosureStatus', 'covered'],
+          ['dataStatus', 'partial'],
+          ['processStatus', 'mostly_covered'],
+          ['comment', '目標の記載を確認した（テスト）'],
+        ]),
+      ),
+    );
+    expect(url.searchParams.get('decision')).toBe('modified');
+    expect(assessment('ESRS-E1-4').reviewDecision).toBe('modified');
   });
 
   it('評価対象でない要求事項（対象外）は分析できない', async () => {

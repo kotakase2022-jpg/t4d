@@ -175,13 +175,27 @@ export function encodeDemoEdits(edits: DemoEdit[]): string {
   return VERSION_2 + deflatePacked(edits);
 }
 
+/**
+ * 容量に収まらないときに 1 回だけ試す、より強い圧縮（品質 10）。同じ JSON で約 5〜6% 小さくなるが
+ * 約 10 倍遅い（実演の流れ＋CSRD の流れの終わりの 43KB で 9ms。2026-10-01 実測: 品質 9 で 11,015B、
+ * 品質 10 で 10,414B）。人の操作 1 回の書き込みで、品質 9 で収まらないときだけ使う（取込の行のように
+ * 1 回の操作で数百回書き込むときは使わない）。読むときの形式は同じ（Brotli）
+ */
+const BROTLI_DENSE_OPTIONS = {
+  params: {
+    ...BROTLI_OPTIONS.params,
+    [zlibConstants.BROTLI_PARAM_QUALITY]: 10,
+  },
+};
+
 /** 分割して持つための 1 本の圧縮列（STREAM_MARK で始まる）。切り分けは呼び出し側が行う */
-export function encodeDemoEditStream(edits: DemoEdit[]): string {
+export function encodeDemoEditStream(edits: DemoEdit[], options: { dense?: boolean } = {}): string {
   return (
     STREAM_MARK +
-    brotliCompressSync(Buffer.from(JSON.stringify(edits), 'utf8'), BROTLI_OPTIONS).toString(
-      'base64url',
-    )
+    brotliCompressSync(
+      Buffer.from(JSON.stringify(edits), 'utf8'),
+      options.dense ? BROTLI_DENSE_OPTIONS : BROTLI_OPTIONS,
+    ).toString('base64url')
   );
 }
 

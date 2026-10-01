@@ -9,14 +9,16 @@
  *    G1 だけ人の判断が未評価（E2E が「財務のみ」に判断する）
  *  - 要求事項の評価 12 行（表示時に行を作らない。SSBJ の一括作成の問題を持ち込まない）
  *  - 対応計画 2 件（E1-4 開示・対応中、S1-9 データ・未着手で女性管理職比率の収集項目あり）
- *  - 開示ドラフト: ESRS 2 は人が確定済み、S1 は AI 草案のみ（本文未採用）
+ *  - 開示ドラフト: ESRS 2 は人が書いた本文を保存済み（未確定）、S1 は AI 草案のみ（本文未採用）。
+ *    節の確定は DMA の確定後にしかできない（confirmCsrdDraft）ため、DMA 未確定の Fixture では
+ *    どの節も確定済みにしない（画面の操作で作れない状態を置かない）
  *
  * 作成者・判断者は 海野 みどり（本社サステナビリティ担当）。監査ログの行は作らない
  * （既存の監査ログ一覧・件数の表示を変えないため。disclosure-first.ts と同じ方針）。
  *
  * 時系列（基準日 FIXTURE_TODAY から何日前か）
  *   分析条件 30 → IRO 登録 26 → 事項の判断 22 → AI ギャップ分析 16 → 人の確認 14
- *   → 対応計画 12 → S1 の AI 草案 10 → ESRS 2 の本文確定 8
+ *   → 対応計画 12 → S1 の AI 草案 10 → ESRS 2 の本文の保存 8
  */
 
 import { csrdRowIds } from '@/lib/domain/csrd-ids';
@@ -757,7 +759,7 @@ function seedDrafts(db: FixtureDb): void {
       organizationId: ORG,
       reportingPeriodId: PERIOD,
       section: 'ESRS2',
-      // 人が書いて確定した本文（AI の草案は使っていない）
+      // 人が書いて保存した本文（AI の草案は使っていない）。DMA が未確定のため、まだ確定していない
       body:
         '当社は、サステナビリティに関する事項を取締役会が監督し、サステナビリティ委員会（委員長: 代表取締役社長）が四半期ごとに重要な影響・リスク・機会の状況を審議して取締役会へ報告しています（架空）。' +
         'ダブル・マテリアリティ評価は、従業員・主要サプライヤー・顧客への聞き取りを踏まえてサステナビリティ推進部が行い、評価方法と閾値は自社で定めています（架空）。' +
@@ -769,8 +771,8 @@ function seedDrafts(db: FixtureDb): void {
       aiConfidence: null,
       aiWarnings: [],
       aiGeneratedAt: null,
-      confirmedAt: at(8),
-      confirmedBy: AUTHOR,
+      confirmedAt: null,
+      confirmedBy: null,
       ...audit(at(9), at(8)),
     },
     {

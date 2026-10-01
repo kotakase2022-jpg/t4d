@@ -2845,3 +2845,72 @@ commit・push・deploy はしていない。`docs/disclosure-first.md` は編集
 - 本番へは未反映。反映後に `pnpm test:e2e:prod`（追加した 1 件を含む）と、CSRD の流れを本番の 1 ブラウザで流すこと。
 - CSRD 計画の更新が隠し項目を送り直す（SSBJ と同じ。C-5）。草案の無い節への手書き（C-2）・節ドラフトの DOCX（C-1）は P1。
 - `zzz-csrd-chain.spec.ts` は収集項目の割当を残すため、同じサーバーでの流し直しにはサーバーの再起動が要る。
+
+---
+
+## 2026-10-01 CSRD・分析の自己監査の指摘への対応（単独の修正担当・未コミット）
+
+`3c9923c`（CSRD を 5 画面＋ダブル・マテリアリティに再構成）への検証済みの指摘をすべて直した。commit・push・deploy はしていない。
+`docs/disclosure-first.md` は編集していない。各指摘は実装の原因を直し、見逃さないテストを足した（既存の期待値は緩めていない。
+仕様の変更で期待値を変えたものは 2. に明記）。
+
+### 1. 指摘と対応
+
+| ID                                                        | 対応                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ORCH-1                                                    | Fixture の ESRS 2 の節を「人が書いた本文を保存済み・未確定」に変更（`confirmed_at/by` を null）。seed を再生成。known-limitations の C-3 を削除。対応する unit・integration・E2E の期待値を「本文あり・未確定・DMA 確定前は確定できない」に置き換え                                                                                                         |
+| csrd-mock-gap-row-count・F2（回帰）                       | AI ギャップ分析へ「値のある指標の数」「実績値のある指標の数」「値の無い指標名」「推計だけの指標名」を渡し、Mock・Prompt は指標の数で判定（値の行の数で判定しない）。E1-6 は「一部対応」になり、不足する指標を挙げる。Prompt 版を `.2` に上げた                                                                                                              |
+| csrd-confirmed-draft-survives-dma-change                  | 事項の判断の結果が変わったら、その事項の節の確定を同じ処理で外す（本文は残す・監査ログ）。対応状況・ドラフトの「確定済みの節」は評価対象の節だけを数え、以前のデータで対象外になった確定済みの節には注意を出す                                                                                                                                              |
+| csrd-draft-confirm-stale-body・F4（UX）                   | 本文の保存・本文に採用・確定は、表示したときの版（`updatedAt`）を送り、別の操作で変わっていれば断る（`assertSameBase`）。本文の保存は入力を残して理由を示す                                                                                                                                                                                                 |
+| csrd-adopt-unseen-ai-candidate・F1（UX）                  | 「候補を採用」は表示した候補の実行日時（`ai_evaluated_at`）を送り、分析がやり直されていれば断る                                                                                                                                                                                                                                                             |
+| csrd-adopt-ai-run-without-permission・SEC-1・F2（永続化） | `adoptCsrdDraft` は AI の採否（ai_runs）を ai.run を持つ人の採用だけ記録する（判定は書込の前）。レビュー担当の採用は本文に入り、採否は監査ログだけ。RLS テストに「レビュー担当の ai_runs 更新は 0 行」を追加                                                                                                                                                |
+| csrd-estimate-shown-as-actual                             | 収集画面・要求事項の詳細の承認済みの値に区分（`valueKind`）を持たせ、推計に「推計」バッジ。AI の入力の値に `kind` を付け、Mock の草案は「（推計値）」と明記、ギャップ分析は推計だけの指標を「一部対応」にする                                                                                                                                               |
+| diagnosis-csrd-not-material-responses-gap                 | 規制対応度の CSRD 行に「回答が必要な要求事項（評価対象）」の承認 n / 件数（`responsesRequired`）を足し、現状診断の「未承認の回答」はそれで数える（表示は全項目のまま）                                                                                                                                                                                      |
+| csrd-manual-save-modified-without-reason・SEC-3           | 担当者の入力が AI の候補と違えば理由（コメント）が必須（「修正して確定」と同じ文言）。候補と同じ値なら「採用」として記録。入力欄の説明も変えた                                                                                                                                                                                                              |
+| SEC-2                                                     | migration `0047_csrd_actor_integrity.sql`: 判断者・確認者・確定者は本人名義だけ（4 表のトリガ）、DMA の確定は条件がそろったときだけ（トリガ）。RLS テストに偽の名義・条件未達の確定・本人名義の成功を追加。Demo の Cookie の検査も分析条件・事項・節は「名義 = 更新者」を確かめる。rls-matrix と known-limitations（ロールバック）を更新                    |
+| SEC-4                                                     | AI の草案は、別の節を返したら保存しない・本文の上限（3,000 字）を超えたら保存しない・根拠の要求事項をこの節の担当者確認済み（対応済み／おおむね対応）に絞り、書けなかった箇所をこの節のコードに絞って、外したものは注意に書く。採用でも上限を確かめる                                                                                                       |
+| F1（回帰）                                                | 開示デモのリセットのカードとフラッシュに、CSRD の設定・DMA・評価・計画・ドラフト・収集項目・AI 実行記録を戻すことを明記                                                                                                                                                                                                                                     |
+| F3（回帰）                                                | 規制対応度の SSBJ の注記を「同じ数え方」と言わず、対応状況画面の「未対応」が未確認を含むことを示す文言に変更                                                                                                                                                                                                                                                |
+| F4（回帰）・F11（UX）                                     | 開示ドラフトの AI 草案の出所を、草案を作った実行の提供元で示す（実行の記録が無い Fixture の草案は Mock）。AI 実行後のフラッシュは実行した提供元（`ai=mock/openai`）で「デモ生成」「AI 生成」を分ける。工程⑤の説明は「AI 草案（候補）」                                                                                                                      |
+| F5（回帰）                                                | 定性情報・CSRD のグループと 5 画面に `enterprise.disclosure.read` を付け、拠点担当には出さない。隠す判定を `hiddenNavHrefsFor`（nav-config）に移してテスト                                                                                                                                                                                                  |
+| F2（UX）・F8（UX）                                        | 入力を残すフォーム（`PreservingForm`・`runPreservingAction`）を追加。事項の判断・IRO・修正して確定・担当者の入力・収集項目の作成・本文の保存は、断られたらリダイレクトせず理由を示して入力を戻す。根拠は「重要／重要でない」を選んだときだけ必須、IRO の出している欄・修正の理由は必須                                                                      |
+| F3（UX）                                                  | 対応計画の更新は表示したときの版を送り、別の操作で変わっていれば断る（known-limitations C-5 を解消済みに）                                                                                                                                                                                                                                                  |
+| F5（UX）                                                  | 「確認待ち」は評価対象の要求事項だけ（一覧・詳細・対応状況の件数が一致）                                                                                                                                                                                                                                                                                    |
+| F6（UX）                                                  | 要求事項の一覧・詳細の状態バッジをアイコン付きの共通部品（`CoverageStatusBadge`・`FinalStatusBadge`・`PlanPriorityBadge`・`RequiredItemBadge`）に統一                                                                                                                                                                                                       |
+| F7（UX）                                                  | 収集項目の作成は、割当を作ったか・既存の割当を使ったか・計画の状況が変わったかを返し、フラッシュの文言を分ける                                                                                                                                                                                                                                              |
+| F9（UX）                                                  | 草案の行が無い評価対象の節にも本文の入力欄を出し、保存で行を作る（AI の実行権限の無い編集者も書ける）。known-limitations C-2 を解消済みに                                                                                                                                                                                                                   |
+| F10（UX）                                                 | 両軸を未評価に戻したときは `csrdMatterCleared`（判断者・日時を消したと伝える）                                                                                                                                                                                                                                                                              |
+| F12（UX）                                                 | 要求事項の詳細は「候補を採用」だけを primary に（回答への導線・計画の追加は outline）。CSRD 設定は「DMA を確定する」だけを primary に                                                                                                                                                                                                                       |
+| F13（UX）                                                 | 工程の帯（SSBJ・CSRD 共通）の `aria-current="step"` は進行中の最初の工程だけ。題は省略せず折り返す                                                                                                                                                                                                                                                          |
+| F14（UX）                                                 | 最上位「分析」に `currentPrefix: '/enterprise/analysis'`。従来メニューを折りたたんでも規制対応度・他社比較で現在地が付く                                                                                                                                                                                                                                    |
+| F15（UX）                                                 | 他社比較の数値の列を右寄せ、値・中央値・範囲に必ず単位、1 列目を固定（規制対応度の 1 列目も固定）                                                                                                                                                                                                                                                           |
+| F1（永続化・high）                                        | CSRD の AI の実行は Cookie で参照元・入力の参照も空にする。人の操作 1 回の書き込みは、通常の圧縮で収まらないときだけ強い圧縮（Brotli 品質 10）を 1 回試してから押し出す。実演の流れ → CSRD の流れ（と逆の順）を 1 つの Cookie で通す stateless の integration を追加し、押し出し 0・確定版・出力・CSV の版・CSRD の結果が別インスタンスに残ることを確かめる |
+| F3（永続化）                                              | 開示デモのリセットで、CSRD の計画から作った収集項目（計画が結び付けた指標の Fixture に無い割当・計画から作った指標・補った担当部署と証跡必須）も戻し、Cookie からも外す（別インスタンスへの反映も同じ。`planCsrdCollectionReset`）。zzz-csrd-chain の流し直しにサーバーの再起動は不要に                                                                     |
+
+### 2. 期待値を変えたテスト（仕様の変更による。緩めてはいない）
+
+- Fixture の ESRS 2 が未確定になったため: `csrd-plans-draft`（確定済みの節 0・ESRS 2 は草案を作れる）、`csrd-requirements`（`draftCounts.confirmed` 0）、
+  `csrd-pages-model`（「確定 0 節」）、`csrd-plans-collection-draft-pages`・`csrd-screens.spec.ts`（「本文あり・未確定」と DMA 確定前の理由）。
+- 草案の行が無い評価対象の節に本文の入力欄を出すため: `csrd-plans-collection-draft-pages` の E1（入力欄あり）、レビュー担当の文言。
+- 入力を残すフォームはエラーでリダイレクトしないため: 各 Action のテストは「理由と送った値を返す」を確かめる形へ。
+- 最上位「分析」が規制対応度・他社比較でも現在地になるため: `nav-config` の 2 行。メニューの権限の形（定性情報・CSRD）。
+- Server Action の結果に提供元・計画の状況を足したため: 草案の生成のリダイレクト先に `&ai=mock`、収集項目の作成に `&plan=`。
+- サービスの入力に版を足したため: 採用・保存・確定・計画の更新・候補の採用の呼び出しに `baseUpdatedAt`／`aiEvaluatedAt` を渡す。
+  `ai-schema` の CSRD ギャップ分析の入力に指標の数を足した（期待値「一部対応」は同じ）。
+
+### 3. テスト結果（2026-10-01 ローカル。E2E はほかの重い処理と並走させず単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` 合格。`pnpm seed:generate` で seed を再生成（ESRS 2 の節の確定の 1 行）。
+- `pnpm test`: 135 ファイル・**1,688 件**合格（Stage C の 1,643 件から増。新規 `tests/unit/csrd-self-audit-ui.test.tsx`・`tests/unit/ssbj-flow.test.tsx`・`tests/support/demo-flows.ts`）。
+- `pnpm test:rls`: 2 ファイル・**311 件**合格（0047 の名義・DMA の確定の条件、レビュー担当の ai_runs 更新 0 行を追加）。`pnpm check:rls`: 106 表・RLS 有効 106・ポリシー 240 で合格。
+- `E2E_PORT=3217 pnpm test:e2e` の関連 7 spec（analysis・csrd-screens・csrd・disclosure-first-nav・nav-structure・zz-disclosure-project・zzz-csrd-chain）: **45 件合格**。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: **25 件すべて合格**・押し出し 0。Cookie ヘッダーの最大は 実演の流れ 8,839B（操作の記録 8,691B）、CSRD の流れ 3,469B（操作の記録 3,359B。以前は 3,948B）。
+- `E2E_PORT=3217 pnpm test:e2e`（通常・全件・単独実行）: **308 件すべて合格・10.3 分**（retries 0・flaky 0）。
+- Service の層の実演の流れ＋CSRD の流れ（`stateless-demo-chain.test.ts`）: 最大 約 11,040B（上限 11,400B）・押し出し 0（逆の順も押し出し 0）。
+
+### 4. 未解決・次作業
+
+- Cookie の余裕は小さい（実演の流れ＋CSRD の流れで約 11.0KB / 11.4KB。強い圧縮で約 6% の余裕を足した）。実演で手順を足すと押し出しが起き得る（デモの帯で知らせる）。
+- 版の照合は `updatedAt`（ミリ秒）で行う。別々のリクエストが同じミリ秒に同じ節・計画を書いた場合は区別できない（実運用ではまず起きない）。
+- SSBJ の草案（`ssbj-draft.ts`）・SSBJ の担当者の確認には、同じ版の照合・AI 出力の検査・理由の必須が無い（今回の範囲外。指摘でも SSBJ 側は同じ形と記載）。
+- 本番へは未反映。0047 は Supabase へ未適用。

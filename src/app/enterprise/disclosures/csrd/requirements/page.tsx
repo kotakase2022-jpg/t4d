@@ -18,7 +18,7 @@ import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { CSRD_SECTION_LABEL } from '@/lib/domain/csrd';
-import { COVERAGE_LABEL, COVERAGE_TONE, PRIORITY_LABEL } from '@/lib/domain/ssbj';
+import { COVERAGE_LABEL } from '@/lib/domain/ssbj';
 import {
   filterCsrdRequirements,
   loadCsrdRequirementViews,
@@ -28,7 +28,9 @@ import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { SsbjCoverageStatus } from '@/types/domain';
 import {
   ApplicabilityBadge,
+  CoverageStatusBadge,
   PerspectiveBadges,
+  PlanPriorityBadge,
   SampleMasterBadge,
 } from '../_components/csrd-badges';
 import { DoubleMaterialityNote } from '../settings/_components/materiality-note';
@@ -43,9 +45,9 @@ export const metadata = { title: 'CSRD 要求事項の評価' };
 
 const BASE = '/enterprise/disclosures/csrd';
 
-/** 3 観点の 1 セル（評価行が無ければ未確認） */
+/** 3 観点の 1 セル（評価行が無ければ未確認）。ラベルとアイコンを併記する（色だけで表さない） */
 function CoverageCell({ status }: { status: SsbjCoverageStatus }) {
-  return <Badge tone={COVERAGE_TONE[status]}>{COVERAGE_LABEL[status]}</Badge>;
+  return <CoverageStatusBadge status={status} />;
 }
 
 /** 担当者の確認の状態。AI の候補の後に人が確認していなければ「確認待ち」 */
@@ -353,17 +355,7 @@ export default async function CsrdRequirementsPage({
                         </TD>
                         <TD>
                           {view.priority ? (
-                            <Badge
-                              tone={
-                                view.priority.priority === 'high'
-                                  ? 'danger'
-                                  : view.priority.priority === 'medium'
-                                    ? 'warning'
-                                    : 'neutral'
-                              }
-                            >
-                              {PRIORITY_LABEL[view.priority.priority]}
-                            </Badge>
+                            <PlanPriorityBadge priority={view.priority.priority} />
                           ) : (
                             <span className="text-[11px] text-ink-muted">評価対象外</span>
                           )}

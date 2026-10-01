@@ -72,8 +72,9 @@ export function parseReviewForm(form: FormLike): ReviewCsrdAssessmentInput {
     decision,
     comment: text(form, 'comment'),
   };
-  // 「候補を採用」は AI の候補をサービスが写す。画面の値を混ぜない
-  if (decision !== 'modified') return base;
+  // 「候補を採用」は AI の候補をサービスが写す。画面の値を混ぜない。
+  // 画面が表示した候補の実行日時だけを渡し、表示の後に分析がやり直されていればサービスが断る
+  if (decision !== 'modified') return { ...base, aiEvaluatedAt: text(form, 'aiEvaluatedAt') };
   return {
     ...base,
     disclosureStatus: text(form, 'disclosureStatus') as SsbjCoverageStatus,

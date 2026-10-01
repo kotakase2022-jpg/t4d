@@ -575,6 +575,23 @@ describe('10. URL 直打ち相当（ID 指定の単発取得）でも遮断さ�
     expect(row!.status, '権限の無いロールが AI の採否を確定できてしまう').toBe('succeeded');
   });
 
+  it('開示の編集権限はあるが AI 実行権限の無いロール（レビュー担当）も採否を確定できない（0 行）', async () => {
+    // CSRD の「本文に採用」はレビュー担当にも出る。0023 の ai_runs_update は ai.run を求めるため、
+    // アプリは ai.run の無い人の採用で ai_runs を更新しない（更新すると 0 行で失敗し、本文だけが変わる）
+    const runId = await seedAiRun();
+    const updated = await h.asUser<{ id: string }>(
+      userId('reviewer@demo.local'),
+      'update ai_runs set status = $1 where id = $2 returning id',
+      ['accepted', runId],
+    );
+    expect(updated).toHaveLength(0);
+    const [row] = await h.asSuperuser<{ status: string }>(
+      'select status from ai_runs where id = $1',
+      [runId],
+    );
+    expect(row!.status).toBe('succeeded');
+  });
+
   it('AI 実行権限のあるロールは採否を確定できる', async () => {
     const runId = await seedAiRun();
     await h.asUser(ENT_A_ADMIN, 'update ai_runs set status = $1 where id = $2', [
@@ -3512,6 +3529,184 @@ describe('13. CSRD のダブル・マテリアリティと要求事項の評価�
         [PERIOD_IDS.fy2026],
       );
       expect(other).toHaveLength(0);
+    });
+  });
+
+  describe('判断者・確認者・確定者は本人名義だけ（0047 t4d.csrd_actor_must_be_self）', () => {
+    // レビュー担当: 同じ組織で開示の編集権限を持つが、別の人の名義で確定・判断を書くことはできない
+    const REVIEWER = userId('reviewer@demo.local');
+    const ADMIN = userId('enterprise-admin@demo.local');
+    const ACTOR_ERROR = /T4D_ACTOR_MUST_BE_SELF/;
+
+    it('DMA の確定者を別の人（管理者）の名義にできない', async () => {
+      await expect(
+        h.asUser(
+          REVIEWER,
+          `update csrd_analysis_settings set dma_confirmed_at = now(), dma_confirmed_by = $1
+            where id = $2`,
+          [ADMIN, id('settings')],
+        ),
+      ).rejects.toThrow(ACTOR_ERROR);
+    });
+
+    it('事項の判断者・評価の確認者・節の確定者を別の人の名義にできない', async () => {
+      await expect(
+        h.asUser(
+          REVIEWER,
+          `update csrd_dma_matters set decided_at = now(), decided_by = $1 where id = $2`,
+          [ADMIN, id('matter')],
+        ),
+      ).rejects.toThrow(ACTOR_ERROR);
+      await expect(
+        h.asUser(
+          REVIEWER,
+          `update csrd_assessments
+              set disclosure_status = 'covered', data_status = 'covered', process_status = 'covered',
+                  final_status = 'covered', reviewed_at = now(), reviewed_by = $1
+            where id = $2`,
+          [ADMIN, id('assessment')],
+        ),
+      ).rejects.toThrow(ACTOR_ERROR);
+      await expect(
+        h.asUser(
+          REVIEWER,
+          `update csrd_disclosure_drafts set confirmed_at = now(), confirmed_by = $1 where id = $2`,
+          [ADMIN, id('draft')],
+        ),
+      ).rejects.toThrow(ACTOR_ERROR);
+      // 新しい行を別の人の名義で作ることもできない
+      await expect(
+        h.asUser(
+          REVIEWER,
+          `insert into csrd_disclosure_drafts
+             (organization_id, reporting_period_id, section, body, confirmed_at, confirmed_by)
+           values ($1, $2, 'S1', '本文', now(), $3)`,
+          [ORG_A, PERIOD, ADMIN],
+        ),
+      ).rejects.toThrow(ACTOR_ERROR);
+    });
+
+    it('本人の名義なら書ける（空振りテストでないことの確認）。確定を外す（null に戻す）のは誰でもできる', async () => {
+      const confirmed = await h.asUser<{ id: string }>(
+        REVIEWER,
+        `update csrd_disclosure_drafts set confirmed_at = now(), confirmed_by = $1
+          where id = $2 returning id`,
+        [REVIEWER, id('draft')],
+      );
+      expect(confirmed).toHaveLength(1);
+      const released = await h.asUser<{ id: string }>(
+        AUTHOR,
+        `update csrd_disclosure_drafts set confirmed_at = null, confirmed_by = null
+          where id = $1 returning id`,
+        [id('draft')],
+      );
+      expect(released).toHaveLength(1);
+      const decided = await h.asUser<{ id: string }>(
+        REVIEWER,
+        `update csrd_dma_matters set decided_at = now(), decided_by = $1 where id = $2 returning id`,
+        [REVIEWER, id('matter')],
+      );
+      expect(decided).toHaveLength(1);
+      // 確定済みの名義はそのまま、ほかの列だけを変える更新は通る（名義を書き換えていない）
+      const touched = await h.asUser<{ id: string }>(
+        AUTHOR,
+        `update csrd_dma_matters set stakeholder_note = '追記（RLS テスト）' where id = $1 returning id`,
+        [id('matter')],
+      );
+      expect(touched).toHaveLength(1);
+    });
+  });
+
+  describe('DMA の確定は条件がそろったときだけ（0047 t4d.csrd_dma_confirmation_guard）', () => {
+    const DMA_ERROR = /T4D_DMA_NOT_READY/;
+    const ESRS_TOPICS = ['E1', 'E2', 'E3', 'E4', 'E5', 'S1', 'S2', 'S3', 'S4', 'G1'];
+    // 他のテストと重ならない期間（FY2024）に、確定の条件を作る
+    const READY_PERIOD = PERIOD_IDS.fy2024;
+
+    async function readySettings(): Promise<string> {
+      const settingsId = await one(
+        `insert into csrd_analysis_settings
+           (organization_id, reporting_period_id, value_chain_scope, stakeholder_engagement_note)
+         values ($1, $2, 'both', '従業員への聞き取り（RLS テスト）')
+         on conflict (organization_id, reporting_period_id)
+           do update set value_chain_scope = 'both',
+                         stakeholder_engagement_note = '従業員への聞き取り（RLS テスト）',
+                         dma_confirmed_at = null, dma_confirmed_by = null
+         returning id`,
+        [ORG_A, READY_PERIOD],
+      );
+      return settingsId;
+    }
+
+    async function decideAll(except: string | null): Promise<void> {
+      for (const topic of ESRS_TOPICS) {
+        const assessed = topic !== except;
+        await h.asSuperuser(
+          `insert into csrd_dma_matters
+             (organization_id, reporting_period_id, esrs_topic, impact_assessment, impact_rationale,
+              financial_assessment, financial_rationale)
+           values ($1, $2, $3, $4, $5, $6, $7)
+           on conflict (organization_id, reporting_period_id, esrs_topic)
+             do update set impact_assessment = excluded.impact_assessment,
+                           impact_rationale = excluded.impact_rationale,
+                           financial_assessment = excluded.financial_assessment,
+                           financial_rationale = excluded.financial_rationale`,
+          [
+            ORG_A,
+            READY_PERIOD,
+            topic,
+            assessed ? 'not_material' : 'not_assessed',
+            assessed ? '閾値未満（RLS テスト）' : '',
+            assessed ? 'not_material' : 'not_assessed',
+            assessed ? '閾値未満（RLS テスト）' : '',
+          ],
+        );
+      }
+    }
+
+    it('報告範囲が未決定（FY2025 の行）の DMA は、本人の名義でも確定できない', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `update csrd_analysis_settings set dma_confirmed_at = now(), dma_confirmed_by = $1
+            where id = $2`,
+          [AUTHOR, id('settings')],
+        ),
+      ).rejects.toThrow(DMA_ERROR);
+    });
+
+    it('未評価の事項が残っていれば確定できず、10 事項すべての両軸を判断すれば確定できる', async () => {
+      const settingsId = await readySettings();
+      await decideAll('G1');
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `update csrd_analysis_settings set dma_confirmed_at = now(), dma_confirmed_by = $1
+            where id = $2`,
+          [AUTHOR, settingsId],
+        ),
+      ).rejects.toThrow(DMA_ERROR);
+      await decideAll(null);
+      const confirmed = await h.asUser<{ id: string }>(
+        AUTHOR,
+        `update csrd_analysis_settings set dma_confirmed_at = now(), dma_confirmed_by = $1
+          where id = $2 returning id`,
+        [AUTHOR, settingsId],
+      );
+      expect(confirmed).toHaveLength(1);
+    });
+
+    it('Service Role 相当（auth.uid() が無い seed・ワーカー）は対象外', async () => {
+      const rows = await h.asSuperuser<{ id: string }>(
+        `update csrd_analysis_settings set dma_confirmed_at = now(), dma_confirmed_by = $1
+          where id = $2 returning id`,
+        [AUTHOR, id('settings')],
+      );
+      expect(rows).toHaveLength(1);
+      await h.asSuperuser(
+        `update csrd_analysis_settings set dma_confirmed_at = null, dma_confirmed_by = null where id = $1`,
+        [id('settings')],
+      );
     });
   });
 });

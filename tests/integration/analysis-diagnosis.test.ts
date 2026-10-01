@@ -272,6 +272,40 @@ describe('定性情報・開示対応（開示の閲覧権限のときだけ）'
     expect(disclosure.links.map((l) => l.href)).toContain('/enterprise/analysis/regulations');
   });
 
+  it('CSRD は、重要でないと判断した要求事項（評価対象外）の未回答で「不足あり」にしない', async () => {
+    // 評価対象（ESRS 2・重要と判断した事項）の要求事項をすべて人が「対応済み」で確定し、回答も承認する。
+    // 対象外の E5-5（DMA で重要でない）と未判定の G1 だけは回答していない
+    const csrdItems = new Map(
+      fixture.disclosureItems.filter((i) => i.code.startsWith('ESRS')).map((i) => [i.id, i]),
+    );
+    const outOfScope = new Set(['ESRS-E5-5', 'ESRS-G1-1', 'ESRS-G1-4']);
+    for (const assessment of fixture.csrdAssessments) {
+      const code = csrdItems.get(assessment.itemId)?.code;
+      if (!code || outOfScope.has(code) || assessment.reportingPeriodId !== PERIOD_IDS.fy2026) {
+        continue;
+      }
+      Object.assign(assessment, {
+        disclosureStatus: 'covered',
+        dataStatus: 'covered',
+        processStatus: 'covered',
+        finalStatus: 'covered',
+        reviewedAt: '2026-08-01T00:00:00.000Z',
+        reviewedBy: userId('sustainability@demo.local'),
+      });
+    }
+    for (const response of fixture.disclosureResponses) {
+      const code = csrdItems.get(response.itemId)?.code;
+      if (code && !outOfScope.has(code) && response.reportingPeriodId === PERIOD_IDS.fy2026) {
+        response.status = 'approved';
+      }
+    }
+    const disclosure = area(await diagnose(), 'disclosure');
+    const csrd = disclosure.frameworks!.find((f) => f.key === 'csrd')!;
+    expect(csrd.state).toBe('ok');
+    // 表示は全項目の n / 件数のまま（評価対象外の未回答も数えて見せる）
+    expect(csrd.line).toContain('回答の承認 9 / 12 件');
+  });
+
   it('開示の閲覧権限が無い役割には出さず、その旨を 1 行示す', async () => {
     const diagnosis = await diagnose(siteUser());
     expect(diagnosis.areas.map((a) => a.key)).toEqual(['collection', 'evidence', 'ghg']);

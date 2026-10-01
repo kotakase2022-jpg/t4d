@@ -17,7 +17,7 @@ import { ReferenceDateBadge } from './header-badges';
 import { DemoRoleSwitcher, type DemoRoleChoiceView } from './header-demo-role-switcher';
 import { HelpDialog } from './help-dialog';
 import { RecordShortcuts } from './record-shortcuts';
-import { navTreeFor, type NavVariant } from './nav-config';
+import { hiddenNavHrefsFor, navTreeFor, type NavVariant } from './nav-config';
 import {
   EngagementSelector,
   ReportingPeriodSelector,
@@ -74,14 +74,7 @@ export interface AppShellProps {
  * 判定には画面に出すのと同じツリー（従来／開示優先）を使う。
  */
 function hiddenNavHrefs(ctx: AuthorizationContext, variant: NavVariant): string[] {
-  const source = navTreeFor(variant, null);
-  // 子項目（例: 管理 > 設定）にも権限が付くため、階層をたどって集める
-  const collect = (items: typeof source): string[] =>
-    items.flatMap((item) => [
-      ...(item.permission && !can(ctx, item.permission) ? [item.href] : []),
-      ...collect(item.children ?? []),
-    ]);
-  return collect(source);
+  return hiddenNavHrefsFor(navTreeFor(variant, null), (permission) => can(ctx, permission));
 }
 
 function periodText(start: IsoDate, end: IsoDate): string {

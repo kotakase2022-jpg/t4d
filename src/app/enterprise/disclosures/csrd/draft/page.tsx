@@ -85,11 +85,20 @@ export default async function CsrdDraftPage({
   }
 
   const aiMode = (await getAiProvider()).kind === 'mock' ? 'mock' : 'openai';
+  // 草案の出所は、その草案を作った実行の提供元で示す（いまの設定で決めない）。
+  // 実行の記録が無い草案（Fixture のデモ生成・押し出された実行）は Mock として示す
+  const draftProviders = new Map<string, 'mock' | 'openai'>();
+  for (const view of overview.sections) {
+    const runId = view.draft?.aiRunId;
+    const run = runId ? await shell.db.findById('aiRuns', runId) : null;
+    const own = run && run.organizationId === shell.ctx.workspace.organizationId ? run : null;
+    draftProviders.set(view.section, own && own.provider !== 'mock' ? 'openai' : 'mock');
+  }
   const inScopeCount = overview.sections.filter((s) => s.inScope).length;
   const generatedCount = overview.sections.filter(
     (s) => s.draft !== null && s.draft.aiBody.trim() !== '',
   ).length;
-  const confirmedCount = overview.sections.filter((s) => s.draft?.confirmedAt).length;
+  const confirmedCount = overview.confirmedCount;
 
   return (
     <>
@@ -189,6 +198,7 @@ export default async function CsrdDraftPage({
               canWrite={overview.canWrite}
               canRunAi={overview.canRunAi}
               aiMode={aiMode}
+              draftProvider={draftProviders.get(view.section) ?? 'mock'}
             />
           ))
         )}

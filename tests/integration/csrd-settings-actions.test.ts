@@ -5,12 +5,14 @@ import { CSRD_IDS } from '@/lib/fixtures/csrd';
 import { ORG_IDS, PERIOD_IDS, UNIT_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
+import { IDLE_FORM_STATE, type FormActionState } from '@/lib/errors/form-action-state';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
 
 /**
  * CSRD 設定の Server Action（docs/disclosure-first.md §9.4）。
  *  - 入力を取り出してサービスへ渡し、成功したら同じ画面へフラッシュ付きで戻る
- *  - 利用者向けのエラー（入力の誤り・権限・対象なし）は ?error= で同じ画面へ戻し、何も書かない
+ *  - 利用者向けのエラー（入力の誤り・権限・対象なし）は ?error= で同じ画面へ戻し、何も書かない。
+ *    入力の多いフォーム（事項の判断・IRO）は、リダイレクトせず理由と送った値を返す（画面が入力を残す）
  *  - 再検証は CSRD 全体（layout）と分析（layout）
  *  - 戻り先の事項コードは ESRS のテーマだけ（送られた文字列で別の画面へ飛ばさない）
  */
@@ -65,6 +67,23 @@ function form(entries: Array<[string, string]>): FormData {
   const data = new FormData();
   for (const [key, value] of entries) data.append(key, value);
   return data;
+}
+
+/** 入力を残すフォームの Action が断ったときの状態（遷移したら失敗） */
+async function failureOf(
+  run: (previous: FormActionState, formData: FormData) => Promise<FormActionState>,
+  formData: FormData,
+): Promise<FormActionState> {
+  try {
+    return await run(IDLE_FORM_STATE, formData);
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw new Error(`断られずに遷移しました: ${getURLFromRedirectError(error)}`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
 }
 
 /** Server Action を呼び、リダイレクト先の URL を返す（リダイレクトしなければ失敗） */
@@ -186,7 +205,9 @@ describe('報告範囲・評価方法', () => {
 
 describe('事項の判断・DMA の確定', () => {
   it('G1 を判断すると事項の画面へ戻り、全事項の判断が揃えば確定できる', async () => {
-    const decided = await redirectOf(() => actions.decideCsrdDmaMatterAction(form(G1_DECISION)));
+    const decided = await redirectOf(() =>
+      actions.decideCsrdDmaMatterAction(IDLE_FORM_STATE, form(G1_DECISION)),
+    );
     expect(decided.pathname).toBe(`${SETTINGS}/matters/G1`);
     expect(decided.searchParams.get('flash')).toBe('csrdMatterDecided');
     const g1 = fixture.csrdDmaMatters.find((m) => m.id === CSRD_IDS.matters.G1)!;
@@ -213,40 +234,62 @@ describe('事項の判断・DMA の確定', () => {
     expect(settingsRow().dmaConfirmedAt).toBeNull();
   });
 
-  it('評価済みの軸に根拠が無ければ ?error= で事項の画面へ戻る', async () => {
-    const url = await redirectOf(() =>
-      actions.decideCsrdDmaMatterAction(
-        form(
-          G1_DECISION.map(([key, value]) =>
-            key === 'financialRationale' ? [key, '  '] : [key, value],
-          ),
+  it('評価済みの軸に根拠が無ければ、選んだ判断と書いた根拠を残して理由を返す（書かない）', async () => {
+    const failed = await failureOf(
+      actions.decideCsrdDmaMatterAction,
+      form(
+        G1_DECISION.map(([key, value]) =>
+          key === 'financialRationale' ? [key, '  '] : [key, value],
         ),
       ),
     );
-    expect(url.pathname).toBe(`${SETTINGS}/matters/G1`);
-    expect(url.searchParams.get('error')).toContain('根拠');
+    expect(failed.message).toContain('根拠');
+    // 画面へ戻す値: 選んだ判断・書いたインパクトの根拠
+    expect(failed.values).toEqual(
+      expect.arrayContaining([
+        ['impactAssessment', 'not_material'],
+        ['financialAssessment', 'material'],
+        ['impactRationale', G1_DECISION.find(([key]) => key === 'impactRationale')![1]],
+      ]),
+    );
     const g1 = fixture.csrdDmaMatters.find((m) => m.id === CSRD_IDS.matters.G1)!;
     expect(g1.financialAssessment).toBe('not_assessed');
   });
 
-  it('ESRS のテーマでない事項コードは設定画面へ戻す（URL に使わない）', async () => {
-    const url = await redirectOf(() =>
+  it('両軸を「未評価」に戻すと、判断者・日時を消したことを伝える（「記録しました」と言わない）', async () => {
+    await redirectOf(() => actions.decideCsrdDmaMatterAction(IDLE_FORM_STATE, form(G1_DECISION)));
+    const cleared = await redirectOf(() =>
       actions.decideCsrdDmaMatterAction(
+        IDLE_FORM_STATE,
         form(
           G1_DECISION.map(([key, value]) =>
-            key === 'topic' ? [key, '../../admin'] : [key, value],
+            key === 'impactAssessment' || key === 'financialAssessment'
+              ? [key, 'not_assessed']
+              : [key, value],
           ),
         ),
       ),
     );
-    expect(url.pathname).toBe(SETTINGS);
-    expect(url.searchParams.get('error')).not.toBeNull();
+    expect(cleared.searchParams.get('flash')).toBe('csrdMatterCleared');
+    const g1 = fixture.csrdDmaMatters.find((m) => m.id === CSRD_IDS.matters.G1)!;
+    expect(g1).toMatchObject({ decidedAt: null, decidedBy: null });
+  });
+
+  it('ESRS のテーマでない事項コードは書かず、理由を返す（URL に使わない）', async () => {
+    const failed = await failureOf(
+      actions.decideCsrdDmaMatterAction,
+      form(
+        G1_DECISION.map(([key, value]) => (key === 'topic' ? [key, '../../admin'] : [key, value])),
+      ),
+    );
+    expect(failed.status).toBe('error');
+    expect(failed.message).not.toBeNull();
   });
 });
 
 describe('IRO', () => {
   it('IRO を追加すると算定に入り、確定していた DMA は外れる', async () => {
-    await redirectOf(() => actions.decideCsrdDmaMatterAction(form(G1_DECISION)));
+    await redirectOf(() => actions.decideCsrdDmaMatterAction(IDLE_FORM_STATE, form(G1_DECISION)));
     await redirectOf(() =>
       actions.confirmCsrdDmaAction(form([['reportingPeriodId', PERIOD_IDS.fy2026]])),
     );
@@ -257,6 +300,7 @@ describe('IRO', () => {
     ).length;
     const url = await redirectOf(() =>
       actions.upsertCsrdDmaIroAction(
+        IDLE_FORM_STATE,
         form([
           ['reportingPeriodId', PERIOD_IDS.fy2026],
           ['topic', 'E1'],
@@ -280,27 +324,32 @@ describe('IRO', () => {
     expect(settingsRow().dmaConfirmedAt).toBeNull();
   });
 
-  it('形の合わない IRO は ?error= で戻り、追加しない', async () => {
+  it('形の合わない IRO は追加せず、入力（内容・段階・スコア）を残して理由を返す', async () => {
     const before = fixture.csrdDmaIros.length;
-    const url = await redirectOf(() =>
-      actions.upsertCsrdDmaIroAction(
-        form([
-          ['reportingPeriodId', PERIOD_IDS.fy2026],
-          ['topic', 'E1'],
-          ['iroType', 'impact'],
-          ['description', '説明（テスト）'],
-          ['valueChainStage', 'own_operations'],
-          ['impactOccurrence', 'potential'],
-          ['impactDirection', 'negative'],
-          ['impactScale', '3'],
-          ['impactScope', '3'],
-          ['impactIrremediability', '3'],
-          ['impactLikelihood', ''],
-        ]),
-      ),
+    const failed = await failureOf(
+      actions.upsertCsrdDmaIroAction,
+      form([
+        ['reportingPeriodId', PERIOD_IDS.fy2026],
+        ['topic', 'E1'],
+        ['iroType', 'impact'],
+        ['description', '説明（テスト）'],
+        ['valueChainStage', 'own_operations'],
+        ['impactOccurrence', 'potential'],
+        ['impactDirection', 'negative'],
+        ['impactScale', '3'],
+        ['impactScope', '3'],
+        ['impactIrremediability', '3'],
+        ['impactLikelihood', ''],
+      ]),
     );
-    expect(url.pathname).toBe(`${SETTINGS}/matters/E1`);
-    expect(url.searchParams.get('error')).toContain('発生可能性');
+    expect(failed.message).toContain('発生可能性');
+    expect(failed.values).toEqual(
+      expect.arrayContaining([
+        ['description', '説明（テスト）'],
+        ['impactOccurrence', 'potential'],
+        ['impactScale', '3'],
+      ]),
+    );
     expect(fixture.csrdDmaIros).toHaveLength(before);
   });
 

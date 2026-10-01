@@ -199,6 +199,10 @@ test('設定と規制対応度は権限のある利用者だけに左メニュ�
   await expect(page.locator('#t4d-main')).toBeVisible();
   await expect(nav(page).getByRole('link', { name: '設定', exact: true })).toHaveCount(0);
   await expect(nav(page).getByRole('link', { name: '規制対応度', exact: true })).toHaveCount(0);
+  // 定性情報・CSRD の画面も開示の閲覧権限が要る（開いても「アクセス権限がありません」になる）ため出さない
+  await expect(nav(page).getByRole('link', { name: '定性情報', exact: true })).toHaveCount(0);
+  await expect(nav(page).getByRole('link', { name: 'CSRD', exact: true })).toHaveCount(0);
+  await expect(nav(page).getByRole('list', { name: 'CSRD', exact: true })).toHaveCount(0);
   // 分析そのもの（現状診断・他社比較）は出る
   await expect(childList(page, '分析').getByRole('link')).toHaveText(['現状診断', '他社比較']);
 

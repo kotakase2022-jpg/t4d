@@ -1,16 +1,10 @@
-import {
-  ArrowDown,
-  ArrowUp,
-  Ban,
-  CircleCheck,
-  CircleDashed,
-  CircleDot,
-  Eye,
-  Minus,
-} from 'lucide-react';
+import { Ban, CircleCheck, CircleDashed, CircleDot, Eye } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { ACTION_STATUS_LABEL, ACTION_STATUS_TONE, PRIORITY_LABEL } from '@/lib/domain/ssbj';
-import type { SsbjActionStatus, SsbjPriority } from '@/types/domain';
+import { ACTION_STATUS_LABEL, ACTION_STATUS_TONE } from '@/lib/domain/ssbj';
+import type { SsbjActionStatus } from '@/types/domain';
+
+// 優先度のバッジは、要求事項の一覧・詳細と共通（csrd-badges）
+export { PlanPriorityBadge } from '../../_components/csrd-badges';
 
 /**
  * CSRD 対応計画の状態バッジ。色だけで状態を表さない（ラベルとアイコンを併記する。CLAUDE.md §2）。
@@ -30,26 +24,6 @@ export function ActionStatusBadge({ status }: { status: SsbjActionStatus }) {
     <Badge tone={ACTION_STATUS_TONE[status]}>
       <Icon className="size-3" aria-hidden="true" />
       {ACTION_STATUS_LABEL[status]}
-    </Badge>
-  );
-}
-
-const PRIORITY_STYLE: Record<
-  SsbjPriority,
-  { tone: 'danger' | 'warning' | 'neutral'; Icon: typeof Eye }
-> = {
-  high: { tone: 'danger', Icon: ArrowUp },
-  medium: { tone: 'warning', Icon: Minus },
-  low: { tone: 'neutral', Icon: ArrowDown },
-};
-
-/** 優先度（「優先度: 高」のように何の値かを文字で示す） */
-export function PlanPriorityBadge({ priority }: { priority: SsbjPriority }) {
-  const s = PRIORITY_STYLE[priority];
-  return (
-    <Badge tone={s.tone}>
-      <s.Icon className="size-3" aria-hidden="true" />
-      優先度: {PRIORITY_LABEL[priority]}
     </Badge>
   );
 }

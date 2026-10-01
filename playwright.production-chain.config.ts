@@ -14,7 +14,7 @@ const BASE_URL = process.env.PROD_BASE_URL ?? 'https://terrast-t4d.vercel.app';
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: ['zz-disclosure-project.spec.ts'],
+  testMatch: ['zz-disclosure-project.spec.ts', 'zzz-csrd-chain.spec.ts'],
   fullyParallel: false,
   retries: 0,
   workers: 1,

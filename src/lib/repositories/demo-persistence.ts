@@ -114,14 +114,25 @@ export async function readDemoEdits(): Promise<DemoEdit[]> {
  * 1 本にすれば詰め方で空きを残すことも無い。並びは追記の順番（n）で戻す。
  *
  * 返すのは切り分けたチャンクと、入りきらなかった編集（入りきらなければ全部。呼び出し側が古い順に落とす）。
+ *
+ * dense を指定すると、通常の圧縮で収まらないときに、より強い圧縮（約 5〜6% 小さい・約 10 倍遅い）を
+ * 1 回だけ試す。実演の流れの後に CSRD の流れを続けると上限をわずかに超え、前半の確定版・出力を
+ * 押し出していた（自己監査 F1）。人の操作 1 回の書き込みにだけ使う（押し出しの繰り返しでは使わない）
  */
-export function packIntoChunks(edits: readonly DemoEdit[]): {
+export function packIntoChunks(
+  edits: readonly DemoEdit[],
+  options: { dense?: boolean } = {},
+): {
   chunks: string[];
   overflow: DemoEdit[];
 } {
   if (edits.length === 0) return { chunks: [], overflow: [] };
-  const encoded = encodeDemoEditStream([...edits]);
-  if (encoded.length > COOKIE_CHUNKS * MAX_BYTES_PER_COOKIE) {
+  const capacity = COOKIE_CHUNKS * MAX_BYTES_PER_COOKIE;
+  let encoded = encodeDemoEditStream([...edits]);
+  if (encoded.length > capacity && options.dense) {
+    encoded = encodeDemoEditStream([...edits], { dense: true });
+  }
+  if (encoded.length > capacity) {
     return { chunks: [], overflow: [...edits] };
   }
   const chunks: string[] = [];
@@ -198,16 +209,19 @@ export async function appendDemoEdit(
   merged.push(nextEdit);
 
   // 全チャンクへ入りきらない分は、古い方から落とす。機能設定（開示優先モードの ON/OFF）は落とさない
-  // （落とすと新しいインスタンスでメニューとホームが従来の構成へ戻り、実演の途中で画面が変わる）
+  // （落とすと新しいインスタンスでメニューとホームが従来の構成へ戻り、実演の途中で画面が変わる）。
+  // 人の操作 1 回の書き込みは、通常の圧縮で収まらなければ強い圧縮も試してから落とす。取込の行は
+  // 1 回の取込で数百回書き込むため、遅い圧縮は使わない（取込の行は同じ取込の中で押し出し合う前提）
+  const dense = table !== 'ingestionRows';
   let candidate = merged;
-  let packed = packIntoChunks(candidate);
+  let packed = packIntoChunks(candidate, { dense });
   const noisyTables = new Set<string>();
   while (candidate.length > 0 && packed.overflow.length > 0) {
     const next = dropOldestUnpinned(candidate) ?? candidate.slice(1);
     const dropped = candidate.find((e) => !next.includes(e));
     if (dropped && !isQuietEviction(dropped, nextEdit)) noisyTables.add(dropped.t);
     candidate = next;
-    packed = packIntoChunks(candidate);
+    packed = packIntoChunks(candidate, { dense });
   }
 
   try {
@@ -416,11 +430,12 @@ export async function removeDemoEditsWhere(
   if (remaining.length === current.length) return;
   // 取り除いた後はふつう必ず入る。1 本に圧縮する形式では、中身によって縮み方がわずかに変わるため、
   // 万一入らなくても全部を捨てて空の Cookie を書かないよう、古い順に落として入れる
+  // 強い圧縮で書いた Cookie から取り除いた後も、通常の圧縮だけでは収まらないことがあるため、強い圧縮も試す
   let candidate = remaining;
-  let packed = packIntoChunks(candidate);
+  let packed = packIntoChunks(candidate, { dense: true });
   while (candidate.length > 0 && packed.overflow.length > 0) {
     candidate = dropOldestUnpinned(candidate) ?? candidate.slice(1);
-    packed = packIntoChunks(candidate);
+    packed = packIntoChunks(candidate, { dense: true });
   }
   try {
     writeChunks(store, packed.chunks);

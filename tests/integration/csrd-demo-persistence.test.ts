@@ -15,29 +15,18 @@ import {
   DISCLOSURE_DEMO_RESET_TABLES,
   restoreDisclosureDemoTables,
 } from '@/lib/repositories/demo-reset-sync';
-import {
-  adoptCsrdDraft,
-  confirmCsrdDraft,
-  generateCsrdDraft,
-  loadCsrdDrafts,
-  saveCsrdDraftBody,
-} from '@/lib/services/csrd/draft';
+import { loadCsrdDrafts } from '@/lib/services/csrd/draft';
 import {
   createCsrdActionPlan,
   createCsrdCollectionItem,
   loadCsrdActionPlans,
   loadCsrdDataCollection,
-  updateCsrdActionPlan,
 } from '@/lib/services/csrd/plans';
-import {
-  loadCsrdOverview,
-  loadCsrdRequirementViews,
-  reviewCsrdAssessment,
-  runCsrdGapAnalysis,
-} from '@/lib/services/csrd/requirements';
-import { confirmCsrdDma, decideCsrdDmaMatter } from '@/lib/services/csrd/settings';
+import { loadCsrdOverview, loadCsrdRequirementViews } from '@/lib/services/csrd/requirements';
+import { decideCsrdDmaMatter } from '@/lib/services/csrd/settings';
 import { resetDisclosureDemoData } from '@/lib/services/disclosure-demo-reset';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
+import { playCsrdChain } from '../support/demo-flows';
 
 /**
  * CSRD の編集が別インスタンスでも残る（docs/disclosure-first.md §9.3「デモ永続化」、
@@ -117,79 +106,9 @@ beforeEach(() => {
   delete (globalThis as { __t4dAppliedDemoResets?: unknown }).__t4dAppliedDemoResets;
 });
 
-/** §9.7 の zzz-csrd-chain と同じ流れ（操作ごとに別インスタンス） */
+/** §9.7 の zzz-csrd-chain と同じ流れ（操作ごとに別インスタンス。tests/support/demo-flows.ts） */
 async function playChain(): Promise<{ planId: string; draftId: string }> {
-  // 設定: G1 をインパクト=重要でない・財務=重要と判断 → DMA を確定
-  await decideCsrdDmaMatter((await fresh()).db, manager(), {
-    reportingPeriodId: PERIOD_IDS.fy2026,
-    topic: 'G1',
-    impactAssessment: 'not_material',
-    impactRationale: '贈収賄への関与の算定結果 2.2 で閾値未満（E2E）',
-    financialAssessment: 'material',
-    financialRationale: '制裁金の算定結果 3.2 が閾値以上（E2E）',
-    stakeholderNote: '',
-  });
-  await confirmCsrdDma((await fresh()).db, manager(), PERIOD_IDS.fy2026);
-
-  // E1-6 の AI 分析（デモ生成）→ 候補を採用 → 対応計画を追加 → 対応中へ
-  const { assessment } = await runCsrdGapAnalysis((await fresh()).db, manager(), {
-    reportingPeriodId: PERIOD_IDS.fy2026,
-    itemId: CSRD_IDS.items['ESRS-E1-6']!,
-  });
-  await reviewCsrdAssessment((await fresh()).db, manager(), {
-    assessmentId: assessment.id,
-    decision: 'approved',
-    comment: '',
-  });
-  const plan = await createCsrdActionPlan((await fresh()).db, manager(), {
-    reportingPeriodId: PERIOD_IDS.fy2026,
-    itemId: CSRD_IDS.items['ESRS-E1-6']!,
-    gapKind: 'data',
-    title: 'Scope2 ロケーション基準の排出量を集める（架空）',
-    detail: '',
-    actionType: 'data_collection',
-    department: '環境管理部',
-    assigneeUserId: userId('sustainability@demo.local'),
-    dueDate: '2026-11-30',
-    priority: 'high',
-  });
-  await updateCsrdActionPlan((await fresh()).db, manager(), {
-    planId: plan.id,
-    status: 'in_progress',
-    department: '環境管理部',
-    assigneeUserId: userId('sustainability@demo.local'),
-    dueDate: '2026-11-30',
-    priority: 'high',
-  });
-  // 収集画面で scope2_location の収集項目を作る
-  await createCsrdCollectionItem((await fresh()).db, manager(), {
-    planId: plan.id,
-    metricCode: 'scope2_location',
-    metricName: 'Scope2（ロケーション基準）',
-    unit: 't-CO2e',
-    unitId: UNIT_IDS.hq,
-    ownerUserId: userId('sustainability@demo.local'),
-    dueDate: '2026-12-01',
-    requiresEvidence: false,
-    department: '環境管理部',
-  });
-
-  // 開示ドラフト E1: 生成 → 本文に採用 → 保存 → 確定
-  const generated = await generateCsrdDraft(
-    (await fresh()).db,
-    manager(),
-    await period((await fresh()).db),
-    'E1',
-  );
-  await adoptCsrdDraft((await fresh()).db, manager(), generated.id);
-  await saveCsrdDraftBody(
-    (await fresh()).db,
-    manager(),
-    generated.id,
-    `${generated.aiBody}（人が確認して加筆）`,
-  );
-  await confirmCsrdDraft((await fresh()).db, manager(), generated.id);
-  return { planId: plan.id, draftId: generated.id };
+  return playCsrdChain(fresh);
 }
 
 describe('CSRD の流れは、すべてのリクエストが別インスタンスに届いても最後まで進む', () => {
@@ -295,6 +214,92 @@ describe('CSRD の流れは、すべてのリクエストが別インスタン�
     restoreDisclosureDemoTables(other, createFixtureDb(), ORG_IDS.aomi);
     expect(other.csrdDmaMatters).toEqual(pristine.csrdDmaMatters);
   });
+
+  it('開示デモのリセットで、CSRD の計画から作った収集項目（計画の無い割当）も戻り、Cookie にも残らない', async () => {
+    await playChain();
+    const { db } = await fresh();
+    await resetDisclosureDemoData(db, manager(), { pristine: createFixtureDb() });
+    // Cookie に割当・指標の編集が残らない（別インスタンス・再起動したサーバーでも戻らない）
+    const edits = await readDemoEdits();
+    expect(edits.filter((e) => e.t === 'metricAssignments' || e.t === 'metrics')).toEqual([]);
+    // 新しいインスタンスでも、scope2_location の本社の割当は無く、収集の表は「収集項目を作成」へ戻る
+    const { db: next, fixture: nextFixture } = await fresh();
+    const pristine = createFixtureDb();
+    expect(nextFixture.metricAssignments).toEqual(pristine.metricAssignments);
+    const collection = await loadCsrdDataCollection(next, manager(), await period(next), REF);
+    const location = collection.requirementRows.filter((r) => r.metric.code === 'scope2_location');
+    expect(location.map((r) => [r.unit, r.state])).toEqual([[null, 'not_entered']]);
+  });
+
+  it('リセットで、収集項目の作成が補った指標の列（証跡必須・担当部署）と、計画から作った指標も戻る', async () => {
+    // 既存の計画（S1-9・女性管理職比率）から証跡必須で収集項目を作る → 指標の証跡必須・担当部署が補われる
+    await createCsrdCollectionItem((await fresh()).db, manager(), {
+      planId: CSRD_IDS.plans.s1FemaleManagers,
+      metricCode: 'female_manager_ratio',
+      metricName: '女性管理職比率',
+      unit: '%',
+      unitId: UNIT_IDS.west,
+      ownerUserId: null,
+      dueDate: '2026-12-01',
+      requiresEvidence: true,
+      department: '人事部',
+    });
+    // 新しい計画から、新しい指標（出所は CSRD）の収集項目を作る
+    const plan = await createCsrdActionPlan((await fresh()).db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      itemId: CSRD_IDS.items['ESRS-E1-6']!,
+      gapKind: 'data',
+      title: '新しい指標を集める（テスト）',
+      detail: '',
+      actionType: 'data_collection',
+      department: '',
+      assigneeUserId: null,
+      dueDate: null,
+      priority: 'medium',
+    });
+    await createCsrdCollectionItem((await fresh()).db, manager(), {
+      planId: plan.id,
+      metricCode: 'csrd_reset_test_metric',
+      metricName: 'リセットの確認用の指標（テスト）',
+      unit: 't',
+      unitId: UNIT_IDS.hq,
+      ownerUserId: null,
+      dueDate: '2026-12-01',
+      requiresEvidence: false,
+      department: '',
+    });
+    {
+      const { fixture } = await fresh();
+      expect(fixture.metrics.some((m) => m.code === 'csrd_reset_test_metric')).toBe(true);
+      expect(
+        fixture.metrics.find((m) => m.id === metricId('AOMI', 'female_manager_ratio'))!
+          .requiresEvidence,
+      ).toBe(true);
+    }
+    await resetDisclosureDemoData((await fresh()).db, manager(), { pristine: createFixtureDb() });
+    const edits = await readDemoEdits();
+    expect(edits.filter((e) => e.t === 'metricAssignments' || e.t === 'metrics')).toEqual([]);
+    const { fixture } = await fresh();
+    const pristine = createFixtureDb();
+    expect(fixture.metricAssignments).toEqual(pristine.metricAssignments);
+    expect(fixture.metrics).toEqual(pristine.metrics);
+    // 別インスタンス（Cookie の編集を適用済みのメモリ）にも同じ戻しを反映できる
+    const other = createFixtureDb();
+    other.metricAssignments.push({
+      ...structuredClone(
+        pristine.metricAssignments.find(
+          (a) => a.metricId === metricId('AOMI', 'female_manager_ratio'),
+        )!,
+      ),
+      id: 'other-instance-assignment',
+      unitId: UNIT_IDS.west,
+    });
+    other.metrics.find((m) => m.id === metricId('AOMI', 'female_manager_ratio'))!.requiresEvidence =
+      true;
+    restoreDisclosureDemoTables(other, createFixtureDb(), ORG_IDS.aomi);
+    expect(other.metricAssignments).toEqual(pristine.metricAssignments);
+    expect(other.metrics).toEqual(pristine.metrics);
+  });
 });
 
 // ----------------------------------------------------------------------
@@ -366,6 +371,46 @@ describe('偽の Cookie の CSRD の行は、DB と同じ規則で拒否する',
       'not_assessed',
     );
     expect(db.csrdAnalysisSettings.some((s) => s.organizationId === ORG_IDS.soten)).toBe(false);
+  });
+
+  it('判断者・確定者に、書いた人（更新者）と別の人の名義を名乗る行は戻さない（0047 と同じ）', () => {
+    const ADMIN = userId('enterprise-admin@demo.local'); // 編集権限はある別の人
+    const db = apply([
+      // 担当者が書いた事項の判断を、管理者の名義にする
+      {
+        t: 'csrdDmaMatters',
+        id: CSRD_IDS.matters.G1,
+        v: {
+          impactAssessment: 'not_material',
+          impactRationale: '根拠',
+          financialAssessment: 'material',
+          financialRationale: '根拠',
+          decidedAt: NOW,
+          decidedBy: ADMIN,
+          updatedBy: AUTHOR,
+        },
+      },
+      // 担当者が書いた本文の確定を、管理者の名義にする
+      {
+        t: 'csrdDisclosureDrafts',
+        id: CSRD_IDS.drafts.esrs2,
+        v: { confirmedAt: NOW, confirmedBy: ADMIN, updatedBy: AUTHOR },
+      },
+    ]);
+    const pristine = createFixtureDb();
+    expect(db.csrdDmaMatters).toEqual(pristine.csrdDmaMatters);
+    expect(db.csrdDisclosureDrafts).toEqual(pristine.csrdDisclosureDrafts);
+    // 本人の名義なら戻す（空振りテストでないことの確認）
+    const ok = apply([
+      {
+        t: 'csrdDisclosureDrafts',
+        id: CSRD_IDS.drafts.esrs2,
+        v: { confirmedAt: NOW, confirmedBy: AUTHOR, updatedBy: AUTHOR },
+      },
+    ]);
+    expect(ok.csrdDisclosureDrafts.find((d) => d.id === CSRD_IDS.drafts.esrs2)!.confirmedBy).toBe(
+      AUTHOR,
+    );
   });
 
   it('既にある行の組織・業務キーは書き換えさせない', () => {

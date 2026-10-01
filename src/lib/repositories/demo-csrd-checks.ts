@@ -107,6 +107,16 @@ function writerCan(next: Row, can: PermissionCheck, permission: PermissionKey): 
   return can(next.organizationId, next.updatedBy ?? next.createdBy, permission);
 }
 
+/**
+ * 判断者・確定者が、行を書いた人（更新者）本人か（0047 の t4d.csrd_actor_must_be_self と同じ規則）。
+ * 分析条件・事項・節は、確定・判断を入れる書込で名義と更新者を同時に入れ、ほかの書込は確定を外すため、
+ * 名義が入っている行では必ず名義 = 更新者になる。偽の Cookie で別の人の名義を名乗らせない。
+ * 評価（csrd_assessments）は、確認の後に AI の分析が更新者だけを変えるため、この規則を当てない（DB 側で見る）
+ */
+function actorIsWriter(next: Row, actor: unknown): boolean {
+  return actor === null || actor === (next.updatedBy ?? next.createdBy);
+}
+
 /** AI の実行は、このインスタンスにあれば同じ組織のもの（押し出された実行は「無い」として受け付ける） */
 function aiRunOfOrg(db: FixtureDb, organizationId: unknown, aiRunId: unknown): boolean {
   if (aiRunId === null) return true;
@@ -187,6 +197,7 @@ function acceptSettings(
   const confirmationValid =
     row.dmaConfirmedAt !== null &&
     can(row.organizationId, row.dmaConfirmedBy, 'enterprise.disclosure.write') &&
+    actorIsWriter(next, row.dmaConfirmedBy) &&
     dmaConfirmable(db, row);
   if (!confirmationValid) {
     next.dmaConfirmedAt = null;
@@ -257,6 +268,7 @@ function acceptMatter(
   if (row.decidedAt !== null) {
     if (!isTimestamp(row.decidedAt)) return false;
     if (!can(row.organizationId, row.decidedBy, 'enterprise.disclosure.write')) return false;
+    if (!actorIsWriter(next, row.decidedBy)) return false;
   }
   return true;
 }
@@ -451,6 +463,7 @@ function acceptDraft(
   if (row.confirmedAt !== null) {
     if (!isTimestamp(row.confirmedAt) || row.body.trim() === '') return false;
     if (!can(row.organizationId, row.confirmedBy, 'enterprise.disclosure.write')) return false;
+    if (!actorIsWriter(next, row.confirmedBy)) return false;
   }
   return true;
 }

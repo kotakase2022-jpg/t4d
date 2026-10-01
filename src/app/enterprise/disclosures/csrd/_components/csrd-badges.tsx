@@ -1,17 +1,24 @@
 import {
+  ArrowDown,
+  ArrowUp,
   Banknote,
+  Calculator,
   Check,
   CircleCheck,
   CircleDashed,
   CircleHelp,
   CircleMinus,
+  CircleX,
   Clock,
   Eye,
+  FileCheck2,
   FlaskConical,
   Globe,
   Hourglass,
   Lock,
+  Minus,
   Scale,
+  TriangleAlert,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -24,7 +31,8 @@ import {
   type CsrdApplicability,
   type CsrdDataState,
 } from '@/lib/domain/csrd';
-import type { DmaOutcome, DmaPerspective } from '@/types/domain';
+import { COVERAGE_LABEL, COVERAGE_TONE, PRIORITY_LABEL } from '@/lib/domain/ssbj';
+import type { DmaOutcome, DmaPerspective, SsbjCoverageStatus, SsbjPriority } from '@/types/domain';
 
 /**
  * CSRD の画面で使う状態バッジ（docs/disclosure-first.md §9.4）。
@@ -141,6 +149,81 @@ export function CsrdDataStateBadge({ state }: { state: CsrdDataState }) {
     <Badge tone={s.tone}>
       <s.Icon className="size-3" aria-hidden="true" />
       {CSRD_DATA_STATE_LABEL[state]}
+    </Badge>
+  );
+}
+
+const COVERAGE_ICON: Record<SsbjCoverageStatus, typeof Check> = {
+  covered: CircleCheck,
+  mostly_covered: CircleCheck,
+  partial: TriangleAlert,
+  not_covered: CircleX,
+  unconfirmed: CircleHelp,
+};
+
+/**
+ * 対応状況（対応済み／おおむね対応／一部対応／未対応／未確認）。要求事項の一覧・詳細・開示ドラフトで
+ * 同じ状態を同じ見た目（ラベル＋アイコン）にするため、ここに 1 つだけ置く。
+ * prefix は「開示: 一部対応」のように何の状況かを文字で添えるとき
+ */
+export function CoverageStatusBadge({
+  status,
+  prefix,
+}: {
+  status: SsbjCoverageStatus;
+  prefix?: string;
+}) {
+  const Icon = COVERAGE_ICON[status];
+  return (
+    <Badge tone={COVERAGE_TONE[status]}>
+      <Icon className="size-3" aria-hidden="true" />
+      {prefix ? `${prefix}: ` : ''}
+      {COVERAGE_LABEL[status]}
+    </Badge>
+  );
+}
+
+/** 要求事項の人の確定値（3 観点をまとめた最終判定）。確定が無ければ「未確認」 */
+export function FinalStatusBadge({ status }: { status: SsbjCoverageStatus | null }) {
+  return <CoverageStatusBadge status={status ?? 'unconfirmed'} />;
+}
+
+const PRIORITY_STYLE: Record<
+  SsbjPriority,
+  { tone: 'danger' | 'warning' | 'neutral'; Icon: typeof Check }
+> = {
+  high: { tone: 'danger', Icon: ArrowUp },
+  medium: { tone: 'warning', Icon: Minus },
+  low: { tone: 'neutral', Icon: ArrowDown },
+};
+
+/** 優先度（「優先度: 高」のように何の値かを文字で示す）。一覧・詳細・対応計画で同じ見た目にする */
+export function PlanPriorityBadge({ priority }: { priority: SsbjPriority }) {
+  const s = PRIORITY_STYLE[priority];
+  return (
+    <Badge tone={s.tone}>
+      <s.Icon className="size-3" aria-hidden="true" />
+      優先度: {PRIORITY_LABEL[priority]}
+    </Badge>
+  );
+}
+
+/** 開示が求められる要求事項（任意の要求事項と区別する） */
+export function RequiredItemBadge() {
+  return (
+    <Badge tone="brand">
+      <FileCheck2 className="size-3" aria-hidden="true" />
+      開示が求められる項目
+    </Badge>
+  );
+}
+
+/** 承認済みの値が推計であること（推計は推計のまま示し、実績と見誤らせない） */
+export function EstimateValueBadge() {
+  return (
+    <Badge tone="warning" title="承認済みですが推計値です（実績値ではありません）">
+      <Calculator className="size-3" aria-hidden="true" />
+      推計
     </Badge>
   );
 }

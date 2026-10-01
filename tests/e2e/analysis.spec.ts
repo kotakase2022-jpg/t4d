@@ -170,6 +170,12 @@ test('他社比較: 架空の比較データと明示し、比較対象外の理
   await expect(scope1).toContainText('範囲が異なる');
   await expect(scope1).toContainText('3 / 5 社');
   await expect(scope1).toContainText('12,400');
+  // 数値の列は右寄せで、中央値・範囲にも単位を付ける。1 列目（指標）は横スクロールしても見えるよう固定する
+  const median = scope1.locator('td').nth(-2);
+  await expect(median).toContainText(/12,400\s*t-CO2e/);
+  await expect(median).toHaveCSS('text-align', 'right');
+  await expect(scope1.locator('td').last()).toContainText('t-CO2e');
+  await expect(scope1.locator('th[scope="row"]')).toHaveCSS('position', 'sticky');
 
   // Scope2（マーケット）: D は未開示、比較できるのは 2 社なので中央値は出さない
   const scope2 = row('Scope2（マーケット基準）');

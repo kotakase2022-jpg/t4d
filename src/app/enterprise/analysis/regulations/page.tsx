@@ -125,7 +125,8 @@ export default async function RegulationsPage() {
             </caption>
             <THead>
               <TR>
-                <TH>基準</TH>
+                {/* 1 列目（基準）は横スクロールしても見えるよう固定する */}
+                <TH className="sticky left-0 z-[1] bg-surface">基準</TH>
                 <TH>位置付け</TH>
                 <TH>重要性の考え方</TH>
                 <TH>収録状況</TH>
@@ -139,7 +140,10 @@ export default async function RegulationsPage() {
             <TBody>
               {coverage.rows.map((row) => (
                 <TR key={row.key} className="align-top">
-                  <th scope="row" className="px-2 py-2 text-left align-top text-[12px]">
+                  <th
+                    scope="row"
+                    className="sticky left-0 z-[1] bg-surface px-2 py-2 text-left align-top text-[12px]"
+                  >
                     <span className="font-semibold text-ink">{row.name}</span>
                     {row.versionLabel && (
                       <span className="block text-[11px] font-normal text-ink-muted">

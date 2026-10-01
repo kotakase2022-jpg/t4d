@@ -5,11 +5,13 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   ENTERPRISE_NAV,
   ENTERPRISE_NAV_DISCLOSURE_FIRST,
+  hiddenNavHrefsFor,
   isNavSubtreeActive,
   navTreeFor,
   resolveNavCurrent,
   type NavItem,
 } from '@/components/shared/nav-config';
+import { permissionsFor } from '@/lib/authorization/can';
 
 /**
  * 左メニューの 2 つのツリー（従来／開示優先モード。docs/disclosure-first.md §2-1・§9.1）。
@@ -59,21 +61,39 @@ function uniqueHrefs(items: NavItem[]): string[] {
   return [...new Set(flatten(items).map((item) => item.href))];
 }
 
+/**
+ * 定性情報・CSRD の画面は開示の閲覧権限を求める（拠点担当などが開くと「アクセス権限がありません」になる）
+ * ため、メニューにも同じ権限を付けて出さない（規制対応度と同じ。自己監査 F5）
+ */
+const DISCLOSURE_READ = 'enterprise.disclosure.read';
+
 const SSBJ_CHILDREN: Shape[] = [
   { label: '対応状況', href: '/enterprise/disclosures/ssbj' },
   { label: '要求事項', href: '/enterprise/disclosures/ssbj/requirements' },
   { label: '対応計画', href: '/enterprise/disclosures/ssbj/plans' },
   { label: 'データ収集', href: '/enterprise/disclosures/ssbj/collection' },
-  { label: '定性情報', href: '/enterprise/narratives' },
+  { label: '定性情報', href: '/enterprise/narratives', permission: DISCLOSURE_READ },
   { label: '開示ドラフト', href: '/enterprise/disclosures/ssbj/draft' },
 ];
 
 const CSRD_CHILDREN: Shape[] = [
-  { label: '対応状況', href: '/enterprise/disclosures/csrd' },
-  { label: '要求事項', href: '/enterprise/disclosures/csrd/requirements' },
-  { label: '対応計画', href: '/enterprise/disclosures/csrd/plans' },
-  { label: 'データ収集', href: '/enterprise/disclosures/csrd/collection' },
-  { label: '開示ドラフト', href: '/enterprise/disclosures/csrd/draft' },
+  { label: '対応状況', href: '/enterprise/disclosures/csrd', permission: DISCLOSURE_READ },
+  {
+    label: '要求事項',
+    href: '/enterprise/disclosures/csrd/requirements',
+    permission: DISCLOSURE_READ,
+  },
+  { label: '対応計画', href: '/enterprise/disclosures/csrd/plans', permission: DISCLOSURE_READ },
+  {
+    label: 'データ収集',
+    href: '/enterprise/disclosures/csrd/collection',
+    permission: DISCLOSURE_READ,
+  },
+  {
+    label: '開示ドラフト',
+    href: '/enterprise/disclosures/csrd/draft',
+    permission: DISCLOSURE_READ,
+  },
 ];
 
 const ANALYSIS: Shape = {
@@ -106,7 +126,12 @@ describe('従来メニュー（機能設定が無効の組織: A39 と §9.1 の
           { label: 'SSBJ', href: '/enterprise/disclosures/ssbj', children: SSBJ_CHILDREN },
           { label: 'CDP', href: '/enterprise/disclosures/cdp' },
           // ③ CSRD は SSBJ と同じ 5 画面のグループ（定性情報は入れない）
-          { label: 'CSRD', href: '/enterprise/disclosures/csrd', children: CSRD_CHILDREN },
+          {
+            label: 'CSRD',
+            href: '/enterprise/disclosures/csrd',
+            permission: DISCLOSURE_READ,
+            children: CSRD_CHILDREN,
+          },
           { label: 'MSCI', href: '/enterprise/disclosures/msci' },
           { label: 'FTSE', href: '/enterprise/disclosures/ftse' },
         ],
@@ -248,6 +273,7 @@ describe('開示優先モードのメニュー（A01）', () => {
     expect(projects?.children?.find((item) => item.label === 'CSRD')).toEqual({
       label: 'CSRD',
       href: '/enterprise/disclosures/csrd',
+      permission: DISCLOSURE_READ,
       children: CSRD_CHILDREN,
     });
     // 正規の位置（情報・根拠 → 定性情報）は secondary ではない
@@ -255,6 +281,7 @@ describe('開示優先モードのメニュー（A01）', () => {
     expect(info?.children?.find((item) => item.label === '定性情報')).toEqual({
       label: '定性情報',
       href: '/enterprise/narratives',
+      permission: DISCLOSURE_READ,
     });
   });
 
@@ -294,7 +321,64 @@ describe('開示優先モードのメニュー（A01）', () => {
   });
 });
 
+describe('権限の無い項目を出さない（hiddenNavHrefsFor）', () => {
+  /** 役割の権限で隠す href（app-shell と同じ判定） */
+  const hiddenFor = (tree: NavItem[], role: Parameters<typeof permissionsFor>[0][number]) => {
+    const permissions = new Set(permissionsFor([role]));
+    return hiddenNavHrefsFor(tree, (permission) => permissions.has(permission));
+  };
+
+  it.each([
+    ['従来メニュー', ENTERPRISE_NAV],
+    ['開示優先モード', ENTERPRISE_NAV_DISCLOSURE_FIRST],
+  ] as const)(
+    '%s: 拠点担当（開示の閲覧権限なし）には、定性情報・CSRD の 5 画面・規制対応度を出さない（開いても権限なしの画面になる）',
+    (_label, tree) => {
+      const hidden = new Set(hiddenFor(tree, 'site_contributor'));
+      for (const href of [
+        '/enterprise/narratives',
+        '/enterprise/disclosures/csrd',
+        '/enterprise/disclosures/csrd/requirements',
+        '/enterprise/disclosures/csrd/plans',
+        '/enterprise/disclosures/csrd/collection',
+        '/enterprise/disclosures/csrd/draft',
+        '/enterprise/analysis/regulations',
+      ]) {
+        expect(hidden.has(href), href).toBe(true);
+      }
+      // 開ける画面（数値・資料・現状診断）は出す
+      for (const href of [
+        '/enterprise/data',
+        '/enterprise/evidence',
+        '/enterprise/analysis/diagnosis',
+      ]) {
+        expect(hidden.has(href), href).toBe(false);
+      }
+    },
+  );
+
+  it('開示の閲覧権限を持つ役割（閲覧者）には、定性情報・CSRD を出す', () => {
+    const hidden = new Set(hiddenFor(ENTERPRISE_NAV, 'viewer'));
+    expect(hidden.has('/enterprise/narratives')).toBe(false);
+    expect(hidden.has('/enterprise/disclosures/csrd')).toBe(false);
+  });
+});
+
 describe('現在地の決定（resolveNavCurrent・isNavSubtreeActive）', () => {
+  it('従来メニューを折りたたむと、分析のどの画面でも最上位「分析」が現在地になる', () => {
+    const analysisIndex = String(ENTERPRISE_NAV.findIndex((item) => item.label === '分析'));
+    for (const path of [
+      '/enterprise/analysis/diagnosis',
+      '/enterprise/analysis/regulations',
+      '/enterprise/analysis/benchmark',
+    ]) {
+      expect(
+        [...resolveNavCurrent(ENTERPRISE_NAV, path, { mode: 'top-and-leaf', collapsed: true })],
+        path,
+      ).toEqual([analysisIndex]);
+    }
+  });
+
   const leaf = (label: string, href: string, extra: Partial<NavItem> = {}): NavItem => ({
     label,
     href,
@@ -468,8 +552,9 @@ describe('Sidebar の現在地（aria-current）', () => {
     ['/enterprise/disclosures/csrd/draft', ['CSRD / 開示ドラフト']],
     // 最上位「開示対応」の href は SSBJ のため、SSBJ の画面では最上位にも付く（従来どおり）
     ['/enterprise/disclosures/ssbj/collection', ['(最上位) / 開示対応', 'SSBJ / データ収集']],
-    ['/enterprise/analysis/regulations', ['分析 / 規制対応度']],
-    ['/enterprise/analysis/benchmark', ['分析 / 他社比較']],
+    // 最上位「分析」は分析の画面すべて（入口の現状診断以外も）で現在地になる（SSBJ の画面と同じ扱い）
+    ['/enterprise/analysis/regulations', ['(最上位) / 分析', '分析 / 規制対応度']],
+    ['/enterprise/analysis/benchmark', ['(最上位) / 分析', '分析 / 他社比較']],
   ])('従来メニュー %s の現在地は %j', (path, expected) => {
     pathname = path;
     render(<Sidebar variant="enterprise" hiddenHrefs={[]} />);

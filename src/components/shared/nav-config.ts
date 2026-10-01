@@ -56,13 +56,23 @@ export interface NavItem {
    * （例: CSRD の回答編集 `/csrd/{UUID}` は「要求事項」から入る画面なので、要求事項を現在地にする）。
    */
   alsoCurrentFor?: RegExp[];
+  /**
+   * 最上位だけに付ける。現在地（top-and-leaf の最上位の前方一致）を判定するパスが href と違うとき
+   * （例: 分析の入口は現状診断 /enterprise/analysis/diagnosis だが、規制対応度・他社比較も分析の画面）。
+   * 付けないと、折りたたみ中に規制対応度・他社比較の画面で現在地が 1 つも付かない
+   */
+  currentPrefix?: string;
 }
 
-/** 定性情報は SSBJ 専用ではなく全基準共通の資産（§9.1 ①）。両ツリーで同じ検索語を使う */
+/**
+ * 定性情報は SSBJ 専用ではなく全基準共通の資産（§9.1 ①）。両ツリーで同じ検索語を使う。
+ * 開示の閲覧権限が無い役割（拠点担当など）は画面を開けない（listNarratives が拒む）ため出さない
+ */
 const NARRATIVES_ITEM: NavItem = {
   label: '定性情報',
   href: '/enterprise/narratives',
   icon: NotebookPen,
+  permission: 'enterprise.disclosure.read',
   keywords: ['定性', 'ガバナンス', 'リスク', '機会', '財務的影響', '戦略'],
 };
 
@@ -142,21 +152,25 @@ export const ENTERPRISE_NAV: NavItem[] = [
       },
       { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
       {
-        // SSBJ と同じ画面構成。ただし重要性はダブル・マテリアリティ（設定は対応状況の工程①から入る）
+        // SSBJ と同じ画面構成。ただし重要性はダブル・マテリアリティ（設定は対応状況の工程①から入る）。
+        // CSRD の画面はすべて開示の閲覧権限を求める（拠点担当などには出さない。開いても権限なしの画面になる）
         label: 'CSRD',
         href: '/enterprise/disclosures/csrd',
         icon: FileSpreadsheet,
+        permission: 'enterprise.disclosure.read',
         keywords: ['CSRD', 'ESRS', 'ダブル・マテリアリティ', 'DMA'],
         children: [
           {
             label: '対応状況',
             href: '/enterprise/disclosures/csrd',
+            permission: 'enterprise.disclosure.read',
             icon: Gauge,
             keywords: ['CSRD', 'ESRS', '全体状況', 'ダブル・マテリアリティ', 'DMA', '重要性'],
           },
           {
             label: '要求事項',
             href: '/enterprise/disclosures/csrd/requirements',
+            permission: 'enterprise.disclosure.read',
             icon: ListChecks,
             keywords: ['CSRD', 'ESRS', '要求事項', 'ギャップ分析', '適用'],
             // 既存の回答編集画面（csrd/[questionId]）は要求事項の詳細から入るため、ここを現在地にする
@@ -165,18 +179,21 @@ export const ENTERPRISE_NAV: NavItem[] = [
           {
             label: '対応計画',
             href: '/enterprise/disclosures/csrd/plans',
+            permission: 'enterprise.disclosure.read',
             icon: ClipboardList,
             keywords: ['CSRD', 'ESRS', '対応計画', '担当', '期限'],
           },
           {
             label: 'データ収集',
             href: '/enterprise/disclosures/csrd/collection',
+            permission: 'enterprise.disclosure.read',
             icon: Database,
             keywords: ['CSRD', 'ESRS', 'データ収集', '不足データ'],
           },
           {
             label: '開示ドラフト',
             href: '/enterprise/disclosures/csrd/draft',
+            permission: 'enterprise.disclosure.read',
             icon: FileText,
             keywords: ['CSRD', 'ESRS', 'ドラフト', '草案', '開示文書'],
           },
@@ -284,6 +301,8 @@ export const ENTERPRISE_NAV: NavItem[] = [
     // 閲覧専用の横断画面。単一の総合点は作らない（§9.6）。入口は現状診断
     label: '分析',
     href: '/enterprise/analysis/diagnosis',
+    // 規制対応度・他社比較も分析の画面として、最上位の現在地を付ける
+    currentPrefix: '/enterprise/analysis',
     icon: ChartColumnBig,
     keywords: ['分析', 'analysis', '診断', '比較'],
     children: [
@@ -453,6 +472,20 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
 
 export type NavVariant = 'enterprise' | 'enterprise-disclosure' | 'assurance';
 
+/**
+ * 権限が無いため出さない項目の href（Sidebar・Command Palette が同じ一覧で隠す）。
+ * 子項目（例: 管理 > 設定、CSRD > 対応状況）にも権限が付くため、階層をたどって集める
+ */
+export function hiddenNavHrefsFor(
+  items: NavItem[],
+  has: (permission: PermissionKey) => boolean,
+): string[] {
+  return items.flatMap((item) => [
+    ...(item.permission && !has(item.permission) ? [item.href] : []),
+    ...hiddenNavHrefsFor(item.children ?? [], has),
+  ]);
+}
+
 /** メニューの種類ごとのツリー。Sidebar・Command Palette・非表示判定が同じツリーを使う */
 export function navTreeFor(variant: NavVariant, engagementId: string | null): NavItem[] {
   if (variant === 'enterprise') return ENTERPRISE_NAV;
@@ -562,7 +595,9 @@ export function resolveNavCurrent(
 
   if (mode === 'top-and-leaf') {
     items.forEach((item, index) => {
-      if (isNavPathActive(pathname, item.href)) current.add(navItemKey(null, index));
+      if (isNavPathActive(pathname, item.currentPrefix ?? item.href)) {
+        current.add(navItemKey(null, index));
+      }
     });
     if (!collapsed && best) current.add(best.key);
     return current;

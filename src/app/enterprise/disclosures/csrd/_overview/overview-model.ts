@@ -55,7 +55,8 @@ export function csrdFlowSteps(overview: CsrdOverview): SsbjFlowStep[] {
     },
     {
       title: '開示ドラフト',
-      description: '節ごとに AI 草案（デモ生成）を本文に採用し、人が編集して確定します。',
+      // 草案の出所（デモ生成・AI 生成）は開示ドラフトの画面で節ごとに示す。ここでは決め打ちしない
+      description: '節ごとに AI 草案（候補）を本文に採用し、人が編集して確定します。',
       state: draftCounts.confirmed + draftCounts.generated > 0 ? 'current' : 'todo',
       detail: `確定 ${draftCounts.confirmed} 節 ／ AI 草案 ${draftCounts.generated} 節`,
       href: `${BASE}/draft`,

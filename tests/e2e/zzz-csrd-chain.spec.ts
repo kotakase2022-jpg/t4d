@@ -29,10 +29,9 @@ import {
  * AI の出力は候補の列にだけ入り、採用・確定はすべて人の操作で行う（CLAUDE.md §0.4）。
  *
  * zzz- で始めているのは、Demo Mode の共有状態（CSRD の DMA・評価・計画・草案）を変えるため（最後に流す）。
- * 最後のテストで開示デモをリセットして CSRD の 6 表を初期状態へ戻す（失敗した場合も afterAll で戻す）。
- * 収集項目の割当（metricAssignments）は数値の収集の領域なのでリセットの対象外で、本社の
- * scope2_location FY2026 の割当は残る（docs/known-limitations.md）。このため、同じサーバー（Fixture）へ
- * この spec を流し直すときはサーバーを起動し直す（割当が残ると、状況の表に「収集項目を作成」が出ない）。
+ * 最後のテストで開示デモをリセットして CSRD の 6 表と、CSRD の計画から作った収集項目（本社の
+ * scope2_location FY2026 の割当）を初期状態へ戻す（失敗した場合も afterAll で戻す）。リセットの後は、
+ * 状況の表に計画の無い「収集依頼済み（未入力）」が残らず、同じサーバーへこの spec を流し直せる。
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -373,6 +372,18 @@ test('開示デモのリセットで、CSRD の DMA・評価・計画・草案�
       name: 'AI 草案を作成（デモ生成）',
     }),
   ).toBeVisible();
+  // CSRD の計画から作った収集項目（本社の scope2_location）も戻る（計画の無い割当を残さない）
+  await page.goto(`${BASE}/collection`);
+  const s2Row = page
+    .getByRole('table', { name: '評価対象の要求事項 × 指標 × 拠点の当期の状況' })
+    .locator('tbody tr', { hasText: 'scope2_location' });
+  await expect(s2Row).toHaveCount(1);
+  await expect(s2Row).not.toContainText('収集依頼済み');
+  await expect(
+    page.getByRole('table', { name: '計画から作成した収集項目' }).locator('tbody tr', {
+      hasText: 'scope2_location',
+    }),
+  ).toHaveCount(0);
   // 開示優先モードは既定（OFF）へ戻した
   await expect(sidebar(page).getByRole('link', { name: '開示対応', exact: true })).toBeVisible();
 });

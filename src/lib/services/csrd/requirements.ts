@@ -26,6 +26,7 @@ import { daysUntilJst } from '@/lib/format/datetime';
 import {
   evaluateDataCoverage,
   hasUsableValue,
+  valueKindOf,
   type DataCoverage,
 } from '@/lib/services/aggregation';
 import type { DbClient } from '@/lib/repositories/types';
@@ -52,10 +53,13 @@ import {
   type SsbjActionStatus,
   type SsbjCoverageStatus,
   type Uuid,
+  type ValueKind,
 } from '@/types/domain';
 import {
   assertCsrdWrite,
+  assertSameBase,
   cleanText,
+  countsAsConfirmedDraft,
   displayNameOf,
   findCsrdPeriod,
   loadCsrdContext,
@@ -90,7 +94,10 @@ export interface CsrdRequirementView {
   combined: SsbjCoverageStatus;
   /** 優先度（評価対象のみ。対象外・未判定は null） */
   priority: PriorityResult | null;
-  /** AI の候補があり、その後に人が確認していない */
+  /**
+   * AI の候補があり、その後に人が確認していない（評価対象の要求事項だけ。対象外・未判定になった
+   * 要求事項の候補は確認の操作が無いため「確認待ち」にしない）
+   */
   awaitingReview: boolean;
   /** 人が確認済み（human）／AI の候補だけ（ai_only）／どちらも無い（none） */
   reviewState: 'human' | 'ai_only' | 'none';
@@ -228,7 +235,7 @@ async function buildViews(
       assessment,
       combined: combineCoverage(...statuses),
       priority: csrdPriority(item, applicability, statuses, days),
-      awaitingReview: isAwaitingReview(assessment),
+      awaitingReview: isCsrdInScope(applicability) && isAwaitingReview(assessment),
       reviewState: reviewStateOf(assessment),
       plans: assessment ? context.plans.filter((p) => p.assessmentId === assessment.id) : [],
       metrics,
@@ -385,13 +392,14 @@ export async function loadCsrdOverview(
       provisional: views.filter((v) => v.applicability.provisional).length,
     },
     coverageCounts,
-    awaitingReview: inScope.filter((v) => v.awaitingReview).length,
+    awaitingReview: views.filter((v) => v.awaitingReview).length,
     highPriority: inScope.filter((v) => v.combined !== 'covered' && v.priority?.priority === 'high')
       .length,
     planCounts,
     collectionPlanCount: context.plans.filter((p) => p.linkedMetricCode !== null).length,
     draftCounts: {
-      confirmed: drafts.filter((d) => d.confirmedAt !== null).length,
+      // 事項の判断が変わって対象外・未判定になった節の確定は数えない（確定の条件を満たさない）
+      confirmed: drafts.filter((d) => countsAsConfirmedDraft(context, d)).length,
       generated: drafts.filter((d) => d.aiBody.trim() !== '').length,
     },
   };
@@ -449,8 +457,19 @@ export interface CsrdMetricDataRow {
   state: CsrdDataState;
   /** 承認済みの値（承認済み以外は null。0 と未入力を混同しない） */
   value: number | null;
+  /** 承認済みの値の区分（実績・推計）。値が無ければ null。推計は推計と表示する */
+  valueKind: Exclude<ValueKind, 'target'> | null;
   unitOfMeasure: string;
   dataPointId: Uuid | null;
+}
+
+/** 承認済みの値の区分（実績・推計）。値が無い行は null */
+export function approvedValueKind(
+  dp: DataPoint | undefined,
+  state: CsrdDataState,
+): Exclude<ValueKind, 'target'> | null {
+  if (!dp || state !== 'approved' || !hasUsableValue(dp)) return null;
+  return valueKindOf(dp) === 'estimate' ? 'estimate' : 'actual';
 }
 
 /** 指標 × 拠点の当期の状況（収集画面と要求事項の詳細が同じ組み立てを使う） */
@@ -474,6 +493,7 @@ export function metricDataRows(
         unit: null,
         state: 'not_entered',
         value: null,
+        valueKind: null,
         unitOfMeasure: metric.unit,
         dataPointId: null,
       });
@@ -490,6 +510,7 @@ export function metricDataRows(
         unit: unitById.get(unitId) ?? null,
         state,
         value: dp && state === 'approved' && hasUsableValue(dp) ? dp.value : null,
+        valueKind: approvedValueKind(dp, state),
         unitOfMeasure: dp?.unitOfMeasure ?? metric.unit,
         dataPointId: dp?.id ?? null,
       });
@@ -652,9 +673,14 @@ export interface SaveCsrdAssessmentInput {
   ownerDepartment?: string;
 }
 
+/** AI の候補と違う値で確定するときの理由の指摘（「修正して確定」と同じ規則・同じ文言） */
+const MODIFY_REASON_REQUIRED = '修正して確定する場合は、修正の理由（コメント）を入力してください。';
+
 /**
  * 人が 3 観点を入力して確定する（AI の候補が無くてもよい）。
- * final_status = combineCoverage(3 観点)、reviewed_* に入力者と日時を入れる。AI の候補の列は変えない
+ * final_status = combineCoverage(3 観点)、reviewed_* に入力者と日時を入れる。AI の候補の列は変えない。
+ * AI の候補がある要求事項で候補と違う値にするときは、「修正して確定」と同じく理由（コメント）が必須
+ * （AI の候補を理由なく上書きした記録を残さない）。候補と同じ値なら「候補を採用」と同じ区分にする
  */
 export async function saveCsrdAssessment(
   db: DbClient,
@@ -667,6 +693,17 @@ export async function saveCsrdAssessment(
   const processStatus = assertCoverage(input.processStatus);
   const comment = cleanText(input.comment, COMMENT_MAX, 'コメント');
   const { context, item } = await resolveItem(db, ctx, input.reportingPeriodId, input.itemId);
+  // 書く前に区分を決める（理由が要るのに無ければ、評価行を作る前に断る）
+  const existing = context.assessments.find((a) => a.itemId === item.id) ?? null;
+  const hasCandidate = existing !== null && existing.aiStatus !== null;
+  const sameAsCandidate =
+    hasCandidate &&
+    existing.aiDisclosureStatus === disclosureStatus &&
+    existing.aiDataStatus === dataStatus &&
+    existing.aiProcessStatus === processStatus;
+  if (hasCandidate && !sameAsCandidate && comment === '') {
+    throw new ValidationError(MODIFY_REASON_REQUIRED);
+  }
   const now = new Date().toISOString();
   const assessment = await ensureCsrdAssessment(db, ctx, context, item, now);
   const finalStatus = combineCoverage(disclosureStatus, dataStatus, processStatus);
@@ -675,8 +712,8 @@ export async function saveCsrdAssessment(
     dataStatus,
     processStatus,
     finalStatus,
-    // AI の候補があるところへ人が値を入れた場合は「修正」、候補が無ければ判断の区分は付けない
-    reviewDecision: assessment.aiStatus !== null ? 'modified' : null,
+    // AI の候補と違う値は「修正」（理由あり）、同じ値は「採用」、候補が無ければ区分を付けない
+    reviewDecision: !hasCandidate ? null : sameAsCandidate ? 'approved' : 'modified',
     reviewedBy: ctx.userId,
     reviewedAt: now,
     reviewComment: comment,
@@ -743,13 +780,20 @@ export async function runCsrdGapAnalysis(
   ]);
   const unitName = new Map(units.map((u) => [u.id, u.name]));
   const metricById = new Map(metrics.map((m) => [m.id, m]));
-  const values = approved
-    .filter((dp) => metricIds.has(dp.metricId) && hasUsableValue(dp))
-    .slice(0, 10);
+  const usable = approved.filter((dp) => metricIds.has(dp.metricId) && hasUsableValue(dp));
+  // 値の揃い具合は指標の数で渡す（値の行は指標 × 拠点のため、1 つの指標の拠点別の値だけで
+  // 複数指標の要求事項を対応済みに見せない）。数えるのは切り詰める前の全件
+  const withValue = new Set(usable.map((dp) => dp.metricId));
+  const withActual = new Set(
+    usable.filter((dp) => valueKindOf(dp) === 'actual').map((dp) => dp.metricId),
+  );
+  const values = usable.slice(0, 10);
+  // 推計は推計のまま渡す（AI が実績として扱わないよう、値ごとに区分を付ける）
   const metricValues = values.map((dp) => ({
     label: `${metricById.get(dp.metricId)?.name ?? '指標'}（${unitName.get(dp.unitId) ?? '—'}）`,
     value: dp.value as number,
     unit: dp.unitOfMeasure,
+    kind: valueKindOf(dp) === 'estimate' ? ('estimate' as const) : ('actual' as const),
   }));
   const matterState =
     section && section !== 'ESRS2' ? context.matters.find((m) => m.topic === section) : undefined;
@@ -806,6 +850,12 @@ export async function runCsrdGapAnalysis(
           : null,
         responseStatus: responses[0]?.status ?? null,
         mappedMetricCount: metrics.length,
+        metricsWithValueCount: withValue.size,
+        metricsWithActualValueCount: withActual.size,
+        missingMetricNames: metrics.filter((m) => !withValue.has(m.id)).map((m) => m.name),
+        estimateOnlyMetricNames: metrics
+          .filter((m) => withValue.has(m.id) && !withActual.has(m.id))
+          .map((m) => m.name),
         metricValues,
         hasApprovalWorkflow: approvals.length > 0,
         sources,
@@ -845,7 +895,16 @@ export interface ReviewCsrdAssessmentInput {
   dataStatus?: SsbjCoverageStatus;
   processStatus?: SsbjCoverageStatus;
   comment: string;
+  /**
+   * 「候補を採用」のとき、画面が表示した AI の候補の実行日時（ai_evaluated_at）。
+   * 表示の後に分析がやり直されていれば、見ていない候補を確定しないよう断る
+   */
+  aiEvaluatedAt?: string | null;
 }
+
+/** 表示した後に AI の候補が変わったときの説明 */
+export const CSRD_CANDIDATE_CHANGED_MESSAGE =
+  'AI の候補が更新されています（別の操作で分析がやり直されました）。画面を再表示し、新しい候補を確認してから採用してください。';
 
 /** 担当者の確認。ここで初めて AI の候補が確定値になる（または人が修正して確定する） */
 export async function reviewCsrdAssessment(
@@ -871,6 +930,8 @@ export async function reviewCsrdAssessment(
         'AI の候補がありません。先に AI ギャップ分析を実行するか、修正して確定してください。',
       );
     }
+    // 採用するのは、利用者が画面で見た候補だけ
+    assertSameBase(before.aiEvaluatedAt, input.aiEvaluatedAt, CSRD_CANDIDATE_CHANGED_MESSAGE);
     statuses = [before.aiDisclosureStatus, before.aiDataStatus, before.aiProcessStatus];
   } else if (input.decision === 'modified') {
     statuses = [
@@ -879,9 +940,7 @@ export async function reviewCsrdAssessment(
       assertCoverage(input.processStatus),
     ];
     if (comment === '') {
-      throw new ValidationError(
-        '修正して確定する場合は、修正の理由（コメント）を入力してください。',
-      );
+      throw new ValidationError(MODIFY_REASON_REQUIRED);
     }
   } else {
     throw new ValidationError('確認の区分が正しくありません。');

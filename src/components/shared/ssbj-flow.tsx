@@ -10,8 +10,18 @@ import { Card } from '@/components/ui/card';
  * 開示作成までが 1 本の流れであることを、常に画面上で示すための帯。
  *
  * 4 列 × 2 段にしているのは、8 列を 1 段に並べると 1280px 幅で 1 マスが狭くなり
- * 説明文が読めなくなるため（横スクロールも出したくない）。
+ * 説明文が読めなくなるため（横スクロールも出したくない）。題は省略せずに折り返す
+ * （1366px の 4 列で長い題が途中から見えなくなっていた）。
+ *
+ * 「進行中」の工程は複数ありうるが、支援技術に伝える現在の工程（aria-current="step"）は、
+ * 未完了の最初の 1 つ（進行中の最初の工程）だけにする。複数に付けると「現在のステップ」が
+ * 何か所も読み上げられ、どこが今の工程か分からなくなる。
  */
+
+/** 現在の工程（進行中の最初の工程）の位置。進行中が無ければ -1 */
+export function currentStepIndex(steps: readonly Pick<SsbjFlowStep, 'state'>[]): number {
+  return steps.findIndex((step) => step.state === 'current');
+}
 
 export interface SsbjFlowStep {
   title: string;
@@ -29,6 +39,7 @@ const STATE = {
 };
 
 export function SsbjFlow({ steps }: { steps: SsbjFlowStep[] }) {
+  const currentIndex = currentStepIndex(steps);
   return (
     <Card className="overflow-hidden">
       <ol className="grid grid-cols-4 divide-x divide-y divide-line">
@@ -40,7 +51,9 @@ export function SsbjFlow({ steps }: { steps: SsbjFlowStep[] }) {
                 <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-[11px] font-semibold text-ink-muted">
                   {index + 1}
                 </span>
-                <span className="truncate text-[12px] font-semibold text-ink">{step.title}</span>
+                <span className="min-w-0 break-words text-[12px] font-semibold text-ink">
+                  {step.title}
+                </span>
               </div>
               <p className="text-[11px] leading-relaxed text-ink-muted">{step.description}</p>
               <div className="flex items-center gap-1.5">
@@ -56,7 +69,7 @@ export function SsbjFlow({ steps }: { steps: SsbjFlowStep[] }) {
             <li
               key={step.title}
               className={`space-y-1 p-2.5 ${step.state === 'current' ? 'bg-brand-50/60' : ''}`}
-              aria-current={step.state === 'current' ? 'step' : undefined}
+              aria-current={index === currentIndex ? 'step' : undefined}
             >
               {/* Focus Ring は globals.css の :focus-visible が全体に効くので上書きしない */}
               {step.href ? (

@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
+import { runPreservingAction } from '@/lib/errors/form-action';
+import type { FormActionState } from '@/lib/errors/form-action-state';
 import { withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
 import {
@@ -29,6 +31,8 @@ import {
  *
  * 成功したら同じ画面へ `?flash=` 付きで戻り、利用者向けのエラーは `?error=` で戻す
  * （withUserFacingError）。DMA の確定を外す書込の結果もフラッシュの文面で伝える。
+ * 入力の多いフォーム（事項の判断・IRO）は、断られたときにリダイレクトせず、入力を残して理由を返す
+ * （リダイレクトで画面が組み直されると、選んだ判断・書いた根拠・選んだスコアが消えていた）。
  */
 
 /** CSRD の画面すべてと分析（規制対応度）が DMA・評価の結果を表示するため、まとめて再検証する */
@@ -70,14 +74,18 @@ export async function confirmCsrdDmaAction(formData: FormData): Promise<void> {
   redirect(`${CSRD_SETTINGS_PATH}?flash=csrdDmaConfirmed`);
 }
 
-/** IRO を追加・更新する */
-export async function upsertCsrdDmaIroAction(formData: FormData): Promise<void> {
-  const ctx = await requireEnterpriseContext();
-  const db = await getDb();
+/** IRO を追加・更新する（断られたら入力を残して理由を返す） */
+export async function upsertCsrdDmaIroAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   const back = matterPath(safeTopic(formData.get('topic')));
-  await withUserFacingError(back, async () => {
+  const failure = await runPreservingAction(formData, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
     await upsertCsrdDmaIro(db, ctx, parseIroForm(formData));
   });
+  if (failure) return failure;
   revalidateCsrd();
   redirect(`${back}?flash=csrdIroSaved`);
 }
@@ -94,14 +102,23 @@ export async function deleteCsrdDmaIroAction(formData: FormData): Promise<void> 
   redirect(`${back}?flash=csrdIroDeleted`);
 }
 
-/** 事項の 2 軸（インパクト・財務）を人が判断する */
-export async function decideCsrdDmaMatterAction(formData: FormData): Promise<void> {
-  const ctx = await requireEnterpriseContext();
-  const db = await getDb();
+/**
+ * 事項の 2 軸（インパクト・財務）を人が判断する（断られたら入力を残して理由を返す）。
+ * 両軸を「未評価」に戻したときは判断者・日時を消すため、フラッシュの文言を分ける
+ */
+export async function decideCsrdDmaMatterAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   const back = matterPath(safeTopic(formData.get('topic')));
-  await withUserFacingError(back, async () => {
-    await decideCsrdDmaMatter(db, ctx, parseMatterDecisionForm(formData));
+  let decided = true;
+  const failure = await runPreservingAction(formData, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const matter = await decideCsrdDmaMatter(db, ctx, parseMatterDecisionForm(formData));
+    decided = matter.decidedAt !== null;
   });
+  if (failure) return failure;
   revalidateCsrd();
-  redirect(`${back}?flash=csrdMatterDecided`);
+  redirect(`${back}?flash=${decided ? 'csrdMatterDecided' : 'csrdMatterCleared'}`);
 }

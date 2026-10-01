@@ -281,6 +281,8 @@ export default async function CsrdPlansPage({
                                 <input type="hidden" name="department" value={plan.department} />
                                 <input type="hidden" name="priority" value={plan.priority} />
                                 <input type="hidden" name="dueDate" value={plan.dueDate ?? ''} />
+                                {/* 表示したときの版。別の操作（収集項目の作成・別のタブ）で変わっていれば断る */}
+                                <input type="hidden" name="baseUpdatedAt" value={plan.updatedAt} />
                                 <select
                                   name="assigneeUserId"
                                   defaultValue={plan.assigneeUserId ?? ''}

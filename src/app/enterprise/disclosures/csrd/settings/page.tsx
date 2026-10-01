@@ -298,7 +298,7 @@ export default async function CsrdSettingsPage({
 
             {view.canEdit && (
               <div className="flex items-center gap-2">
-                <SubmitButton size="sm" pendingLabel="保存中…">
+                <SubmitButton size="sm" variant="outline" pendingLabel="保存中…">
                   報告範囲を保存
                 </SubmitButton>
                 <span className="text-[11px] text-ink-muted">
@@ -381,7 +381,7 @@ export default async function CsrdSettingsPage({
             </label>
             {view.canEdit && (
               <div className="flex items-center gap-2">
-                <SubmitButton size="sm" pendingLabel="保存中…">
+                <SubmitButton size="sm" variant="outline" pendingLabel="保存中…">
                   評価方法を保存
                 </SubmitButton>
                 <span className="text-[11px] text-ink-muted">

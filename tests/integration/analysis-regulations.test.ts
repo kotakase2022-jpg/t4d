@@ -190,6 +190,9 @@ describe('SSBJ（ssbj_assessments を読むだけ）', () => {
     expect(ssbj.breakdown!.aiOnly).toBe(23);
     // SSBJ の AI は 3 観点の列に直接書くため、内訳に未確認の AI 判定が入ることを明記する
     expect(ssbj.notes).toContain(SSBJ_BREAKDOWN_AI_NOTE);
+    // SSBJ の対応状況画面の「未対応」は未確認を含むため、「同じ数え方」と言わず違いを示す（未対応 31・未確認 10）
+    expect(SSBJ_BREAKDOWN_AI_NOTE).not.toContain('同じ数え方');
+    expect(SSBJ_BREAKDOWN_AI_NOTE).toContain('「未対応」は未確認を含みます');
     // SSBJ には要求事項ごとの回答が無い（節ごとの開示ドラフト）
     expect(ssbj.responses).toBeNull();
     expect(ssbj.responsesNote).toContain('開示ドラフト');
@@ -247,6 +250,8 @@ describe('CSRD（DMA から導出した適用）', () => {
     expect(csrd.breakdown!.humanConfirmed).toBe(4);
     expect(csrd.breakdown!.aiOnly).toBe(3);
     expect(csrd.responses).toEqual({ approved: 0, total: 12 });
+    // 回答が必要なのは評価対象の要求事項だけ（現状診断の「未承認の回答」はこちらで数える）
+    expect(csrd.responsesRequired).toEqual({ approved: 0, total: 9 });
     expect(csrd.notes.join('')).toContain('改正 ESRS（2026-07-03 採択・未発効）は未収録');
     // CSRD の AI は候補の列だけに書く。内訳は人の値だけで、AI の候補だけの要求事項は「未確認」
     expect(csrd.notes).toContain(CSRD_BREAKDOWN_NOTE);

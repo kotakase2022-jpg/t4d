@@ -1,7 +1,12 @@
 import 'server-only';
 
 import { assertCan, assertEnterpriseWorkspace, can, NotFoundError } from '@/lib/authorization/can';
-import { dmaOutcome } from '@/lib/domain/csrd';
+import {
+  deriveCsrdApplicability,
+  dmaOutcome,
+  isCsrdInScope,
+  type CsrdApplicability,
+} from '@/lib/domain/csrd';
 import { csrdRowIds } from '@/lib/domain/csrd-ids';
 import { frameworkLegalLabel } from '@/lib/domain/disclosure-status';
 import {
@@ -20,7 +25,9 @@ import {
   type CsrdAnalysisSettings,
   type CsrdAssessment,
   type CsrdDmaIro,
+  type CsrdDisclosureDraft,
   type CsrdDmaMatter,
+  type CsrdSection,
   type DisclosureFrameworkVersion,
   type DisclosureItem,
   type DmaOutcome,
@@ -313,6 +320,25 @@ export function cleanText(value: unknown, max: number, label: string): string {
   return text;
 }
 
+/** 画面が表示した版と保存されている版が違うときの説明（別のタブ・別の利用者の操作の後） */
+export const CSRD_STALE_MESSAGE =
+  '他の操作で内容が更新されています。画面を再表示して、最新の内容を確認してからやり直してください。';
+
+/**
+ * 画面が表示したときの版（updatedAt など）と、いま保存されている版が同じかを確かめる。
+ * 違えば ValidationError（表示していない内容を、黙って上書き・採用・確定しない）。
+ * 版を送らない呼び出しも拒む（何を見て操作したかが分からないため）
+ */
+export function assertSameBase(
+  stored: string | null,
+  base: unknown,
+  message: string = CSRD_STALE_MESSAGE,
+): void {
+  if (typeof base !== 'string' || base === '' || base !== (stored ?? '')) {
+    throw new ValidationError(message);
+  }
+}
+
 /**
  * DMA の確定を外す（DMA に関わる書込と同じ処理で呼ぶ）。確定していなければ書かない
  * （書く必要の無い更新で Cookie の容量を使わない）。外したら true
@@ -336,6 +362,32 @@ export async function releaseDmaConfirmation(
     updatedBy: ctx.userId,
   });
   return true;
+}
+
+/**
+ * 開示ドラフトの節の適用（ESRS 2 は常に適用、テーマ別の節は事項の人の判断から導く）。
+ * ドラフトの画面・確定の条件・対応状況の「確定済みの節」の件数が同じ判定を使う
+ */
+export function csrdSectionApplicability(
+  context: Pick<CsrdContext, 'matters' | 'dmaConfirmed'>,
+  section: CsrdSection,
+): CsrdApplicability {
+  if (section === 'ESRS2') return deriveCsrdApplicability('ESRS2', null, context.dmaConfirmed);
+  const matter = context.matters.find((m) => m.topic === section)?.matter ?? null;
+  return deriveCsrdApplicability(section, matter, context.dmaConfirmed);
+}
+
+/**
+ * 確定の数に入れる節か（確定済み・評価対象）。事項の判断が変わって対象外・未判定になった節の確定は、
+ * 確定の条件（評価対象の節）を満たさないため「確定済み」と数えない
+ */
+export function countsAsConfirmedDraft(
+  context: Pick<CsrdContext, 'matters' | 'dmaConfirmed'>,
+  draft: Pick<CsrdDisclosureDraft, 'section' | 'confirmedAt'>,
+): boolean {
+  return (
+    draft.confirmedAt !== null && isCsrdInScope(csrdSectionApplicability(context, draft.section))
+  );
 }
 
 /** 名前の引き当て（判断者・確定者の表示用） */

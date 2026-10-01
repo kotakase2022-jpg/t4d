@@ -142,6 +142,7 @@ describe('CSRD の書込の前後で SSBJ の出力が同一', () => {
       assessmentId: assessment.id,
       decision: 'approved',
       comment: '',
+      aiEvaluatedAt: assessment.aiEvaluatedAt,
     });
     await saveCsrdAssessment(db, ctx, {
       reportingPeriodId: period.id,
@@ -170,6 +171,7 @@ describe('CSRD の書込の前後で SSBJ の出力が同一', () => {
       assigneeUserId: null,
       dueDate: null,
       priority: 'high',
+      baseUpdatedAt: plan.updatedAt,
     });
     // 部署を空にして、指標マスター（SSBJ と共有）の担当部署を書き換えない
     await createCsrdCollectionItem(db, ctx, {
@@ -184,9 +186,16 @@ describe('CSRD の書込の前後で SSBJ の出力が同一', () => {
       department: '',
     });
     const draft = await generateCsrdDraft(db, ctx, period, 'E1');
-    await adoptCsrdDraft(db, ctx, draft.id);
-    await saveCsrdDraftBody(db, ctx, draft.id, `${draft.aiBody}（加筆）`);
-    await confirmCsrdDraft(db, ctx, draft.id);
+    const adopted = await adoptCsrdDraft(db, ctx, {
+      draftId: draft.id,
+      baseUpdatedAt: draft.updatedAt,
+    });
+    const saved = await saveCsrdDraftBody(db, ctx, {
+      draftId: draft.id,
+      body: `${draft.aiBody}（加筆）`,
+      baseUpdatedAt: adopted.updatedAt,
+    });
+    await confirmCsrdDraft(db, ctx, { draftId: draft.id, baseUpdatedAt: saved.updatedAt });
 
     const after = await ssbjOutputs(db, period);
     expect(after).toEqual(before);

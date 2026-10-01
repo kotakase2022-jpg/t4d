@@ -89,6 +89,12 @@ export const CSRD_PROVISIONAL_LABEL = '暫定（DMA 確定前）';
  */
 export const CSRD_DRAFT_BODY_MAX = 3000;
 
+/**
+ * AI 草案（ai_body）の目安の長さ（字）。Prompt と Mock が守る長さで、超えた草案には注意を添える。
+ * 本文の上限（CSRD_DRAFT_BODY_MAX）を超える草案は保存しない（採用すると本文の上限を破るため）
+ */
+export const CSRD_DRAFT_AI_BODY_TARGET = 600;
+
 /** 架空のサンプル・マスターであることの表示（正式な ESRS と見誤らせない） */
 export const CSRD_SAMPLE_MASTER_LABEL = 'サンプル（架空）';
 

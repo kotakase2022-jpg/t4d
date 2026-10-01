@@ -685,14 +685,53 @@ export async function decideCsrdDmaMatter(
     updatedBy: ctx.userId,
   });
   const released = await releaseDmaConfirmation(db, ctx, period, now);
+  const beforeOutcome = dmaOutcome(matter.impactAssessment, matter.financialAssessment);
+  const afterOutcome = dmaOutcome(input.impactAssessment, input.financialAssessment);
   await recordAuditEvent(db, ctx, {
     eventType: 'data_updated',
     resourceType: 'csrd_dma_matter',
     resourceId: matter.id,
-    beforeSummary: `${topic}: ${DMA_OUTCOME_LABEL[dmaOutcome(matter.impactAssessment, matter.financialAssessment)]}`,
-    afterSummary: `${topic} ${ESRS_TOPIC_LABEL[topic]}: ${DMA_OUTCOME_LABEL[dmaOutcome(input.impactAssessment, input.financialAssessment)]}${released ? '（DMA の確定は取り消し）' : ''}`,
+    beforeSummary: `${topic}: ${DMA_OUTCOME_LABEL[beforeOutcome]}`,
+    afterSummary: `${topic} ${ESRS_TOPIC_LABEL[topic]}: ${DMA_OUTCOME_LABEL[afterOutcome]}${released ? '（DMA の確定は取り消し）' : ''}`,
   });
+  // 事項の結果（重要と判断した観点）が変わったら、その事項の節の本文の確定も外す。確定した本文は
+  // 前の判断の観点（例:「両面で重要」）で書かれており、対象外・未判定になれば確定の条件も満たさない
+  if (beforeOutcome !== afterOutcome) {
+    await releaseTopicDraftConfirmation(db, ctx, period, topic, now);
+  }
   return updated;
+}
+
+/** 事項の節（テーマ別の開示ドラフト）の確定を外す。確定していなければ書かない */
+async function releaseTopicDraftConfirmation(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  period: ReportingPeriod,
+  topic: EsrsTopic,
+  now: string,
+): Promise<void> {
+  const drafts = await db.select('csrdDisclosureDrafts', {
+    where: {
+      organizationId: ctx.workspace.organizationId,
+      reportingPeriodId: period.id,
+      section: topic,
+    },
+    limit: 1,
+  });
+  const draft = drafts[0];
+  if (!draft || draft.confirmedAt === null) return;
+  await db.update('csrdDisclosureDrafts', draft.id, {
+    confirmedAt: null,
+    confirmedBy: null,
+    updatedAt: now,
+    updatedBy: ctx.userId,
+  });
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_updated',
+    resourceType: 'csrd_disclosure_draft',
+    resourceId: draft.id,
+    afterSummary: `${topic} ${ESRS_TOPIC_LABEL[topic]} の重要性の判断が変わったため、節の本文の確定を取り消し（本文は残す）`,
+  });
 }
 
 /**

@@ -106,9 +106,17 @@ test('開示ドラフト: 節ごとの領域に AI 草案（候補）と本文�
   // マスターに要求事項が無い節（E2 等）は出さない
   await expect(page.getByRole('region', { name: 'E2 汚染' })).toHaveCount(0);
 
-  // ESRS 2: 人が確定済み。S1: AI 草案だけ（本文に未採用）。E5: 対象外。G1: 未評価
+  // ESRS 2: 人が書いた本文を保存済み・未確定（DMA 未確定のため確定できない）。S1: AI 草案だけ（本文に未採用）。
+  // E5: 対象外。G1: 未評価
   const esrs2 = page.getByRole('region', { name: 'ESRS 2 全般開示' });
-  await expect(esrs2).toContainText('（海野 みどり）');
+  await expect(esrs2).toContainText('本文あり・未確定');
+  await expect(esrs2.getByRole('textbox', { name: 'ESRS 2 全般開示の本文' })).toHaveValue(
+    /取締役会が監督/,
+  );
+  await expect(esrs2).toContainText(
+    '確定できません: ダブル・マテリアリティ評価（DMA）を確定してから確定してください。',
+  );
+  await expect(esrs2.getByRole('button', { name: '保存済みの本文で確定' })).toHaveCount(0);
   const s1 = page.getByRole('region', { name: 'S1 自社の労働力' });
   await expect(s1).toContainText('AI 草案（候補・デモ生成）');
   await expect(s1.getByRole('textbox', { name: 'S1 自社の労働力の本文' })).toHaveValue('');
@@ -159,8 +167,11 @@ test('AI の実行・指標の管理の権限が無い役割（レビュー担�
   await loginAs(page, DEMO_USERS.reviewer);
   await page.goto(`${BASE}/draft`);
   const e1 = page.getByRole('region', { name: 'E1 気候変動' });
-  await expect(e1).toContainText('AI の実行権限が無いため、草案は作れません。');
+  await expect(e1).toContainText('AI の実行権限が無いため、AI 草案は作れません。');
   await expect(main(page).getByRole('button', { name: /AI 草案を/ })).toHaveCount(0);
+  // 草案の行が無い評価対象の節にも、本文を直接書いて保存できる（作業が止まらない）
+  await expect(e1.getByRole('textbox', { name: 'E1 気候変動の本文' })).toBeVisible();
+  await expect(e1.getByRole('button', { name: '本文を保存' })).toBeVisible();
   await page.goto(`${BASE}/requirements/${CSRD_IDS.items['ESRS-E1-6']}`);
   await expect(page.getByRole('heading', { level: 1, name: /ESRS-E1-6/ })).toBeVisible();
   await expect(main(page).getByRole('button', { name: /AI ギャップ分析/ })).toHaveCount(0);
@@ -183,6 +194,38 @@ test('AI の実行・指標の管理の権限が無い役割（レビュー担�
     await expect(main(page).getByText('アクセス権限がありません'), path).toBeVisible();
     await expect(main(page).getByRole('table'), path).toHaveCount(0);
   }
+  // 開けない画面へのリンクは左メニューにも出さない（CSRD の 5 画面・定性情報）
+  await expect(
+    page
+      .getByRole('navigation', { name: 'メインナビゲーション' })
+      .getByRole('list', { name: 'CSRD', exact: true }),
+  ).toHaveCount(0);
+});
+
+test('DMA の事項: 「重要」「重要でない」を選ぶと根拠が必須になり、送る前にブラウザが止める', async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.goto(`${BASE}/settings/matters/G1`);
+  const financial = page.getByRole('group', { name: /財務的重要性/ });
+  const rationale = financial.getByLabel('根拠（重要／重要でないを選んだときは必須）');
+  // G1 は未評価（根拠は任意）
+  await expect(rationale).not.toHaveAttribute('required', '');
+  await financial.getByLabel('重要', { exact: true }).check();
+  await expect(rationale).toHaveAttribute('required', '');
+  // 根拠が空のまま送ろうとしても、ブラウザが止める（画面は変わらず、選んだ値は残る）
+  await page.getByRole('button', { name: '判断を保存' }).click();
+  await expect(page).toHaveURL(new RegExp(`${BASE}/settings/matters/G1$`));
+  await expect(financial.getByLabel('重要', { exact: true })).toBeChecked();
+  // 空白だけの根拠はサーバーが断り、選んだ判断と書いた根拠を残して理由を示す（状態は変えない）
+  await rationale.fill('   ');
+  await page.getByRole('button', { name: '判断を保存' }).click();
+  await expect(main(page).getByRole('alert')).toContainText('財務の判断の根拠を入力してください。');
+  await expect(main(page).getByRole('alert')).toContainText('入力は残っています');
+  await expect(
+    page.getByRole('group', { name: /財務的重要性/ }).getByLabel('重要', { exact: true }),
+  ).toBeChecked();
+  await expect(page).not.toHaveURL(/flash=/);
 });
 
 test('CSRD の対応計画・データ収集・開示ドラフト・事項（G1）に重大なアクセシビリティ違反が無い', async ({

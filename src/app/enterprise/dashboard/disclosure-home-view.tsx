@@ -569,14 +569,17 @@ function UnitSubmissions({ home }: { home: DisclosureHome }) {
   );
 }
 
-function DemoResetCard() {
+export function DemoResetCard() {
   return (
     <Card className="border-dashed">
       <SectionTitle title="開示デモのリセット（デモ環境のみ）" />
       <form action={resetDisclosureDemoAction} className="space-y-2 px-3 pb-3">
         <p className="text-[12px] text-ink-muted">
           開示プロジェクト・原稿・レビュー・定性情報・引用位置・スナップショット・出力記録・KPI
-          目標を、デモ開始時の状態へ戻します。デモ中に作った行は削除し、変更した行は元の値へ戻します。
+          目標と、CSRD
+          の設定（報告範囲・評価方法）・ダブル・マテリアリティ評価（DMA）・要求事項の評価・対応計画・開示ドラフト・CSRD
+          の計画から作った収集項目・CSRD の AI
+          実行記録を、デモ開始時の状態へ戻します。デモ中に作った行は削除し、変更した行は元の値へ戻します。
           資料・SSBJ の評価・Scope3
           の算定・通知・監査ログ・開示優先モードの設定には触れません。数値データは、下で選んだときだけ戻します。
         </p>

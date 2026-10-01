@@ -33,15 +33,18 @@ import {
   type SsbjGapKind,
   type SsbjPriority,
   type Uuid,
+  type ValueKind,
 } from '@/types/domain';
 import {
   assertCsrdWrite,
+  assertSameBase,
   cleanText,
   findCsrdPeriod,
   loadCsrdContext,
   type CsrdContext,
 } from './core';
 import {
+  approvedValueKind,
   ensureCsrdAssessment,
   metricDataRows,
   type CsrdMetricDataRow,
@@ -188,6 +191,11 @@ export interface UpdateCsrdActionPlanInput {
   assigneeUserId: Uuid | null;
   dueDate: string | null;
   priority: SsbjPriority;
+  /**
+   * 画面が表示したときの計画の updatedAt。表示の後に別の操作（収集項目の作成で「対応中」へ進んだ、
+   * 別のタブで更新した）で変わっていれば、古い値で上書きしないよう断る
+   */
+  baseUpdatedAt: string;
 }
 
 /** 対応状況・担当・期限・優先度を更新する */
@@ -201,6 +209,7 @@ export async function updateCsrdActionPlan(
   if (!plan || plan.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('対応計画が見つかりません。');
   }
+  assertSameBase(plan.updatedAt, input.baseUpdatedAt);
   const status = assertOneOf(SSBJ_ACTION_STATUSES, input.status, '対応状況を選んでください。');
   const priority = assertOneOf(SSBJ_PRIORITIES, input.priority, '優先度を選んでください。');
   const department = cleanText(input.department, DEPARTMENT_MAX, '担当部署');
@@ -288,6 +297,21 @@ export interface CreateCsrdCollectionItemInput {
   department: string;
 }
 
+export interface CreateCsrdCollectionItemResult {
+  metricCode: string;
+  /** 指標マスターへ新しく作ったか */
+  metricCreated: boolean;
+  /**
+   * 割当（指標 × 拠点 × 期間）を新しく作ったか。既にあれば作り直さず、入力した担当者・期限は使わない
+   * （画面は「既存の割当を使った」と伝える）
+   */
+  assignmentCreated: boolean;
+  /** 計画の対応状況（更新後） */
+  planStatus: SsbjActionStatus;
+  /** 未着手から対応中へ進めたか */
+  planStatusChanged: boolean;
+}
+
 /**
  * 計画から収集項目（指標 × 拠点 × 期間の担当・期限）を作る。指標マスターに無ければ作る（出所は CSRD）。
  * 計画には指標コードを結び付け、未着手なら対応中にする
@@ -296,7 +320,7 @@ export async function createCsrdCollectionItem(
   db: DbClient,
   ctx: AuthorizationContext,
   input: CreateCsrdCollectionItemInput,
-): Promise<{ metricCode: string }> {
+): Promise<CreateCsrdCollectionItemResult> {
   assertCsrdWrite(ctx);
   assertCan(ctx, 'enterprise.metric.manage');
   const organizationId = ctx.workspace.organizationId;
@@ -316,23 +340,28 @@ export async function createCsrdCollectionItem(
   const dueDate = assertDueDate(input.dueDate);
   if (!dueDate) throw new ValidationError('期限を入力してください。');
 
-  const { metricId, metricCode } = await ensureMetricAssignment(db, ctx, {
-    frameworks: ['csrd'],
-    description: `CSRD 対応計画「${plan.title}」から作成したデータ項目`,
-    reportingPeriodId: plan.reportingPeriodId,
-    metricCode: input.metricCode,
-    metricName: input.metricName,
-    unit: input.unit,
-    unitId: input.unitId,
-    ownerUserId: await assertMember(db, ctx, input.ownerUserId),
-    dueDate,
-    requiresEvidence: input.requiresEvidence,
-    department: cleanText(input.department, DEPARTMENT_MAX, '担当部署'),
-  });
+  const { metricId, metricCode, metricCreated, assignmentCreated } = await ensureMetricAssignment(
+    db,
+    ctx,
+    {
+      frameworks: ['csrd'],
+      description: `CSRD 対応計画「${plan.title}」から作成したデータ項目`,
+      reportingPeriodId: plan.reportingPeriodId,
+      metricCode: input.metricCode,
+      metricName: input.metricName,
+      unit: input.unit,
+      unitId: input.unitId,
+      ownerUserId: await assertMember(db, ctx, input.ownerUserId),
+      dueDate,
+      requiresEvidence: input.requiresEvidence,
+      department: cleanText(input.department, DEPARTMENT_MAX, '担当部署'),
+    },
+  );
   const now = new Date().toISOString();
+  const planStatus: SsbjActionStatus = plan.status === 'not_started' ? 'in_progress' : plan.status;
   await db.update('csrdActionPlans', plan.id, {
     linkedMetricCode: metricCode,
-    status: plan.status === 'not_started' ? 'in_progress' : plan.status,
+    status: planStatus,
     updatedAt: now,
     updatedBy: ctx.userId,
   });
@@ -340,10 +369,18 @@ export async function createCsrdCollectionItem(
     eventType: 'data_created',
     resourceType: 'metric_assignment',
     resourceId: metricId,
-    afterSummary: `CSRD のデータ収集項目を作成: ${input.metricName.trim()}（${metricCode}）`,
-    metadata: { planId: plan.id, dueDate },
+    afterSummary: assignmentCreated
+      ? `CSRD のデータ収集項目を作成: ${input.metricName.trim()}（${metricCode}）`
+      : `CSRD の計画に既存の収集項目を結び付け: ${input.metricName.trim()}（${metricCode}。担当・期限は変更なし）`,
+    metadata: { planId: plan.id, dueDate, assignmentCreated },
   });
-  return { metricCode };
+  return {
+    metricCode,
+    metricCreated,
+    assignmentCreated,
+    planStatus,
+    planStatusChanged: planStatus !== plan.status,
+  };
 }
 
 /** 評価対象の要求事項 × 対応指標 × 拠点の当期の状況 */
@@ -366,6 +403,8 @@ export interface CsrdCollectionRow {
   state: CsrdDataState;
   /** 承認済みの値だけ（承認済み以外は null） */
   collectedValue: number | null;
+  /** 承認済みの値の区分（実績・推計）。値が無ければ null */
+  valueKind: Exclude<ValueKind, 'target'> | null;
   dataPointId: Uuid | null;
 }
 
@@ -452,6 +491,7 @@ export async function loadCsrdDataCollection(
         daysLeft: assignment.dueDate ? daysUntilJst(assignment.dueDate, referenceDate) : null,
         state,
         collectedValue: dp && state === 'approved' && hasUsableValue(dp) ? dp.value : null,
+        valueKind: approvedValueKind(dp, state),
         dataPointId: dp?.id ?? null,
       });
     }

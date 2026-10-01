@@ -70,3 +70,39 @@ export function iroFormValuesOf(iro: CsrdDmaIro): IroFormValues {
     relatedImpactIroId: iro.relatedImpactIroId ?? '',
   };
 }
+
+/**
+ * 送った値（断られたときにサーバーが返す）から、フォームの初期値を組み立て直す。
+ * 送られなかった欄（種類によって出さない欄）は空にし、IRO の ID は元のものを使う
+ */
+export function iroFormValuesFromEntries(
+  entries: ReadonlyArray<[string, string]>,
+  fallback: IroFormValues,
+): IroFormValues {
+  const get = (name: string): string | undefined => entries.find(([key]) => key === name)?.[1];
+  const iroType = get('iroType');
+  const occurrence = get('impactOccurrence');
+  const direction = get('impactDirection');
+  return {
+    iroId: fallback.iroId,
+    iroType:
+      iroType === 'impact' || iroType === 'risk' || iroType === 'opportunity'
+        ? iroType
+        : fallback.iroType,
+    subTopic: get('subTopic') ?? '',
+    description: get('description') ?? '',
+    valueChainStage: get('valueChainStage') ?? fallback.valueChainStage,
+    timeHorizon: get('timeHorizon') ?? '',
+    impactOccurrence: occurrence === 'actual' || occurrence === 'potential' ? occurrence : '',
+    impactDirection: direction === 'negative' || direction === 'positive' ? direction : '',
+    impactScale: get('impactScale') ?? '',
+    impactScope: get('impactScope') ?? '',
+    impactIrremediability: get('impactIrremediability') ?? '',
+    impactLikelihood: get('impactLikelihood') ?? '',
+    financialLikelihood: get('financialLikelihood') ?? '',
+    financialMagnitude: get('financialMagnitude') ?? '',
+    humanRights: get('humanRights') === 'on',
+    affectedStakeholders: get('affectedStakeholders') ?? '',
+    relatedImpactIroId: get('relatedImpactIroId') ?? '',
+  };
+}

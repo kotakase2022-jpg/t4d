@@ -90,6 +90,12 @@ export interface RegulationRow {
   breakdownNote: string | null;
   /** 回答の承認 n / 全項目（CDP・CSRD）。回答を持たない基準は null */
   responses: { approved: number; total: number } | null;
+  /**
+   * 回答が必要な要求事項の承認 n / 件数（CSRD: 評価対象＝常に適用・重要と判断した事項だけ。
+   * 重要でないと判断した要求事項は回答を求めない）。現状診断の「未承認の回答」はこちらで数える。
+   * 表示は全項目の n / 件数（responses）のまま。区別が無い基準は null（responses と同じ）
+   */
+  responsesRequired: { approved: number; total: number } | null;
   responsesNote: string | null;
   /** 算定しない理由（0% と出さない） */
   notCalculatedReason: string | null;
@@ -110,7 +116,7 @@ export const CSRD_REVISED_ESRS_NOTE = '改正 ESRS（2026-07-03 採択・未発�
 
 /** 内訳の数え方の違い（SSBJ は AI の判定が 3 観点に入る、CSRD は人の値だけ） */
 export const SSBJ_BREAKDOWN_AI_NOTE =
-  '内訳は SSBJ の対応状況画面と同じ数え方で、担当者が未確認の AI 判定（「AI 判定のみ」の件数）も含みます。';
+  '内訳には、担当者が未確認の AI 判定（「AI 判定のみ」の件数）も含みます（SSBJ の対応状況画面と同じ扱い）。SSBJ の対応状況画面の「未対応」は未確認を含みますが、ここでは未対応と未確認を分けて数えます。';
 export const CSRD_BREAKDOWN_NOTE =
   '内訳は人が入力・確定した値だけで数えます（AI の候補だけの要求事項は「未確認」に入ります）。';
 
@@ -215,6 +221,7 @@ function baseRow(key: RegulationKey, master: Master | null): RegulationRow {
     breakdown: null,
     breakdownNote: null,
     responses: null,
+    responsesRequired: null,
     responsesNote: null,
     notCalculatedReason: itemCount ? null : NOT_CALCULATED_REASON[key],
     notes: [],
@@ -350,6 +357,10 @@ async function csrdRow(
   row.responses = {
     approved: loaded.views.filter((v) => v.response?.status === 'approved').length,
     total: loaded.views.length,
+  };
+  row.responsesRequired = {
+    approved: inScope.filter((v) => v.response?.status === 'approved').length,
+    total: inScope.length,
   };
   row.notes.unshift(
     '評価対象は「ESRS 2（常に適用）」と、ダブル・マテリアリティで重要と判断した事項の要求事項です。',

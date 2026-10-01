@@ -45,6 +45,9 @@ function persistedColumns(
   if (table === 'disclosureBlocks') return withoutWorkingBody(record);
   if (isDisclosureReviewNotification(table, row)) return { ...record, body: '' };
   if (table !== 'aiRuns' || !OUTPUT_NOT_REREAD.has(String(record.featureType))) return record;
+  if (REFERENCES_NOT_REREAD.has(String(record.featureType))) {
+    return { ...record, outputJson: {}, sourceReferences: [], inputReferenceIds: [] };
+  }
   return { ...record, outputJson: {} };
 }
 
@@ -55,6 +58,18 @@ function persistedColumns(
  */
 const OUTPUT_NOT_REREAD: ReadonlySet<string> = new Set([
   'importMapping',
+  'csrdGapAnalysis',
+  'csrdDisclosureDraft',
+]);
+
+/**
+ * Cookie では参照元（sourceReferences）と入力の参照（inputReferenceIds）も空にする AI の実行。
+ * CSRD のギャップ分析・草案の実行を別インスタンスで読む画面は、提供元・モデル・Prompt 版・確信度・
+ * 注意（warnings）・状態だけを使い、参照元は使わない。参照元は数値の行・IRO の ID を十数個持ち
+ * （実行 1 件で約 2〜3KB）、実演の流れの後に CSRD の流れを続けると、前半の確定版・出力を押し出していた
+ * （自己監査 F1）。メモリの行は全体を持ったまま（同じインスタンスでは参照元も読める）
+ */
+const REFERENCES_NOT_REREAD: ReadonlySet<string> = new Set([
   'csrdGapAnalysis',
   'csrdDisclosureDraft',
 ]);

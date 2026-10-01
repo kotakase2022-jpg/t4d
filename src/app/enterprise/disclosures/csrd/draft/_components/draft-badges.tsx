@@ -1,16 +1,9 @@
-import {
-  Bot,
-  CircleCheck,
-  CircleDashed,
-  CircleHelp,
-  CircleMinus,
-  CircleX,
-  PenLine,
-  TriangleAlert,
-} from 'lucide-react';
+import { Bot, CircleCheck, CircleDashed, CircleMinus, PenLine } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { COVERAGE_LABEL, COVERAGE_TONE } from '@/lib/domain/ssbj';
-import type { CsrdDisclosureDraft, SsbjCoverageStatus } from '@/types/domain';
+import type { CsrdDisclosureDraft } from '@/types/domain';
+
+// 要求事項の最終判定のバッジは、要求事項の一覧・詳細と共通（csrd-badges）
+export { FinalStatusBadge } from '../../_components/csrd-badges';
 
 /**
  * CSRD 開示ドラフトの状態バッジ。色だけで状態を表さない（ラベルとアイコンを併記する。CLAUDE.md §2）。
@@ -43,26 +36,6 @@ export function DraftStateBadge({ state }: { state: CsrdDraftState }) {
     <Badge tone={s.tone}>
       <s.Icon className="size-3" aria-hidden="true" />
       {s.label}
-    </Badge>
-  );
-}
-
-const COVERAGE_ICON: Record<SsbjCoverageStatus, typeof Bot> = {
-  covered: CircleCheck,
-  mostly_covered: CircleCheck,
-  partial: TriangleAlert,
-  not_covered: CircleX,
-  unconfirmed: CircleHelp,
-};
-
-/** 要求事項の人の確定値（3 観点をまとめた最終判定）。確定が無ければ「未確認」 */
-export function FinalStatusBadge({ status }: { status: SsbjCoverageStatus | null }) {
-  const value = status ?? 'unconfirmed';
-  const Icon = COVERAGE_ICON[value];
-  return (
-    <Badge tone={COVERAGE_TONE[value]}>
-      <Icon className="size-3" aria-hidden="true" />
-      {COVERAGE_LABEL[value]}
     </Badge>
   );
 }

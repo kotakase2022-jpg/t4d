@@ -92,6 +92,10 @@ function rowOf(assessmentId: string): CsrdAssessment {
   return fixture.csrdAssessments.find((a) => a.id === assessmentId)!;
 }
 
+function detailMetricId(code: string): string {
+  return fixture.metrics.find((m) => m.organizationId === ORG_IDS.aomi && m.code === code)!.id;
+}
+
 describe('Fixture の適用の導出', () => {
   it('12 項目の適用・観点・暫定（評価対象 9／12）', async () => {
     const loaded = await loadCsrdRequirementViews(db, manager(), fy2026, REF);
@@ -186,7 +190,8 @@ describe('Fixture の適用の導出', () => {
       done: 0,
     });
     expect(overview!.collectionPlanCount).toBe(1);
-    expect(overview!.draftCounts).toEqual({ confirmed: 1, generated: 1 });
+    // ESRS 2 は本文を保存済みで未確定（DMA 未確定の Fixture では、どの節も確定済みにしない）
+    expect(overview!.draftCounts).toEqual({ confirmed: 0, generated: 1 });
   });
 
   it('G1 を「財務のみ」と判断すると G1-1/G1-4 が適用（財務）になり、DMA を確定すると暫定が外れる', async () => {
@@ -329,7 +334,7 @@ describe('AI ギャップ分析と担当者の確認', () => {
     expect(loaded!.views.find((v) => v.item.code === 'ESRS-E1-1')!.awaitingReview).toBe(true);
     const run = fixture.aiRuns.find((r) => r.id === runId)!;
     expect(run.featureType).toBe('csrdGapAnalysis');
-    expect(run.promptVersion).toBe('csrd-gap-analysis@2026-10-01.1');
+    expect(run.promptVersion).toBe('csrd-gap-analysis@2026-10-01.2');
   });
 
   it('評価対象でない（対象外・未判定）要求事項は分析できない', async () => {
@@ -362,6 +367,7 @@ describe('AI ギャップ分析と担当者の確認', () => {
       assessmentId: assessment.id,
       decision: 'approved',
       comment: '',
+      aiEvaluatedAt: assessment.aiEvaluatedAt,
     });
     expect([reviewed.disclosureStatus, reviewed.dataStatus, reviewed.processStatus]).toEqual([
       assessment.aiDisclosureStatus,
@@ -426,6 +432,148 @@ describe('AI ギャップ分析と担当者の確認', () => {
       finalStatus: null,
       disclosureStatus: 'unconfirmed',
     });
+  });
+
+  it('「候補を採用」は画面が表示した候補（実行日時）のときだけ。分析がやり直された後は、見ていない候補を確定しない', async () => {
+    const first = await runCsrdGapAnalysis(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      itemId: item('ESRS-E1-4'),
+    });
+    // 別のタブ・別の利用者が分析をやり直す（実行日時が変わる）
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await runCsrdGapAnalysis(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      itemId: item('ESRS-E1-4'),
+    });
+    expect(second.assessment.aiEvaluatedAt).not.toBe(first.assessment.aiEvaluatedAt);
+    await expect(
+      reviewCsrdAssessment(db, manager(), {
+        assessmentId: first.assessment.id,
+        decision: 'approved',
+        comment: '',
+        aiEvaluatedAt: first.assessment.aiEvaluatedAt,
+      }),
+    ).rejects.toThrow(/AI の候補が更新されています/);
+    // 表示した候補を送らない「採用」も断る
+    await expect(
+      reviewCsrdAssessment(db, manager(), {
+        assessmentId: first.assessment.id,
+        decision: 'approved',
+        comment: '',
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(rowOf(first.assessment.id).finalStatus).toBeNull();
+    // 最新の候補を見て採用すれば確定する（空振りテストでないことの確認）
+    const reviewed = await reviewCsrdAssessment(db, manager(), {
+      assessmentId: first.assessment.id,
+      decision: 'approved',
+      comment: '',
+      aiEvaluatedAt: second.assessment.aiEvaluatedAt,
+    });
+    expect(reviewed.reviewDecision).toBe('approved');
+  });
+
+  it('AI の候補がある要求事項で、担当者の入力が候補と違うときは理由が必須（「修正」の記録に理由を残す）', async () => {
+    const sbm3 = CSRD_IDS.assessments['ESRS2-SBM-3']!; // Fixture: AI 候補 一部×3・人は未確認
+    await expect(
+      saveCsrdAssessment(db, manager(), {
+        reportingPeriodId: PERIOD_IDS.fy2026,
+        itemId: item('ESRS2-SBM-3'),
+        disclosureStatus: 'covered',
+        dataStatus: 'covered',
+        processStatus: 'covered',
+        comment: '  ',
+      }),
+    ).rejects.toThrow(/修正の理由（コメント）を入力してください/);
+    expect(rowOf(sbm3)).toMatchObject({ reviewDecision: null, reviewedAt: null });
+    const modified = await saveCsrdAssessment(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      itemId: item('ESRS2-SBM-3'),
+      disclosureStatus: 'covered',
+      dataStatus: 'covered',
+      processStatus: 'covered',
+      comment: '戦略への影響の記載を確認した（テスト）',
+    });
+    expect(modified).toMatchObject({
+      reviewDecision: 'modified',
+      reviewComment: '戦略への影響の記載を確認した（テスト）',
+    });
+  });
+
+  it('担当者の入力が AI の候補と同じなら「採用」として記録する（理由は任意）', async () => {
+    const saved = await saveCsrdAssessment(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      itemId: item('ESRS2-SBM-3'),
+      disclosureStatus: 'partial',
+      dataStatus: 'partial',
+      processStatus: 'partial',
+      comment: '',
+    });
+    expect(saved).toMatchObject({ reviewDecision: 'approved', finalStatus: 'partial' });
+  });
+
+  it('E1-6（対応指標 4 件のうち値があるのは Scope1・Scope2 の 2 指標）の AI の候補は、データを「一部対応」にする', async () => {
+    const detail = await loadCsrdRequirementDetail(db, manager(), fy2026, item('ESRS-E1-6'), REF);
+    expect(detail!.view.metrics.map((m) => m.code).sort()).toEqual(
+      ['scope1', 'scope2', 'scope2_location', 'scope3_total'].sort(),
+    );
+    expect(detail!.view.dataCoverage).toBe('partial');
+    const { assessment } = await runCsrdGapAnalysis(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      itemId: item('ESRS-E1-6'),
+    });
+    // 値の行（Scope1×3・Scope2×3 = 6 行）の数ではなく、値のある指標の数（2 / 4）で判定する
+    expect(assessment.aiDataStatus).toBe('partial');
+    expect(assessment.aiMissingInfo.join(' ')).toContain('Scope2');
+    expect(assessment.aiMissingInfo.join(' ')).toContain('承認済みの値が無い指標');
+  });
+
+  it('対象外・未判定になった要求事項の AI 候補は「確認待ち」にしない（確認の操作が無いため）', async () => {
+    await decideCsrdDmaMatter(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      topic: 'S1',
+      impactAssessment: 'not_material',
+      impactRationale: '見直し（テスト）',
+      financialAssessment: 'not_material',
+      financialRationale: '見直し（テスト）',
+      stakeholderNote: '',
+    });
+    const { views } = (await loadCsrdRequirementViews(db, manager(), fy2026, REF))!;
+    const s19 = views.find((v) => v.item.code === 'ESRS-S1-9')!;
+    expect(s19.applicability.kind).toBe('not_material');
+    expect(s19.awaitingReview).toBe(false);
+    // 一覧の「確認待ち」と対応状況の件数が一致する
+    const awaiting = filterCsrdRequirements(views, { review: ['awaiting'] });
+    const overview = await loadCsrdOverview(db, manager(), fy2026, REF);
+    expect(awaiting.map((v) => v.item.code)).toEqual(['ESRS2-SBM-3', 'ESRS-E1-4']);
+    expect(overview!.awaitingReview).toBe(awaiting.length);
+    const detail = await loadCsrdRequirementDetail(db, manager(), fy2026, item('ESRS-S1-9'), REF);
+    expect(detail!.view.awaitingReview).toBe(false);
+  });
+
+  it('承認済みの推計値は、指標の当期データで「推計」と区別する（実績と同じに見せない）', async () => {
+    const scope1Hq = fixture.dataPoints.find(
+      (dp) =>
+        dp.metricId === detailMetricId('scope1') &&
+        dp.reportingPeriodId === PERIOD_IDS.fy2026 &&
+        fixture.units.find((u) => u.id === dp.unitId)?.code === 'HQ',
+    )!;
+    scope1Hq.valueKind = 'estimate';
+    const detail = await loadCsrdRequirementDetail(db, manager(), fy2026, item('ESRS-E1-6'), REF);
+    const scope1 = detail!.metricData.filter((r) => r.metric.code === 'scope1');
+    expect(scope1.map((r) => [r.unit?.code, r.valueKind])).toEqual([
+      ['HQ', 'estimate'],
+      ['EAST', 'actual'],
+      ['WEST', 'actual'],
+      ['EU', null],
+      ['JV', null],
+    ]);
+    // AI の候補: 値はあるが推計だけの指標があれば、データを「対応済み」にしない
+    const { assessment } = await runCsrdGapAnalysis(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      itemId: item('ESRS-E1-6'),
+    });
+    expect(assessment.aiDataStatus).toBe('partial');
   });
 
   it('他組織の評価は確認できない・他組織の期間には書けない', async () => {

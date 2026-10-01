@@ -17,6 +17,7 @@ import {
   DISCLOSURE_RESET_AI_FEATURES,
   isDataPointApproval,
   isDisclosureNotification,
+  planCsrdCollectionReset,
 } from '@/lib/repositories/demo-reset-sync';
 import type { DbClient, Row, TableName } from '@/lib/repositories/types';
 
@@ -31,7 +32,8 @@ import type { AuthorizationContext } from '@/types/domain';
  *
  * 対象は開示優先モードの表（プロジェクト・基準の適用判断・定性情報・引用位置・原稿・レビュー・
  * スナップショット・出力記録・KPI 目標）と CSRD の 6 表（分析条件・DMA の事項と IRO・評価・計画・
- * 開示ドラフト。docs/disclosure-first.md §9.3）、原稿の AI 下書きと CSRD の AI の実行記録だけ。
+ * 開示ドラフト。docs/disclosure-first.md §9.3）、CSRD の計画から作った収集項目（その計画が結び付けた
+ * 指標の割当・新しく作った指標・補った列。planCsrdCollectionReset）、原稿の AI 下書きと CSRD の AI の実行記録だけ。
  * いまの組織の行に限る。
  *  - デモ中に作られた行（Fixture に無い ID）は物理削除する（DemoDbClient.hardDeleteDemoRows）
  *  - Fixture の行が書き換えられていれば、Fixture の値へ戻す
@@ -107,6 +109,26 @@ export async function resetDisclosureDemoData(
   let removedRows = 0;
   let restoredRows = 0;
 
+  // CSRD の計画から作った収集項目（割当・指標）。CSRD の計画を戻す前に、計画が結び付けた指標を決める
+  const [csrdPlans, ssbjPlans, metrics, assignments, dataPoints] = await Promise.all([
+    db.select('csrdActionPlans', { where: { organizationId } }),
+    db.select('ssbjActionPlans', { where: { organizationId } }),
+    db.select('metrics', { where: { organizationId } }),
+    db.select('metricAssignments', { where: { organizationId } }),
+    db.select('dataPoints', { where: { organizationId } }),
+  ]);
+  const collectionReset = planCsrdCollectionReset({
+    organizationId,
+    csrdPlans,
+    pristineCsrdPlans: pristine.csrdActionPlans,
+    ssbjPlans: [...ssbjPlans, ...pristine.ssbjActionPlans],
+    metrics,
+    pristineMetrics: pristine.metrics,
+    assignments,
+    pristineAssignments: pristine.metricAssignments,
+    metricIdsWithData: new Set(dataPoints.map((dp) => dp.metricId)),
+  });
+
   const tables: ReadonlyArray<ResetTable> = options.includeDataPoints
     ? [...DATA_DEMO_RESET_TABLES, 'approvals', ...DISCLOSURE_DEMO_RESET_TABLES]
     : DISCLOSURE_DEMO_RESET_TABLES;
@@ -174,6 +196,42 @@ export async function resetDisclosureDemoData(
     removedRows += removed;
     restoredRows += restored;
   }
+
+  // CSRD の計画から作った収集項目。計画の無い割当（「収集依頼済み」）・計画から作った指標を残さず、
+  // 収集項目の作成が補った指標の担当部署・証跡必須を Fixture の値へ戻す（Cookie からも外す）
+  const removedAssignments =
+    collectionReset.assignmentIds.length > 0
+      ? await db.hardDeleteDemoRows('metricAssignments', new Set(collectionReset.assignmentIds))
+      : 0;
+  const removedMetrics =
+    collectionReset.metricIds.length > 0
+      ? await db.hardDeleteDemoRows('metrics', new Set(collectionReset.metricIds))
+      : 0;
+  const pristineMetricById = new Map(pristine.metrics.map((m) => [m.id, m]));
+  for (const restore of collectionReset.metricRestores) {
+    await db.update(
+      'metrics',
+      restore.id,
+      structuredClone(restore.patch) as Partial<Row<'metrics'>>,
+    );
+  }
+  if (collectionReset.metricRestores.length > 0) {
+    const restoredIds = new Set(collectionReset.metricRestores.map((r) => r.id));
+    // 戻した後の持ち回りが Fixture と同じ値だけなら、持ち回る必要がない（ほかの列の変更が残る編集は残す）
+    await removeDemoEditsWhere((edit) => {
+      if (edit.t !== 'metrics' || !restoredIds.has(edit.id)) return false;
+      const fixtureRow = pristineMetricById.get(edit.id) as unknown as
+        Record<string, unknown> | undefined;
+      return (
+        fixtureRow !== undefined &&
+        Object.entries(edit.v).every(([key, value]) => sameValue(fixtureRow[key], value))
+      );
+    });
+  }
+  byTable.metricAssignments = { removed: removedAssignments, restored: 0 };
+  byTable.metrics = { removed: removedMetrics, restored: collectionReset.metricRestores.length };
+  removedRows += removedAssignments + removedMetrics;
+  restoredRows += collectionReset.metricRestores.length;
 
   // 原稿の AI 下書きと CSRD のギャップ分析・草案（デモ中の実行分）。Fixture の実行記録は残す
   const fixtureAiRunIds = new Set(pristine.aiRuns.map((r) => r.id));

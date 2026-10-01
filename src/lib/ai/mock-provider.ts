@@ -2,7 +2,7 @@ import { createRng, stableHash } from '@/lib/fixtures/ids';
 import { normalizeLabel } from '@/lib/imports/learning';
 import { classifyColumns, pickValueCell } from '@/lib/imports/column-roles';
 import { parseFlexibleNumber } from '@/lib/imports/number';
-import { perspectiveSentence } from '@/lib/domain/csrd';
+import { CSRD_DRAFT_AI_BODY_TARGET, perspectiveSentence } from '@/lib/domain/csrd';
 import type { DmaPerspective, SsbjCoverageStatus as SsbjCoverage } from '@/types/domain';
 import { buildMockDisclosureDraft, type DraftInvocationInput } from './mock-disclosure-draft';
 import { AI_SCHEMAS, PROMPT_VERSIONS, type AiFeature, type AiOutputOf } from './schemas';
@@ -665,8 +665,12 @@ function buildMockOutput<F extends AiFeature>(
       }) ?? { kind: 'undetermined', perspectives: [] };
       const responseStatus = typeof input.responseStatus === 'string' ? input.responseStatus : null;
       const mappedMetricCount = Number(input.mappedMetricCount ?? 0);
-      const metricValues =
-        (input.metricValues as Array<{ label: string; value: number; unit: string }>) ?? [];
+      // 値の揃い具合は「値（実績）のある指標の数」で見る。値の行（指標 × 拠点）の数で見ると、
+      // 1 つの指標の拠点別の値だけで複数指標の要求事項を「対応済み」にしてしまう（W0 O7 と同じ規則）
+      const metricsWithValueCount = Number(input.metricsWithValueCount ?? 0);
+      const metricsWithActualValueCount = Number(input.metricsWithActualValueCount ?? 0);
+      const missingMetricNames = (input.missingMetricNames as string[] | undefined) ?? [];
+      const estimateOnlyMetricNames = (input.estimateOnlyMetricNames as string[] | undefined) ?? [];
       const hasProcess = input.hasApprovalWorkflow === true;
       const sources = (input.sources as never[]) ?? [];
 
@@ -680,12 +684,13 @@ function buildMockOutput<F extends AiFeature>(
               responseStatus === 'returned'
             ? 'partial'
             : 'not_covered';
+      // 対応済みは、対応付いたすべての指標に承認済みの実績値があるときだけ（推計だけの指標は一部）
       const dataStatus: SsbjCoverage =
         mappedMetricCount === 0
           ? 'unconfirmed'
-          : metricValues.length === 0
+          : metricsWithValueCount === 0
             ? 'not_covered'
-            : metricValues.length >= mappedMetricCount
+            : metricsWithActualValueCount >= mappedMetricCount
               ? 'covered'
               : 'partial';
       const processStatus: SsbjCoverage = hasProcess ? 'partial' : 'not_covered';
@@ -701,6 +706,16 @@ function buildMockOutput<F extends AiFeature>(
       if (dataStatus === 'not_covered') {
         missing.push('開示に必要な数値の承認済みの値がありません（データ収集が必要）。');
       }
+      if (dataStatus === 'partial' && missingMetricNames.length > 0) {
+        missing.push(
+          `承認済みの値が無い指標があります: ${missingMetricNames.join('、')}（データ収集が必要）。`,
+        );
+      }
+      if (estimateOnlyMetricNames.length > 0) {
+        missing.push(
+          `承認済みの値が推計だけの指標があります: ${estimateOnlyMetricNames.join('、')}（実績値ではありません）。`,
+        );
+      }
       if (dataStatus === 'unconfirmed') {
         missing.push('数値の指標が対応付いていないため、データの観点は人が確認してください。');
       }
@@ -713,10 +728,11 @@ function buildMockOutput<F extends AiFeature>(
         disclosureStatus,
         dataStatus,
         processStatus,
-        comment: `ESRS（サンプル）${itemCode}（${sectionLabel}）を、${basis}として評価しました（デモ生成）。承認済みの値 ${metricValues.length} 件・回答の状態を根拠にしています。`,
+        comment: `ESRS（サンプル）${itemCode}（${sectionLabel}）を、${basis}として評価しました（デモ生成）。承認済みの値のある指標 ${metricsWithValueCount} / ${mappedMetricCount} 件・回答の状態を根拠にしています。`,
         missingInformation: missing,
         recommendation:
-          dataStatus === 'not_covered'
+          dataStatus === 'not_covered' ||
+          (dataStatus === 'partial' && missingMetricNames.length > 0)
             ? '対応計画で必要な数値の収集項目を作り、担当部署へ依頼してください（デモ生成）。'
             : disclosureStatus === 'not_covered'
               ? '回答の下書きを作り、版・承認の手続きへ進めてください（デモ生成）。'
@@ -755,7 +771,12 @@ function buildMockOutput<F extends AiFeature>(
           reviewed: boolean;
         }>) ?? [];
       const metricValues =
-        (input.metricValues as Array<{ label: string; value: number; unit: string }>) ?? [];
+        (input.metricValues as Array<{
+          label: string;
+          value: number;
+          unit: string;
+          kind?: 'actual' | 'estimate';
+        }>) ?? [];
       const sources = (input.sources as never[]) ?? [];
 
       // 書けるのは、担当者が確認して「対応済み／おおむね対応」とした要求事項だけ
@@ -797,7 +818,11 @@ function buildMockOutput<F extends AiFeature>(
         metricValues.length > 0
           ? `主要な指標は${metricValues
               .slice(0, 3)
-              .map((m) => `${m.label} ${m.value.toLocaleString('ja-JP')} ${m.unit}`)
+              // 推計は推計と明記する（実績のように書かない）
+              .map(
+                (m) =>
+                  `${m.label} ${m.value.toLocaleString('ja-JP')} ${m.unit}${m.kind === 'estimate' ? '（推計値）' : ''}`,
+              )
               .join('、')}です。`
           : null;
       const gapLine =
@@ -805,7 +830,7 @@ function buildMockOutput<F extends AiFeature>(
       const closing = '本文はデモ生成の草案です（架空）。';
 
       // 1 節 600 字以内に収める。冒頭と結びは必ず残し、収まらない文から落とす
-      const LIMIT = 600;
+      const LIMIT = CSRD_DRAFT_AI_BODY_TARGET;
       let body = opening;
       for (const part of [writableLine, iroLine, numbers, gapLine]) {
         if (part && body.length + part.length + closing.length <= LIMIT) body += part;

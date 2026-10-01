@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Bot, Check, CircleAlert, Save, Sparkles, TriangleAlert } from 'lucide-react';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
@@ -18,12 +19,18 @@ import { DraftStateBadge, FinalStatusBadge, ReviewedBadge, draftStateOf } from '
 
 const requirementHref = (itemId: Uuid) => `/enterprise/disclosures/csrd/requirements/${itemId}`;
 
+/** AI の出所の表示（Mock は「デモ生成」、OpenAI などは「AI 生成」） */
+const providerLabel = (provider: 'mock' | 'openai') =>
+  provider === 'mock' ? 'デモ生成' : 'AI 生成';
+
 /**
  * CSRD 開示ドラフトの 1 節（docs/disclosure-first.md §9.4）。
  *
  * AI 草案（ai_body）と人の本文（body）を別の枠に分けて見せる。AI 草案は「本文に採用」を
  * 人が押すまで本文に入らず、確定も人が別に行う（CLAUDE.md §0.4）。
  * 押せない操作は隠すだけにせず、理由を文で示す（対象外・未判定・DMA 未確定・本文が空）。
+ * 採用・保存・確定は表示したときの版（updatedAt）を送り、別の操作で変わっていればサーバーが断る。
+ * AI 草案の出所の表示は、草案を作った実行の提供元（draftProvider）で決める（いまの設定ではなく）。
  */
 export function CsrdDraftSectionCard({
   view,
@@ -31,16 +38,21 @@ export function CsrdDraftSectionCard({
   canWrite,
   canRunAi,
   aiMode,
+  draftProvider,
 }: {
   view: CsrdDraftSectionView;
   reportingPeriodId: Uuid;
   canWrite: boolean;
   canRunAi: boolean;
+  /** いまの AI の提供元（「AI 草案を作成」のボタンの表示に使う） */
   aiMode: 'mock' | 'openai';
+  /** この節の AI 草案を作った実行の提供元（実行の記録が無い Fixture の草案は mock） */
+  draftProvider: 'mock' | 'openai';
 }) {
   const { draft, section, label } = view;
   const titleId = `csrd-draft-${section}-title`;
-  const aiLabel = aiMode === 'mock' ? 'デモ生成' : 'AI 生成';
+  const draftLabel = providerLabel(draftProvider);
+  const buttonLabel = providerLabel(aiMode);
   const hasAiBody = draft !== null && draft.aiBody.trim() !== '';
   const hasBody = draft !== null && draft.body.trim() !== '';
   const adopted = hasAiBody && draft.body === draft.aiBody;
@@ -90,11 +102,24 @@ export function CsrdDraftSectionCard({
             </p>
           )}
 
+          {view.staleConfirmation && (
+            <p
+              role="note"
+              className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-ink"
+            >
+              <TriangleAlert
+                className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]"
+                aria-hidden="true"
+              />
+              確定した後に事項の重要性の判断が変わり、この節は評価対象ではなくなりました。確定済みの節には数えていません。本文の観点が今の判断と合っているか確認してください。
+            </p>
+          )}
+
           {hasAiBody && draft && (
             <div className="space-y-1.5 rounded-t4d border border-brand-200 bg-brand-50 px-3 py-2">
               <p className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-ink">
                 <Bot className="size-3.5" aria-hidden="true" />
-                AI 草案（候補・{aiLabel}）
+                AI 草案（候補・{draftLabel}）
                 <span className="text-[11px] font-normal text-ink-muted">
                   {draft.aiGeneratedAt && `作成: ${formatJst(draft.aiGeneratedAt)}`}
                   {draft.aiConfidence !== null &&
@@ -157,6 +182,7 @@ export function CsrdDraftSectionCard({
                   <form action={adoptCsrdDraftAction} className="flex flex-wrap items-center gap-2">
                     <input type="hidden" name="draftId" value={draft.id} />
                     <input type="hidden" name="section" value={section} />
+                    <input type="hidden" name="baseUpdatedAt" value={draft.updatedAt} />
                     <SubmitButton
                       size="sm"
                       variant="secondary"
@@ -175,7 +201,7 @@ export function CsrdDraftSectionCard({
             </div>
           )}
 
-          {draft && (
+          {(draft || view.canWriteBody) && (
             <div className="space-y-1.5">
               <p className="text-[12px] font-medium text-ink">
                 本文（担当者が採用・編集したもの）
@@ -185,21 +211,28 @@ export function CsrdDraftSectionCard({
                   </span>
                 )}
               </p>
-              {canWrite ? (
-                <form
-                  key={draft.updatedAt}
+              {view.canWriteBody ? (
+                <PreservingForm
+                  key={draft?.updatedAt ?? 'new'}
                   action={saveCsrdDraftBodyAction}
                   className="space-y-1.5"
                 >
-                  <input type="hidden" name="draftId" value={draft.id} />
+                  <input type="hidden" name="draftId" value={draft?.id ?? ''} />
                   <input type="hidden" name="section" value={section} />
+                  <input type="hidden" name="reportingPeriodId" value={reportingPeriodId} />
+                  <input type="hidden" name="baseUpdatedAt" value={draft?.updatedAt ?? ''} />
                   <Textarea
                     name="body"
-                    defaultValue={draft.body}
+                    defaultValue={draft?.body ?? ''}
                     rows={8}
                     maxLength={CSRD_DRAFT_BODY_MAX}
+                    required={draft === null}
                     aria-label={`${label}の本文`}
-                    placeholder="AI 草案を本文に採用するか、ここに直接書いて保存してください。"
+                    placeholder={
+                      draft
+                        ? 'AI 草案を本文に採用するか、ここに直接書いて保存してください。'
+                        : 'ここに本文を直接書いて保存できます（AI 草案は使わなくても構いません）。'
+                    }
                     className="text-[12px] leading-relaxed"
                   />
                   <div className="flex flex-wrap items-center gap-2">
@@ -216,8 +249,8 @@ export function CsrdDraftSectionCard({
                       字以内。保存すると、確定していた場合は確定が外れます。
                     </span>
                   </div>
-                </form>
-              ) : hasBody ? (
+                </PreservingForm>
+              ) : hasBody && draft ? (
                 <p className="whitespace-pre-wrap rounded-t4d border border-line px-3 py-2 text-[12px] leading-relaxed text-ink">
                   {draft.body}
                 </p>
@@ -238,14 +271,18 @@ export function CsrdDraftSectionCard({
                   icon={<Sparkles aria-hidden="true" />}
                   pendingLabel="作成中…"
                 >
-                  {hasAiBody ? `AI 草案を作り直す（${aiLabel}）` : `AI 草案を作成（${aiLabel}）`}
+                  {hasAiBody
+                    ? `AI 草案を作り直す（${buttonLabel}）`
+                    : `AI 草案を作成（${buttonLabel}）`}
                 </SubmitButton>
               </form>
             ) : view.inScope && view.generateBlockedReason ? (
               <span className="text-[11px] text-ink-muted">{view.generateBlockedReason}</span>
             ) : view.inScope && canWrite && !canRunAi ? (
               <span className="text-[11px] text-ink-muted">
-                AI の実行権限が無いため、草案は作れません。
+                AI の実行権限が無いため、AI
+                草案は作れません。本文は上の欄に直接書いて保存できます（AI 草案が要る場合は、AI
+                の実行権限を持つ担当者に依頼してください）。
               </span>
             ) : null}
 
@@ -259,6 +296,7 @@ export function CsrdDraftSectionCard({
                 <form action={confirmCsrdDraftAction}>
                   <input type="hidden" name="draftId" value={draft.id} />
                   <input type="hidden" name="section" value={section} />
+                  <input type="hidden" name="baseUpdatedAt" value={draft.updatedAt} />
                   <SubmitButton
                     size="sm"
                     icon={<Check aria-hidden="true" />}

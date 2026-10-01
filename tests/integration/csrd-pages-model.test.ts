@@ -92,7 +92,12 @@ describe('対応状況の工程', () => {
     );
     expect(steps[2]!.detail).toBe('対応中 1 件 ／ 未着手 1 件');
     expect(steps[3]!.detail).toBe('計画から作成した収集項目 1 件');
-    expect(steps[4]!.detail).toBe('確定 1 節 ／ AI 草案 1 節');
+    // Fixture の節はどれも未確定（DMA 未確定のため確定できない。ESRS 2 は本文を保存済み・未確定）
+    expect(steps[4]!.detail).toBe('確定 0 節 ／ AI 草案 1 節');
+    // 草案の出所は節ごとに示すため、工程の説明では「デモ生成」と決め打ちしない
+    expect(steps[4]!.description).toBe(
+      '節ごとに AI 草案（候補）を本文に採用し、人が編集して確定します。',
+    );
   });
 
   it('G1 を判断して DMA を確定すると ① が完了になる（重要 6 / 10 事項）', async () => {

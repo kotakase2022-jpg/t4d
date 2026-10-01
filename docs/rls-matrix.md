@@ -132,7 +132,7 @@
 - `returned` … `reason` と `paragraph_id` が必須
 - すべて … `target_version_id` は依頼で固定した版と一致（別の版を名乗って作成者の判定をすり抜けさせない）
 
-### 6.2 CSRD のダブル・マテリアリティと要求事項の評価（0044〜0046）
+### 6.2 CSRD のダブル・マテリアリティと要求事項の評価（0044〜0047）
 
 権限キーは新設していない（docs/disclosure-first.md §9.3）。参照は組織メンバー、書込（for all）は `enterprise.disclosure.write`（0028 / 0030 と同じ）。
 追記専用の表は無い（判断・閾値は書き換えられ、DMA の確定は同じ処理で外れる）。子の `organization_id` は親と一致しなければならず、
@@ -150,6 +150,18 @@
 `t4d.csrd_assessment_item_guard`（`csrd_assessments` の BEFORE INSERT OR UPDATE OF item_id、Service Role にも効く）:
 要求事項の版の基準（`disclosure_frameworks.key`）が `csrd` でなければ `T4D_CSRD_ITEM_ONLY` で拒否する
 （SSBJ・CDP の要求事項を CSRD の評価として登録させない。読むのは全利用者が読めるマスターだけ）。
+
+**0047（2026-10-01 自己監査 SEC-2）: 判断者・確認者・確定者は本人名義だけ。** 書込ポリシーは `enterprise.disclosure.write` だけを
+見るため、同じ組織の編集権限者が PostgREST へ直接、別の人の名義（`dma_confirmed_by`・`decided_by`・`reviewed_by`・`confirmed_by`）を
+書けた。0035〜0037 の「判断・依頼・記録は本人名義」と同じ規則をトリガで掛ける（利用者の JWT による書込だけ。Service Role・seed は対象外）。
+
+| トリガ（BEFORE INSERT OR UPDATE）                           | 規則                                                                                                                                            |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `t4d.csrd_actor_must_be_self`（4 表）                       | 名義の列と対の日時が新しく入る（変わる）とき、名義 = `auth.uid()`。違えば `T4D_ACTOR_MUST_BE_SELF`。確定を外す（null に戻す）のは誰でもできる   |
+| `t4d.csrd_dma_confirmation_guard`（csrd_analysis_settings） | DMA の確定が新しく入るとき、報告範囲の決定・ステークホルダー関与の記載・10 事項すべての両軸の判断がそろっていること。違えば `T4D_DMA_NOT_READY` |
+
+Demo Mode の Cookie から戻す行（`src/lib/repositories/demo-csrd-checks.ts`）も、分析条件・事項・節は「名義 = 行を書いた人（更新者）」を確かめる
+（評価は確認の後に AI の分析が更新者だけを変えるため、Cookie では確かめず DB 側で見る）。
 
 ## 7. Import / AI
 

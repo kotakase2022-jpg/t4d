@@ -67,7 +67,7 @@ describe('担当者の入力（3 観点）', () => {
 });
 
 describe('担当者の確認（候補を採用／修正して確定）', () => {
-  it('候補を採用は 3 観点を送らない（AI の候補を写すのはサービス）', () => {
+  it('候補を採用は 3 観点を送らない（AI の候補を写すのはサービス）。表示した候補の実行日時だけを渡す', () => {
     expect(
       parseReviewForm(
         form([
@@ -75,9 +75,15 @@ describe('担当者の確認（候補を採用／修正して確定）', () => {
           ['decision', 'approved'],
           ['disclosureStatus', 'covered'],
           ['comment', ''],
+          ['aiEvaluatedAt', '2026-09-15T00:00:00.000Z'],
         ]),
       ),
-    ).toEqual({ assessmentId: ITEM, decision: 'approved', comment: '' });
+    ).toEqual({
+      assessmentId: ITEM,
+      decision: 'approved',
+      comment: '',
+      aiEvaluatedAt: '2026-09-15T00:00:00.000Z',
+    });
   });
 
   it('修正して確定は人の 3 観点とコメント', () => {

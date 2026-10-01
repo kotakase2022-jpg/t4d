@@ -16,6 +16,7 @@ import {
 import { ResponseStatusBadge } from '@/components/shared/badges';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -37,9 +38,7 @@ import {
   ACTION_STATUS_TONE,
   ACTION_TYPE_LABEL,
   COVERAGE_LABEL,
-  COVERAGE_TONE,
   GAP_KIND_LABEL,
-  PRIORITY_LABEL,
   PRIORITY_MEANING,
 } from '@/lib/domain/ssbj';
 import { formatJst, formatJstDate, formatNumber } from '@/lib/format/datetime';
@@ -55,15 +54,21 @@ import {
 } from '@/types/domain';
 import {
   ApplicabilityBadge,
+  CoverageStatusBadge,
   CsrdDataStateBadge,
   DmaOutcomeBadge,
+  EstimateValueBadge,
+  FinalStatusBadge,
   PerspectiveBadges,
+  PlanPriorityBadge,
   ProvisionalBadge,
+  RequiredItemBadge,
 } from '../../_components/csrd-badges';
 import { AiCandidateBadge } from '../_components/detail-badges';
 import {
   createCsrdActionPlanAction,
   reviewCsrdAssessmentAction,
+  reviewCsrdAssessmentFormAction,
   runCsrdGapAnalysisAction,
   saveCsrdAssessmentAction,
 } from '../actions';
@@ -96,7 +101,7 @@ function GapCard({ kind, status }: { kind: SsbjGapKind; status: SsbjCoverageStat
         <Icon className="size-3.5 text-ink-muted" aria-hidden="true" />
         <span className="text-[12px] font-semibold text-ink">{GAP_KIND_LABEL[kind]}</span>
       </div>
-      <Badge tone={COVERAGE_TONE[status]}>{COVERAGE_LABEL[status]}</Badge>
+      <CoverageStatusBadge status={status} />
       <p className="text-[11px] leading-relaxed text-ink-muted">{CSRD_GAP_KIND_QUESTION[kind]}</p>
     </div>
   );
@@ -209,7 +214,7 @@ export default async function CsrdRequirementDetailPage({
               {shell.currentPeriod.label}
             </span>
             <ApplicabilityBadge applicability={applicability} />
-            {item.required && <Badge tone="brand">開示が求められる項目</Badge>}
+            {item.required && <RequiredItemBadge />}
           </span>
         }
         breadcrumbs={[
@@ -222,7 +227,7 @@ export default async function CsrdRequirementDetailPage({
         actions={
           <div className="flex items-center gap-1.5">
             {listButton}
-            <Button size="sm" asChild>
+            <Button variant="outline" size="sm" asChild>
               <Link href={detail.responseHref}>
                 <FilePenLine aria-hidden="true" />
                 回答を編集（版・承認）
@@ -397,9 +402,11 @@ export default async function CsrdRequirementDetailPage({
                           ? a.aiDataStatus
                           : a.aiProcessStatus;
                     return value ? (
-                      <Badge key={kind} tone={COVERAGE_TONE[value]}>
-                        {GAP_KIND_LABEL[kind]}: {COVERAGE_LABEL[value]}
-                      </Badge>
+                      <CoverageStatusBadge
+                        key={kind}
+                        status={value}
+                        prefix={GAP_KIND_LABEL[kind]}
+                      />
                     ) : null;
                   })}
                   {a.aiStatus && (
@@ -446,6 +453,8 @@ export default async function CsrdRequirementDetailPage({
                       <input type="hidden" name="assessmentId" value={a.id} />
                       <input type="hidden" name="itemId" value={item.id} />
                       <input type="hidden" name="decision" value="approved" />
+                      {/* 表示した候補（実行日時）。採用までに分析がやり直されていれば、サーバーが断る */}
+                      <input type="hidden" name="aiEvaluatedAt" value={a.aiEvaluatedAt ?? ''} />
                       <p className="text-[12px] font-semibold text-ink">候補をそのまま採用する</p>
                       <label className="block space-y-1">
                         <span className="text-[11px] text-ink-muted">確認コメント（任意）</span>
@@ -459,7 +468,7 @@ export default async function CsrdRequirementDetailPage({
                         候補を採用
                       </SubmitButton>
                     </form>
-                    <form action={reviewCsrdAssessmentAction} className="space-y-2">
+                    <PreservingForm action={reviewCsrdAssessmentFormAction} className="space-y-2">
                       <input type="hidden" name="assessmentId" value={a.id} />
                       <input type="hidden" name="itemId" value={item.id} />
                       <input type="hidden" name="decision" value="modified" />
@@ -474,7 +483,7 @@ export default async function CsrdRequirementDetailPage({
                       />
                       <label className="block space-y-1">
                         <span className="text-[11px] text-ink-muted">修正の理由（必須）</span>
-                        <Input name="comment" defaultValue="" maxLength={600} />
+                        <Input name="comment" defaultValue="" required maxLength={600} />
                       </label>
                       <SubmitButton
                         size="sm"
@@ -484,7 +493,7 @@ export default async function CsrdRequirementDetailPage({
                       >
                         修正して確定
                       </SubmitButton>
-                    </form>
+                    </PreservingForm>
                   </div>
                 )}
               </>
@@ -535,7 +544,7 @@ export default async function CsrdRequirementDetailPage({
                 <div className="flex flex-wrap items-center gap-2 rounded-t4d bg-surface-muted p-2">
                   <UserCheck className="size-3.5 text-ink-muted" aria-hidden="true" />
                   <span className="text-[11px] text-ink-muted">最終判定</span>
-                  <Badge tone={COVERAGE_TONE[a.finalStatus]}>{COVERAGE_LABEL[a.finalStatus]}</Badge>
+                  <FinalStatusBadge status={a.finalStatus} />
                   <span className="text-[11px] text-ink-muted">
                     {a.reviewDecision === 'approved'
                       ? 'AI の候補を採用'
@@ -549,13 +558,17 @@ export default async function CsrdRequirementDetailPage({
                 <p className="text-[12px] leading-relaxed text-ink">{a.reviewComment}</p>
               )}
               {canWrite && inScope ? (
-                <form action={saveCsrdAssessmentAction} className="space-y-2.5">
+                <PreservingForm action={saveCsrdAssessmentAction} className="space-y-2.5">
                   <input type="hidden" name="reportingPeriodId" value={shell.currentPeriod.id} />
                   <input type="hidden" name="itemId" value={item.id} />
                   <CoverageSelects labelPrefix="担当者の入力" values={statuses} />
                   <div className="grid grid-cols-[2fr_1fr] gap-2">
                     <label className="block space-y-1">
-                      <span className="text-[11px] text-ink-muted">コメント（履歴に残ります）</span>
+                      <span className="text-[11px] text-ink-muted">
+                        {hasCandidate
+                          ? 'コメント（AI の候補と違う値で確定するときは理由が必須。履歴に残ります）'
+                          : 'コメント（履歴に残ります）'}
+                      </span>
                       <Textarea name="comment" rows={2} defaultValue="" maxLength={600} />
                     </label>
                     <label className="block space-y-1">
@@ -575,7 +588,7 @@ export default async function CsrdRequirementDetailPage({
                   >
                     担当者の入力として確定
                   </SubmitButton>
-                </form>
+                </PreservingForm>
               ) : (
                 <p className="text-[12px] text-ink-muted">
                   {canWrite
@@ -593,17 +606,7 @@ export default async function CsrdRequirementDetailPage({
               action={
                 priority ? (
                   <span className="flex items-center gap-1.5">
-                    <Badge
-                      tone={
-                        priority.priority === 'high'
-                          ? 'danger'
-                          : priority.priority === 'medium'
-                            ? 'warning'
-                            : 'neutral'
-                      }
-                    >
-                      優先度 {PRIORITY_LABEL[priority.priority]}
-                    </Badge>
+                    <PlanPriorityBadge priority={priority.priority} />
                     <span className="text-[11px] text-ink-muted">
                       {PRIORITY_MEANING[priority.priority]}
                     </span>
@@ -687,9 +690,10 @@ export default async function CsrdRequirementDetailPage({
                       {row.value === null ? (
                         <span className="text-ink-muted">—</span>
                       ) : (
-                        <>
+                        <span className="inline-flex items-center gap-1">
                           {formatNumber(row.value)} {row.unitOfMeasure}
-                        </>
+                          {row.valueKind === 'estimate' && <EstimateValueBadge />}
+                        </span>
                       )}
                       {row.dataPointId && (
                         <Link
@@ -838,6 +842,7 @@ export default async function CsrdRequirementDetailPage({
                 </label>
                 <SubmitButton
                   size="sm"
+                  variant="outline"
                   icon={<ClipboardList aria-hidden="true" />}
                   pendingLabel="追加しています…"
                 >

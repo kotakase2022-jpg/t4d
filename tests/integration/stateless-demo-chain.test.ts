@@ -1,47 +1,45 @@
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ORG_IDS, PERIOD_IDS, dataPointId, userId } from '@/lib/fixtures/dataset';
+import { CSRD_IDS } from '@/lib/fixtures/csrd';
+import { PERIOD_IDS } from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
-import { parseDocx } from '@/lib/imports/docx-text';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { applyDemoEdits } from '@/lib/repositories/demo-edit-codec';
-import { demoEditsWereEvicted, readDemoEdits } from '@/lib/repositories/demo-persistence';
-import { decideApprovalStep } from '@/lib/services/approval-route';
 import {
-  adoptDraftParagraphs,
-  closeDraftRun,
-  generateBlockDraft,
-} from '@/lib/services/disclosure-ai-draft';
+  COOKIE_CHUNKS,
+  MAX_BYTES_PER_COOKIE,
+  demoEditsWereEvicted,
+  readDemoEdits,
+} from '@/lib/repositories/demo-persistence';
+import { loadCsrdDrafts } from '@/lib/services/csrd/draft';
+import { loadCsrdOverview } from '@/lib/services/csrd/requirements';
 import {
   autosaveWorkingBody,
   getBlockEditorData,
-  metricDisplay,
   saveBlockVersion,
 } from '@/lib/services/disclosure-block';
 import { resetDisclosureDemoData } from '@/lib/services/disclosure-demo-reset';
 import { exportReportSnapshot } from '@/lib/services/disclosure-export';
-import { computeBlockFreshness, decideRecheck } from '@/lib/services/disclosure-recheck';
-import {
-  addReviewComment,
-  completeReview,
-  finalApprove,
-  requestReview,
-  returnReview,
-} from '@/lib/services/disclosure-review';
-import { transitionDataPoint } from '@/lib/services/data-point-workflow';
-import { setDisclosureFirst } from '@/lib/services/feature-settings';
-import { confirmNarrative, createNarrative } from '@/lib/services/narrative';
 import {
   commitQuantitativeImport,
   listQuantitativeImportBatches,
   QuantitativeImportConflictError,
   validateQuantitativeImport,
-  type ValidateQuantitativeImportInput,
 } from '@/lib/services/quantitative-import';
-import { confirmReport, listProjectSnapshots } from '@/lib/services/report-snapshot';
-import { createAnchorFromFragment } from '@/lib/services/source-anchor';
-import type { AuthorizationContext, BlockBody, RoleKey } from '@/types/domain';
+import { listProjectSnapshots } from '@/lib/services/report-snapshot';
+import type { AuthorizationContext, BlockBody } from '@/types/domain';
+import {
+  RISK,
+  WATER_EU,
+  admin,
+  approver,
+  author,
+  csvSource,
+  playCsrdChain,
+  playMainDemoFlow,
+  reviewer,
+} from '../support/demo-flows';
 
 /**
  * 「すべてのリクエストが別インスタンスに届く」最悪の場合の実演の流れ（§14.1・zz-disclosure-project.spec.ts）。
@@ -50,6 +48,8 @@ import type { AuthorizationContext, BlockBody, RoleKey } from '@/types/domain';
  * Cookie の操作だけを適用した DB（fresh）で次の手順を行う。Cookie とブラウザが持ち回した状態
  * （標準 CSV の元の入力・画面の本文）だけで最後まで進むこと、押し出しが起きないこと、Cookie の大きさを確かめる。
  * E2E（pnpm test:e2e:stateless）と同じ流れを Service の層で速く回す。
+ * 実演の流れの後に、同じブラウザで CSRD の流れ（§9.7）を続けても押し出しが起きないことも確かめる
+ * （顧客の新しい画面を同じ実演で見せる。CSRD の操作が前半の確定版・出力を押し出していた。自己監査 F1）。
  */
 
 const jar = vi.hoisted(() => new Map<string, string>());
@@ -66,49 +66,6 @@ vi.mock('next/headers', () => ({
     },
   }),
 }));
-
-function ctxFor(email: string, roleKeys: RoleKey[]): AuthorizationContext {
-  return {
-    userId: userId(email),
-    email,
-    displayName: email,
-    workspace: {
-      organizationId: ORG_IDS.aomi,
-      organizationType: 'enterprise',
-      organizationName: '青海テクノロジー株式会社',
-      roleKeys,
-      unitScopeIds: [],
-    },
-    engagementIds: [],
-    demo: true,
-  };
-}
-
-const author = () => ctxFor('sustainability@demo.local', ['sustainability_manager']);
-const reviewer = () => ctxFor('reviewer@demo.local', ['reviewer']);
-const approver = () => ctxFor('approver@demo.local', ['approver', 'reviewer']);
-const admin = () => ctxFor('enterprise-admin@demo.local', ['enterprise_admin']);
-
-const RISK = IDS.blocks.fy2026RiskOpportunity.block;
-const ESRS = IDS.blocks.fy2026Esrs40aGovernance.block;
-const METRICS = IDS.blocks.fy2026Metrics.block;
-const WATER_EU = dataPointId('EU', 'water', 'FY2026');
-
-function standardCsv(value: string): Uint8Array {
-  const text = [
-    'metric_code,period_start,period_end,entity_code,value,unit,source_reference',
-    `water,2026-04-01,2027-03-31,EU,${value},m3,欧州販売子会社 検針票の再集計（架空）`,
-  ].join('\n');
-  // 表計算ソフトから保存した CSV と同じく BOM 付き UTF-8 にする
-  return new TextEncoder().encode(`${String.fromCharCode(0xfeff)}${text}\n`);
-}
-
-function csvSource(name: string, value: string): ValidateQuantitativeImportInput {
-  return {
-    reportingPeriodId: PERIOD_IDS.fy2026,
-    source: { kind: 'file', fileName: name, bytes: standardCsv(value) },
-  };
-}
 
 /**
  * 起動直後の別インスタンス: Fixture を作り直し、Cookie の操作だけを適用する（getDb と同じ手順。
@@ -131,12 +88,6 @@ function measure(step: string): void {
   sizes.push({ step, bytes: editsBytes() });
 }
 
-async function docxText(bytes: Uint8Array): Promise<string> {
-  const parsed = await parseDocx(bytes);
-  expect(parsed.status).toBe('parsed');
-  return parsed.paragraphs.join('\n');
-}
-
 beforeEach(() => {
   jar.clear();
   sizes.length = 0;
@@ -145,315 +96,7 @@ beforeEach(() => {
 
 describe('実演の流れ（§14.1）は、すべてのリクエストが別インスタンスに届いても最後まで進む', () => {
   it('CSV → 数値の承認 → 定性情報と引用 → AI 下書き → 版・依頼 → 差戻し → 再依頼 → 承認 → 確定 → DOCX → 訂正 → 再確認 → リセット', async () => {
-    // 1. 開示優先モードを有効にする（管理者）
-    await setDisclosureFirst((await fresh()).db, admin(), true);
-    measure('A01 開示優先モード');
-
-    // 2. 標準 CSV: 検証と確定が別のインスタンスに届く。確定は元の入力を送り直し、サーバーが検証し直す
-    const firstCsv = csvSource('eu-water-fy2026.csv', '23480.5');
-    const preview = await validateQuantitativeImport((await fresh()).db, author(), firstCsv);
-    expect(preview.counts.changed).toBe(1);
-    const key = randomUUID();
-    const commitInput = {
-      batchId: preview.batchId,
-      previewHash: preview.previewHash,
-      idempotencyKey: key,
-      mode: 'all' as const,
-      correctionReason: 'E2E: 検針票の再集計により訂正',
-      source: firstCsv,
-    };
-    const committed = await commitQuantitativeImport((await fresh()).db, author(), commitInput);
-    expect(committed.updated).toBe(1);
-    // 成功した確定の再送は、別のインスタンスでも二重に書かない（確定の控えを Cookie で持ち回す）
-    const retry = await commitQuantitativeImport((await fresh()).db, author(), commitInput);
-    expect(retry.replayed).toBe(true);
-    // 同じ内容を別名で検証し直しても「変更なし」（取り込んだ版が別インスタンスにも届いている）
-    const duplicate = await validateQuantitativeImport(
-      (await fresh()).db,
-      author(),
-      csvSource('eu-water-fy2026-copy.csv', '23480.5'),
-    );
-    expect(duplicate.rows[0]?.diffKind).toBe('unchanged');
-    {
-      const { fixture } = await fresh();
-      const versions = fixture.dataPointVersions.filter((v) => v.dataPointId === WATER_EU);
-      expect(versions.filter((v) => v.value === 23480.5)).toHaveLength(1);
-    }
-    // 提出 → 5 段階の承認（段階ごとに別のインスタンス）
-    await transitionDataPoint((await fresh()).db, author(), {
-      dataPointId: WATER_EU,
-      to: 'submitted',
-      comment: null,
-    });
-    for (const actor of [reviewer(), author(), reviewer(), admin(), approver()]) {
-      const { db } = await fresh();
-      const result = await decideApprovalStep(db, actor, {
-        dataPointId: WATER_EU,
-        decision: 'approved',
-        comment: '',
-      });
-      if (result.completed) {
-        await transitionDataPoint(db, actor, {
-          dataPointId: WATER_EU,
-          to: 'approved',
-          comment: null,
-        });
-      }
-    }
-    {
-      const { fixture } = await fresh();
-      expect(fixture.dataPoints.find((d) => d.id === WATER_EU)?.status).toBe('approved');
-    }
-    measure('CSV 登録 → 承認');
-
-    // 3. 委員会資料の一部を引用して定性情報を登録し、確認する
-    const { fixture: f3 } = await fresh();
-    const fragment = f3.fragments.find((f) => f.text.includes('識別したリスク及び機会を審議した'));
-    expect(fragment).toBeDefined();
-    const anchor = await createAnchorFromFragment((await fresh()).db, author(), {
-      fragmentId: fragment!.id,
-      quoteText: '識別したリスク及び機会を審議した',
-    });
-    const narrative = await createNarrative((await fresh()).db, author(), {
-      theme: 'risk_opportunity',
-      title: 'E2E 委員会でのリスク・機会の審議（架空）',
-      ownerDepartment: '',
-      tags: [],
-      reportingPeriodId: PERIOD_IDS.fy2026,
-      scopeNote: '',
-      fields: {},
-      body: '2026年度第3回サステナビリティ委員会で、識別したリスク及び機会を審議しました。財務的影響の算定は継続中です。',
-      sourceAnchorIds: [anchor.id],
-    });
-    await confirmNarrative((await fresh()).db, author(), {
-      narrativeId: narrative.record.id,
-      versionId: narrative.version.id,
-    });
-    measure('定性情報と引用');
-
-    // 4. 原稿: 画面の本文（数値参照・定性情報の引用）で AI 下書きを作り、採用して版を作り、依頼する
-    const { fixture: f4 } = await fresh();
-    const riskBlock = f4.disclosureBlocks.find((b) => b.id === RISK)!;
-    const v1 = f4.disclosureBlockVersions.find((v) => v.id === riskBlock.currentVersionId)!;
-    const water = f4.dataPoints.find((d) => d.id === WATER_EU)!;
-    const waterVersion = f4.dataPointVersions.find((v) => v.id === water.currentVersionId)!;
-    const onScreen: BlockBody = {
-      paragraphs: [
-        ...v1.body.paragraphs,
-        {
-          id: 'e2e-metric',
-          kind: 'paragraph',
-          children: [
-            { t: 'text', text: 'E2E確認: 欧州販売子会社の2026年度の水使用量は ' },
-            {
-              t: 'metric',
-              dataPointId: WATER_EU,
-              dataPointVersionId: waterVersion.id,
-              display: metricDisplay(waterVersion),
-            },
-            { t: 'text', text: ' です。' },
-          ],
-        },
-        {
-          id: 'e2e-quote',
-          kind: 'paragraph',
-          children: [
-            {
-              t: 'narrative',
-              narrativeVersionId: narrative.version.id,
-              quote: narrative.version.body,
-            },
-          ],
-        },
-      ],
-    };
-    const draft = await generateBlockDraft((await fresh()).db, author(), {
-      blockId: RISK,
-      operation: 'draft_from_sources',
-      sources: [
-        { kind: 'narrative_version', id: narrative.version.id },
-        { kind: 'source_anchor', id: anchor.id },
-      ],
-      workingBody: onScreen,
-    });
-    if (draft.status !== 'succeeded') throw new Error('AI 下書きに失敗しました');
-    // 採用は別のインスタンス（作業本文が無い）でも、画面の本文に足す（画面の段落を失わない）
-    const adopted = await adoptDraftParagraphs((await fresh()).db, author(), {
-      blockId: RISK,
-      runId: draft.run.runId,
-      candidateIndexes: [0],
-      workingBody: onScreen,
-      baseVersionId: v1.id,
-    });
-    expect(adopted.status).toBe('applied');
-    if (adopted.status !== 'applied') return;
-    expect(adopted.body.paragraphs.map((p) => p.id)).toEqual(
-      expect.arrayContaining(['e2e-metric', 'e2e-quote']),
-    );
-    await closeDraftRun((await fresh()).db, author(), {
-      blockId: RISK,
-      runId: draft.run.runId,
-      workingBody: adopted.body,
-    });
-    const v2 = (
-      await saveBlockVersion((await fresh()).db, author(), {
-        blockId: RISK,
-        baseVersionId: v1.id,
-        body: adopted.body,
-        changeReason: 'E2E: 数値参照・定性情報・AI 候補の採用を反映',
-      })
-    ).version;
-    expect(v2.versionNo).toBe(2);
-    const firstRequest = await requestReview((await fresh()).db, author(), {
-      blockId: RISK,
-      body: adopted.body,
-      baseVersionId: v2.id,
-    });
-    expect(firstRequest.version.id).toBe(v2.id);
-    const { fixture: f4b } = await fresh();
-    const esrsBlock = f4b.disclosureBlocks.find((b) => b.id === ESRS)!;
-    const esrsBody = f4b.disclosureBlockVersions.find(
-      (v) => v.id === esrsBlock.currentVersionId,
-    )!.body;
-    const esrsRequest = await requestReview((await fresh()).db, author(), {
-      blockId: ESRS,
-      body: esrsBody,
-      baseVersionId: esrsBlock.currentVersionId,
-    });
-    const metricsBlock = (await fresh()).fixture.disclosureBlocks.find((b) => b.id === METRICS)!;
-    const staleItem = (
-      await computeBlockFreshness((await fresh()).db, author(), metricsBlock)
-    ).items.find((i) => i.refKind === 'metric' && i.newRefId);
-    expect(staleItem).toBeDefined();
-    await decideRecheck((await fresh()).db, author(), {
-      blockId: METRICS,
-      refKind: 'metric',
-      oldRefId: staleItem!.oldRefId,
-      decision: 'keep_old',
-      reason: 'E2E: 訂正は集計範囲の注記のみで、本文が引用した承認済みの値は変わらないため',
-    });
-    measure('原稿・AI 下書き・依頼・再確認');
-
-    // 5. レビュー: コメント → 差戻し → 修正の版 → 再依頼 → レビュー完了 → 最終承認（手順ごとに別インスタンス）
-    await addReviewComment((await fresh()).db, reviewer(), {
-      blockId: RISK,
-      paragraphId: 'e2e-metric',
-      body: 'E2E社内メモ: 集計範囲の書き方は社内の表記基準に合わせています。',
-      severity: 'info',
-    });
-    await returnReview((await fresh()).db, reviewer(), {
-      requestId: firstRequest.request.id,
-      reason: 'E2E: 数値の集計範囲を本文に明記してください。',
-      paragraphId: 'e2e-metric',
-    });
-    await completeReview((await fresh()).db, reviewer(), { requestId: esrsRequest.request.id });
-    const fixed: BlockBody = {
-      paragraphs: adopted.body.paragraphs.map((p) =>
-        p.id === 'e2e-metric'
-          ? {
-              ...p,
-              children: p.children.map((c) =>
-                c.t === 'text' && c.text === ' です。'
-                  ? { t: 'text' as const, text: ' です（集計範囲は欧州販売子会社の全拠点）。' }
-                  : c,
-              ),
-            }
-          : p,
-      ),
-    };
-    const v3 = (
-      await saveBlockVersion((await fresh()).db, author(), {
-        blockId: RISK,
-        baseVersionId: v2.id,
-        body: fixed,
-        changeReason: 'E2E: 差戻しを受けて集計範囲を明記',
-      })
-    ).version;
-    expect(v3.versionNo).toBe(3);
-    const secondRequest = await requestReview((await fresh()).db, author(), {
-      blockId: RISK,
-      body: fixed,
-      baseVersionId: v3.id,
-    });
-    await completeReview((await fresh()).db, reviewer(), { requestId: secondRequest.request.id });
-    // 作成者は最終承認できない（別インスタンスでも、Cookie から戻した版の作成者で職務分離を確かめる）
-    await expect(
-      finalApprove((await fresh()).db, author(), { requestId: secondRequest.request.id }),
-    ).rejects.toThrow();
-    await finalApprove((await fresh()).db, approver(), { requestId: secondRequest.request.id });
-    await finalApprove((await fresh()).db, approver(), { requestId: esrsRequest.request.id });
-    {
-      const { fixture } = await fresh();
-      const risk = fixture.disclosureBlocks.find((b) => b.id === RISK)!;
-      expect(risk.status).toBe('approved');
-      expect(risk.approvedVersionId).toBe(v3.id);
-      expect(fixture.disclosureBlockVersions.find((v) => v.id === v3.id)?.contentHash).toBe(
-        v3.contentHash,
-      );
-    }
-    measure('差戻し → 再依頼 → 承認');
-
-    // 6. レポートを確定し、承認済みスナップショットから対外用・社内確認用の DOCX を出力する
-    const snapshot = await confirmReport((await fresh()).db, approver(), IDS.projects.fy2026);
-    const listed = await listProjectSnapshots((await fresh()).db, approver(), IDS.projects.fy2026);
-    const again = listed.find((entry) => entry.snapshot.id === snapshot.id);
-    expect(again?.integrityOk).toBe(true);
-    const ssbjVersion = snapshot.frameworkVersions.find(
-      (f) => f.frameworkVersionId !== IDS.esrs40aVersion,
-    )!.frameworkVersionId;
-    const external = await exportReportSnapshot((await fresh()).db, approver(), {
-      snapshotId: snapshot.id,
-      format: 'docx',
-      audience: 'external',
-      frameworkVersionId: ssbjVersion,
-    });
-    const externalText = await docxText(external.bytes);
-    expect(externalText).toContain('23,480.5 m3 です（集計範囲は欧州販売子会社の全拠点）。');
-    expect(externalText).not.toContain('E2E社内メモ');
-    const internal = await exportReportSnapshot((await fresh()).db, approver(), {
-      snapshotId: snapshot.id,
-      format: 'docx',
-      audience: 'internal',
-      frameworkVersionId: ssbjVersion,
-    });
-    expect(await docxText(internal.bytes)).toContain('E2E社内メモ');
-    {
-      const { fixture } = await fresh();
-      expect(fixture.exportArtifacts.filter((a) => a.snapshotId === snapshot.id)).toHaveLength(2);
-    }
-    measure('確定・DOCX');
-
-    // 7. 元データを訂正する。原稿は再確認が必要になり、承認済みスナップショットと出力は変わらない
-    const correction = csvSource('eu-water-fy2026-correction.csv', '23512.8');
-    const correctionPreview = await validateQuantitativeImport(
-      (await fresh()).db,
-      author(),
-      correction,
-    );
-    expect(correctionPreview.rows[0]?.warnings.join(' ')).toContain('承認済みの値です');
-    await commitQuantitativeImport((await fresh()).db, author(), {
-      batchId: correctionPreview.batchId,
-      previewHash: correctionPreview.previewHash,
-      idempotencyKey: randomUUID(),
-      mode: 'all',
-      correctionReason: 'E2E: 検針票の差し替えにより再訂正',
-      source: correction,
-    });
-    {
-      const { db, fixture } = await fresh();
-      const risk = fixture.disclosureBlocks.find((b) => b.id === RISK)!;
-      const freshness = await computeBlockFreshness(db, author(), risk);
-      expect(freshness.items.some((i) => i.refKind === 'metric' && i.newRefId)).toBe(true);
-    }
-    const reExported = await exportReportSnapshot((await fresh()).db, approver(), {
-      snapshotId: snapshot.id,
-      format: 'docx',
-      audience: 'external',
-      frameworkVersionId: ssbjVersion,
-    });
-    expect(reExported.artifact.contentHash).toBe(external.artifact.contentHash);
-    expect(await docxText(reExported.bytes)).toBe(externalText);
-    measure('訂正 → 再確認');
+    const result = await playMainDemoFlow(fresh, measure);
 
     expect(await demoEditsWereEvicted()).toBe(false);
 
@@ -463,8 +106,8 @@ describe('実演の流れ（§14.1）は、すべてのリクエストが別イ�
       const { fixture } = await fresh();
       const risk = fixture.disclosureBlocks.find((b) => b.id === RISK)!;
       expect(risk.status).toBe('draft');
-      expect(risk.currentVersionId).toBe(v1.id);
-      expect(fixture.narrativeRecords.some((r) => r.id === narrative.record.id)).toBe(false);
+      expect(risk.currentVersionId).toBe(result.v1Id);
+      expect(fixture.narrativeRecords.some((r) => r.id === result.narrativeRecordId)).toBe(false);
     }
 
     const peak = Math.max(...sizes.map((s) => s.bytes));
@@ -472,6 +115,58 @@ describe('実演の流れ（§14.1）は、すべてのリクエストが別イ�
       `[stateless-chain] Cookie（操作の記録）: ${sizes.map((s) => `${s.step}=${s.bytes}B`).join(' / ')}（最大 ${peak}B・上限 3×3800B）`,
     );
     expect(peak).toBeLessThanOrEqual(3 * 3800);
+  });
+
+  it('実演の流れの後に同じブラウザで CSRD の流れを続けても押し出しが起きず、確定版・出力・CSRD の結果がすべて別インスタンスに残る', async () => {
+    const main = await playMainDemoFlow(fresh, measure);
+    await playCsrdChain(fresh, measure);
+
+    // 押し出し（容量不足で古い操作を捨てること）が 0
+    expect(await demoEditsWereEvicted()).toBe(false);
+    const { db, fixture } = await fresh();
+    // 前半の確定版（承認済みスナップショット）と DOCX の出力記録が別インスタンスに残る
+    expect(fixture.reportSnapshots.filter((s) => s.id === main.snapshotId)).toHaveLength(1);
+    expect(fixture.exportArtifacts.filter((a) => a.snapshotId === main.snapshotId)).toHaveLength(3);
+    const listed = await listProjectSnapshots(db, approver(), IDS.projects.fy2026);
+    expect(listed.find((entry) => entry.snapshot.id === main.snapshotId)?.integrityOk).toBe(true);
+    const reExported = await exportReportSnapshot(db, approver(), {
+      snapshotId: main.snapshotId,
+      format: 'docx',
+      audience: 'external',
+      frameworkVersionId: main.ssbjVersionId,
+    });
+    expect(reExported.artifact.contentHash).toBe(main.externalHash);
+    // 前半の CSV の数値の版も残る
+    expect(
+      fixture.dataPointVersions.filter((v) => v.dataPointId === WATER_EU && v.value === 23480.5),
+    ).toHaveLength(1);
+    // CSRD の結果（DMA 確定・E1-6 の採用・E1 の確定）も残る
+    const fy2026 = (await db.findById('periods', PERIOD_IDS.fy2026))!;
+    const overview = await loadCsrdOverview(db, author(), fy2026, { referenceDate: '2026-08-14' });
+    expect(overview!.dma.confirmed).toBe(true);
+    expect(
+      overview!.views.find((v) => v.item.id === CSRD_IDS.items['ESRS-E1-6'])!.assessment!
+        .reviewDecision,
+    ).toBe('approved');
+    const drafts = await loadCsrdDrafts(db, author(), fy2026);
+    expect(drafts!.sections.find((s) => s.section === 'E1')!.draft!.confirmedAt).not.toBeNull();
+
+    const peak = Math.max(...sizes.map((s) => s.bytes));
+    console.warn(
+      `[stateless-chain+csrd] Cookie（操作の記録）: ${sizes.map((s) => `${s.step}=${s.bytes}B`).join(' / ')}（最大 ${peak}B・上限 ${COOKIE_CHUNKS}×${MAX_BYTES_PER_COOKIE}B）`,
+    );
+    expect(peak).toBeLessThanOrEqual(COOKIE_CHUNKS * MAX_BYTES_PER_COOKIE);
+  });
+
+  it('CSRD の流れを先に行い、その後に実演の流れを続けても押し出しが起きない（逆の順）', async () => {
+    await playCsrdChain(fresh, measure);
+    await playMainDemoFlow(fresh, measure);
+    expect(await demoEditsWereEvicted()).toBe(false);
+    const { db } = await fresh();
+    const fy2026 = (await db.findById('periods', PERIOD_IDS.fy2026))!;
+    const overview = await loadCsrdOverview(db, author(), fy2026, { referenceDate: '2026-08-14' });
+    // G1 の判断が押し出されると DMA の確定が外れる（以前の不具合）。押し出しが無ければ確定のまま
+    expect(overview!.dma.confirmed).toBe(true);
   });
 
   it('作業本文の無いインスタンスでも、最後に自動保存した本人かを示す（開示デモのリセット・版の保存の後は示さない）', async () => {

@@ -367,11 +367,15 @@ describe('CSRD 開示ドラフト', () => {
     expect(within(g1).queryByRole('button')).toBeNull();
   });
 
-  it('E1 は草案を作れる。S1 は AI 草案（候補）と空の本文を分けて見せ、DMA 確定前は確定できない理由を示す', async () => {
+  it('E1 は草案を作れる（草案の行が無くても本文を直接書ける）。S1 は AI 草案（候補）と空の本文を分けて見せ、DMA 確定前は確定できない理由を示す', async () => {
     await renderDraft();
     const e1 = screen.getByRole('region', { name: 'E1 気候変動' });
     expect(within(e1).getByRole('button', { name: 'AI 草案を作成（デモ生成）' })).toBeTruthy();
-    expect(within(e1).queryByRole('textbox')).toBeNull();
+    const e1Body = within(e1).getByRole('textbox', { name: 'E1 気候変動の本文' });
+    expect((e1Body as HTMLTextAreaElement).value).toBe('');
+    expect(within(e1).getByRole('button', { name: '本文を保存' })).toBeTruthy();
+    // 草案の行が無いので、確定の操作は出さない
+    expect(within(e1).queryByRole('button', { name: '保存済みの本文で確定' })).toBeNull();
 
     const s1 = screen.getByRole('region', { name: 'S1 自社の労働力' });
     expect(s1.textContent).toContain('AI 草案（候補・デモ生成）');
@@ -408,25 +412,42 @@ describe('CSRD 開示ドラフト', () => {
     );
   });
 
-  it('ESRS 2 は確定済み（確定者と日時）で、作り直せない理由を示す', async () => {
+  it('ESRS 2 は人が書いた本文を保存済みで未確定。DMA の確定前は確定できない理由を示し、AI 草案は作れる', async () => {
     await renderDraft();
     const esrs2 = screen.getByRole('region', { name: 'ESRS 2 全般開示' });
-    expect(esrs2.textContent).toContain('確定済み');
-    expect(esrs2.textContent).toContain('（海野 みどり）');
-    expect(esrs2.textContent).toContain('確定済みの節は作り直せません');
-    expect(within(esrs2).queryByRole('button', { name: /AI 草案を/ })).toBeNull();
+    expect(esrs2.textContent).toContain('本文あり・未確定');
+    expect(esrs2.textContent).not.toContain('確定: ');
+    const body = within(esrs2).getByRole('textbox', { name: 'ESRS 2 全般開示の本文' });
+    expect((body as HTMLTextAreaElement).value).toContain('取締役会が監督');
+    expect(esrs2.textContent).toContain(
+      '確定できません: ダブル・マテリアリティ評価（DMA）を確定してから確定してください。',
+    );
+    expect(within(esrs2).queryByRole('button', { name: '保存済みの本文で確定' })).toBeNull();
+    expect(within(esrs2).getByRole('button', { name: 'AI 草案を作成（デモ生成）' })).toBeTruthy();
   });
 
-  it('DMA の確定後、採用・保存した本文は「保存済みの本文で確定」できる', async () => {
+  it('DMA の確定後、採用・保存した本文は「保存済みの本文で確定」できる（表示した版を送る）', async () => {
     const period = fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!;
     const generated = await generateCsrdDraft(db, manager(), period, 'E1');
-    await adoptCsrdDraft(db, manager(), generated.id);
-    await saveCsrdDraftBody(db, manager(), generated.id, `${generated.aiBody}（加筆）`);
+    const adopted = await adoptCsrdDraft(db, manager(), {
+      draftId: generated.id,
+      baseUpdatedAt: generated.updatedAt,
+    });
+    const saved = await saveCsrdDraftBody(db, manager(), {
+      draftId: generated.id,
+      body: `${generated.aiBody}（加筆）`,
+      baseUpdatedAt: adopted.updatedAt,
+    });
     await decideG1AndConfirmDma();
     await renderDraft();
     expect(document.body.textContent).toContain('ダブル・マテリアリティ評価（DMA）は確定済みです');
     const e1 = screen.getByRole('region', { name: 'E1 気候変動' });
-    expect(within(e1).getByRole('button', { name: '保存済みの本文で確定' })).toBeTruthy();
+    const confirm = within(e1).getByRole('button', { name: '保存済みの本文で確定' });
+    // 確定のフォームは表示した版を送る（別の操作で変わった本文を確定しない）
+    const confirmForm = confirm.closest('form')!;
+    expect(
+      (confirmForm.querySelector('input[name="baseUpdatedAt"]') as HTMLInputElement).value,
+    ).toBe(saved.updatedAt);
     expect(e1.textContent).toContain('AI 草案から担当者が修正');
     expect(e1.textContent).toContain('本文あり・未確定');
     // 作り直しは AI 草案だけを置き換える
@@ -439,7 +460,11 @@ describe('CSRD 開示ドラフト', () => {
     const first = await renderDraft();
     const e1 = screen.getByRole('region', { name: 'E1 気候変動' });
     expect(within(e1).queryByRole('button', { name: /AI 草案を/ })).toBeNull();
-    expect(e1.textContent).toContain('AI の実行権限が無いため、草案は作れません。');
+    expect(e1.textContent).toContain(
+      'AI の実行権限が無いため、AI 草案は作れません。本文は上の欄に直接書いて保存できます',
+    );
+    // 草案の行が無い評価対象の節にも、本文を直接書ける
+    expect(within(e1).getByRole('textbox', { name: 'E1 気候変動の本文' })).toBeTruthy();
     first.unmount();
 
     useShell(approver());

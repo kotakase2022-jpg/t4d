@@ -603,7 +603,10 @@ async function disclosureArea(
     } else {
       const c = row.breakdown?.counts;
       const open = c ? c.partial + c.not_covered + c.unconfirmed : 0;
-      const unapproved = row.responses ? row.responses.total - row.responses.approved : 0;
+      // 回答が必要な要求事項だけで数える（CSRD は評価対象だけ。重要でないと判断した要求事項の
+      // 未回答で「不足あり」にしない）
+      const required = row.responsesRequired ?? row.responses;
+      const unapproved = required ? required.total - required.approved : 0;
       state =
         open > 0 || unapproved > 0 ? 'gap' : (row.breakdown?.aiOnly ?? 0) > 0 ? 'pending' : 'ok';
     }

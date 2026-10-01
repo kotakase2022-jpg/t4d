@@ -38,6 +38,7 @@ vi.mock('@/app/enterprise/disclosures/csrd/requirements/actions', () => ({
   saveCsrdAssessmentAction: vi.fn(),
   runCsrdGapAnalysisAction: vi.fn(),
   reviewCsrdAssessmentAction: vi.fn(),
+  reviewCsrdAssessmentFormAction: vi.fn(),
   createCsrdActionPlanAction: vi.fn(),
 }));
 // 一覧のフィルターは URL を書き換える Client Component（App Router が要る）。ここでは件数だけ見せる
@@ -395,9 +396,32 @@ describe('CSRD 要求事項の詳細', () => {
     await renderDetail(item('ESRS2-SBM-3'));
     expect(screen.getByText('デモ生成（Mock）')).toBeTruthy();
     expect(screen.getAllByText('確認待ち').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: '候補を採用' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '修正して確定' })).toBeTruthy();
+    const adopt = screen.getByRole('button', { name: '候補を採用' });
+    // 「候補を採用」は表示した候補の実行日時を送る（分析がやり直された後の見ていない候補を確定しない）
+    const candidate = fixture.csrdAssessments.find(
+      (a) => a.id === CSRD_IDS.assessments['ESRS2-SBM-3'],
+    )!;
+    expect(
+      (adopt.closest('form')!.querySelector('input[name="aiEvaluatedAt"]') as HTMLInputElement)
+        .value,
+    ).toBe(candidate.aiEvaluatedAt);
+    const modify = screen.getByRole('button', { name: '修正して確定' });
+    // 修正の理由は送る前にブラウザでも必須（空のまま送れない）
+    expect(
+      (modify.closest('form')!.querySelector('input[name="comment"]') as HTMLInputElement).required,
+    ).toBe(true);
+    // AI の候補がある要求事項の担当者の入力は、候補と違う値なら理由が必須と示す
+    expect(document.body.textContent).toContain(
+      'コメント（AI の候補と違う値で確定するときは理由が必須。履歴に残ります）',
+    );
     expect(document.body.textContent).toContain('重要性に関わらず適用（ESRS 2 全般開示）');
+    // 主となる操作（primary）は「候補を採用」だけ。回答への導線・計画の追加は outline
+    expect(screen.getByRole('link', { name: '回答を編集（版・承認）' }).className).toContain(
+      'border-line',
+    );
+    expect(screen.getByRole('button', { name: '対応計画に追加' }).className).toContain(
+      'border-line',
+    );
   });
 
   it('評価対象でない要求事項（対象外）は AI・計画・入力の操作を出さず、理由を示す', async () => {

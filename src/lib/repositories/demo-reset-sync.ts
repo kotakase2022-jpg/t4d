@@ -30,7 +30,8 @@ export const DISCLOSURE_DEMO_RESET_TABLES = [
   'exportArtifacts',
   'kpiTargets',
   // CSRD のダブル・マテリアリティ・評価・計画・開示ドラフト（docs/disclosure-first.md §9.3）。
-  // 収集項目の割当（metricAssignments）は数値の収集の領域なので戻さない
+  // CSRD の計画から作った収集項目（割当・指標）は表ごとには戻さず、planCsrdCollectionReset で
+  // CSRD の計画が結び付けた指標に限って戻す（数値の収集の領域の、ほかの割当には触れない）
   'csrdAnalysisSettings',
   'csrdDmaMatters',
   'csrdDmaIros',
@@ -83,6 +84,165 @@ interface OrgRow {
   organizationId?: string;
 }
 
+// ----------------------------------------------------------------------
+// CSRD の計画から作った収集項目（割当・指標）の戻し方
+// ----------------------------------------------------------------------
+
+/** CSRD の収集項目の作成（collection-item.ts の ensureMetricAssignment）が既存の指標に補う列 */
+const CSRD_PATCHED_METRIC_COLUMNS = [
+  'responsibleDepartment',
+  'requiresEvidence',
+  'updatedAt',
+  'updatedBy',
+] as const;
+
+export interface CsrdCollectionResetPlan {
+  /** 消す割当（Fixture に無く、CSRD の計画が結び付けた指標の割当） */
+  assignmentIds: string[];
+  /** 消す指標（CSRD の計画から新しく作った、Fixture に無い、数値の行が無い指標） */
+  metricIds: string[];
+  /** Fixture の値へ戻す指標の列（CSRD の収集項目が補った担当部署・証跡必須） */
+  metricRestores: Array<{ id: string; patch: Record<string, unknown> }>;
+}
+
+interface PlanLike {
+  organizationId: string;
+  linkedMetricCode: string | null;
+}
+
+interface MetricLike {
+  id: string;
+  organizationId: string;
+  code: string;
+  frameworks: readonly string[];
+  responsibleDepartment: string | null;
+  requiresEvidence: boolean;
+}
+
+interface AssignmentLike {
+  id: string;
+  organizationId: string;
+  metricId: string;
+}
+
+/**
+ * 開示デモのリセットで、CSRD の計画から作った収集項目を戻す範囲を決める（純関数）。
+ * CSRD の計画（いまの行と Fixture の行）が結び付けた指標だけを対象にし、その指標の
+ *  - Fixture に無い割当を消す（リセットで計画が消えた後に、計画の無い「収集依頼済み」を残さない）
+ *  - CSRD の計画から新しく作った指標（出所が CSRD だけ・Fixture に無い・数値の行が無い）を消す
+ *  - Fixture にある指標で、収集項目の作成が補った担当部署・証跡必須を Fixture の値へ戻す
+ * SSBJ の計画も結び付けている指標は、どちらの計画の収集項目か区別できないため触れない。
+ * リセットで CSRD の計画を戻す**前**に呼ぶ（戻した後は結び付けが分からない）
+ */
+export function planCsrdCollectionReset(input: {
+  organizationId: string;
+  csrdPlans: readonly PlanLike[];
+  pristineCsrdPlans: readonly PlanLike[];
+  ssbjPlans: readonly PlanLike[];
+  metrics: readonly MetricLike[];
+  pristineMetrics: readonly MetricLike[];
+  assignments: readonly AssignmentLike[];
+  pristineAssignments: readonly AssignmentLike[];
+  /** 数値の行が指す指標（数値のある指標は消さない） */
+  metricIdsWithData: ReadonlySet<string>;
+}): CsrdCollectionResetPlan {
+  const org = input.organizationId;
+  const codesOf = (plans: readonly PlanLike[]) =>
+    new Set(
+      plans
+        .filter((p) => p.organizationId === org && p.linkedMetricCode)
+        .map((p) => p.linkedMetricCode as string),
+    );
+  const ssbjCodes = codesOf(input.ssbjPlans);
+  const codes = new Set(
+    [...codesOf(input.csrdPlans), ...codesOf(input.pristineCsrdPlans)].filter(
+      (code) => !ssbjCodes.has(code),
+    ),
+  );
+  const pristineMetricById = new Map(
+    input.pristineMetrics.filter((m) => m.organizationId === org).map((m) => [m.id, m]),
+  );
+  const targetMetrics = input.metrics.filter((m) => m.organizationId === org && codes.has(m.code));
+  const targetMetricIds = new Set(targetMetrics.map((m) => m.id));
+  const pristineAssignmentIds = new Set(input.pristineAssignments.map((a) => a.id));
+
+  const assignmentIds = input.assignments
+    .filter(
+      (a) =>
+        a.organizationId === org &&
+        targetMetricIds.has(a.metricId) &&
+        !pristineAssignmentIds.has(a.id),
+    )
+    .map((a) => a.id);
+  const metricIds = targetMetrics
+    .filter(
+      (m) =>
+        !pristineMetricById.has(m.id) &&
+        m.frameworks.length === 1 &&
+        m.frameworks[0] === 'csrd' &&
+        !input.metricIdsWithData.has(m.id),
+    )
+    .map((m) => m.id);
+  const metricRestores: CsrdCollectionResetPlan['metricRestores'] = [];
+  for (const metric of targetMetrics) {
+    const pristine = pristineMetricById.get(metric.id);
+    if (!pristine) continue;
+    if (
+      metric.responsibleDepartment === pristine.responsibleDepartment &&
+      metric.requiresEvidence === pristine.requiresEvidence
+    ) {
+      continue;
+    }
+    const patch: Record<string, unknown> = {};
+    for (const column of CSRD_PATCHED_METRIC_COLUMNS) {
+      patch[column] = (pristine as unknown as Record<string, unknown>)[column];
+    }
+    metricRestores.push({ id: metric.id, patch });
+  }
+  return { assignmentIds, metricIds, metricRestores };
+}
+
+/** 決めた範囲をメモリ（Fixture）へ当てる（別インスタンスへの反映で使う） */
+function applyCsrdCollectionReset(target: FixtureDb, plan: CsrdCollectionResetPlan): void {
+  const assignmentIds = new Set(plan.assignmentIds);
+  const metricIds = new Set(plan.metricIds);
+  for (let i = target.metricAssignments.length - 1; i >= 0; i -= 1) {
+    if (assignmentIds.has(target.metricAssignments[i]!.id)) target.metricAssignments.splice(i, 1);
+  }
+  for (let i = target.metrics.length - 1; i >= 0; i -= 1) {
+    if (metricIds.has(target.metrics[i]!.id)) target.metrics.splice(i, 1);
+  }
+  for (const restore of plan.metricRestores) {
+    const index = target.metrics.findIndex((m) => m.id === restore.id);
+    if (index !== -1) {
+      target.metrics[index] = { ...target.metrics[index]!, ...structuredClone(restore.patch) };
+    }
+  }
+}
+
+/** FixtureDb から CSRD の収集項目の戻し方を決める（別インスタンスへの反映で使う） */
+export function planCsrdCollectionResetFor(
+  target: FixtureDb,
+  pristine: FixtureDb,
+  organizationId: string,
+): CsrdCollectionResetPlan {
+  return planCsrdCollectionReset({
+    organizationId,
+    csrdPlans: target.csrdActionPlans,
+    pristineCsrdPlans: pristine.csrdActionPlans,
+    ssbjPlans: [...target.ssbjActionPlans, ...pristine.ssbjActionPlans],
+    metrics: target.metrics,
+    pristineMetrics: pristine.metrics,
+    assignments: target.metricAssignments,
+    pristineAssignments: pristine.metricAssignments,
+    metricIdsWithData: new Set(
+      target.dataPoints
+        .filter((dp) => dp.organizationId === organizationId)
+        .map((dp) => dp.metricId),
+    ),
+  });
+}
+
 function restoreTable(
   target: OrgRow[],
   pristine: readonly OrgRow[],
@@ -108,6 +268,7 @@ function restoreTable(
 
 /**
  * 組織の開示デモの範囲を Fixture の初期値へ戻す（resetDisclosureDemoData がメモリに対して行うことと同じ）。
+ * CSRD の計画から作った収集項目（割当・指標の補った列）も戻す（planCsrdCollectionReset）。
  * 数値データ・資料・機能設定などほかの領域には触れない。
  */
 export function restoreDisclosureDemoTables(
@@ -116,6 +277,8 @@ export function restoreDisclosureDemoTables(
   organizationId: string,
   options: { includeDataPoints?: boolean } = {},
 ): void {
+  // CSRD の計画を戻す前に、計画が結び付けた収集項目を決める（戻した後は結び付けが分からない）
+  const collection = planCsrdCollectionResetFor(target, pristine, organizationId);
   if (options.includeDataPoints) {
     for (const table of DATA_DEMO_RESET_TABLES) {
       restoreTable(
@@ -153,6 +316,7 @@ export function restoreDisclosureDemoTables(
     organizationId,
     (row) => isDisclosureNotification(row as unknown as { href?: string | null }),
   );
+  applyCsrdCollectionReset(target, collection);
 }
 
 /**

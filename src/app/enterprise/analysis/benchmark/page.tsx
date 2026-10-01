@@ -28,13 +28,25 @@ export const metadata = { title: '他社比較' };
  *
  * 比較データは Demo Mode のときだけの架空データ。Supabase モードでは「比較データが登録されていません」
  * と示す（他テナントの値を比較データとして使わない）。順位・総合スコアは出さず、値の高低を色で示さない。
+ *
+ * 数値の列は右寄せ（桁をそろえる）にし、値・中央値・範囲には必ず単位を付ける（行の単位と同じでも省かない。
+ * 横にスクロールした先で単位が分からなくならないように）。1 列目（指標）は横スクロールしても見えるよう固定する。
  */
 
-function valueWithUnit(value: number, unit: string, rowUnit: string): string {
-  return unit === rowUnit ? formatNumber(value) : `${formatNumber(value)} ${unit}`;
+/** 値と単位（常に単位を付ける） */
+function ValueWithUnit({ value, unit }: { value: number; unit: string }) {
+  return (
+    <>
+      {formatNumber(value)}
+      <span className="ml-0.5 text-[11px] font-normal text-ink-muted">{unit}</span>
+    </>
+  );
 }
 
-function PeerCell({ cell, row }: { cell: BenchmarkPeerCell; row: BenchmarkRow }) {
+/** 1 列目（指標）を横スクロールしても見えるように固定する（背景を塗って下の列を隠す） */
+const STICKY_FIRST_COLUMN = 'sticky left-0 z-[1] bg-surface';
+
+function PeerCell({ cell }: { cell: BenchmarkPeerCell }) {
   if (!cell.disclosed || !cell.value || cell.value.value === null) {
     return <UndisclosedBadge />;
   }
@@ -42,7 +54,7 @@ function PeerCell({ cell, row }: { cell: BenchmarkPeerCell; row: BenchmarkRow })
   return (
     <div className="space-y-0.5">
       <span className="tnum block text-[13px] font-semibold text-ink">
-        {valueWithUnit(cell.value.value, cell.value.unit, row.metric.unit)}
+        <ValueWithUnit value={cell.value.value} unit={cell.value.unit} />
       </span>
       {cell.value.method && (
         <span className="block text-[11px] text-ink-muted">{cell.value.method}</span>
@@ -69,7 +81,7 @@ function OwnCell({ row }: { row: BenchmarkRow }) {
     <div className="space-y-0.5">
       {own.value !== null ? (
         <span className="tnum block text-[13px] font-semibold text-ink">
-          {valueWithUnit(own.value, own.conditions.unit, row.metric.unit)}
+          <ValueWithUnit value={own.value} unit={own.conditions.unit} />
         </span>
       ) : (
         <span className="block text-[12px] font-semibold text-ink">{own.label}</span>
@@ -96,7 +108,7 @@ function StatsCells({ row }: { row: BenchmarkRow }) {
   const { stats } = row;
   return (
     <>
-      <TD className="py-2 align-top text-[12px]">
+      <TD align="right" className="py-2 align-top text-[12px]">
         <span className="tnum font-semibold">
           {stats.n} / {row.peerTotal} 社
         </span>
@@ -104,19 +116,22 @@ function StatsCells({ row }: { row: BenchmarkRow }) {
           未開示 {row.undisclosedCount}・比較対象外 {row.notComparableCount}
         </span>
       </TD>
-      <TD className="py-2 align-top text-[12px]">
+      <TD align="right" className="py-2 align-top text-[12px]">
         {stats.median !== null ? (
-          <span className="tnum font-semibold">{formatNumber(stats.median)}</span>
+          <span className="tnum font-semibold">
+            <ValueWithUnit value={stats.median} unit={row.metric.unit} />
+          </span>
         ) : (
           <span className="block text-[11px] text-ink-muted">
             出しません（{BENCHMARK_MEDIAN_MIN_PEERS} 社未満）
           </span>
         )}
       </TD>
-      <TD className="py-2 align-top text-[12px]">
+      <TD align="right" className="py-2 align-top text-[12px]">
         {stats.min !== null && stats.max !== null ? (
           <span className="tnum">
             {formatNumber(stats.min)}〜{formatNumber(stats.max)}
+            <span className="ml-0.5 text-[11px] text-ink-muted">{row.metric.unit}</span>
           </span>
         ) : (
           <span className="text-[11px] text-ink-muted">—</span>
@@ -213,14 +228,16 @@ export default async function BenchmarkPage() {
             </caption>
             <THead>
               <TR>
-                <TH>指標（単位）</TH>
-                <TH>自社（{view.fiscalYear}）</TH>
+                <TH className={STICKY_FIRST_COLUMN}>指標（単位）</TH>
+                <TH align="right">自社（{view.fiscalYear}）</TH>
                 {view.peers.map((peer) => (
-                  <TH key={peer.id}>{peer.name}</TH>
+                  <TH key={peer.id} align="right">
+                    {peer.name}
+                  </TH>
                 ))}
-                <TH>比較できる社</TH>
-                <TH>中央値</TH>
-                <TH>範囲（最小〜最大）</TH>
+                <TH align="right">比較できる社</TH>
+                <TH align="right">中央値</TH>
+                <TH align="right">範囲（最小〜最大）</TH>
               </TR>
             </THead>
             <TBody>
@@ -228,7 +245,7 @@ export default async function BenchmarkPage() {
                 <TR key={row.metric.key} className="align-top">
                   <th
                     scope="row"
-                    className="max-w-[200px] px-2 py-2 text-left align-top text-[12px]"
+                    className={`max-w-[200px] px-2 py-2 text-left align-top text-[12px] ${STICKY_FIRST_COLUMN}`}
                   >
                     <span className="font-semibold text-ink">{row.metric.label}</span>
                     <span className="block font-normal text-ink-muted">（{row.metric.unit}）</span>
@@ -243,12 +260,12 @@ export default async function BenchmarkPage() {
                       </span>
                     )}
                   </th>
-                  <TD className="max-w-[200px] py-2 align-top">
+                  <TD align="right" className="max-w-[200px] py-2 align-top">
                     <OwnCell row={row} />
                   </TD>
                   {row.peers.map((cell) => (
-                    <TD key={cell.peer.id} className="max-w-[170px] py-2 align-top">
-                      <PeerCell cell={cell} row={row} />
+                    <TD key={cell.peer.id} align="right" className="max-w-[170px] py-2 align-top">
+                      <PeerCell cell={cell} />
                     </TD>
                   ))}
                   <StatsCells row={row} />

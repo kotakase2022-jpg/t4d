@@ -22,7 +22,10 @@ function revalidateCsrd(): void {
   revalidatePath('/enterprise/analysis', 'layout');
 }
 
-/** 対応計画の更新（担当者・対応状況。期限・担当部署・優先度は表示中の値をそのまま送る） */
+/**
+ * 対応計画の更新（担当者・対応状況。期限・担当部署・優先度は表示中の値をそのまま送る）。
+ * 表示したときの版（baseUpdatedAt）も送り、別の操作で変わっていれば古い値で上書きしない
+ */
 export async function updateCsrdActionPlanAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
@@ -36,6 +39,7 @@ export async function updateCsrdActionPlanAction(formData: FormData): Promise<vo
       assigneeUserId: String(formData.get('assigneeUserId') ?? '') || null,
       dueDate: dueDate === '' ? null : dueDate,
       priority: String(formData.get('priority') ?? '') as SsbjPriority,
+      baseUpdatedAt: String(formData.get('baseUpdatedAt') ?? ''),
     });
   });
   revalidateCsrd();

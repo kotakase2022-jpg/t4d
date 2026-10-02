@@ -756,3 +756,347 @@ E1-6 の AI ギャップ分析（デモ生成）→ 候補を採用 → 対応�
 
 残課題: 節ドラフトの Word 出力（C-1）、他社比較の年度付きリンク（C-4）、実在企業の比較データ（C-6）、DMA の AI 候補・サブトピック単位・企業固有の事項、改正 ESRS の収録、
 主デモと CSRD デモを続けた場合の Cookie 余裕が小さい（約 11KB / 11.4KB。押し出し時はヘッダーに表示）。0044〜0047 は本番 Supabase 未適用。
+
+---
+
+## 10. 2026-10-02 追加要望（CSRD 定性情報・自社経年比較・財務影響分析・UI の簡潔化）
+
+発注者要望（2026-10-02）: ① 従来メニュー CSRD の「データ収集」と「開示ドラフト」の間に「定性情報」（`/enterprise/narratives`）、
+② 分析の「規制対応度」と「他社比較」の間に「自社経年比較」（直近 3 年の各指標の経年変化を一覧で見る）、
+③ 「他社比較」の下に「財務影響分析」（システム内の定量・定性の非財務情報が、どの経路で・どの時間差で・財務のどこに影響するかを推定・可視化・シミュレーションする。外部の専門企業が提供してきた種類の分析）、
+④ プロダクト全体の文字量を減らす（既定で閉じた折りたたみ・グラフ）。Vercel 本番（Demo Mode・環境変数なし、CLAUDE.md §0-7）まで反映する。
+
+共通の決定: D0。**DB 表・マイグレーション・RLS・権限キー・npm 依存・AI Use Case を追加しない**（`check:rls` は 106 表のまま）。§0・§9 の不変条件
+（架空データのみ・AI は確定しない・単一の総合点を出さない・未入力を 0 にしない・色だけで示さない・他テナントの値を使わない）はそのまま。
+外部企業の名前は UI・コード・テストに書かない。
+
+### 10.1 メニューの決定
+
+| #   | 決定                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ①   | 従来ツリーの CSRD の子を 対応状況／要求事項／対応計画／データ収集／**定性情報**／開示ドラフト の 6 項目にする（`NARRATIVES_ITEM` を再利用。href は `/enterprise/narratives` 完全一致、権限 `enterprise.disclosure.read`）。§9.1 ③「定性情報は CSRD に入れない」は本要望で置き換える。開示優先ツリーは CSRD も `legacyItemWithSecondaryChild` で複製し、SSBJ・CSRD 配下の定性情報はどちらも secondary（正規の位置は「情報・根拠」のまま） |
+| ②   | 分析の子を 現状診断／規制対応度／**自社経年比較**（`/enterprise/analysis/trends`、History）／他社比較／**財務影響分析**（`/enterprise/analysis/financial-impact`、Waypoints）の順にする。両ツリー共通（開示優先は `legacyItem` で共有）。2 画面とも nav の permission なし（`enterprise.data.read` は全 enterprise 役割が持つ）                                                                                                          |
+| ③   | 財務影響分析は他社比較の**次の兄弟**（子ではない）。h1 はメニュー名と同じ（「自社経年比較」「財務影響分析」）、パンくずは 企業ワークスペース／分析／画面名。keywords: 経年比較 `経年・推移・前年比・年度比較`、財務影響 `財務・影響・シミュレーション・経路・炭素価格・シナリオ`                                                                                                                                                         |
+
+```
+従来ツリー                                   開示優先ツリー
+開示対応 > CSRD                               開示プロジェクト > CSRD（同じ 6 子。定性情報は secondary）
+  対応状況/要求事項/対応計画/                 情報・根拠 > 定性情報（正規の位置。唯一の現在地）
+  データ収集/定性情報/開示ドラフト             分析（左と同じ 5 子）
+分析
+  現状診断/規制対応度/自社経年比較/他社比較/財務影響分析
+```
+
+**現在地の規則（従来ツリーで同じ href が SSBJ と CSRD の 2 か所に出る）**
+
+- 2 階層目以下の現在地は木全体で 1 つ（§9.1 の保証を維持）。同点（同じ href の完全一致）は「優先枝」に一致する候補を選び、無ければ木の順（＝SSBJ）。
+- 枝の識別子は祖先ラベルの経路（例 `開示対応 / CSRD`）。位置キーは権限で項目が隠れるとずれるため保存に使わない。
+- `resolveNavCurrent(items, pathname, { mode, collapsed, preferredBranch?: string | null })`: 並びは rank 降順 → depth 降順 → 優先枝に一致 → 木の順。優先枝は同点の解消にだけ効く。
+- 優先枝の保存: 新規 `src/components/shared/nav-branch.ts`。sessionStorage キー `t4d.sidebar.branch`。`readNavBranch()`・`rememberNavBranch(branch | null)`・
+  `useNavBranch()`（`useSyncExternalStore`、**サーバースナップショットは null**）。読み書きはすべて try/catch（使えなければ null）。
+- 書く時機: (a) サイドバーの 2 階層目以下のリンクを押したとき → そのリンクの親の経路。最上位のリンク → null（削除）。
+  (b) 遷移後、現在地が「木に 1 回しか出ない href」の項目で、その親に重複 href の子があるとき → その親の経路
+  （例: `/csrd/draft` を開いてから画面右上のリンクで定性情報へ → CSRD 側）。純関数 `branchToRemember(items, currentKeys): string | null | undefined`
+  （undefined = 変えない）。Command Palette は書かない（(b) と既定に従う）。
+- SSR と初回描画は null（＝SSBJ）で決定的。マウント後に保存値を当てる（サイドバーの折りたたみ状態と同じ扱い。表示が 1 回切り替わりうる）。
+- 強調表示（グループ行の太字・最上位の背景）は現在地キーの祖先から決める（純関数 `isNavAncestorOfCurrent(key, currentKeys)`）。2 階層目以下に現在地が無い画面
+  （設定・折りたたみ中）は従来の `isNavSubtreeActive(pathname)` に戻す。SSBJ と CSRD が同時に強調されない。
+- 開示優先ツリー: 定性情報は「情報・根拠」だけが現在地（優先枝は無関係）。Command Palette: 従来は `開示対応 / SSBJ / 定性情報`・`開示対応 / CSRD / 定性情報` の 2 件、
+  開示優先は `情報・根拠 / 定性情報` の 1 件。
+
+テスト（Stage A。既存は新しい形を厳密に固定し直す。緩めない）:
+
+- unit `nav-config.test.tsx`: 形（CSRD_CHILDREN に定性情報、ANALYSIS 5 子）、secondary は開示優先の SSBJ・CSRD 配下の定性情報 2 件、従来 `/enterprise/narratives` は
+  優先枝なし → `['SSBJ / 定性情報']`・`開示対応 / CSRD` → `['CSRD / 定性情報']`・該当しない枝 → SSBJ、全 href ループ（従来 ≤1・開示優先 =1）、強調表示は片方だけ、
+  `branchToRemember`（/csrd/draft → `開示対応 / CSRD`、/enterprise/narratives → undefined、/enterprise/ghg → undefined）、折りたたみ時は分析 5 画面とも「分析」、Command Palette の候補。
+  新規 `nav-branch.test.ts`（storage 不可で null、書いた値が購読者に届く）。
+- E2E `nav-structure.spec.ts`: CSRD リスト 6 リンク厳密・定性情報の href、分析リスト 5 リンク厳密（拠点担当は 現状診断／自社経年比較／他社比較／財務影響分析）、
+  同名リンクの現在地（直接開く → SSBJ 側 1 つ、CSRD の定性情報を押す → CSRD 側だけ 1 つ、再読込しても CSRD、SSBJ の定性情報を押す → SSBJ）。
+  `disclosure-first-nav.spec.ts`（CSRD 配下にも定性情報、現在地は情報・根拠だけ）。`analysis.spec.ts` のメニュー試験（:27-47）を 5 画面に。
+
+### 10.2 自社経年比較（`/enterprise/analysis/trends`）
+
+**値の源（ESG経営・他社比較と食い違わない）**: Stage A が `src/lib/services/kpi.ts` を一般化する（**挙動不変**。`esg-kpi`・`self-audit-values` の期待値は変えない）。
+
+- `loadMetricYearStates(db, ctx, { metricCodes, periodIds })` → `{ periods（startDate 昇順）, rows: { metric, years: { period, state: MetricPeriodState, display: KpiDataState }[], changes: YoyResult[] }[] }`。
+  `changes` は隣接年（古 → 新）。中身は既存の `loadKpiData`（指標コードを引数化、既定 `ALL_KPI_METRIC_CODES`）・`metricPeriodState`・`describeState`・
+  `comparisonConditionChanges`・`retroactiveNotes`。`loadKpiDetail` の前年比も同じ補助関数を使うよう置き換える。`assertEnterpriseWorkspace`＋`enterprise.data.read`。読むだけ。
+- 全社値: 合計 ＝ 承認済みの連結値（持分調整・内部取引控除後）、比率 ＝ 分子・分母の weightedAverage、それ以外
+  （turnover_rate・ltifr・gender_pay_gap・avg_tenure・training_hours・directors_count）＝「全社値は算定不可」（拠点値は内訳に出す）。
+  推計・前年値補完・目標・途中合計は**値の欄と前年比に使わない**。
+
+**年度の窓**: ヘッダー年度（Cookie）を終点に、startDate がそれ以前の組織の期間を新しい順に最大 3 つ（コードで並べない）。データの無い年度も列に出す。
+3 未満なら「比較できる年度は n 年分（それ以前の報告期間なし）」。既定（FY2026）は FY2024／FY2025／FY2026。
+
+**セルの状態**（純関数 `trendCellOf(state)`。バッジはラベル＋アイコン）:
+
+| 状態                | 条件                                 | 表示                                              |
+| ------------------- | ------------------------------------ | ------------------------------------------------- |
+| `confirmed`         | complete かつ値あり                  | 数値（右寄せ）＋ sr-only「確定」                  |
+| `incomplete`        | 未承認・未入力の拠点あり             | 「集計中（承認済み n/N 拠点）」Clock              |
+| `estimate_included` | 推計の拠点だけが残る                 | 「推計を含む（実績 n/N 拠点）」FlaskConical       |
+| `not_entered`       | 行なし                               | 「未入力」CircleDashed（0 と書かない）            |
+| `not_computable`    | 集計方法が合計できない               | 「全社値は算定不可」CircleMinus                   |
+| `not_applicable`    | 全拠点が対象外と判断                 | 「対象外と判断」                                  |
+| `no_actual`         | 承認済みだが実績値なし（目標のみ等） | 「承認済みの実績なし」                            |
+| `unit_mismatch`     | 承認済みの寄与行の単位 ≠ 指標の単位  | 「単位の確認が必要」TriangleAlert（値を出さない） |
+
+**前年比（隣接年ごと）**: `changes[i]` が ok かつ `basisChangeReasons(prev, cur)` が空のときだけ数値を出す。単位が % の指標は「±x.xx pt」（相対 % を出さない）、
+それ以外は「±x.x%（±差 単位）」、前年 0 は差だけ。ArrowUp／ArrowDown／Minus（aria-hidden）＋符号＋数値、**中立色**（良し悪しは指標で逆になるため赤緑にしない）。
+`large`（|差|/|前年| > `metric.yoyWarningRatio`。閾値の無い指標は常に false。data-point-rules.ts:175 と同じ）は「大きな変化」バッジ。
+needs_check は既存の NeedsCheckBadge（理由は内訳）。unavailable は「—」＋ sr-only の理由。
+
+`basisChangeReasons(prev, cur)`（純関数。経年比較だけで使い、ESG経営への適用は P1）: (a) 承認済みの内部取引行（boundary「内部取引」・factor>0）が片方の年度だけにある
+（scope3_cat1 FY2025→FY2026 が該当。素の比較は −0.2%、控除を揃えると約 +5% で逆の印象になる）、(b) 寄与行の単位 ≠ 指標の単位、(c) 期間の月数か決算月が違う。
+
+**画面**（§10.4 の部品で文字を減らす）:
+
+1. PageHeader: 説明「直近 3 年度の確定値を指標ごとに並べます」、help に窓の決め方・年度はヘッダーで切り替えること。
+2. 要約チップ（絞込リンクを兼ねる。分母付き、総合点なし）: 比較できた指標 n / N（データのある指標）・大きな変化 n・比較条件の確認が必要 n・最新年度が集計中 n。
+3. Collapsible「比較の決まり」（既定で閉じる）: 確定値のみ／合計＝連結値／比率＝加重平均／推計・目標・途中合計は比べない／Scope2 マーケットとロケーションは合算しない／Cat.1 は Scope3 全体ではない。
+4. FilterBar（URL: `group`=ghg・environment・social・governance、`change`=compared・large・needs_check、`q`、`empty=1`）。
+5. 表 1 つ（`t4d-scroll-x`、先頭列 sticky、群見出し行 GHG／環境／社会／ガバナンス。`trendGroupOf(category)`: ghg → GHG、energy・water・waste・climate_transition → 環境、
+   human_capital → 社会、governance → ガバナンス）。列: 指標（単位）｜年度 ×3｜推移（`MiniBars`、decorative）｜前年比 ×2。
+   指標セルに Collapsible「内訳」: 定義と集計方法、年度ごとの承認済み n/N と未承認の拠点、参考値（「承認済み分のみの途中集計（比較に使いません）」「参考: 推計込み」）、
+   比較できない理由、算定不可の指標の拠点値、リンク（KPI 指標 `/enterprise/esg/{kpiKey}`、GHG `/enterprise/ghg`、全指標 `/enterprise/data?metric={id}`。一覧の年度は Cookie のためリンク文言に年度を書く）。
+6. どの年度にもデータが無い数値指標は既定で隠し、「データが 1 年もない指標 n 件（0 ではありません）」＋「表示」リンク（`empty=1`）。text・boolean 指標は対象外。
+
+デモで見えるもの（青海、既定 FY2026）: FY2024 は scope1・scope2・scope3_cat1 だけ（他は未入力）、FY2025 は 21 指標が確定、FY2026 は集計中が多い。
+**fixture は拡張しない**（ghg-trend.test.ts:119-135・seed・保証件数への波及が大きい。薄いが誠実）。承認済みの異常値（officers_total 12→3 等）もそのまま出し、内訳から検証結果へリンク。
+
+**ファイル（B1）**: `src/lib/domain/metric-trend.ts`（`TREND_GROUPS`・ラベル・`trendGroupOf`・`trendCellOf`・`basisChangeReasons`・`changeViewOf`・`filterMetricTrendRows`・`summarizeTrends`。
+入力は構造型で受け、services を import しない）、`src/lib/services/analysis/trends.ts`（`loadMetricTrends(db, ctx, { period, periods })` → `{ periods, windowNote, rows, summary }`。
+数値指標すべて〔deletedAt null〕を `loadMetricYearStates` で 1 回に読む。書かない）、`src/app/enterprise/analysis/trends/page.tsx`＋`_components/`（バッジは自分の `_components` に置く）。
+
+**テスト（先に書く）**: unit `metric-trend.test.ts`（群の対応・各状態・pt と %・前年 0・large・basisChangeReasons 3 種・絞込）。
+integration `analysis-trends.test.ts`（DemoDbClient＋WriteDetectingDbClient）: 窓 FY2024→FY2026（startDate 順）、scope1 9,735.4 → 8,931.6（−8.3%）・FY2026 は集計中 3/4・値 null・前年比なし、
+scope3_cat1 FY2025→FY2026 は比較条件の確認（内部取引）、female_manager_ratio FY2026 18.25（加重）・+3.25 pt・FY2024 未入力（null）、turnover_rate・directors_count は算定不可、
+JV を数えない、ヘッダー FY2025 で 2 年窓、蒼天の値が混ざらない、監査法人 ctx は AuthorizationError、書込なし。
+E2E `analysis-trends.spec.ts`: メニューから開く、年度見出し 3 つ、未入力のセルに「0」が無い、内訳を開くと理由、群の絞込、axe（serious/critical 0）、「準拠率」が無い。
+
+### 10.3 財務影響分析（`/enterprise/analysis/financial-impact`）
+
+**位置付け**: 承認済みの非財務データ × 画面に示した仮定（URL で変えられる）による**決定論的な試算**。システムに財務データ（売上・費用・資産・価格）は 1 件も無く、
+確定データは GHG 2 年・他 1 年しかないため、統計的な推定（回帰・弾性値・因果推定）は**行わない**と明示する。DB 表・Cookie・AI は使わない。
+
+**常に見える注記（文言固定。E2E で確かめる）**
+
+- バナー（FlaskConical）: 「試算（仮定に基づく）。予測・保証ではありません。経路と係数は画面に示した仮定で、相関から因果を推定していません」
+- Demo Mode: 「架空の財務ベースライン・単価（デモ用）。実在企業の数値ではありません」
+- データの厚み（動的）: 「確定データは最長 n 年分のため、統計的な推定は行いません」
+- Supabase モード（source `'none'`）: 「財務データ・単価の前提が登録されていません。仮定を入力すると試算します」（既定値・ベースラインなし。入力欄は空で、入力が揃った経路だけ計算）
+
+**基準年度と起点**: 基準年度 B ＝ ヘッダー年度以前で status `closed` の最新の期間（デモは FY2025）。無ければ空状態。起点は `loadMetricYearStates` の B 年度で
+complete かつ値ありのものだけ（FY2026 の途中値・前年値補完・推計は使わない）。無い起点の経路は「未算定（基準年度の確定値なし）」。
+試算期間は B+1〜B+10（デモ FY2026〜FY2035）。年度番号は期間の開始年、目標年 N は FY N として扱う。
+
+**符号と表示**: すべて「基準年度の費用構造からの営業利益の増減（円/年）」。＋＝増益、−＝減益。表示は百万円・小数 1 桁（丸めは表示だけ）、矢印＋符号＋文字で示し、
+色で良し悪しを示さない。未定量は `null`（0 にしない）。合計は必ず「定量化できた経路のみ（n / N 経路）」と書く。制度開始前の年は実際に 0（制度が無い）なので 0 とし、表に「制度開始前」と注記。
+
+**経路（`PATHWAYS`、`src/lib/domain/financial-impact.ts`。L は時間差〔年〕。起点 D(y−L) は y−L ≤ B なら D(B)）**
+
+| ID  | 起点 → 仕組み → 財務項目                                            | 式（年 y）                                                                   | 時間差（既定）                                                      | 関連する定性情報                                                          |
+| --- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| P1  | Scope1（t）→ 化石燃料賦課金の転嫁 → 売上原価                        | −S1(y−L) × 燃料由来割合 × P(y−L) × 転嫁率                                    | 開始 FY2028、L=0                                                    | IRO E1 炭素価格（4×4・中期）、定性「移行リスク：炭素価格」                |
+| P2  | Scope2 マーケット（t）→ 発電事業者の負担金の電気料金転嫁 → 売上原価 | −S2(y−L) × P(y−L) × 転嫁率                                                   | 開始 FY2033、L=1                                                    | 同上                                                                      |
+| P3  | エネルギー（MWh）→ 電力・燃料費 → 売上原価                          | −(E(y) − E(B)) × 単価                                                        | L=0                                                                 | —                                                                         |
+| P4  | 取水量（m3）→ 水道料金 → 売上原価                                   | −(W(y) − W(B)) × 単価                                                        | L=0                                                                 | IRO E3 渇水（未定量として表示）                                           |
+| P5  | 廃棄物（t）→ 処理費 → 売上原価                                      | −(T(y) − T(B)) × 単価                                                        | L=0                                                                 | IRO E5 再生材（機会）、SSBJ 資源循環の根拠文                              |
+| P6  | 新規採用者数（人）→ 採用難による採用単価の上昇 → 販管費             | −H(y−L) × 補充割合 × 採用単価 × ((1+上昇率)^(y−L−B) − 1)                     | L=1                                                                 | IRO S1 人材確保難（4×3）                                                  |
+| P7  | 労働災害 → 休業・補償 → 売上原価                                    | −件数 × 1 件当たり費用（**入力があるときだけ**）                             | L=0                                                                 | SSBJ 労働安全の根拠文。work_related_injuries は未収集、LTIFR は全社値なし |
+| P8  | 浸水（物理的リスク）→ 復旧・操業停止 → 特別損失                     | −年発生確率 × (復旧費用 + 停止日数 × 日次限界利益)（**4 つとも入力時だけ**） | L=0                                                                 | 定性「物理的リスク：西日本工場の浸水」                                    |
+| P9  | 低消費電力型製品 → 売上増 → 売上高                                  | +追加売上 × 限界利益率 × 立上り係数（入力時だけ）                            | 開始年・立上り年数を入力                                            | 定性「低消費電力型製品の拡大」                                            |
+| P10 | Scope3 Cat.1（t）→ 調達先の炭素コスト転嫁 → 売上原価                | −C1(y−L) × P(y−L) × 転嫁率                                                   | 開始 FY2028、L=3、**既定で無効**（Cat.1 のみ・Scope3 全体ではない） | —                                                                         |
+
+- 炭素価格 P(y)（仮定）: 開始年に 1,000 円/t、以後 +500 円/t・年。開始年より前は 0。
+- 別枠（営業利益に足さない）: 削減費用 = max(0, S1_bau(y) − S1_scn(y)) × 5 万円/t（仮定）。資本コストは「未定量（根拠データなし）」のノードとして図にだけ出す。
+- 円にしない IRO（1〜5 の点数と期間のまま表示）: E2・E4・S2・S3・S4（リコール 2×5）・G1（制裁金 2×5）。定性「気候関連リスクの財務的影響」は金額が無く、記録された理由をそのまま表示。
+- 経路間の相互作用（省エネで Scope1/2 が減る等）はモデル化しない（起点ごとに独立。二重計上に注意と明記）。
+
+**既定の仮定**（`src/lib/financial-impact/demo-assumptions.ts`。静的・organization_id なし・Demo Mode だけ。画面ではすべて「仮定・デモ既定」と表示。範囲外・数値でない値は既定に戻して通知）
+
+| キー                                                                 | 既定                      | 範囲                             |
+| -------------------------------------------------------------------- | ------------------------- | -------------------------------- |
+| `carbonPriceStart`（円/t）・`carbonPriceStep`（円/t・年）            | 1,000・500                | 0〜50,000・0〜10,000             |
+| `fuelShare`（Scope1 のうち燃料由来）                                 | 100%                      | 0〜100                           |
+| `passThroughFuel`・`passThroughPower`・`passThroughSupplier`         | 100%・50%・0%             | 0〜100                           |
+| `energyPrice`（円/MWh）・`waterPrice`（円/m3）・`wastePrice`（円/t） | 25,000・300・50,000       | 0〜200,000・0〜5,000・0〜500,000 |
+| `refillShare`・`hiringCost`（円/人）・`hiringCostGrowth`（%/年）     | 60%・1,000,000・3%        | 0〜100・0〜10,000,000・−10〜30   |
+| `abatementCost`（円/t）・`discountRate`（%）                         | 50,000・5                 | 0〜1,000,000・0〜20              |
+| `lag_P1`〜`lag_P10`（年）                                            | 上表の既定                | 0〜10                            |
+| P7〜P9 の入力                                                        | 空（未定量）              | —                                |
+| 財務ベースライン（売上高・営業利益）                                 | 600 億円・50 億円（架空） | 営業利益比の参考表示だけ         |
+
+**シナリオ（`sc`）**: `bau` 現状維持 ＝ 起点を B 年度で固定。`target` 目標達成 ＝ 登録済み KPI 目標のうち `targetComparability` が比較可の指標だけ、B 年度の実績から目標年まで直線、以後一定
+（デモ: Scope1 8,931.6 → 7,840 t〔FY2030〕）。比較不可の目標（Scope2: 境界が単体）は一定のまま理由を表示。目標の無い起点は一定と明示。
+`custom` カスタム ＝ 起点ごとの年率 `r_<driver>`（%/年、−30〜30、複利）。
+
+出力: 経路 × 年の影響、年合計（定量化できた経路のみ）、10 年累計、参考の現在価値（割引率）、回避コスト（target − bau の累計）と削減費用の累計、営業利益比（デモのみ）。
+感度: 数値の仮定を 1 つずつ ±20%（他は固定）にしたときの 10 年累計の幅。幅の大きい順に上位 8（トルネード図）。
+
+**URL**: `sc`、`a_<key>`、`r_<driver>`、`p_<ID>=1|0`（経路の有効・無効）。`<form method="get">`（数値欄はラベルと単位付き、「再計算」ボタン、「既定に戻す」リンク）。
+JS なしで動き、URL で共有できる。Cookie に保存しない。parse／serialize は純関数（範囲・丸め・往復一致）。
+
+**画面**
+
+- 既定で見える: 注記群、シナリオ切替（3 リンク、aria-current）、要約タイル 3 つ（FY2030 の年間影響／10 年累計／回避コスト対削減費用。各「定量化 n / N 経路」付き）、経路図、年次の図、累計の線。
+- 経路図 `PathwayFlow`（B2 のページ部品、SVG）: 4 列 起点（指標・定性・IRO）→ 仕組み → 財務項目（売上高／売上原価／販管費／特別損失）→ 時間帯。
+  時間帯は「初めて効く年 − (B+1)」が 0 → 短期（報告期間）、1〜5 → 中期（〜5 年）、6 以上 → 長期（5 年超）（dma.ts の `TIME_HORIZON_LABEL`・`TIME_HORIZON_MEANING`）。
+  帯の太さ ∝ |FY2030 の影響|、帯に「開始 FY2028・減益」等の文字。未定量は細い破線＋「未定量」の文字。
+- 年次の図: 共通 `BarChart`（縦・積み上げ・負値は 0 軸の下、FY2026〜FY2035、系列 ＝ 定量化できた経路の上位 6＋「その他」）。累計: 共通 `LineChart`（現状維持 ＝ 実線、目標達成 ＝ 破線＋別の点形。二軸にしない）。
+- 既定で閉じる: 「仮定を変える」（`a_`・`r_`・`p_` がある、または `sc=custom` なら開く）、経路ごとの試算表（起点の値と出所リンク `/enterprise/data?metric=…`・`/enterprise/narratives/{id}`・
+  `/enterprise/disclosures/csrd/settings/matters/{topic}`・`/enterprise/esg`、値を埋めた式、結果、根拠の種類）、感度（トルネード）、定性情報（IRO の 5×5 格子〔可能性 × 大きさ〕と定性情報・理由。
+  `enterprise.disclosure.read` が無ければ「閲覧権限が無い領域は表示していません」の 1 行）、制度の前提と出典、方法と限界。
+- 根拠の種類バッジ（ラベル＋アイコン）: Database「データに基づく」・FlaskConical「仮定に依存」・CircleDashed「未定量」・CircleMinus「算定対象外」。
+
+**制度の前提**（日付付きの参考情報。価格水準は法定でないため常に「炭素価格（仮定）」。2026-10-02 に Scout が政府資料で確認。**デプロイ前に再確認**）
+
+| 事実                                                                            | 扱い                                                                                                             | 出典                                                                                          |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 地球温暖化対策税 289 円/t-CO2 は既に燃料価格に含まれる                          | 上乗せしない                                                                                                     | https://www.env.go.jp/policy/tax/about.html                                                   |
+| GX-ETS: 直近 3 年度平均の直接 CO2 が 10 万 t 以上の事業者は FY2026 から参加義務 | 「参考: 直接の義務対象外」（デモの Scope1 は約 0.9 万 t。CO2e であり、FY2026 は収集中のため 3 年平均も出さない） | https://www.meti.go.jp/shingikai/sankoshin/sangyo_gijutsu/emissions_trading/pdf/001_03_00.pdf |
+| 化石燃料賦課金は FY2028 から（化石燃料の輸入事業者等）                          | P1 の開始年。転嫁率は仮定                                                                                        | https://www.meti.go.jp/press/2022/02/20230210004/20230210004.html                             |
+| 特定事業者負担金（発電事業者）は FY2033 から                                    | P2 の開始年                                                                                                      | https://www.cas.go.jp/jp/seisaku/gx_jikkou_kaigi/dai15/siryou1.pdf                            |
+
+**ファイル（B2）**: `src/lib/domain/financial-impact.ts`（型・`PATHWAYS`・`ASSUMPTION_SPECS`・`simulateFinancialImpact(input)`・`lagBandOf`・`parseImpactParams`／`serializeImpactParams`・
+`sensitivity`。純関数・client 可）、`src/lib/financial-impact/demo-assumptions.ts`、`src/lib/charts/flow-layout.ts`（経路図のレイアウト純関数）、
+`src/lib/services/analysis/financial-impact.ts`（server-only。`assertEnterpriseWorkspace`＋`enterprise.data.read`。定性・IRO は `enterprise.disclosure.read` のときだけ
+`listNarratives`・`loadCsrdSettings`・SSBJ マテリアリティを読む。source は `isDemoMode()`、目標は `listKpiTargets`＋`targetComparability`。書かない）、
+`src/app/enterprise/analysis/financial-impact/page.tsx`＋`_components/`（pathway-flow・tornado・iro-grid・assumption-form・estimate-table・impact-badges）。
+
+**テスト（先に書く。浮動小数は `toBeCloseTo(x, 0)`）**: unit `financial-impact-model.test.ts`: P1 bau FY2027 = 0（制度開始前）・FY2028 = −8,931,600 円・FY2030 = −17,863,200 円、
+target の Scope1 FY2028 = 8,276.64 t・P1 FY2030 = −15,680,000 円、P2 bau FY2033 = 0・FY2034 = −40,070,450 円（L=1）、L を変えると効き始めがずれる、P3〜P5 は bau で 0、custom の複利、
+未定量は null で合計から除き n/N が減る（0 にしない）、符号、URL の範囲外 → 既定＋通知、往復一致、累計・現在価値、感度の並び。unit `flow-layout.test.ts`（列・帯の太さ・未定量の破線）。
+integration `analysis-financial-impact.test.ts`: 起点が FY2025 の確定連結値（scope1 8,931.6 等）と一致、FY2026 の途中値を使わない、ltifr・turnover_rate を起点にしない、
+disclosure.read なしで定性・IRO なし、source `'none'` は既定値・ベースラインなし、書込検知ラッパーで書かない、他テナントの値なし、監査法人 ctx は拒否。
+E2E `analysis-financial-impact.spec.ts`: メニューから開く、注記 3 種、シナリオ切替で URL と数値が変わる、仮定を変えて再計算、未定量の理由が見える、図に role=img と名前、axe、「準拠率」が無い。
+
+P1 以降: 財務ベースラインの表（RLS・承認付き）、シナリオの保存、経路の相互作用、統計的推定（確定データが十分な年数になってから）、AI による経路候補（候補のみ・金額は書かない）、CSV 出力。
+
+### 10.4 UI の簡潔化（④）
+
+**共通部品（Stage A。Server Component で動く。新しい npm 依存なし）**
+
+| 部品                 | パス                                         | props（要点）                                                                                                                                                   | 規則                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Collapsible`        | `src/components/ui/collapsible.tsx`          | `summary`（1 行。要点の数値を含める）、`meta?`、`defaultOpen?`（既定 false）、`open?`（強制）、`id?`、`variant?`（card・plain）、`className?`、`bodyClassName?` | ネイティブ `<details>`／`<summary>`。summary は `list-none [&::-webkit-details-marker]:hidden`＋ChevronRight（aria-hidden、開くと 90°）＋「開く／閉じる」の文字（disclosure-home-view.tsx:523-535 の形）。入れ子でずれないよう `group-open:` ではなく任意バリアント `[details[open]>summary_&]:` を使う。summary にリンク・ボタン・見出し・入力を置かない。globals.css の :focus-visible を消さない |
+| `CollapsibleSection` | 同上                                         | `id`、`title`（h2。details の外）、`summary`、`actions?`（外）、`defaultOpen?`、`open?`                                                                         | `<section aria-labelledby>`。見出しと主操作は常に見える（`getByRole('heading')` が通る）                                                                                                                                                                                                                                                                                                            |
+| `MoreInfo`           | `src/components/ui/more-info.tsx`            | `label`（必須。何の説明か。例「件数の数え方」）                                                                                                                 | Info アイコン＋label の小さな details。脚注・規則一覧用                                                                                                                                                                                                                                                                                                                                             |
+| `PageHeader.help`    | `src/components/shared/page-header.tsx`      | `help?`                                                                                                                                                         | description の下に `<MoreInfo label="この画面について">`。description は 40 字程度まで                                                                                                                                                                                                                                                                                                              |
+| `FractionBar`        | `src/components/charts/fraction-bar.tsx`     | `label`、`numerator`、`denominator`、`unit?`（既定「件」）、`showPercent?`（既定 false）                                                                        | 「n / N 件」を独立した要素で必ず表示。バーは role=img・aria-label「label: n / N 件」。分母 0 は「対象なし」                                                                                                                                                                                                                                                                                         |
+| `StatusBreakdown`    | `src/components/charts/status-breakdown.tsx` | `label`、`items`（key・label・count・icon?・href?）、`unit?`、`showPercent?`（既定 false）                                                                      | StackedBar＋凡例 `<ul aria-label={label}>`。各項目は チップ・アイコン・**ラベル（独立要素。既存の文言そのまま）**・件数。分析系では % を出さない                                                                                                                                                                                                                                                    |
+| `BarChart`           | `src/components/charts/bar-chart.tsx`        | `title`、`categories`、`series`（label・values〔数値か null〕）、`unit`、`orientation?`、`stacked?`、`valueFormat?`、`showValues?`、`table?`                    | 負値は 0 軸の下。null は空き＋「未入力」                                                                                                                                                                                                                                                                                                                                                            |
+| `LineChart`          | `src/components/charts/line-chart.tsx`       | `title`、`xLabels`、`series`（label・values・dashed?）、`unit`、`table?`                                                                                        | null で線を切る（補間しない）。2 系列以上は線種と点の形も変える                                                                                                                                                                                                                                                                                                                                     |
+| `MiniBars`           | `src/components/charts/mini-bars.tsx`        | `values`、`labels`、`label?`、`decorative?`                                                                                                                     | 表の中の小さな年次バー（0 起点）。null は破線の空枠。decorative なら aria-hidden（値は隣のセル）                                                                                                                                                                                                                                                                                                    |
+| `CategoryGrid`       | `src/components/charts/category-grid.tsx`    | `label`、`items`（key・label・stateLabel・icon・filled・value?・href?）、`columns?`                                                                             | Scope3 15 カテゴリ等。状態は文字＋アイコン                                                                                                                                                                                                                                                                                                                                                          |
+| `FunnelSteps`        | `src/components/charts/funnel-steps.tsx`     | `label`、`steps`（label・count・unit?・href?）                                                                                                                  | 件数が絞られる流れ（文字の件数＋相対幅）                                                                                                                                                                                                                                                                                                                                                            |
+| `ChartFrame`         | `src/components/charts/chart-frame.tsx`      | `title`、`summary`（aria-label）、`legend?`、`table?`（caption・columns・rows）                                                                                 | `<figure>`＋`<figcaption>`。SVG は `role="img"`＋aria-label。表は Collapsible「数値を表で見る」                                                                                                                                                                                                                                                                                                     |
+
+レイアウトは純関数 `src/lib/charts/{scale,bar-layout,line-layout,breakdown}.ts`（dma-view.ts と同じ作り。unit: 目盛り・0 軸・負値の積み上げ・null・最小幅）。
+
+**図の規則**: SVG は viewBox＋`w-full`（横はみ出し禁止。ui-integrity-audit の 1280/1440/1920 を通す）。系列色は `stackedBarSegmentClass` の順、明るい色（brand-100〜300）には brand-700 の 1px 枠、
+隣接区分は 1px の隙間。文字は `fill-ink`／`fill-ink-muted`・11px 以上。success・warning・danger はアイコン＋ラベルと一緒のときだけ、`#f5a800` を文字に使わない。
+数値は印の隣に書く。aria-label は要点（12 個までなら全数値）、それ以上は「数値を表で見る」に全数値。凡例は正確なラベル＋数値。null は空き（0 にしない）。分析系は良し悪しを色で示さない。
+
+**折りたたみの規則**
+
+- 既定で閉じる: 説明文・注記・算定方法・規則一覧・長い凡例、主表と重複する補助表・参照マスター・履歴・監査タイムライン、行ごとの根拠の詳細（1 行の要約は残す）、図と同じ内容の数値表。
+- 閉じない（少なくとも 1 行は details の外に見せる）: 誠実さ・安全の注記（架空／サンプル／デモ生成／未発効・公開草案／暫定／AI は候補・確定は人／権限なし／転載許可・出典／提出ではない／試算・仮定に基づく）、
+  エラー・検証結果・フラッシュ・空状態、主操作とフォーム、リセットの確認とその範囲（「上記の範囲」が指す内容を 1 行で）、h1・h2・分母付きの主要数値・主表。
+- 開いて描く: URL の絞込・フラッシュ・入力エラー・ハッシュが中身を指すとき（ハッシュは閉じた details を開かない）。開閉状態は保存しない。
+- E2E: 閉じた中は `toBeVisible`・`getByRole`・`fill` が失敗する。`toContainText`・`toHaveCount`・`not.toContainText` は隠れた文字も数えるため、新しい凡例・要約が既存の
+  「件数ちょうど」「禁止語」の検査（ssbj-gap.spec.ts:59-60、zzz-csrd-chain.spec.ts の「確認待ち」の数、analysis.spec.ts の「準拠率」）に触れないこと。
+  テストは開いてから確かめる（`openCollapsible`）。**誠実さの検査は消さない・緩めない**。
+- 単体テスト（happy-dom）は閉じた details の中身を隠れたものとして扱うか未確認。中身は getByText／within で確かめ、可視性に頼らない（Stage A の `collapsible.test.tsx` で挙動を固定）。
+
+**ページ別チェックリスト**（行番号は 2026-10-02 時点。「残す」は可視のまま）
+
+B3 ホーム・SSBJ:
+
+| 画面                                                | 閉じる                                                                                                 | 残す                                                                                                                                            | 図                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| ホーム開示業務 `dashboard/disclosure-home-view.tsx` | 分母の決め方 :399-420、直近のアクティビティ :317-331                                                   | 4 カード、自分の作業表、「適用確定済み n 項目中、承認済み n 項目」:395-396、適用未判定 :422-442、リセットのチェック・ボタン・範囲 1 行 :577-595 | FractionBar（承認済み／適用確定済み）、基準別ミニバー :459-510                                |
+| ホーム ESG タブ `legacy-home.tsx`・`page.tsx`       | 注記 :109-111                                                                                          | —                                                                                                                                               | 拠点別 StatusBreakdown（承認済み／レビュー中／未提出／エラー）:174-213                        |
+| SSBJ 対応状況 `ssbj/page.tsx`                       | 母集団 :262-272、ReadinessCard の説明 :80、工程の説明、行の理由 :458-460                               | 3 つの準備状況、架空／正式バッジ :182-191、領域別・優先ギャップの見出し、マテリアリティ充足度 :406、転載許可 :517-519                           | 8 カード :242-261 → StatusBreakdown（各ラベルは独立要素。「ステータス」等の禁止語を足さない） |
+| `src/components/shared/ssbj-flow.tsx`               | step.description を帯の下の Collapsible「各工程の説明」1 つへ                                          | 工程名・状態                                                                                                                                    | —                                                                                             |
+| 要求事項 `requirements/page.tsx`                    | 段階の説明 :292-294、マテリアリティ × 基準の表 :373-421＋凡例（ssbj-gap.spec.ts:130-136 は開いてから） | 段階名と件数、適用基準 :344-357、連携ラベル                                                                                                     | 件数の流れ :322-342 → FunnelSteps、連携 → StatusBreakdown                                     |
+| 設定・ドラフト・計画・収集                          | 設定の補助段落 :124,246-247,299,313、ドラフト :89-95（「生成されるのは草案」1 行は残す）               | materiality-manager の行・欄                                                                                                                    | 計画・収集に状態の StackedBar                                                                 |
+
+B4 CSRD:
+
+| 画面                                                     | 閉じる                                                                                                      | 残す                                                                                                                                            | 図                                                                                                                                                               |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 対応状況 `csrd/page.tsx`・`_overview/overview-cards.tsx` | SSBJ との違い :55-57、表のヒント :303-305                                                                   | SampleMasterBadge＋「架空の縮小マスター」、DMA 未確定の文 :75、「評価対象（常に適用・重要） n / N 件」、暫定 :131-136、ギャップ表               | DMA 結果 :58-70・適用の内訳 → StatusBreakdown（`ul aria-label`「事項の結果（人の判断）」「適用の内訳」と「n / N 件」を保つ）、4×5 の dl :168-190 → 積み上げ 4 本 |
+| 設定 `settings/page.tsx`・`materiality-note.tsx`         | 本文 :39-42,62-66、式 :320-327、閾値のヒント :355-358、マトリクスの案内と事項一覧 :490-506、保存の注記      | h2「SSBJ: シングル…」「CSRD: ダブル…」（未発効の文は summary に）、不足一覧 :186-193、AI の 1 行 :195-198、DMA 表、マトリクス、フォーム①②       | —                                                                                                                                                                |
+| 要求事項 `requirements/page.tsx`・`[itemId]`             | DoubleMaterialityNote は 1 行（未発効）＋details、脚注 :383-388、回答画面の説明 :869-871、優先度の説明 :648 | DMA 未確定 :211-222、表、「架空の縮小サンプル」、適用の根拠、「この判定は候補です」:420。詳細画面に「確認待ち」と完全一致するラベルを新設しない | ファネル :228-246 → FunnelSteps                                                                                                                                  |
+| 収集・ドラフト・計画                                     | 収集のヘルプ :684、ドラフトの説明 :139-152（「AI 草案は候補・採用と確定は担当者」1 行は残す）               | 両表、権限の行 :542、DMA の注記 :123-137                                                                                                        | 5 カード :282-308 → リンク付き StatusBreakdown、ドラフト 3 カード :154-188 → FractionBar、計画に状態の StackedBar                                                |
+
+B5 分析 3 画面・GHG:
+
+| 画面                                                            | 閉じる                                                                                                                                                                         | 残す                                                                                                                                                  | 図                                                                                                                                                            |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 現状診断 `diagnosis/page.tsx`・`_components/diagnosis-area.tsx` | 見方 :48-55 → MoreInfo、出所 :88、拠点表 :92-132                                                                                                                               | hiddenNote :56-64、題・状態・stateReason :87、事実の「n / N 件」（独立要素。`^…$`）と「分母:」、GHG 表の「n / 4 拠点」、「n / 15 カテゴリ」「未算定」 | 事実 → FractionBar、Scope3 :178-194 → CategoryGrid                                                                                                            |
+| 規制対応度 `regulations/page.tsx`                               | 説明 :106-119 → MoreInfo                                                                                                                                                       | 6 行、「人が確認済み」「AI 判定のみ」、算定しない理由 :179-181                                                                                        | BreakdownCell :37-63 → 行ごとの StatusBreakdown（% なし。セルに表を入れない）                                                                                 |
+| 他社比較 `benchmark/page.tsx`                                   | 比較の決まり :191-222（summary「同条件の会社だけ・換算しない・順位なし」）、指標の注記 :252-261、ピア表 :278-302                                                               | バナー :189、caption :227、12 行                                                                                                                      | （任意）中立色の範囲帯（最小〜最大・中央値・自社。並べ替えない）                                                                                              |
+| GHG `ghg/page.tsx`                                              | 脚注 :224-238,320-323,381-385,444-446,727-735、排出係数マスター :744-780（架空値バッジは見出しに）                                                                             | 連結集計表、推移の見出しと 9,735.4・−8.3%、Cat.1 の見出し、比率の定義 :574                                                                            | 推移 :242-324 → 小さな LineChart（null で切る。前年比は矢印＋符号、赤緑だけにしない）、Scope3 表 :449-496 → CategoryGrid（表は閉じる）、:548-565 → StackedBar |
+| サプライヤー `ghg/suppliers/page.tsx`                           | 見本一覧 :167-185（h2 は残す）、データセットの説明 :196-200,215-217（ZIP リンクは残す）、係数マスター :413-451（題は残す）、再リンク表 :305-411（flash=factorRelinked で開く） | DemoSimulationNotice :94、リセットの題・チェック・ボタン・範囲 1 行 :230-243                                                                          | カード :96-139 → FractionBar                                                                                                                                  |
+
+B6 ESG・データ・定性・プロジェクト・その他:
+
+| 画面                                                       | 閉じる                                                                                                                                                             | 残す                                                                                                                                           | 図                                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| ESG `esg/page.tsx`・`kpi-card.tsx`・`[kpiKey]/page.tsx`    | info :280-284、スナップショットの注記 :83-85、spec.note :202-205、式 :69、dataState.details :251-257、前年比の注記 :95-101、SubRows :152-190、年次の推移表 :80-110 | 実績・目標・進捗率、NeedsCheckBadge と最初の理由、集計中 :143-146、「全社値は算定できません」                                                  | 進捗 → FractionBar（基準 → 目標）、詳細の推移 → LineChart、Scope3 副行 → CategoryGrid |
+| 取込 `imports/page.tsx`・`imports/standard/page.tsx`       | 貼り付け :125-151（data-entry-aggregation.spec.ts:47-48 は開いてから）、標準 CSV の技術説明 :118-127                                                               | DemoSimulationNotice :103、「デモデータ｜組織・指標・値はすべて架空です」                                                                      | 履歴 → StackedBar（新規／変更／変更なし／エラー／除外）                               |
+| データ `data/page.tsx`・`data/[dataPointId]/page.tsx`      | Version 履歴 :517、Audit Timeline :915、開示マッピング :716                                                                                                        | 承認フロー :737                                                                                                                                | 一覧に状態の StackedBar                                                               |
+| 定性情報 `narratives/page.tsx`                             | 説明 :78 → 1 行＋help、脚注 :293-296 → MoreInfo                                                                                                                    | :216-218、:259-263                                                                                                                             | 状態別・テーマ別の StatusBreakdown                                                    |
+| 開示プロジェクト `disclosure-projects/page.tsx`・`_tabs/*` | 一覧の説明 :58、outputs :254,270,453,478、requirements :314                                                                                                        | 公開草案 overview :71-76、outputs :245（提出ではない）・:310（草案基準）、requirements :105-112、block-editor の警告 :1003-1030,1063,1103-1107 | 承認済みの節 → FractionBar、overview :54-126 → 基準別 FractionBar                     |
+| 通知・保証側                                               | 説明を 1 行＋help（「未アサイン案件は閲覧不可」の意味を残す）                                                                                                      | data-room :83（Read-only）、testing :349（自己レビュー禁止）                                                                                   | —                                                                                     |
+
+**テストの更新（開いてから確かめる。期待を緩めない）**: Stage A が `tests/e2e/helpers.ts` に `openCollapsible(scope, summary)`（scope は Page か Locator、summary は文字列か正規表現。
+閉じていれば summary を押す。何度呼んでもよい）を足す。B3: ssbj-gap.spec.ts:130-136。B4: csrd.spec.ts・csrd-screens.spec.ts・zzz-csrd-chain.spec.ts・
+unit csrd-overview-settings-requirements-pages.test.tsx（:199-205・232・246）。B5: ghg-suppliers.spec.ts:180-190、zz-murata-demo.spec.ts（ZIP・リセットは残すので原則不変）、
+analysis.spec.ts（メニュー試験以外）、benchmark-analysis-ui.test.tsx:157。B6: data-entry-aggregation.spec.ts:47-48、crud-persistence.spec.ts:107（`getByText(reason).first()` の DOM 順を確認）。
+Stage C: production-smoke.spec.ts、six-features.spec.ts、zz-disclosure-project.spec.ts（変更不要の見込み）、`src/components/shared/demo-tour.tsx` の文言（:41-42,49-50,72-73「冒頭のマッピング表」等）。
+
+### 10.5 デモ永続化
+
+新しいサーバー状態は無い。経年比較の絞込と財務影響分析の仮定・シナリオは URL、折りたたみの開閉は保存しない、メニューの優先枝はタブ内の sessionStorage（表示の便宜だけ。サーバーへ送らない）。
+`PERSISTED_TABLES`・`DISCLOSURE_DEMO_RESET_TABLES`・Cookie の容量（§9.9 約 11KB / 11.4KB）は変えない。年度はこれまでどおり Cookie のヘッダー年度。
+stateless 構成の spec は増やさないが、対象 spec（disclosure-first-nav・zz-disclosure-project・zzz-csrd-chain）の画面が変わるため Stage C で `pnpm test:e2e:stateless` を流す（押し出し 0）。
+
+### 10.6 並行実装計画
+
+**Stage A（1 エージェントで順に。B の前提）**
+
+1. ナビ: `nav-config.ts`（§10.1）・`sidebar.tsx`・新規 `nav-branch.ts`（`command-palette.tsx` は変更が要るときだけ）、unit `nav-config.test.tsx`・`nav-branch.test.ts`、
+   E2E `nav-structure.spec.ts`・`disclosure-first-nav.spec.ts`・`analysis.spec.ts` のメニュー試験（:27-47）。
+2. 部品: §10.4 の表（`ui/collapsible.tsx`・`ui/more-info.tsx`・`page-header.tsx` の help・`components/charts/*`・`lib/charts/*`）、unit `collapsible.test.tsx`・`chart-layout.test.ts`・
+   `chart-components.test.tsx`（ラベル＋数値・role=img・null は「未入力」・n / N 件）、`tests/e2e/helpers.ts` の `openCollapsible`。
+3. `kpi.ts` の一般化（§10.2 `loadMetricYearStates`。挙動不変）と integration `metric-year-states.test.ts`（scope1 の 3 年、female_manager_ratio の加重、監査法人 ctx 拒否、書かない）。
+4. B1・B2 の画面は作らない（メニューのリンクは B 完了まで 404 でよい。E2E は C で通す）。
+
+完了条件: lint・format:check・typecheck・`pnpm test` 合格。E2E は流さない。
+
+**Stage B（並行。所有ファイル以外は編集しない）**
+
+| スライス                           | 所有ファイル                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1 自社経年比較                    | `src/app/enterprise/analysis/trends/**`、`src/lib/domain/metric-trend.ts`、`src/lib/services/analysis/trends.ts`、`tests/unit/metric-trend.test.ts`、`tests/integration/analysis-trends.test.ts`、`tests/e2e/analysis-trends.spec.ts`                                                                                                                                              |
+| B2 財務影響分析                    | `src/app/enterprise/analysis/financial-impact/**`、`src/lib/domain/financial-impact.ts`、`src/lib/financial-impact/**`、`src/lib/charts/flow-layout.ts`、`src/lib/services/analysis/financial-impact.ts`、`tests/unit/financial-impact-model.test.ts`・`flow-layout.test.ts`、`tests/integration/analysis-financial-impact.test.ts`、`tests/e2e/analysis-financial-impact.spec.ts` |
+| B3 ホーム・SSBJ                    | `src/app/enterprise/dashboard/**`、`src/app/enterprise/disclosures/ssbj/**`、`src/components/shared/ssbj-flow.tsx`、`tests/unit/ssbj-flow.test.tsx`、`tests/e2e/ssbj-gap.spec.ts`                                                                                                                                                                                                  |
+| B4 CSRD                            | `src/app/enterprise/disclosures/csrd/**`、CSRD 画面の unit（`tests/unit/csrd-*.test.tsx`）、`tests/e2e/csrd.spec.ts`・`csrd-screens.spec.ts`・`zzz-csrd-chain.spec.ts`                                                                                                                                                                                                             |
+| B5 分析 3 画面・GHG                | `src/app/enterprise/analysis/{diagnosis,regulations,benchmark}/**`・`analysis/_components/**`、`src/app/enterprise/ghg/**`、`tests/unit/benchmark-analysis-ui.test.tsx`、`tests/e2e/analysis.spec.ts`（メニュー試験以外）・`ghg-suppliers.spec.ts`・`zz-murata-demo.spec.ts`                                                                                                       |
+| B6 ESG・データ・定性・プロジェクト | `src/app/enterprise/{esg,imports,data,narratives,disclosure-projects}/**`、`src/app/(common)/notifications/page.tsx`、`src/app/assurance/**/page.tsx`（説明文と help だけ）、`tests/e2e/data-entry-aggregation.spec.ts`・`crud-persistence.spec.ts`・`business-flow-audit.spec.ts`                                                                                                 |
+
+- Stage A の所有物（部品・`kpi.ts`・nav・`helpers.ts`・`page-header.tsx`・`globals.css`）に変更が要るときは編集せず、差分案を最終報告に書く（C で適用）。
+- B1・B2 は `analysis-badges.tsx` を使ってよいが編集しない（バッジは自分の `_components`）。B3〜B6 はサービス・ドメイン・fixture を変えない（表示だけ）。
+- どのスライスも `src/components/ui`・`src/components/charts` に部品を足さない（ページ固有の部品は自分のルートの `_components`）。
+- E2E は流さない（並走すると資源枯渇でフレークする。C で単独実行）。各自 lint・typecheck・自分の unit／integration を通す。
+
+**Stage C（統合、1 エージェント）**: 差分案の適用、`demo-tour.tsx`、`full-audit.spec.ts`（ルート一覧と拠点担当の許可一覧に trends・financial-impact）、`six-features.spec.ts`・`zz-disclosure-project.spec.ts`（要るときだけ）、
+`tests/e2e-production/production-smoke.spec.ts`（CSRD リスト 6・分析リスト 5、2 画面が開く、経年比較の年度見出し、財務影響分析の注記 3 種、閉じた中を確かめている箇所は開いてから）、
+7 コマンド（E2E は単独。3100 が埋まっていれば `E2E_PORT`）、`pnpm test:e2e:stateless`、`pnpm check:rls`（106 表のまま）。
+docs: 本節に「10.7 実施結果」、`docs/known-limitations.md`（経年比較の基準チェックは ESG経営に未適用、指標マスターに定義の履歴が無く単位・集計方法の変更は検知しない、
+財務影響分析は仮定による試算で相互作用・統計推定なし）、`AI_HANDOFF.md`。
+デプロイ（発注者の依頼。Demo Mode・環境変数なし）: feature ブランチでコミット（`git -c user.name=… -c user.email=…`。main へ push しない）→ `pnpm exec vercel deploy --prod --yes` →
+`pnpm exec vercel alias set <デプロイ URL> terrast-t4d.vercel.app`（手動エイリアス）→ `pnpm test:e2e:prod`。本番でメニュー（CSRD の定性情報・分析 5 画面）と新しい 2 画面を目視確認。

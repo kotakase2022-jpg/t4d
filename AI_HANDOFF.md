@@ -2922,3 +2922,83 @@ commit・push・deploy はしていない。`docs/disclosure-first.md` は編集
 - 本番（Demo Mode）: デプロイ → エイリアス → 本番スモーク 32/32、`playwright.production-chain.config.ts`（主デモ＋CSRD、1 ブラウザ）17/17。
   その後、共有メモリに残った数値の訂正等を消すため同じコードを再デプロイした。
 - 未解決: C-1・C-4・C-6（docs/known-limitations.md）、主デモ＋CSRD を続けた場合の Cookie 余裕（約 11KB / 11.4KB）、0044〜0047 は本番 Supabase 未適用。
+
+---
+
+## 2026-10-04 追加要望（2026-10-02: CSRD 定性情報・自社経年比較・財務影響分析・UI の簡潔化）Stage C 統合の再開と完了（単独・未コミット）
+
+設計: `docs/disclosure-first.md` §10（本作業では編集していない。§10.7「実施結果」の記入は統括が行う）。
+中断（利用上限 → 2026-10-02 の顧客デモ）前の作業はすべて `d5fb982` にコミット済みで、その状態が本番デモ URL に反映されている。
+本作業は `git diff a9b64f7..HEAD` で Stage C の途中の作業を確かめ、正しいものは残して仕上げた。commit・push・deploy はしていない。
+
+### 1. 中断前の Stage C の作業（確認して残したもの）
+
+| 対象                                                           | 内容                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/e2e/full-audit.spec.ts`                                 | ルート一覧に自社経年比較（絞込・`empty=1` を含む 3 URL）と財務影響分析（`sc=target`・`sc=custom`＋仮定・P10 有効を含む 3 URL）。拠点担当の許可一覧に両画面（`enterprise.data.read` で開ける）                                                                                                   |
+| `tests/e2e-production/production-smoke.spec.ts`                | 「CSRD の 6 画面と分析の 5 画面」: 2 画面の h1、経年比較の年度の列見出しがちょうど FY2024・FY2025・FY2026、財務影響分析の注記 3 種（文言固定）と経路図の role=img、CSRD リスト 6 リンク（定性情報の href）、分析リスト 5 リンク（2 画面の href）。SSBJ 草案の「書ける範囲」は開いてから確かめる |
+| `tests/e2e/ui-integrity-audit.spec.ts`                         | 図と折りたたみを入れた 10 画面を 1280/1440/1920 の横はみ出し検査に追加。折りたたみをすべて開いた状態の 1280px 検査（経年比較・財務影響分析・ESG・GHG）                                                                                                                                          |
+| `tests/e2e/helpers.ts`                                         | `openCollapsible`（Stage A）に加え、`accessibleExpanded`（Chromium のアクセシビリティ・ツリーの expanded を読む。ネイティブの summary は aria-expanded 属性を持たないため）と `focusRingOfActiveElement`                                                                                        |
+| `analysis-trends.spec.ts`・`analysis-financial-impact.spec.ts` | 既定で閉じた「比較の決まり」「仮定を変える」をクリック・Enter・Space で開閉し、expanded が支援技術に届くこと・フォーカスリング・開いた中へ Tab で進めること・開閉を保存しないことを確かめる試験                                                                                                 |
+| `src/components/shared/demo-tour.tsx`                          | SSBJ 要求事項の手順の文言を「件数の流れ」と「マテリアリティ × 基準の対応表を開くと確かめられる」に変更（B3 の依頼）                                                                                                                                                                             |
+| `src/lib/charts/breakdown.ts`・`fraction-bar.tsx`              | `format?`（既定 String）を追加し、ESG の KPI の進捗を「2,268.4 / 3,360 t-CO2e」と桁区切りで出す（B6 の依頼）                                                                                                                                                                                    |
+| `src/lib/services/kpi.ts`                                      | `actualMethodologiesOf` を公開し、財務影響分析のサービスは自前の複製を使わない（B2 の依頼）                                                                                                                                                                                                     |
+| `docs/known-limitations.md`                                    | T-1〜T-6（経年比較の基準チェックは ESG経営に未適用・指標マスターに定義の履歴なし・財務影響分析は仮定による決定論的な試算・制度の前提は日付付きの参考・FY2024 の Fixture 拡張・開閉は保存しない）                                                                                                |
+
+### 2. スライス間の依頼（crossSliceNeeds）の対応
+
+| 依頼元 | 内容                                                                                                   | 対応                                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| B1     | full-audit のルート一覧・拠点担当の許可一覧に `/enterprise/analysis/trends`                            | 済（上表）                                                                                                                                       |
+| B1     | 本番スモークで経年比較の表（`/^指標ごとの確定値/`）の列見出しがちょうど FY2024・FY2025・FY2026         | 済                                                                                                                                               |
+| B1     | FY2024 の Fixture 拡張（21 指標すべて承認済み）が §10.2「fixture は拡張しない」を置き換えたことの記録  | known-limitations T-5。§10.3 の「GHG 2 年・他 1 年」も成り立たない（画面の「確定データは最長 n 年分」は動的で 2 のまま）。§10.7 への記録は統括へ |
+| B1     | `NeedsCheckBadge` を esg/kpi-card.tsx から公開したまま                                                 | 確認済み（経年比較が import。typecheck 合格）                                                                                                    |
+| B2     | full-audit に `/enterprise/analysis/financial-impact`（拠点担当も可）                                  | 済                                                                                                                                               |
+| B2     | 本番スモークで注記 3 種（`note`「試算についての注記」）・h1・経路図                                    | 済                                                                                                                                               |
+| B2     | `actualMethodologiesOf` を公開して複製を消す                                                           | 済                                                                                                                                               |
+| B2     | demo-tour に新画面（任意）                                                                             | 入れない。ツアーは「SSBJ 対応という 1 本の仕事」を追う構成で、分析の画面はその流れの外にあるため                                                 |
+| B3     | demo-tour の「冒頭のマッピング表」の文言                                                               | 済（上表）                                                                                                                                       |
+| B3     | 本番スモークの `openCollapsible` の import の重複                                                      | 重複なし（1 行）                                                                                                                                 |
+| B4     | 本番スモークの CSRD 6 リンク                                                                           | 済                                                                                                                                               |
+| B5     | なし（本番スモークのメニュー以外は変更不要）                                                           | 本番スモーク全件をローカルのサーバーへ流して確認（下記 4）                                                                                       |
+| B6     | `fractionText`・`FractionBar` の `format`                                                              | 済                                                                                                                                               |
+| B6     | action-audit・zz-disclosure-project（stateless も）・crud-persistence・data-entry-aggregation を単独で | 通常 E2E 全件と stateless で合格                                                                                                                 |
+
+ナビの href はすべて `page.tsx` がある（MSCI・FTSE は `[framework]`）。
+
+### 3. 本作業で直したもの
+
+- **一時ファイルの整理**: `tests/e2e/tmp-axe-open-all.spec.ts`（中断前の確認用）を削除し、正式な spec `tests/e2e/collapsed-content-a11y.spec.ts` に置き換えた。
+  閉じた details の中身は描画されないため、各画面の axe（閉じた状態）では検査されない。§10.4 で説明・注記・補助表を閉じた 30 画面
+  （分析 5 画面と絞込・仮定の URL、ESG、GHG・サプライヤー、ホーム、SSBJ 6 画面、CSRD 7 画面、定性情報、データ、取込 2 画面、開示プロジェクト）で
+  すべての折りたたみを開き、1280px で serious／critical が 0 件であることを確かめる（折りたたみが画面数より多く開いたことも確かめ、空振りしない）。
+- **axe `scrollable-region-focusable`（財務影響分析、1280px・1440px）**: 経路図の「数値を表で見る」が、Stage A の `ChartDataTable` で全セル折り返し禁止のため
+  本文幅を超え、操作できる要素の無いスクロール領域（キーボードで読めない）になっていた。スクロール領域に tabIndex を付けるのではなく（jsx-a11y が禁止）、
+  文字（左寄せ）の列は折り返し、数値（右寄せ）の列だけ折り返さない形にして、はみ出さないようにした（`src/components/charts/chart-frame.tsx`）。
+- **「AI は候補・確定は人」の 1 行（SSBJ 要求事項の評価）**: B3 が工程の説明を既定で閉じる「各工程の説明」に寄せた結果、この画面で候補と最終判定の関係を
+  文で示すのは閉じた中だけになっていた（§10.4 の「閉じない」に反する）。工程チップの下に「人工知能の判定は候補です。最終判定は担当者が確認して入れます。」
+  （Bot アイコン付き）を 1 行出した。unit `home-ssbj-pages.test.tsx` と E2E `ssbj-gap.spec.ts` で、閉じた details の外に見えることを固定。
+- `docs/known-limitations.md` の表の整形（prettier）。
+
+誠実さの注記の点検（本番相当のサーバーで 33 画面、閉じた details の中だけにある語〔架空・サンプル・デモ生成・公開草案・未発効・暫定・候補・権限・試算・転載許可 等〕を列挙）:
+上の 1 件のほかは、データの文字（活動ログの「（架空）」・係数の「候補」）か技術説明だけだった。CSRD 設定・要求事項の「ESRS-40a 公開草案はインパクト重要性のみ」は
+閉じた全文に残る（B4 の判断: 本画面が草案の内容を示すという注記ではなく背景。改正 ESRS が未発効・本サンプルに未反映である旨は常に見える）。
+
+### 4. テスト結果（2026-10-04 ローカル。E2E はほかの重い処理と並走させず単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` 合格。
+- `pnpm test`: 151 ファイル・**1,989 件**合格。
+- `pnpm test:rls`: 2 ファイル・**311 件**合格。`pnpm check:rls`: **106 表**・RLS 有効 106・ポリシー 240 で合格（表は増やしていない）。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: **25 件すべて合格・1.4 分**。押し出し 0。Cookie ヘッダーの最大は 実演の流れ 8,845B（操作の記録 8,697B）、CSRD の流れ 3,467B（操作の記録 3,357B）。
+- `E2E_PORT=3217 pnpm test:e2e`（通常・全件・単独実行・新しいサーバー）: **323 件すべて合格・11.0 分**（retries 0・flaky 0。2026-10-01 の 308 件から 15 件増: 経年比較 6・財務影響分析 7・折りたたみの中の axe 1・ui-integrity の展開時 1）。
+- 本番スモーク（`tests/e2e-production/production-smoke.spec.ts`）をローカルの新しいサーバーへ `PROD_BASE_URL=http://127.0.0.1:3217` で流し **32 件すべて合格**（再試行なし。最終ビルドで再度流しても 32 件合格）。
+  本番（https://terrast-t4d.vercel.app）では本作業では流していない。
+
+### 5. 未解決・次作業
+
+- 本番は `d5fb982` のまま（本作業の 3 点の修正は未反映）。反映は統括の判断で: コミット → `pnpm exec vercel deploy --prod --yes` → `vercel alias set … terrast-t4d.vercel.app`（手動エイリアス）→ `pnpm test:e2e:prod`。
+- 財務影響分析の制度の前提（地球温暖化対策税・GX-ETS・化石燃料賦課金・特定事業者負担金）は 2026-10-02 時点の政府資料による。§10.3 のとおり**デプロイ前に再確認**が要る（本作業では未確認）。
+- `docs/disclosure-first.md` §10.7（実施結果）は未記入（本作業では編集しない指示）。記入する内容: 上記 1〜4、FY2024 の Fixture 拡張（T-5）、B2 の取水量 = `water` の対応付け、本番の反映結果。
+- B5: `CategoryGrid` は Scope3 の長いカテゴリー名を 1 行で省略（全文は title 属性）。現状診断の Scope3 格子はカテゴリーごとの「値あり／対象外」を区別できない（サービスの変更が要る。P1）。
+- B6: データ詳細の「Version 履歴」は値の編集後も閉じたまま（`updateDataPointAction` がフラッシュを付けないため。E2E は開いてから確かめる）。
+- B3: `ssbj-settings-approval-draft` ⑤ は、共有のデモ状態でガバナンスの要求事項がすべて確認済みになると「書けなかった箇所」が 0 件になり得る（現状の Fixture では起きない）。

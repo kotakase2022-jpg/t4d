@@ -232,6 +232,12 @@ describe('SSBJ 要求事項の評価', () => {
       expectOutsideDetails(screen.getByText(title, { exact: true }));
     }
     expectInClosedDetails(screen.getByText('適用の有無と重要性を判断します。'), '各工程の説明');
+    // 「AI は候補・確定は人」は誠実さの注記なので、工程の説明を閉じても 1 行は外に見せる
+    expectOutsideDetails(
+      screen.getByText('人工知能の判定は候補です。最終判定は担当者が確認して入れます。', {
+        exact: true,
+      }),
+    );
 
     // FY2026 はマテリアリティが未登録。空状態と登録への導線は閉じずに見せる
     expectOutsideDetails(screen.getByText('マテリアリティが未登録です'));

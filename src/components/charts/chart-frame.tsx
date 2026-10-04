@@ -86,8 +86,17 @@ export function ChartFrame({
   );
 }
 
-/** 図と同じ内容の数値表（既定で閉じる「数値を表で見る」） */
+/**
+ * 図と同じ内容の数値表（既定で閉じる「数値を表で見る」）。
+ *
+ * 数値（右寄せ）の列だけ折り返さず、文字（左寄せ）の列は折り返す。文字の列まで折り返さないと、
+ * 説明の長い表（財務影響分析の経路図など）が 1280px でも横にはみ出し、操作できる要素の無い
+ * スクロール領域になってキーボードで読めない（axe scrollable-region-focusable）。
+ * スクロール領域に tabIndex を付けるのではなく、はみ出さない形にする
+ */
 export function ChartDataTable({ table, open }: { table: ChartTable; open?: boolean }) {
+  const alignOf = (index: number) =>
+    table.columns[index]?.align ?? (index === 0 ? 'left' : 'right');
   return (
     <Collapsible variant="plain" summary="数値を表で見る" open={open}>
       <div className="t4d-scroll-x">
@@ -100,10 +109,8 @@ export function ChartDataTable({ table, open }: { table: ChartTable; open?: bool
                   key={`${column.label}-${index}`}
                   scope="col"
                   className={cn(
-                    'whitespace-nowrap border-b border-line px-2 py-1 text-[11px] font-semibold text-ink-muted',
-                    (column.align ?? (index === 0 ? 'left' : 'right')) === 'right'
-                      ? 'text-right'
-                      : 'text-left',
+                    'border-b border-line px-2 py-1 text-[11px] font-semibold text-ink-muted',
+                    alignOf(index) === 'right' ? 'whitespace-nowrap text-right' : 'text-left',
                   )}
                 >
                   {column.label}
@@ -115,10 +122,11 @@ export function ChartDataTable({ table, open }: { table: ChartTable; open?: bool
             {table.rows.map((row) => (
               <tr key={row.key} className="border-b border-line last:border-b-0">
                 {row.cells.map((cell, index) => {
-                  const align = table.columns[index]?.align ?? (index === 0 ? 'left' : 'right');
                   const cellClass = cn(
-                    'whitespace-nowrap border-b border-line px-2 py-1',
-                    align === 'right' ? 'text-right tnum' : 'text-left',
+                    'border-b border-line px-2 py-1',
+                    alignOf(index) === 'right'
+                      ? 'whitespace-nowrap text-right tnum'
+                      : 'min-w-[4em] text-left',
                   );
                   return index === 0 ? (
                     <th key={index} scope="row" className={cn(cellClass, 'font-normal text-ink')}>

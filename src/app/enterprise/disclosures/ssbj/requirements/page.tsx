@@ -341,6 +341,12 @@ export default async function SsbjRequirementsPage({
               </li>
             ))}
           </ul>
+          {/* 工程の説明は閉じるが、「AI は候補・確定は人」は誠実さの注記なので 1 行だけ外に見せる
+              （docs/disclosure-first.md §10.4 の「閉じない」） */}
+          <p className="flex items-center gap-1 text-[11px] text-ink-muted">
+            <Bot className="size-3.5 shrink-0" aria-hidden="true" />
+            人工知能の判定は候補です。最終判定は担当者が確認して入れます。
+          </p>
           <MoreInfo label="各工程の説明">
             <ul className="space-y-0.5">
               {stages.map((stage) => (

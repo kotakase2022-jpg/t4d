@@ -200,6 +200,12 @@ test.describe('SSBJ 要求事項の評価（統合画面）', () => {
     await loginAs(page, DEMO_USERS.sustainability);
     await page.goto('/enterprise/disclosures/ssbj/requirements');
     const main = page.locator('#t4d-main');
+    // 工程の説明は既定で閉じるが、「判定は候補・最終判定は人」の 1 行は閉じずに見せる（§10.4）
+    await expect(
+      main.getByText('人工知能の判定は候補です。最終判定は担当者が確認して入れます。', {
+        exact: true,
+      }),
+    ).toBeVisible();
 
     // 未分析が残っていればボタンが出る（他テストの実行順により消化済みのこともある）
     const bulk = main.getByRole('button', { name: /未分析をまとめて分析/ });

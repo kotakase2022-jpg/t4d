@@ -1,10 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
- * 分析（docs/disclosure-first.md §9.5・§9.6・§9.7）。閲覧専用の 3 画面。
- *  - 左メニューの「分析」から 現状診断・規制対応度・他社比較 を開ける
+ * 分析（docs/disclosure-first.md §9.5・§9.6・§9.7）。閲覧専用の 現状診断・規制対応度・他社比較。
+ *  - 左メニューの「分析」から 5 画面（現状診断・規制対応度・自社経年比較・他社比較・財務影響分析。§10.1）を開ける
+ *    （自社経年比較・財務影響分析の中身は analysis-trends.spec.ts・analysis-financial-impact.spec.ts）
  *  - 件数には分母を添える。単一の総合点・準拠率は出さない
  *  - MSCI・FTSE は「今後対応予定」で、算定しない理由を示す（0% と出さない）
  *  - 他社比較は架空の比較データであることを先頭と表に示し、比較対象外の理由を示す
@@ -24,21 +25,32 @@ const nav = (page: Page) => page.getByRole('navigation', { name: 'メインナ�
 const analysisList = (page: Page) => nav(page).getByRole('list', { name: '分析', exact: true });
 const main = (page: Page) => page.locator('#t4d-main');
 
-test('メニューの「分析」から 3 画面を開ける（入口は現状診断）', async ({ page }) => {
+test('メニューの「分析」から 5 画面を開ける（入口は現状診断）', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/dashboard');
   await nav(page).getByRole('link', { name: '分析', exact: true }).click();
   await page.waitForURL('**/enterprise/analysis/diagnosis');
   await expect(page.getByRole('heading', { level: 1, name: '現状診断' })).toBeVisible();
+  await expect(analysisList(page).getByRole('link')).toHaveText([
+    '現状診断',
+    '規制対応度',
+    '自社経年比較',
+    '他社比較',
+    '財務影響分析',
+  ]);
 
+  // h1 はメニュー名と同じ（§10.1 ③）。現在地は開いた画面の 1 つだけ
   for (const [label, path] of [
     ['規制対応度', '/enterprise/analysis/regulations'],
+    ['自社経年比較', '/enterprise/analysis/trends'],
     ['他社比較', '/enterprise/analysis/benchmark'],
+    ['財務影響分析', '/enterprise/analysis/financial-impact'],
     ['現状診断', '/enterprise/analysis/diagnosis'],
   ] as const) {
     await analysisList(page).getByRole('link', { name: label, exact: true }).click();
     await page.waitForURL(`**${path}`);
     await expect(page.getByRole('heading', { level: 1, name: label })).toBeVisible();
+    await expect(analysisList(page).locator('a[aria-current="page"]')).toHaveText(label);
   }
 
   // /enterprise/analysis は現状診断へ
@@ -65,16 +77,25 @@ test('現状診断: 領域ごとの状態と分母を示し、直す画面へ進
     ).toBeVisible();
   }
 
-  // 件数は「n / 分母 件」で示す
+  // 件数は「n / 分母 件」で示す（帯は補助。名前にも n / 分母）
   const collection = page.getByRole('region', { name: 'データ収集・承認' });
   await expect(collection.getByText(/^\d+ \/ \d+ 件$/).first()).toBeVisible();
   await expect(collection.getByText(/^分母: /).first()).toBeVisible();
+  await expect(collection.getByRole('img', { name: /^承認済み: \d+ \/ \d+ 件$/ })).toBeVisible();
+  // 拠点別の表は既定で閉じる（docs/disclosure-first.md §10.4）。開くと拠点ごとの件数
+  await expect(collection.getByRole('table', { name: /拠点別の承認状況/ })).toHaveCount(0);
+  const units = await openCollapsible(collection, /^拠点別の承認状況（\d+ 拠点）$/);
+  await expect(units.getByRole('table', { name: /拠点別の承認状況/ })).toBeVisible();
 
   // GHG: 連結対象の拠点が分母。Scope3 合計は未算定（0 と出さない）
   const ghg = page.getByRole('region', { name: 'GHG 算定の網羅性' });
   await expect(ghg.getByText(/^\d+ \/ 4 拠点$/).first()).toBeVisible();
   await expect(ghg.getByText(/^\d+ \/ 15 カテゴリ$/)).toBeVisible();
   await expect(ghg.getByText('未算定', { exact: true })).toBeVisible();
+  // Scope3 は 15 カテゴリの格子（状態は文字）
+  await expect(
+    ghg.getByRole('list', { name: 'Scope3 のカテゴリ（1〜15）の登録状況' }).getByRole('listitem'),
+  ).toHaveCount(15);
 
   // 開示対応は基準ごとに 1 行。詳細は規制対応度へ
   const disclosure = page.getByRole('region', { name: '開示対応（基準別）' });
@@ -123,11 +144,21 @@ test('規制対応度: 6 基準の位置付け・分母・算定しない理由�
   await expect(row(0)).toContainText(/\d+ \/ 133 件/);
   await expect(row(0)).toContainText('人が確認済み');
   await expect(row(0)).toContainText('AI 判定のみ');
+  // 状況の内訳は積み上げ帯＋凡例（5 状態を文字で。% は出さない）
+  await expect(
+    row(0)
+      .getByRole('list', { name: /の状況の内訳$/ })
+      .getByRole('listitem'),
+  ).toHaveCount(5);
 
   await expect(row(1)).toContainText('サンプル（架空）');
   await expect(row(1)).toContainText('ダブル・マテリアリティ');
   await expect(row(1)).toContainText(/\d+ \/ 12 件/);
-  await expect(row(1)).toContainText('改正 ESRS（2026-07-03 採択・未発効）は未収録');
+  // 未発効・AI の扱いの注記は閉じない（数え方の全文だけを閉じる）
+  await expect(row(1).getByText('改正 ESRS（2026-07-03 採択・未発効）は未収録')).toBeVisible();
+  await expect(row(1).getByText(/^内訳は人が確定した値だけで数えます/)).toBeVisible();
+  const counting = await openCollapsible(row(1), '評価対象と内訳の数え方');
+  await expect(counting.getByText(/^評価対象は「ESRS 2（常に適用）」/)).toBeVisible();
 
   await expect(row(2)).toContainText('公開草案に基づく準備');
   await expect(row(2)).toContainText('インパクト重要性');
@@ -164,8 +195,20 @@ test('他社比較: 架空の比較データと明示し、比較対象外の理
   const row = (label: string) =>
     table.locator('tbody tr').filter({ has: page.locator('th[scope="row"]', { hasText: label }) });
 
+  // 比較の決まりは既定で閉じ、要点の 1 行は見える（§10.4）。開くと規則の一覧
+  await expect(
+    page.getByText('比較の決まり: 同条件の会社だけ・換算しない・順位なし', { exact: true }),
+  ).toBeVisible();
+  const rules = await openCollapsible(page, /^比較の決まり/);
+  await expect(
+    rules.getByText('第三者保証の有無は注記です（比較の可否には使いません）。'),
+  ).toBeVisible();
+  // 範囲の図は比較できる社だけの中立色の帯。印の意味は文字の凡例
+  await expect(page.getByRole('list', { name: '範囲の図の見方' })).toBeVisible();
+
   // Scope1: B は 12 月決算、C は単体で比較対象外。比較できる 3 社で中央値
   const scope1 = row('Scope1').first();
+  await expect(scope1.locator('svg[data-benchmark-range]')).toHaveCount(1);
   await expect(scope1).toContainText('決算月が異なる');
   await expect(scope1).toContainText('範囲が異なる');
   await expect(scope1).toContainText('3 / 5 社');

@@ -6,6 +6,7 @@ import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
 import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
@@ -38,6 +39,9 @@ const BASE = '/enterprise/disclosures/csrd';
  *  ② 評価方法・閾値・ステークホルダー関与（ESRS は数値の閾値を定めていない。会社が決める）
  *  ③ ダブル・マテリアリティ評価（10 事項。算定結果は提案で、各軸の重要性は人が根拠付きで判断する）
  *  ＋ DMA の確定（人の操作。条件が揃ったときだけ。AI は判断・確定に一切書かない）
+ *
+ * 文字量を減らす（§10.4）: 考え方の詳細・算定式・マトリクスの読み方は既定で閉じる。
+ * SSBJ／CSRD の見出し、未発効の注記（summary）、確定の不足一覧、AI は判断しない旨、表・図・フォームは常に見せる。
  */
 export default async function CsrdSettingsPage({
   searchParams,
@@ -115,12 +119,27 @@ export default async function CsrdSettingsPage({
   ];
   const canConfirm = view.canEdit && !view.confirmed;
   const confirmReady = view.settingsPersisted && readiness.ready;
+  const differing = view.matters.filter((m) => m.proposedOutcome !== m.outcome).length;
 
   return (
     <>
       <PageHeader
         title="CSRD 設定（報告範囲・ダブル・マテリアリティ評価）"
-        description={`${shell.currentPeriod.label} ／ ここで決めた報告範囲と DMA が、要求事項の適用（評価対象）の前提になります`}
+        description={`${shell.currentPeriod.label} ／ 報告範囲と DMA が要求事項の適用を決めます`}
+        help={
+          <>
+            <p>
+              ここで決めた報告範囲とダブル・マテリアリティ評価（DMA）が、要求事項の適用（評価対象）の前提になります。
+            </p>
+            <p>
+              ① 報告範囲 → ② 評価方法・閾値・ステークホルダー関与 → ③ 10
+              事項の判断の順に決め、条件が揃ったら人が DMA を確定します。
+            </p>
+            <p>
+              インパクトは自社の事業だけでなく、上流・下流のバリューチェーンでも生じるため、バリューチェーンの扱いも決めます。
+            </p>
+          </>
+        }
         breadcrumbs={breadcrumbs}
         actions={backButton}
       />
@@ -271,8 +290,7 @@ export default async function CsrdSettingsPage({
             <fieldset className="space-y-1.5">
               <legend className="text-[12px] font-medium text-ink">バリューチェーンの扱い</legend>
               <p className="text-[11px] text-ink-muted">
-                インパクトは自社の事業だけでなく、上流・下流のバリューチェーンでも生じます。「未決定」のままでは
-                DMA を確定できません。
+                「未決定」のままでは DMA を確定できません。
               </p>
               <select
                 name="valueChainScope"
@@ -301,9 +319,12 @@ export default async function CsrdSettingsPage({
                 <SubmitButton size="sm" variant="outline" pendingLabel="保存中…">
                   報告範囲を保存
                 </SubmitButton>
-                <span className="text-[11px] text-ink-muted">
-                  保存すると DMA の確定は取り消されます（前提が変わるため）。
-                </span>
+                {/* 取り消す確定があるときだけ書く（未確定のときは何も起きない） */}
+                {view.confirmed && (
+                  <span className="text-[11px] text-ink-muted">
+                    保存すると DMA の確定は取り消されます（前提が変わるため）。
+                  </span>
+                )}
               </div>
             )}
           </form>
@@ -317,14 +338,26 @@ export default async function CsrdSettingsPage({
           />
           <form action={saveCsrdMethodAction} className="space-y-3 p-3">
             <input type="hidden" name="reportingPeriodId" value={shell.currentPeriod.id} />
-            <p className="rounded-t4d bg-surface-muted p-2 text-[11px] leading-relaxed text-ink-muted">
-              {DMA_METHOD_NOTE}
-              インパクトのスコア = 深刻度（負: 規模・範囲・回復困難性の平均、正:
-              規模・範囲の平均）。潜在は √(深刻度 ×
-              発生可能性)、ただし人権に関わる潜在のインパクトは深刻度を使います。リスク・機会のスコア
-              = √(発生可能性 × 財務影響の大きさ)。小数 1
-              桁に丸めた値で閾値と比べ、閾値ちょうどは「重要」を提案します。
-            </p>
+            {/* 「ESRS は数値の閾値を定めていない」ことは summary に置き、閉じていても見せる */}
+            <Collapsible
+              variant="plain"
+              summary="算定式と閾値の決め方（ESRS は数値の閾値を定めていません）"
+              bodyClassName="space-y-1 leading-relaxed text-ink-muted"
+            >
+              <p>{DMA_METHOD_NOTE}</p>
+              <p>
+                インパクトのスコア = 深刻度（負: 規模・範囲・回復困難性の平均、正:
+                規模・範囲の平均）。潜在は √(深刻度 ×
+                発生可能性)、ただし人権に関わる潜在のインパクトは深刻度を使います。リスク・機会のスコア
+                = √(発生可能性 × 財務影響の大きさ)。小数 1
+                桁に丸めた値で閾値と比べ、閾値ちょうどは「重要」を提案します。
+              </p>
+              <p>
+                閾値は {DMA_THRESHOLD_MIN.toFixed(1)}〜{DMA_THRESHOLD_MAX.toFixed(1)} の小数 1
+                桁（デモ既定は
+                3.0）。閾値を変えると算定結果（提案）が変わります。人の判断は変わりません。
+              </p>
+            </Collapsible>
             <div className="flex flex-wrap gap-4">
               <label className="space-y-1 text-[12px] text-ink">
                 <span className="block font-medium">インパクトの閾値（インパクト重要性）</span>
@@ -352,10 +385,6 @@ export default async function CsrdSettingsPage({
                   className="w-28"
                 />
               </label>
-              <p className="self-end text-[11px] text-ink-muted">
-                {DMA_THRESHOLD_MIN.toFixed(1)}〜{DMA_THRESHOLD_MAX.toFixed(1)} の小数 1
-                桁（自社の評価方法・デモ既定は 3.0）
-              </p>
             </div>
             <label className="block space-y-1 text-[12px] text-ink">
               <span className="block font-medium">
@@ -384,10 +413,11 @@ export default async function CsrdSettingsPage({
                 <SubmitButton size="sm" variant="outline" pendingLabel="保存中…">
                   評価方法を保存
                 </SubmitButton>
-                <span className="text-[11px] text-ink-muted">
-                  閾値を変えると算定結果（提案）が変わり、DMA
-                  の確定は取り消されます。人の判断は変わりません。
-                </span>
+                {view.confirmed && (
+                  <span className="text-[11px] text-ink-muted">
+                    保存すると DMA の確定は取り消されます（人の判断は変わりません）。
+                  </span>
+                )}
               </div>
             )}
           </form>
@@ -399,7 +429,7 @@ export default async function CsrdSettingsPage({
             title={`③ ダブル・マテリアリティ評価（判断済み ${decidedCount} / ${view.matterTotal} 事項）`}
             action={
               <span className="text-[11px] text-ink-muted">
-                算定結果は提案です。各観点の重要性は、事項ごとに人が根拠を付けて判断します
+                算定結果は提案。重要性は事項ごとに人が根拠を付けて判断します
               </span>
             }
           />
@@ -486,24 +516,32 @@ export default async function CsrdSettingsPage({
           </div>
           <div className="grid grid-cols-[minmax(0,440px)_1fr] items-start gap-4 border-t border-line p-3">
             <DmaMatrix inputs={matrixInputsOf(view.matters)} thresholds={view.thresholds} />
-            <div className="space-y-2 text-[12px] text-ink">
-              <p className="font-medium">マトリクスの読み方</p>
-              <p className="text-[11px] leading-relaxed text-ink-muted">
-                各事項を、算定したインパクトのスコア（縦）とリスク・機会のスコア（横）の位置に置いています（表と同じ内容）。
-                閾値の線より上ならインパクト重要性、右なら財務的重要性で「重要」を提案します。
-                適用を決めるのは位置ではなく人の判断（表の「人の判断」）です。
+            <div className="min-w-0 space-y-2 text-[12px] text-ink">
+              <p className="text-[11px] text-ink-muted">
+                位置は算定結果（提案）。適用を決めるのは表の「人の判断」です。
               </p>
-              <ul className="space-y-0.5 text-[11px] text-ink-muted">
-                {view.matters.map((state) => (
-                  <li key={state.topic} className="flex flex-wrap items-center gap-1">
-                    <span className="font-mono text-ink">{state.topic}</span>
-                    {ESRS_TOPIC_LABEL[state.topic]}: 人の判断 {DMA_OUTCOME_LABEL[state.outcome]}
-                    {state.proposedOutcome !== state.outcome && (
-                      <span>（提案は {DMA_OUTCOME_LABEL[state.proposedOutcome]}）</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              {/* 読み方と事項ごとの一覧は表と同じ内容なので既定で閉じる（§10.4） */}
+              <Collapsible
+                variant="plain"
+                summary={`マトリクスの読み方・事項ごとの判断（提案と人の判断が違う事項 ${differing} 件）`}
+                bodyClassName="space-y-1.5"
+              >
+                <p className="text-[11px] leading-relaxed text-ink-muted">
+                  各事項を、算定したインパクトのスコア（縦）とリスク・機会のスコア（横）の位置に置いています（表と同じ内容）。
+                  閾値の線より上ならインパクト重要性、右なら財務的重要性で「重要」を提案します。
+                </p>
+                <ul className="space-y-0.5 text-[11px] text-ink-muted">
+                  {view.matters.map((state) => (
+                    <li key={state.topic} className="flex flex-wrap items-center gap-1">
+                      <span className="font-mono text-ink">{state.topic}</span>
+                      {ESRS_TOPIC_LABEL[state.topic]}: 人の判断 {DMA_OUTCOME_LABEL[state.outcome]}
+                      {state.proposedOutcome !== state.outcome && (
+                        <span>（提案は {DMA_OUTCOME_LABEL[state.proposedOutcome]}）</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </Collapsible>
               {view.canEdit && (
                 <p className="flex items-center gap-1 text-[11px] text-ink-muted">
                   <PencilLine className="size-3" aria-hidden="true" />

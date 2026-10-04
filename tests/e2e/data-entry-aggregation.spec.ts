@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * DATA-P0-004（前年度複製・テンプレート・コピペ表入力）と
@@ -44,6 +44,11 @@ test('コピペ表入力: Excel から貼り付けた表が AI 仕分けされ�
   await page.goto('/enterprise/imports');
 
   const pasted = ['拠点\t項目\t値\t単位', '西日本工場\t用水使用量\t120500\tm3'].join('\n');
+  // 貼り付けの入力欄は既定で閉じた折りたたみの中（docs/disclosure-first.md §10.4 B6）。見出しは常に見える
+  await expect(
+    page.getByRole('heading', { name: 'コピペ表入力（Excel からそのまま貼り付け）' }),
+  ).toBeVisible();
+  await openCollapsible(page, '表を貼り付けて取り込む');
   await page.locator('textarea[name="pasted"]').fill(pasted);
   await page.getByRole('button', { name: '貼り付け内容を取り込む' }).click();
 

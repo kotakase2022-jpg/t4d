@@ -104,7 +104,8 @@ export default async function NewNarrativePage({
       <>
         <PageHeader
           title="定性情報を新しく登録"
-          description="文章で自然に書き、構造化した項目は必要な部分だけ記入します。根拠の無い影響額・頻度・委員会名などは自動で補いません。"
+          description="根拠の無い影響額・頻度・委員会名などは自動で補いません"
+          help={<p>文章で自然に書き、構造化した項目（テンプレート）は必要な部分だけ記入します。</p>}
           breadcrumbs={breadcrumbs}
         />
         <div className="space-y-3 p-4">
@@ -150,7 +151,13 @@ export default async function NewNarrativePage({
     <>
       <PageHeader
         title="資料から候補を作成"
-        description="資料の抜粋を選ぶと、その文言を出典つきで並べた下書き（候補）を作ります。AI は使いません。テンプレート項目は埋めないので、内容を確かめて人が記入してください。"
+        description="資料の抜粋から出典つきの下書き（候補）を作ります（AI は使いません）"
+        help={
+          <p>
+            資料の抜粋を選ぶと、その文言を出典つきで並べた下書き（候補）を作ります。AI
+            は使いません。テンプレート項目は埋めないので、内容を確かめて人が記入してください。
+          </p>
+        }
         breadcrumbs={breadcrumbs}
       />
       <div className="space-y-3 p-4">

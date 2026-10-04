@@ -102,7 +102,12 @@ export default async function EvidencePage({
     <>
       <PageHeader
         title={pageTitle}
-        description="原本は非公開の保管領域に保存し、ダウンロードは短時間だけ有効な署名付きリンク経由です。閲覧・ダウンロードは監査ログへ記録されます。"
+        description="原本は非公開で保管し、閲覧・ダウンロードは監査ログに残ります"
+        help={
+          <p>
+            原本は非公開の保管領域に保存し、ダウンロードは短時間だけ有効な署名付きリンク経由です。閲覧・ダウンロードは監査ログへ記録されます。
+          </p>
+        }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: pageTitle }]}
       />
 

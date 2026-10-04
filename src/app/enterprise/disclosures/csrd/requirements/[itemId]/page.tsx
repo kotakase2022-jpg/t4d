@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { getAiProvider } from '@/lib/ai';
@@ -92,7 +93,7 @@ function excerpt(text: string, max = 120): string {
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
 }
 
-/** 3 観点の 1 つ（人が確定した値） */
+/** 3 観点の 1 つ（人が確定した値）。観点が問う内容は下の「3 観点が問うこと」（既定で閉じる）にまとめる */
 function GapCard({ kind, status }: { kind: SsbjGapKind; status: SsbjCoverageStatus }) {
   const Icon = GAP_ICON[kind];
   return (
@@ -102,7 +103,6 @@ function GapCard({ kind, status }: { kind: SsbjGapKind; status: SsbjCoverageStat
         <span className="text-[12px] font-semibold text-ink">{GAP_KIND_LABEL[kind]}</span>
       </div>
       <CoverageStatusBadge status={status} />
-      <p className="text-[11px] leading-relaxed text-ink-muted">{CSRD_GAP_KIND_QUESTION[kind]}</p>
     </div>
   );
 }
@@ -149,6 +149,10 @@ function CoverageSelects({
  *  - 3 観点の人の入力、AI ギャップ分析（候補・デモ生成）と「候補を採用」「修正して確定」
  *  - 対応付いた指標の当期データ（値は承認済みだけ）、対応計画の一覧と追加
  *  - 回答（版・承認）の状態と「回答を編集（版・承認）」（既存の回答画面へ）
+ *
+ * 文字量を減らす（§10.4）: 3 観点の問い・優先度の付け方・回答画面でできることは既定で閉じる。
+ * 適用の根拠、架空の縮小サンプル、「この判定は候補です」、AI の下書きでは承認できないことは常に見せる。
+ * 「確認待ち」と完全一致する表示はここで新しく作らない（E2E がその数で確認待ちの有無を確かめる）。
  */
 export default async function CsrdRequirementDetailPage({
   params,
@@ -540,6 +544,16 @@ export default async function CsrdRequirementDetailPage({
                 <GapCard kind="data" status={statuses.data} />
                 <GapCard kind="process" status={statuses.process} />
               </div>
+              <MoreInfo label="3 観点が問うこと">
+                <dl className="space-y-0.5">
+                  {SSBJ_GAP_KINDS.map((kind) => (
+                    <div key={kind}>
+                      <dt className="inline font-medium text-ink">{GAP_KIND_LABEL[kind]}: </dt>
+                      <dd className="inline">{CSRD_GAP_KIND_QUESTION[kind]}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </MoreInfo>
               {a?.finalStatus && (
                 <div className="flex flex-wrap items-center gap-2 rounded-t4d bg-surface-muted p-2">
                   <UserCheck className="size-3.5 text-ink-muted" aria-hidden="true" />
@@ -644,9 +658,12 @@ export default async function CsrdRequirementDetailPage({
                 </TBody>
               </Table>
             ) : (
-              <p className="px-3 pb-3 text-[12px] text-ink-muted">
-                優先度は評価対象（常に適用・重要と判断した事項）の要求事項だけに付けます。
-              </p>
+              <div className="space-y-1 px-3 pb-3">
+                <p className="text-[12px] text-ink-muted">優先度なし（評価対象外）</p>
+                <MoreInfo label="優先度の付け方">
+                  <p>優先度は評価対象（常に適用・重要と判断した事項）の要求事項だけに付けます。</p>
+                </MoreInfo>
+              </div>
             )}
           </Card>
         </div>
@@ -865,11 +882,18 @@ export default async function CsrdRequirementDetailPage({
             title="回答（版・承認）"
             action={<ResponseStatusBadge status={view.response?.status ?? 'not_started'} />}
           />
-          <p className="px-3 pb-3 text-[12px] text-ink-muted">
-            回答本文の作成・版の履歴・レビュー依頼・承認・AI 回答ドラフトは、回答画面（CDP
-            と同じ画面）で行います。 上の「回答を編集（版・承認）」から開けます。AI
-            の下書きのままでは承認できません。
-          </p>
+          {/* AI の下書きのままでは承認できないこと（確定は人）は閉じずに見せる */}
+          <div className="space-y-1 px-3 pb-3">
+            <p className="text-[12px] text-ink-muted">
+              回答は回答画面で作成・承認します（AI の下書きのままでは承認できません）。
+            </p>
+            <MoreInfo label="回答画面でできること">
+              <p>
+                回答本文の作成・版の履歴・レビュー依頼・承認・AI 回答ドラフト（CDP
+                と同じ画面）。上の「回答を編集（版・承認）」から開けます。
+              </p>
+            </MoreInfo>
+          </div>
         </Card>
       </div>
     </>

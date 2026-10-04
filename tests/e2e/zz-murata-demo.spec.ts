@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { buildMurataFiles } from '../../scripts/murata-dataset';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * 村田製作所向けデモ: リセット → 20 ファイル一括 UI 投入 → 候補選択 → 確定 → リセット。
@@ -30,9 +30,16 @@ test('デモリセット: 削除範囲の確認つきで算定版を初期状態
     'href',
     '/demo/murata-scope3-cat1-upload.zip',
   );
+  // 係数・為替が架空であることは閉じない（データセットの説明の本文だけを閉じる。§10.4）
+  await expect(
+    page.getByText(/為替レートはすべて架空の説明用で、実算定には使用できません/),
+  ).toBeVisible();
 
-  // 削除範囲の説明と確認チェックが必須
+  // 削除範囲の説明と確認チェックが必須。「上記の削除範囲」が指す 1 行は閉じず、
+  // 触らないものの一覧は「リセットで変わらないもの」を開くと読める
   await expect(page.getByText(/削除範囲: この組織 ×/)).toBeVisible();
+  const untouched = await openCollapsible(page, 'リセットで変わらないもの');
+  await expect(untouched.getByText(/Data Point 本体・承認履歴/)).toBeVisible();
   await page.getByRole('checkbox', { name: '上記の削除範囲を確認しました' }).check();
   await page.getByRole('button', { name: '取込済みの算定版をリセットする' }).click();
   await page.waitForURL(/flash=supplierDemoReset/);

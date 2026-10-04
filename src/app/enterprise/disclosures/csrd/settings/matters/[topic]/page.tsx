@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
@@ -336,9 +337,11 @@ export default async function CsrdMatterPage({
               </div>
             </details>
           )}
-          <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
-            削除は論理削除です（履歴は残り、算定からは外れます）。
-          </p>
+          {detail.canEdit && (
+            <MoreInfo label="削除の扱い" className="border-t border-line px-3 py-1.5">
+              <p>削除は論理削除です（履歴は残り、算定からは外れます）。</p>
+            </MoreInfo>
+          )}
         </Card>
 
         <Card className="overflow-hidden">
@@ -392,11 +395,18 @@ export default async function CsrdMatterPage({
                 >
                   判断を保存
                 </SubmitButton>
+                {/* AI は判断しないことは常に見せる。確定の取り消しは、取り消す確定があるときだけ書く */}
                 <span className="text-[11px] text-ink-muted">
-                  評価した観点は根拠が必須です。算定結果と違う判断もできます（根拠を残してください）。保存すると
-                  DMA の確定は取り消されます。AI は判断しません。
+                  AI は判断しません。
+                  {detail.dmaConfirmed && '保存すると DMA の確定は取り消されます。'}
                 </span>
               </div>
+              <MoreInfo label="判断の決まり">
+                <p>
+                  重要／重要でないと評価した観点は根拠が必須です。算定結果（提案）と違う判断もできます（根拠を残してください）。
+                </p>
+                <p>判断を保存すると、確定済みの DMA は確定が取り消されます。</p>
+              </MoreInfo>
             </PreservingForm>
           ) : (
             <div className="space-y-2 p-3">

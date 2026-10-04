@@ -19,7 +19,8 @@ export default async function ReportsPage() {
     <>
       <PageHeader
         title="レポート"
-        description={`${period.label} のデータを CSV / XLSX / DOCX へ出力します。Export の実行は監査ログへ記録されます。`}
+        description={`${period.label} のデータを CSV / XLSX / DOCX へ出力`}
+        help={<p>Export の実行は監査ログへ記録されます。</p>}
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'レポート' }]}
       />
 

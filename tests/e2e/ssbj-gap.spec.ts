@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * SSBJ ギャップ分析の 5 画面。
@@ -35,6 +35,19 @@ test.describe('SSBJ 対応状況（全体状況）', () => {
     ]) {
       await expect(main.getByText(label, { exact: true }).first()).toBeVisible();
     }
+    // 重ならない 6 区分は 1 本の帯＋凡例（各区分は「n / 全要求事項 件」）。確認待ちは区分と重なるので帯の外
+    const breakdown = main.getByRole('list', { name: '全要求事項の内訳' });
+    await expect(breakdown.getByRole('listitem')).toHaveCount(6);
+    await expect(breakdown.getByRole('listitem').first()).toContainText(/対応済み\d+ \/ \d+ 件/);
+    // 件数の数え方・工程の説明は既定で閉じ、開くと読める（docs/disclosure-first.md §10.4）
+    const counting = await openCollapsible(main, /^件数の数え方$/);
+    await expect(
+      counting.getByText(/評価対象（対象外・重要性なしを除く）で数えています/),
+    ).toBeVisible();
+    const stepNotes = await openCollapsible(main, /^各工程の説明$/);
+    await expect(
+      stepNotes.getByText('適用する基準・報告の範囲・重要性のある課題を決めます。'),
+    ).toBeVisible();
 
     // 4 領域の対応状況
     await expect(main.getByText('領域別の対応状況')).toBeVisible();
@@ -126,12 +139,16 @@ test.describe('SSBJ 要求事項の評価（統合画面）', () => {
     // 適用中の基準
     await expect(main.getByText(/一般開示基準 適用/)).toBeVisible();
 
-    // マテリアリティ × 基準の表（登録済みなら行、未登録なら登録への導線）
-    const matrixVisible = await main
-      .getByRole('columnheader', { name: '気候関連開示基準' })
-      .isVisible()
-      .catch(() => false);
-    if (!matrixVisible) {
+    // マテリアリティ × 基準の表（登録済みなら行、未登録なら登録への導線）。
+    // 表は既定で閉じた折りたたみ（docs/disclosure-first.md §10.4）なので、開いてから列を確かめる。
+    // 未登録の空状態は閉じずに見せる
+    const matrixSummary = main
+      .locator('[data-collapsible-summary]')
+      .filter({ hasText: /^マテリアリティ × 基準の対応表/ });
+    if ((await matrixSummary.count()) > 0) {
+      const matrix = await openCollapsible(main, /^マテリアリティ × 基準の対応表（\d+ 件）$/);
+      await expect(matrix.getByRole('columnheader', { name: '気候関連開示基準' })).toBeVisible();
+    } else {
       await expect(main.getByText('マテリアリティが未登録です')).toBeVisible();
     }
   });

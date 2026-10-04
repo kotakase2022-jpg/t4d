@@ -8,6 +8,7 @@ import {
   carriesDemoState,
   carryDemoState,
   loginAs,
+  openCollapsible,
   peakCarriedCookieHeader,
   resetDisclosureDemo,
   setDisclosureFirst,
@@ -281,6 +282,10 @@ test('CSV 登録（訂正行）→ 数値確認（旧版と変更理由・二重
   // 数値確認: 台帳に新しい版が追加され、旧版と変更理由が残る（A04）
   await page.goto(`/enterprise/data/${WATER_EU_FY2026}`);
   await expect(page.getByRole('heading', { name: '水使用量 — 欧州販売子会社' })).toBeVisible();
+  // Version 履歴は既定で閉じた折りたたみ（見出しは常に見える。docs/disclosure-first.md §10.4 B6）。
+  // 閉じた中の行は getByRole で見つからないため、開いてから同じ内容を確かめる
+  await expect(page.getByRole('heading', { name: /^Version 履歴（\d+）$/ })).toBeVisible();
+  await openCollapsible(page, /^版の一覧/);
   const history = page.locator('table').filter({ hasText: '変更理由' }).last();
   const current = history.getByRole('row').filter({ hasText: '現在' });
   await expect(current).toContainText('23,480.5');

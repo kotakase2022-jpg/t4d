@@ -4,6 +4,7 @@ import { ArrowRight, ChartLine } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader } from '@/components/shared/page-header';
 import { Card } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { can } from '@/lib/authorization/can';
 import { businessToday } from '@/lib/clock';
 import { getAppMode } from '@/lib/config';
@@ -105,13 +106,18 @@ export default async function EnterpriseDashboardPage({
       {tab === 'esg' ? (
         <>
           <div className="px-4 pt-1">
+            {/* タブの説明は既定で閉じ、ESG経営への導線だけを常に見せる（docs/disclosure-first.md §10.4） */}
             <Card>
-              <div className="flex items-center gap-2 px-3 py-2 text-[12px] text-ink">
-                <ChartLine className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-                KPI・目標・推移は「ESG経営」画面にまとめています。以下はデータ収集の進み具合です。
+              <div className="flex items-start gap-2 px-3 py-2 text-[12px] text-ink">
+                <ChartLine className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+                <MoreInfo label="このタブに出ているもの" className="pt-0.5">
+                  <p>
+                    KPI・目標・推移は「ESG経営」画面にまとめています。以下はデータ収集の進み具合です。
+                  </p>
+                </MoreInfo>
                 <Link
                   href="/enterprise/esg"
-                  className="ml-auto inline-flex items-center gap-1 font-medium text-brand-700 hover:underline"
+                  className="ml-auto inline-flex shrink-0 items-center gap-1 font-medium text-brand-700 hover:underline"
                 >
                   ESG経営を開く <ArrowRight className="size-3" aria-hidden="true" />
                 </Link>

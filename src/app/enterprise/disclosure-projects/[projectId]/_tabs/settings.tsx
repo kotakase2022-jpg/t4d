@@ -2,6 +2,8 @@ import { AlertTriangle, CheckCircle2, Info, Lock } from 'lucide-react';
 import { SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { permissionsFor } from '@/lib/authorization/can';
 import { getReferenceDate } from '@/lib/clock';
@@ -39,6 +41,7 @@ import { FrameworkConditionsForm } from './framework-conditions-form';
  */
 export async function SettingsTab({
   projectId,
+  searchParams,
 }: {
   projectId: string;
   searchParams: Record<string, string | string[] | undefined>;
@@ -48,6 +51,8 @@ export async function SettingsTab({
   const detail = await getProject(db, ctx, projectId);
   const project = detail.project;
   const today = getReferenceDate();
+  // 判断を確定した直後は、確定した判断が載る履歴を開いて描く（フラッシュが中身を指すとき。§10.4）
+  const historyOpen = searchParams.flash === 'applicabilityConfirmed';
 
   // 新しい版ごとの移行差分と、旧版で書いた原稿への影響
   const newerInfo = new Map<
@@ -150,6 +155,7 @@ export async function SettingsTab({
           decidedByName={(id) => nameOf(detail.members, id)}
           newer={newerInfo.get(f.projectFramework.id) ?? []}
           impact={impactByPf.get(f.projectFramework.id) ?? null}
+          historyOpen={historyOpen}
         />
       ))}
       {detail.frameworks.length === 0 && (
@@ -171,6 +177,7 @@ function FrameworkSettings({
   decidedByName,
   newer,
   impact,
+  historyOpen,
 }: {
   projectId: string;
   framework: ProjectFrameworkView;
@@ -183,6 +190,7 @@ function FrameworkSettings({
     diff: Awaited<ReturnType<typeof compareFrameworkVersions>>;
   }>;
   impact: Awaited<ReturnType<typeof computeBlockImpact>> | null;
+  historyOpen: boolean;
 }) {
   const pfId = f.projectFramework.id;
   const decided = f.projectFramework.currentDecisionId !== null;
@@ -215,10 +223,9 @@ function FrameworkSettings({
             </p>
           )}
           {reference && (
-            <p className="flex gap-1 rounded-t4d bg-surface-muted px-2 py-1 text-[11px] text-ink-muted">
-              <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-              {reference}
-            </p>
+            <MoreInfo label="適用条件の参考">
+              <p>{reference}</p>
+            </MoreInfo>
           )}
           {f.conditionsChangedSinceDecision && (
             <p className="flex items-center gap-1 text-[11px] text-[#8a5d00]">
@@ -291,14 +298,16 @@ function FrameworkSettings({
             />
           ) : null}
 
-          <div>
-            <p className="text-[12px] font-medium text-ink">
-              判断の履歴（{f.decisions.length} 件）
-            </p>
-            {f.decisions.length === 0 ? (
-              <p className="text-[11px] text-ink-muted">まだ判断は確定していません。</p>
-            ) : (
-              <ol className="mt-1 space-y-1">
+          {/* 判断の履歴は既定で閉じる（件数は閉じていても見える。§10.4 B6） */}
+          {f.decisions.length === 0 ? (
+            <p className="text-[11px] text-ink-muted">まだ判断は確定していません。</p>
+          ) : (
+            <Collapsible
+              variant="plain"
+              summary={`判断の履歴（${f.decisions.length} 件）`}
+              open={historyOpen || undefined}
+            >
+              <ol className="space-y-1">
                 {f.decisions.map((d) => (
                   <li key={d.id} className="rounded-t4d bg-surface-muted px-2 py-1 text-[11px]">
                     <span className="font-medium">
@@ -318,8 +327,8 @@ function FrameworkSettings({
                   </li>
                 ))}
               </ol>
-            )}
-          </div>
+            </Collapsible>
+          )}
         </section>
       </div>
 

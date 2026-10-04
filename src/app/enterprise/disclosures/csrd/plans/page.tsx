@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ArrowLeft, ClipboardList, Database, ListChecks } from 'lucide-react';
+import { ArrowLeft, Ban, CalendarClock, ClipboardList, Database, ListChecks } from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -21,6 +22,7 @@ import { loadEnterpriseShell } from '@/lib/services/shell';
 import { SSBJ_ACTION_STATUSES } from '@/types/domain';
 import { ApplicabilityBadge, SampleMasterBadge } from '../_components/csrd-badges';
 import {
+  ACTION_STATUS_ICON,
   ActionStatusBadge,
   OutOfScopeRequirementBadge,
   PlanPriorityBadge,
@@ -51,6 +53,8 @@ function DaysLeft({ view }: { view: CsrdActionPlanView }) {
  * SSBJ の計画は出さない。計画の追加は要求事項の詳細（評価対象の要求事項）から行う。
  * 計画を立てた後に DMA の判断が変わって評価対象から外れた要求事項の計画は、消さずに
  * 「対象外の要求事項」と示す（判断の取り違えで作業を失わせない）。
+ *
+ * 文字量を減らす（§10.4）: 状態の件数は積み上げの帯（分母付き）、操作の説明は「この画面について」。
  */
 export default async function CsrdPlansPage({
   searchParams,
@@ -98,6 +102,21 @@ export default async function CsrdPlansPage({
             <SampleMasterBadge />
           </span>
         }
+        help={
+          <>
+            <p>
+              担当者・対応状況は一覧の表で更新します。計画の追加は要求事項の詳細画面（評価対象の要求事項）から行います。
+            </p>
+            <p>
+              DMA
+              の判断が変わって評価対象から外れた要求事項の計画は、消さずに「対象外の要求事項」と示します。
+            </p>
+            <p>
+              データの不足に対する計画は、「CSRD
+              データ収集」で収集項目（指標・拠点・担当・期限）にします。
+            </p>
+          </>
+        }
         breadcrumbs={BREADCRUMBS}
         actions={
           <div className="flex items-center gap-1.5">
@@ -126,57 +145,55 @@ export default async function CsrdPlansPage({
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
-        <ul className="grid grid-cols-6 gap-2" aria-label="対応計画の件数">
-          {counts.map((c) => (
-            <li key={c.status}>
-              <Card className="space-y-1 p-2.5">
-                <p className="text-[11px] text-ink-muted">{ACTION_STATUS_LABEL[c.status]}</p>
-                <p className="text-[20px] font-semibold leading-none tabular-nums text-ink">
-                  {c.value}
-                  <span className="ml-1 text-[11px] font-normal text-ink-muted">
-                    / {plans.length} 件
-                  </span>
-                </p>
-              </Card>
-            </li>
-          ))}
-          <li>
-            <Card className="space-y-1 p-2.5">
-              <p className="text-[11px] text-ink-muted">期限超過（完了を除く）</p>
-              <p
-                className={`text-[20px] font-semibold leading-none tabular-nums ${
-                  overdue > 0 ? 'text-danger' : 'text-ink'
-                }`}
+        {/* 状態の件数は積み上げの帯＋凡例（分母付き）。期限超過・対象外は別の事実として並べる */}
+        <Card className="flex flex-wrap items-start gap-x-6 gap-y-2 p-3">
+          <StatusBreakdown
+            label="対応計画の件数"
+            className="min-w-[280px] flex-1"
+            denominator={plans.length}
+            items={counts.map((c) => ({
+              key: c.status,
+              label: ACTION_STATUS_LABEL[c.status],
+              count: c.value,
+              icon: ACTION_STATUS_ICON[c.status],
+            }))}
+          />
+          <dl className="space-y-1 text-[12px]">
+            <div className="flex items-center gap-1.5">
+              <dt className="flex items-center gap-1 text-ink-muted">
+                <CalendarClock className="size-3.5" aria-hidden="true" />
+                期限超過（完了を除く）
+              </dt>
+              <dd
+                className={`tabular-nums ${overdue > 0 ? 'font-semibold text-danger' : 'text-ink'}`}
               >
-                {overdue}
-                <span className="ml-1 text-[11px] font-normal text-ink-muted">件</span>
-              </p>
-            </Card>
-          </li>
-          <li>
-            <Card className="space-y-1 p-2.5">
-              <p className="text-[11px] text-ink-muted">対象外の要求事項の計画</p>
-              <p
-                className={`text-[20px] font-semibold leading-none tabular-nums ${
-                  outOfScope > 0 ? 'text-[#8a5d00]' : 'text-ink'
-                }`}
+                {overdue} 件
+              </dd>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <dt className="flex items-center gap-1 text-ink-muted">
+                <Ban className="size-3.5" aria-hidden="true" />
+                対象外の要求事項の計画
+              </dt>
+              <dd
+                className={`tabular-nums ${outOfScope > 0 ? 'font-semibold text-[#8a5d00]' : 'text-ink'}`}
               >
-                {outOfScope}
-                <span className="ml-1 text-[11px] font-normal text-ink-muted">件</span>
-              </p>
-            </Card>
-          </li>
-        </ul>
+                {outOfScope} 件
+              </dd>
+            </div>
+          </dl>
+        </Card>
 
         <Card className="overflow-hidden">
+          {/* 操作の説明は「この画面について」へ。権限が無いことは閉じずに見せる */}
           <SectionTitle
             title="対応計画の一覧"
             action={
-              <span className="text-[11px] text-ink-muted">
-                {canWrite
-                  ? '担当者・対応状況をここで更新します。計画の追加は要求事項の詳細画面から行います'
-                  : '閲覧のみ（更新には開示の編集権限が必要です）'}
-              </span>
+              canWrite ? undefined : (
+                <span className="text-[11px] text-ink-muted">
+                  閲覧のみ（更新には開示の編集権限が必要です）
+                </span>
+              )
             }
           />
           {plans.length === 0 ? (
@@ -328,11 +345,6 @@ export default async function CsrdPlansPage({
             </div>
           )}
         </Card>
-
-        <p className="text-[11px] text-ink-muted">
-          データの不足に対する計画は、「CSRD
-          データ収集」で収集項目（指標・拠点・担当・期限）にします。
-        </p>
       </div>
     </>
   );

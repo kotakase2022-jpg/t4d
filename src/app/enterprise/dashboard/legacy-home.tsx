@@ -1,24 +1,27 @@
 import Link from 'next/link';
 import { AlertTriangle, ArrowRight, CalendarClock, History, ListTodo } from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { PriorityBadge, SeverityBadge } from '@/components/shared/badges';
 import { KpiCard, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
+import { CollapsibleSection } from '@/components/ui/collapsible';
 import { daysUntilJst, formatJst, formatJstDate } from '@/lib/format/datetime';
 import { loadEnterpriseDashboard } from '@/lib/services/enterprise-data';
 import type { EnterpriseShell } from '@/lib/services/shell';
 import { loadSsbjHeadline } from '@/lib/services/ssbj-gap';
 import type { IsoDate } from '@/types/domain';
+import { unitStatusItems } from './home-breakdown';
 
 /**
  * 従来のホーム（データ収集の進み具合が中心）。
  *
- * 開示優先モードが無効の組織ではこれがホームそのもの（見た目・リンクを変えない: A39）。
+ * 開示優先モードが無効の組織ではこれがホームそのもの（A39。KPI カードとリンクは変えない）。
  * 有効な組織では「ESG経営」タブにそのまま出す。期限の判定は業務上の今日（src/lib/clock.ts）を
  * 受け取って使う（以前は Supabase Mode でも固定の FIXTURE_TODAY を使っていた）。
+ * 2026-10-02 の文字量削減（docs/disclosure-first.md §10.4）で、拠点別進捗を状態の内訳の帯に、
+ * 直近のアクティビティを既定で閉じた節にした。
  */
 export async function LegacyHomeBody({ shell, today }: { shell: EnterpriseShell; today: IsoDate }) {
   // KPI はすべて DB 側の count で求める（全件をアプリへ読み込まない）。
@@ -157,23 +160,19 @@ export async function LegacyHomeBody({ shell, today }: { shell: EnterpriseShell;
               </Link>
             }
           />
-          <div className="t4d-scroll-x">
-            <Table>
-              <THead>
-                <TR>
-                  <TH>組織・拠点</TH>
-                  <TH align="right">対象</TH>
-                  <TH align="right">承認済み</TH>
-                  <TH align="right">レビュー中</TH>
-                  <TH align="right">未提出</TH>
-                  <TH align="right">エラー</TH>
-                  <TH className="w-[160px]">進捗</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {data.unitProgress.map((row) => (
-                  <TR key={row.unit.id}>
-                    <TD>
+          {/* 拠点ごとの状態の内訳（docs/disclosure-first.md §10.4）。帯は重ならない区分（合計 = 対象）で、
+              各区分はその拠点・状態の台帳へのリンク。検証エラーは状態と重なるので帯の外に書く */}
+          {data.unitProgress.length === 0 ? (
+            <EmptyState title="集計対象の拠点がありません" />
+          ) : (
+            <ul className="divide-y divide-line border-t border-line">
+              {data.unitProgress.map((row) => (
+                <li
+                  key={row.unit.id}
+                  className="grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-3 px-3 py-2"
+                >
+                  <div className="min-w-0 space-y-0.5 text-[12px]">
+                    <p className="truncate">
                       <Link
                         href={`${base}?unit=${row.unit.id}`}
                         className="text-brand-700 hover:underline"
@@ -181,40 +180,38 @@ export async function LegacyHomeBody({ shell, today }: { shell: EnterpriseShell;
                         {row.unit.name}
                       </Link>
                       <span className="ml-1 text-[11px] text-ink-muted">{row.unit.code}</span>
-                    </TD>
-                    <TD align="right">{row.total}</TD>
-                    <TD align="right">{row.approved}</TD>
-                    <TD align="right">{row.submitted}</TD>
-                    <TD align="right">{row.notStarted}</TD>
-                    <TD align="right">
-                      {row.errors > 0 ? (
-                        <Link
-                          href={`${base}?unit=${row.unit.id}&flag=validation_error`}
-                          className="font-medium text-danger hover:underline"
-                        >
-                          {row.errors}
-                        </Link>
-                      ) : (
-                        <span className="text-ink-muted">0</span>
-                      )}
-                    </TD>
-                    <TD>
-                      <div className="flex items-center gap-2">
-                        <Progress
-                          value={row.progressPercent}
-                          label={`${row.unit.name} の承認進捗`}
-                          tone={row.progressPercent >= 80 ? 'success' : 'brand'}
-                        />
-                        <span className="tnum w-9 shrink-0 text-right text-[11px] text-ink-muted">
-                          {row.progressPercent}%
-                        </span>
-                      </div>
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          </div>
+                    </p>
+                    <p className="text-[11px] text-ink-muted">
+                      対象 <span className="tnum text-ink">{row.total}</span> 件
+                    </p>
+                    {/* 0 件でも書く（表のときと同じく、エラーが無いことも読める） */}
+                    {row.errors > 0 ? (
+                      <Link
+                        href={`${base}?unit=${row.unit.id}&flag=validation_error`}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-danger hover:underline"
+                      >
+                        <AlertTriangle className="size-3" aria-hidden="true" />
+                        エラー {row.errors} 件
+                      </Link>
+                    ) : (
+                      <p className="text-[11px] text-ink-muted">エラー 0 件</p>
+                    )}
+                  </div>
+                  <StatusBreakdown
+                    label={`${row.unit.name} の状態の内訳`}
+                    items={unitStatusItems({
+                      unitId: row.unit.id,
+                      total: row.total,
+                      approved: row.approved,
+                      submitted: row.submitted,
+                      notStarted: row.notStarted,
+                    })}
+                    denominator={row.total}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
         {/* 今日のタスク */}
@@ -314,21 +311,32 @@ export async function LegacyHomeBody({ shell, today }: { shell: EnterpriseShell;
             )}
           </Card>
 
-          <Card>
-            <SectionTitle title="直近のアクティビティ" />
-            {data.recentActivity.length === 0 ? (
-              <EmptyState title="更新履歴がありません" icon={<History className="size-5" />} />
-            ) : (
+          {/* 履歴は既定で閉じる（docs/disclosure-first.md §10.4）。空のときは閉じずに空であることを見せる */}
+          {data.recentActivity.length === 0 ? (
+            <Card>
+              <SectionTitle title="直近のアクティビティ" />
+              <EmptyState
+                title="更新履歴がありません"
+                icon={<History className="size-5" aria-hidden="true" />}
+              />
+            </Card>
+          ) : (
+            <CollapsibleSection
+              id="recent-activity"
+              title="直近のアクティビティ"
+              summary={`更新 ${data.recentActivity.length} 件（最新 ${formatJst(data.recentActivity[0]!.at)}）`}
+              bodyClassName="pl-0"
+            >
               <ul className="divide-y divide-line">
                 {data.recentActivity.map((item) => (
-                  <li key={item.id} className="px-3 py-1.5">
+                  <li key={item.id} className="py-1.5">
                     <div className="text-[12px] text-ink">{item.label}</div>
                     <div className="text-[11px] text-ink-muted">{formatJst(item.at)}</div>
                   </li>
                 ))}
               </ul>
-            )}
-          </Card>
+            </CollapsibleSection>
+          )}
         </div>
       </div>
 

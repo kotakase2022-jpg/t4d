@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { CSRD_IDS } from '@/lib/fixtures/csrd';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * CSRD ワークスペース（機能追加要望 ②・2026-10-01 の再構成 docs/disclosure-first.md §9）。
@@ -36,6 +36,27 @@ test('サイドバーから CSRD を開き、ギャップ分析が表示され�
   await expect(gapTable.locator('tbody tr')).toHaveCount(12);
   // 対応状況の表はギャップ分析表 1 つだけ（§9.4）
   await expect(page.locator('#t4d-main table')).toHaveCount(1);
+
+  // 文字量を減らす（§10.4）: SSBJ との違いは短い 1 行で見せ、全文は閉じる（開いてから確かめる）
+  const main = page.locator('#t4d-main');
+  await expect(
+    main.getByText(
+      'SSBJ は財務的重要性のみ（シングル）。CSRD はインパクトか財務のどちらかで重要なら適用（ダブル）',
+    ),
+  ).toBeVisible();
+  const full = main.getByText(/投資家の意思決定に影響する情報/);
+  await expect(full).toBeHidden();
+  await openCollapsible(main, 'SSBJ との違い');
+  await expect(full).toBeVisible();
+  // DMA の結果・適用の内訳は帯＋凡例（分母付き）。適用の各区分は要求事項の絞込へ
+  await expect(main.getByRole('list', { name: '事項の結果（人の判断）' })).toContainText(
+    '/ 10 事項',
+  );
+  await expect(
+    main
+      .getByRole('list', { name: '適用の内訳' })
+      .getByRole('link', { name: '対象外（重要でない）' }),
+  ).toHaveAttribute('href', '/enterprise/disclosures/csrd/requirements?applicability=not_material');
 });
 
 test('ESRS 項目の要求事項の詳細から回答画面を開き、AI ドラフトを生成できる（共有ビュー）', async ({
@@ -90,6 +111,23 @@ test('CSRD 設定: インパクト重要性と財務的重要性の 2 観点・�
   await expect(main.getByRole('heading', { name: /CSRD 設定/ })).toBeVisible();
   await expect(main.getByText('SSBJ: シングル・マテリアリティ')).toBeVisible();
   await expect(main.getByText('CSRD: ダブル・マテリアリティ')).toBeVisible();
+  // 考え方の詳細は既定で閉じる。改正 ESRS が未発効であることは summary で閉じていても見える（§10.4）
+  await expect(
+    main.getByText(/改正 ESRS（2026-07-03 採択）は未発効・本サンプルに未反映/),
+  ).toBeVisible();
+  const law = main.getByText(/官報掲載まで未発効/);
+  await expect(law).toBeHidden();
+  await openCollapsible(main, /^考え方の詳細/);
+  await expect(law).toBeVisible();
+  // 算定式は閉じる。ESRS が数値の閾値を定めていないことは summary に見せる
+  // （同じ句はマトリクスの凡例にもあるため、summary に絞って確かめる）
+  await expect(
+    main.locator('summary').filter({ hasText: /ESRS は数値の閾値を定めていません/ }),
+  ).toBeVisible();
+  const formula = main.getByText(/√\(発生可能性 × 財務影響の大きさ\)/);
+  await expect(formula).toBeHidden();
+  await openCollapsible(main, /^算定式と閾値の決め方/);
+  await expect(formula).toBeVisible();
   await expect(main.getByRole('img', { name: /ダブル・マテリアリティ・マトリクス/ })).toBeVisible();
   await expect(main.getByLabel('インパクトの閾値（インパクト重要性）')).toHaveValue('3.0');
   await expect(main.getByLabel('財務の閾値（財務的重要性）')).toHaveValue('3.0');
@@ -115,6 +153,30 @@ test('CSRD 要求事項: 適用になった観点を行ごとに示し、URL で
   await expect(
     table.locator('tr', { hasText: 'ESRS-E5-5' }).getByText('対象外（重要でない）'),
   ).toBeVisible();
+
+  // 文字量を減らす（§10.4）: SSBJ との違いは 1 行（未発効の注記を含む）で見せ、根拠の全文は閉じる
+  const main = page.locator('#t4d-main');
+  const note = main.getByRole('note').filter({ hasText: 'SSBJ は財務的重要性のみ（シングル）' });
+  await expect(note).toBeVisible();
+  await expect(note.getByText(/改正 ESRS（2026-07-03 採択）は未発効/)).toBeVisible();
+  const law = note.getByText(/官報掲載まで未発効/);
+  await expect(law).toBeHidden();
+  await openCollapsible(note, '考え方の根拠と注記');
+  await expect(law).toBeVisible();
+  // 件数の流れは図（件数は文字）。評価対象の段は絞込へ。段ごとの内訳は閉じる
+  const funnel = main.getByRole('list', { name: '評価対象の件数の流れ' });
+  await expect(funnel.getByRole('listitem')).toHaveCount(3);
+  await expect(funnel.getByRole('listitem').first()).toContainText('12 項目');
+  await expect(funnel.getByRole('link', { name: '対象外を除く（評価対象）' })).toHaveAttribute(
+    'href',
+    '/enterprise/disclosures/csrd/requirements?applicability=always&applicability=material',
+  );
+  const breakdown = main.getByText(/ESRS 2（常に適用）\s*2\s*件＋重要と判断 7 件/);
+  await expect(breakdown).toBeHidden();
+  await openCollapsible(main, '件数の内訳');
+  await expect(breakdown).toBeVisible();
+  // 架空の縮小サンプルであることは閉じずに見せる
+  await expect(main.getByText(/収録は ESRS の架空の縮小サンプル 12 項目/)).toBeVisible();
 
   await page.goto('/enterprise/disclosures/csrd/requirements?applicability=always');
   await expect(

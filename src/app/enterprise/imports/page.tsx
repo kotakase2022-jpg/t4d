@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/shared/states';
 import { Button } from '@/components/ui/button';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
+import { CollapsibleSection } from '@/components/ui/collapsible';
 import { Textarea } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
@@ -46,7 +47,13 @@ export default async function ImportsPage() {
       {/* 名称は「データ取込」。開示対応側の「SSBJ データ収集」と役割が紛れないようにする */}
       <PageHeader
         title="データ取込"
-        description="Excel / CSV / PDF を取り込み、AI が組織・期間・指標・単位・値・根拠箇所を推定します。取込は非同期ジョブとして実行されます。"
+        description="Excel / CSV / PDF を取り込み、AI が仕分けの候補を作ります"
+        help={
+          <p>
+            AI
+            が組織・期間・指標・単位・値・根拠箇所を推定し、プレビューで人が確かめてから確定します（確定するまで台帳は変わりません）。取込は非同期ジョブとして実行されます。
+          </p>
+        }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'データ取込' }]}
         actions={
           <Button variant="outline" size="sm" asChild>
@@ -122,10 +129,14 @@ export default async function ImportsPage() {
           </Card>
         )}
 
+        {/* 貼り付けはファイル取込の補助の入口。見出しは常に見せ、入力欄は既定で閉じる（§10.4 B6） */}
         {can(ctx, 'enterprise.import.run') && (
-          <Card>
-            <SectionTitle title="コピペ表入力（Excel からそのまま貼り付け）" />
-            <form action={pasteImportAction} className="space-y-2 p-3">
+          <CollapsibleSection
+            id="paste-import"
+            title="コピペ表入力（Excel からそのまま貼り付け）"
+            summary="表を貼り付けて取り込む（タブ区切りのまま）"
+          >
+            <form action={pasteImportAction} className="space-y-2 pt-1">
               <Textarea
                 name="pasted"
                 rows={5}
@@ -147,7 +158,7 @@ export default async function ImportsPage() {
                 </SubmitButton>
               </div>
             </form>
-          </Card>
+          </CollapsibleSection>
         )}
 
         <Card className="overflow-hidden">

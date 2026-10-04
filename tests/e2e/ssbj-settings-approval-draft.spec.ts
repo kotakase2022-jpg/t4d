@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { dataPointId } from '@/lib/fixtures/dataset';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * 5 つの追加要望のうち、画面まで通す必要があるもの。
@@ -182,8 +182,11 @@ test('⑤ 開示ドラフトを人工知能に書かせ、直して確定でき�
   await page.waitForURL(/\/enterprise\/disclosures\/ssbj\/draft/);
 
   await expect(page.getByText('ガバナンス').first()).toBeVisible();
-  // 何を根拠に書くのかが先に説明されている
-  await expect(page.getByText(/対応済み.*おおむね対応.*とした要求事項/)).toBeVisible();
+  // 何を根拠に書くのかが先に説明されている。説明は既定で閉じた「人工知能が書ける範囲」にあり
+  // （「生成されるのは草案」の 1 行は常に見える。docs/disclosure-first.md §10.4）、開くと読める
+  const scopeNote = await openCollapsible(page.locator('#t4d-main'), /^人工知能が書ける範囲$/);
+  await expect(scopeNote.getByText(/対応済み.*おおむね対応.*とした要求事項/)).toBeVisible();
+  await expect(page.getByText(/そのまま開示せず/).first()).toBeVisible();
 
   // 草案を作らせる
   await page.getByRole('button', { name: '人工知能に草案を作らせる' }).first().click();
@@ -195,8 +198,9 @@ test('⑤ 開示ドラフトを人工知能に書かせ、直して確定でき�
   expect((await body.inputValue()).length).toBeGreaterThan(20);
   await expect(page.getByText(/そのまま開示せず/).first()).toBeVisible();
 
-  // 書けなかった箇所が理由つきで出る
-  await expect(page.getByText(/書けなかった箇所/).first()).toBeVisible();
+  // 書けなかった箇所が理由つきで出る（草案の節の「書けなかった箇所（n）」。画面上部の説明に同じ語が
+  // あるが、その説明は既定で閉じているため、節の見出しで確かめる）
+  await expect(page.getByText(/^書けなかった箇所（\d+）$/).first()).toBeVisible();
 
   // 人が直して確定できる
   await body.fill('当社は、サステナビリティ関連のリスク及び機会を取締役会が監督しています。');

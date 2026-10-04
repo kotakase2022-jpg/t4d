@@ -14,11 +14,14 @@ import {
   Scale,
   Tag,
 } from 'lucide-react';
+import { FractionBar } from '@/components/charts/fraction-bar';
+import { MiniBars } from '@/components/charts/mini-bars';
 import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatJstDate } from '@/lib/format/datetime';
 import type { DisclosureHome, MyTaskKind } from '@/lib/services/disclosure-home';
@@ -28,6 +31,7 @@ import { resetDisclosureDemoAction } from './actions';
 /**
  * 開示優先モードのホーム「開示業務」タブ（指示書 §6.1）。
  * 集計は src/lib/services/disclosure-home.ts。ここは表示だけを担う。
+ * 分母の決め方・リセットの対象一覧などの説明は既定で閉じる（docs/disclosure-first.md §10.4）。
  */
 
 function remainingText(days: number | null): string | null {
@@ -388,7 +392,7 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
     <Card className="overflow-hidden">
       <SectionTitle title="開示の進み具合（分母を明示）" />
       <div className="grid grid-cols-3 gap-2 px-3 pb-2">
-        <div className="col-span-2 rounded-t4d border border-line px-3 py-2">
+        <div className="col-span-2 space-y-1.5 rounded-t4d border border-line px-3 py-2">
           <p className="flex items-center gap-1.5 text-[13px] text-ink">
             <Scale className="size-4 text-ink-muted" aria-hidden="true" />
             <span>
@@ -396,28 +400,42 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
               項目中、承認済み <strong className="tnum">{progress.approvedItemCount}</strong> 項目
             </span>
           </p>
-          <ul className="mt-1 space-y-0.5 text-[11px] text-ink-muted">
-            <li>
-              原稿の節に割り当て済み {progress.assignedItemCount} 項目（残り{' '}
-              {Math.max(progress.confirmedItemCount - progress.assignedItemCount, 0)} 項目は未割当）
-            </li>
-            {(progress.excludedItemCount > 0 || progress.notAssessedItemCount > 0) && (
+          <FractionBar
+            label="承認済み（適用確定済みのうち）"
+            numerator={progress.approvedItemCount}
+            denominator={progress.confirmedItemCount}
+            unit="項目"
+          />
+          {/* 承認後の再確認は対応が要る事実なので閉じない（分母の決め方の説明だけを閉じる） */}
+          {progress.staleApprovedItemCount > 0 && (
+            <p className="flex items-center gap-1 text-[11px] text-[#8a5d00]">
+              <History className="size-3.5 shrink-0" aria-hidden="true" />
+              承認済みのうち {progress.staleApprovedItemCount}{' '}
+              項目は、承認後に引用先が更新され再確認が必要です
+            </p>
+          )}
+          <Collapsible
+            variant="plain"
+            summary={`分母の決め方（割当済み ${progress.assignedItemCount} 項目・分母に含めない ${progress.excludedItemCount + progress.notAssessedItemCount} 項目）`}
+          >
+            <ul className="space-y-0.5 text-[11px] text-ink-muted">
               <li>
-                分母に含めていない要求事項: 対象外・非重要と判断 {progress.excludedItemCount}{' '}
-                項目（理由・判断者あり）／要求事項ごとの適用が未判定 {progress.notAssessedItemCount}{' '}
-                項目
+                原稿の節に割り当て済み {progress.assignedItemCount} 項目（残り{' '}
+                {Math.max(progress.confirmedItemCount - progress.assignedItemCount, 0)}{' '}
+                項目は未割当）
               </li>
-            )}
-            {progress.staleApprovedItemCount > 0 && (
-              <li className="text-[#8a5d00]">
-                承認済みのうち {progress.staleApprovedItemCount}{' '}
-                項目は、承認後に引用先が更新され再確認が必要です
+              {(progress.excludedItemCount > 0 || progress.notAssessedItemCount > 0) && (
+                <li>
+                  分母に含めていない要求事項: 対象外・非重要と判断 {progress.excludedItemCount}{' '}
+                  項目（理由・判断者あり）／要求事項ごとの適用が未判定{' '}
+                  {progress.notAssessedItemCount} 項目
+                </li>
+              )}
+              <li>
+                分母は、適用すると判断を確定した基準の要求事項のうち、要求事項ごとの評価で「適用（重要）」と確定したもの（プロジェクトの概要・要求事項タブと同じ数）。承認済みは、その要求事項を割り当てた原稿の節がすべて承認済みのものです（率にはまとめません）。
               </li>
-            )}
-            <li>
-              分母は、適用すると判断を確定した基準の要求事項のうち、要求事項ごとの評価で「適用（重要）」と確定したもの（プロジェクトの概要・要求事項タブと同じ数）。承認済みは、その要求事項を割り当てた原稿の節がすべて承認済みのものです（率にはまとめません）。
-            </li>
-          </ul>
+            </ul>
+          </Collapsible>
         </div>
         <div className="rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2">
           <p className="flex items-center gap-1.5 text-[13px] text-ink">
@@ -452,6 +470,9 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
               <TH align="right">適用確定済み</TH>
               <TH align="right">割当済み</TH>
               <TH align="right">承認済み</TH>
+              {/* 左の 3 列（適用確定済み → 割当済み → 承認済み）の件数を 0 起点の小さな棒で並べる。
+                  数値は左の列にあるので棒は読み上げない */}
+              <TH>確定→割当→承認</TH>
               <TH align="right">原稿の節</TH>
             </TR>
           </THead>
@@ -503,6 +524,21 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
                     </div>
                   )}
                 </TD>
+                <TD>
+                  {row.inScope ? (
+                    <MiniBars
+                      values={[
+                        row.confirmedItemCount,
+                        row.assignedItemCount,
+                        row.approvedItemCount,
+                      ]}
+                      labels={['適用確定済み', '割当済み', '承認済み']}
+                      decorative
+                    />
+                  ) : (
+                    <span className="text-ink-muted">—</span>
+                  )}
+                </TD>
                 <TD align="right" className="tnum">
                   {row.blockCount}
                 </TD>
@@ -518,54 +554,46 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
 function UnitSubmissions({ home }: { home: DisclosureHome }) {
   const total = home.unitSubmissions.reduce((sum, r) => sum + r.notSubmitted, 0);
   return (
-    <Card className="overflow-hidden">
-      {/* 補助表示（指示書 §6.1「拠点の未提出一覧は折りたたんだ補助表示」）。既定は閉じる */}
-      <details className="group">
-        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-[13px] font-semibold text-ink hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600">
-          <span>
-            拠点の未提出（補助表示）
-            <span className="ml-1.5 text-[12px] font-normal text-ink-muted">
-              {home.unitSubmissions.length} 拠点・{total} 件
-            </span>
-          </span>
-          <span className="text-[11px] font-normal text-ink-muted group-open:hidden">開く</span>
-          <span className="hidden text-[11px] font-normal text-ink-muted group-open:inline">
-            閉じる
-          </span>
-        </summary>
-        {home.unitSubmissions.length === 0 ? (
-          <p className="px-3 pb-3 text-[12px] text-ink-muted">未提出の拠点はありません。</p>
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>組織・拠点</TH>
-                <TH align="right">未提出</TH>
-                <TH align="right">対象</TH>
+    // 補助表示（指示書 §6.1「拠点の未提出一覧は折りたたんだ補助表示」）。既定は閉じる。
+    // 開閉の印は共通の Collapsible（docs/disclosure-first.md §10.4。入れ子でもずれない印）に揃える
+    <Collapsible
+      summary="拠点の未提出（補助表示）"
+      meta={`${home.unitSubmissions.length} 拠点・${total} 件`}
+      className="overflow-hidden"
+      bodyClassName="px-0 py-0"
+    >
+      {home.unitSubmissions.length === 0 ? (
+        <p className="px-3 py-2 text-[12px] text-ink-muted">未提出の拠点はありません。</p>
+      ) : (
+        <Table>
+          <THead>
+            <TR>
+              <TH>組織・拠点</TH>
+              <TH align="right">未提出</TH>
+              <TH align="right">対象</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {home.unitSubmissions.map((row) => (
+              <TR key={row.unitId}>
+                <TD>
+                  <Link href={row.href} className="text-brand-700 hover:underline">
+                    {row.unitName}
+                  </Link>
+                  <span className="ml-1 text-[11px] text-ink-muted">{row.unitCode}</span>
+                </TD>
+                <TD align="right" className="tnum">
+                  {row.notSubmitted}
+                </TD>
+                <TD align="right" className="tnum">
+                  {row.total}
+                </TD>
               </TR>
-            </THead>
-            <TBody>
-              {home.unitSubmissions.map((row) => (
-                <TR key={row.unitId}>
-                  <TD>
-                    <Link href={row.href} className="text-brand-700 hover:underline">
-                      {row.unitName}
-                    </Link>
-                    <span className="ml-1 text-[11px] text-ink-muted">{row.unitCode}</span>
-                  </TD>
-                  <TD align="right" className="tnum">
-                    {row.notSubmitted}
-                  </TD>
-                  <TD align="right" className="tnum">
-                    {row.total}
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
-      </details>
-    </Card>
+            ))}
+          </TBody>
+        </Table>
+      )}
+    </Collapsible>
   );
 }
 
@@ -574,15 +602,24 @@ export function DemoResetCard() {
     <Card className="border-dashed">
       <SectionTitle title="開示デモのリセット（デモ環境のみ）" />
       <form action={resetDisclosureDemoAction} className="space-y-2 px-3 pb-3">
-        <p className="text-[12px] text-ink-muted">
-          開示プロジェクト・原稿・レビュー・定性情報・引用位置・スナップショット・出力記録・KPI
-          目標と、CSRD
-          の設定（報告範囲・評価方法）・ダブル・マテリアリティ評価（DMA）・要求事項の評価・対応計画・開示ドラフト・CSRD
-          の計画から作った収集項目・CSRD の AI
-          実行記録を、デモ開始時の状態へ戻します。デモ中に作った行は削除し、変更した行は元の値へ戻します。
-          資料・SSBJ の評価・Scope3
-          の算定・通知・監査ログ・開示優先モードの設定には触れません。数値データは、下で選んだときだけ戻します。
+        {/* 確認のチェックが指す「上記の範囲」は 1 行で常に見せ、戻す表・戻さない表の一覧だけを閉じる
+            （docs/disclosure-first.md §10.4。リセットの確認とその範囲は閉じない） */}
+        <p className="text-[12px] text-ink">
+          戻す範囲: 開示業務（プロジェクト・原稿・レビュー・定性情報・KPI 目標など）と CSRD
+          の設定・評価・計画・草案。資料・SSBJ の評価・Scope3
+          の算定には触れず、数値データは下で選んだときだけ戻します。
         </p>
+        <Collapsible variant="plain" summary="戻す範囲・戻さないものの一覧">
+          <p className="text-ink-muted">
+            開示プロジェクト・原稿・レビュー・定性情報・引用位置・スナップショット・出力記録・KPI
+            目標と、CSRD
+            の設定（報告範囲・評価方法）・ダブル・マテリアリティ評価（DMA）・要求事項の評価・対応計画・開示ドラフト・CSRD
+            の計画から作った収集項目・CSRD の AI
+            実行記録を、デモ開始時の状態へ戻します。デモ中に作った行は削除し、変更した行は元の値へ戻します。
+            資料・SSBJ の評価・Scope3
+            の算定・通知・監査ログ・開示優先モードの設定には触れません。数値データは、下で選んだときだけ戻します。
+          </p>
+        </Collapsible>
         <label className="flex items-start gap-1.5 text-[12px] text-ink">
           <input type="checkbox" name="includeDataPoints" className="mt-0.5 size-3.5" />
           <span>

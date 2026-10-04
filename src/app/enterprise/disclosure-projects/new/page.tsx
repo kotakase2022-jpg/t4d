@@ -71,7 +71,13 @@ export default async function NewDisclosureProjectPage() {
     <>
       <PageHeader
         title="開示プロジェクトの作成"
-        description="報告主体・期間、対応する制度と基準、報告範囲と承認者を 3 段階で設定します。作成後も設定タブで変更できます。"
+        description="3 段階で設定します（作成後も設定タブで変更できます）"
+        help={
+          <p>
+            報告主体・期間、対応する制度と基準、報告範囲と承認者を 3
+            段階で設定します。基準の版はプロジェクトごとに固定され、新しい版が出ても自動では切り替わりません。
+          </p>
+        }
         breadcrumbs={[
           { label: '企業ワークスペース' },
           { label: '開示プロジェクト', href: '/enterprise/disclosure-projects' },

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Bot, Check, CircleAlert, Save, Sparkles, TriangleAlert } from 'lucide-react';
 import { PreservingForm } from '@/components/shared/preserving-form';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
 import { Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { CSRD_DRAFT_BODY_MAX } from '@/lib/domain/csrd';
@@ -57,6 +58,7 @@ export function CsrdDraftSectionCard({
   const hasBody = draft !== null && draft.body.trim() !== '';
   const adopted = hasAiBody && draft.body === draft.aiBody;
   const itemIdByCode = new Map(view.items.map((item) => [item.code, item.itemId]));
+  const reviewedCount = view.items.filter((item) => item.reviewed).length;
 
   return (
     <section id={`csrd-draft-${section}`} aria-labelledby={titleId}>
@@ -74,10 +76,11 @@ export function CsrdDraftSectionCard({
         <div className="space-y-2.5 p-3">
           <p className="text-[12px] text-ink">{view.applicability.reason}</p>
 
-          <div className="rounded-t4d border border-line">
-            <p className="border-b border-line px-3 py-1.5 text-[12px] font-medium text-ink">
-              この節の要求事項（{view.items.length}）
-            </p>
+          {/* 要求事項ごとの状況は根拠の詳細なので既定で閉じ、件数だけを summary に出す（§10.4） */}
+          <Collapsible
+            summary={`この節の要求事項（${view.items.length} 件・担当者確認済み ${reviewedCount} 件）`}
+            bodyClassName="p-0"
+          >
             <ul className="divide-y divide-line">
               {view.items.map((item) => (
                 <li key={item.code} className="flex flex-wrap items-center gap-2 px-3 py-1.5">
@@ -93,7 +96,7 @@ export function CsrdDraftSectionCard({
                 </li>
               ))}
             </ul>
-          </div>
+          </Collapsible>
 
           {!view.inScope && (
             <p className="flex items-start gap-1.5 rounded-t4d border border-line bg-surface-muted px-3 py-2 text-[12px] text-ink">

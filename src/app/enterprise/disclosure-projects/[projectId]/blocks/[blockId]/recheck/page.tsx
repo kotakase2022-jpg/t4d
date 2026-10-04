@@ -2,11 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { AlertTriangle, ArrowRight, CheckCircle2, History, Info, Tag, Undo2 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageHeader } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { CollapsibleSection } from '@/components/ui/collapsible';
 import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { formatJst } from '@/lib/format/datetime';
 import {
@@ -206,8 +207,16 @@ export default async function RecheckPage({
           ))
         )}
 
-        <Card>
-          <SectionTitle title={`判断の記録（${view.decisions.length}）`} />
+        {/* 判断の記録（履歴）は既定で閉じる。判断した直後はフラッシュが指す記録なので開いて描く（§10.4） */}
+        <CollapsibleSection
+          id="recheck-decisions"
+          title={`判断の記録（${view.decisions.length}）`}
+          summary={`これまでの判断（${view.decisions.length} 件）`}
+          open={sp.flash === 'recheckDecided' || undefined}
+          // 記録が無いことは空状態として見せる（空状態は閉じない）
+          defaultOpen={view.decisions.length === 0}
+          bodyClassName="px-0 pb-0"
+        >
           {view.decisions.length === 0 ? (
             <EmptyState
               title="判断の記録はまだありません"
@@ -226,7 +235,7 @@ export default async function RecheckPage({
               ))}
             </ul>
           )}
-        </Card>
+        </CollapsibleSection>
 
         <Button variant="outline" size="sm" asChild>
           <Link href={blockHref}>原稿へ戻る</Link>

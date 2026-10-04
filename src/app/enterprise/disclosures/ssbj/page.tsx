@@ -2,6 +2,7 @@ import Link from 'next/link';
 import {
   CircleAlert,
   ClipboardList,
+  Clock,
   Database,
   FileText,
   FlaskConical,
@@ -10,6 +11,7 @@ import {
   ShieldCheck,
   Target,
 } from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { SsbjFlow, type SsbjFlowStep } from '@/components/shared/ssbj-flow';
@@ -17,6 +19,8 @@ import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
+import { MoreInfo } from '@/components/ui/more-info';
 import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import {
@@ -36,6 +40,7 @@ import {
 } from '@/lib/services/ssbj-gap';
 import { loadSsbjSettings } from '@/lib/services/ssbj-settings';
 import type { MaterialityLevel } from '@/types/domain';
+import { ssbjRequirementItems } from './_components/breakdown-items';
 
 export const metadata = { title: 'SSBJ 対応状況' };
 
@@ -54,7 +59,11 @@ function rateTone(rate: number): 'success' | 'warning' | 'danger' {
   return 'danger';
 }
 
-/** 3 つの整備度カード。単一の総合点にまとめず、何が遅れているかを分けて示す */
+/**
+ * 3 つの整備度カード。単一の総合点にまとめず、何が遅れているかを分けて示す。
+ * 何を測る値かの説明は既定で閉じる（docs/disclosure-first.md §10.4）。説明側に見出しの語を
+ * 重ねて書かない（同じ見出しが画面に 2 回出ないように）
+ */
 function ReadinessCard({
   label,
   description,
@@ -77,7 +86,9 @@ function ReadinessCard({
         <span className="text-[13px] text-ink-muted">%</span>
       </div>
       <Progress value={rate} tone={rateTone(rate)} label={`${label} ${rate}%`} />
-      <p className="text-[11px] leading-relaxed text-ink-muted">{description}</p>
+      <MoreInfo label="何を測るか">
+        <p>{description}</p>
+      </MoreInfo>
     </Card>
   );
 }
@@ -159,17 +170,6 @@ export default async function SsbjPage({
     },
   ];
 
-  const countCards: Array<{ label: string; value: number; tone?: 'warning' | 'danger' }> = [
-    { label: '全要求事項', value: counts.total },
-    { label: '対応済み', value: counts.covered },
-    { label: 'おおむね対応', value: counts.mostlyCovered },
-    { label: '一部対応', value: counts.partial, tone: 'warning' },
-    { label: '未対応', value: counts.notCovered, tone: 'danger' },
-    { label: '重要性なし', value: counts.notMaterial },
-    { label: '対象外', value: counts.notApplicable },
-    { label: '確認待ち', value: counts.awaitingReview, tone: 'warning' },
-  ];
-
   return (
     <>
       <PageHeader
@@ -239,37 +239,46 @@ export default async function SsbjPage({
           />
         </section>
 
-        <ul className="grid grid-cols-8 gap-2">
-          {countCards.map((card) => (
-            <li key={card.label}>
-              <Card className="space-y-1 p-2.5">
-                <p className="truncate text-[11px] text-ink-muted">{card.label}</p>
-                <p
-                  className={`text-[20px] font-semibold leading-none tabular-nums ${
-                    card.tone === 'danger'
-                      ? 'text-danger'
-                      : card.tone === 'warning'
-                        ? 'text-[#8a5d00]'
-                        : 'text-ink'
-                  }`}
-                >
-                  {card.value}
-                </p>
-              </Card>
-            </li>
-          ))}
-        </ul>
-        <p className="text-[11px] leading-relaxed text-ink-muted">
-          件数の母集団: 「全要求事項」は、設定で適用する基準の要求事項 {overview.counts.total}{' '}
-          件です（対象外・重要性なしを含む）。
-          {overview.masterTotal !== overview.counts.total
-            ? ` マスターの収録は計 ${overview.masterTotal} 項目で、設定で適用しない基準の ${overview.masterTotal - overview.counts.total} 項目は数えていません。`
-            : ''}
-          {overview.coverageNote
-            ? ` 収録範囲: ${overview.coverageNote}。基準のすべての条項ではありません。`
-            : ' 収録範囲が一部の場合、基準のすべての条項ではありません。'}
-          対応済み〜未対応・確認待ち・優先度「高」は、評価対象（対象外・重要性なしを除く）で数えています。
-        </p>
+        {/* 件数の内訳。重ならない 6 区分を 1 本の帯（合計 = 全要求事項）にし、
+            区分と重なる「確認待ち」は帯の外に別に書く（帯の幅が嘘にならないように） */}
+        <Card className="space-y-2 p-3">
+          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[12px]">
+            <p className="flex items-baseline gap-1">
+              <span className="text-ink-muted">全要求事項</span>
+              <span className="text-[20px] font-semibold leading-none tabular-nums text-ink">
+                {counts.total}
+              </span>
+              <span className="text-ink-muted">件</span>
+            </p>
+            <p className="flex items-center gap-1">
+              <Clock className="size-3.5 text-ink-muted" aria-hidden="true" />
+              <span className="text-ink-muted">確認待ち</span>
+              <span className="font-semibold tabular-nums text-ink">{counts.awaitingReview}</span>
+              <span className="text-ink-muted">件</span>
+            </p>
+          </div>
+          <StatusBreakdown
+            label="全要求事項の内訳"
+            items={ssbjRequirementItems(counts)}
+            denominator={counts.total}
+          />
+          <MoreInfo label="件数の数え方">
+            <p>
+              「全要求事項」は、設定で適用する基準の要求事項 {counts.total}{' '}
+              件です（対象外・重要性なしを含む）。
+              {overview.masterTotal !== counts.total
+                ? ` マスターの収録は計 ${overview.masterTotal} 項目で、設定で適用しない基準の ${overview.masterTotal - counts.total} 項目は数えていません。`
+                : ''}
+              {overview.coverageNote
+                ? ` 収録範囲: ${overview.coverageNote}。基準のすべての条項ではありません。`
+                : ' 収録範囲が一部の場合、基準のすべての条項ではありません。'}
+            </p>
+            <p>
+              対応済み〜未対応・確認待ち・優先度「高」は、評価対象（対象外・重要性なしを除く）で数えています。
+              「確認待ち」は人工知能が判定し、担当者がまだ確認していない要求事項で、帯の区分と重なります。
+            </p>
+          </MoreInfo>
+        </Card>
 
         <div className="grid grid-cols-[1fr_1.4fr] gap-3">
           {/* 領域別の対応状況 */}
@@ -455,8 +464,11 @@ export default async function SsbjPage({
                         <Target className="size-3.5 text-ink-muted" aria-hidden="true" />
                         {topic.title}
                       </div>
+                      {/* 評価の理由は行ごとに既定で閉じる（評価そのものはこの行の「評価」列に見えている） */}
                       {topic.rationale && (
-                        <p className="mt-0.5 text-[11px] text-ink-muted">{topic.rationale}</p>
+                        <Collapsible variant="plain" summary="評価の理由" className="mt-0.5">
+                          <p className="font-normal text-ink-muted">{topic.rationale}</p>
+                        </Collapsible>
                       )}
                     </TD>
                     <TD>{CATEGORY_LABEL[topic.category]}</TD>

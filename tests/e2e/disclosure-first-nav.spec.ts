@@ -200,14 +200,16 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
   }
 
   // 既存の Scope3・データ取込・SSBJ ドラフトは従来のメニューから同じ URL で開ける（A39）。
-  // 定性情報は従来メニューの SSBJ 配下にも出る（§9.1 ①）。「開示ドラフト」は CSRD にも同名があるため
-  // SSBJ のリストに絞る
+  // 定性情報は従来メニューの SSBJ 配下（§9.1 ①）と CSRD 配下（§10.1 ①）の両方に出る。
+  // 「開示ドラフト」「定性情報」は SSBJ と CSRD に同名があるため、それぞれのリストに絞る
   const ssbjList = sidebar(page).getByRole('list', { name: 'SSBJ', exact: true });
-  for (const [label, href, scope] of [
-    ['Scope3データ取込', '/enterprise/ghg/suppliers', sidebar(page)],
-    ['データ取込', '/enterprise/imports', sidebar(page)],
-    ['開示ドラフト', '/enterprise/disclosures/ssbj/draft', ssbjList],
-    ['定性情報', '/enterprise/narratives', ssbjList],
+  const csrdList = sidebar(page).getByRole('list', { name: 'CSRD', exact: true });
+  for (const [label, href, scope, inStandardList] of [
+    ['Scope3データ取込', '/enterprise/ghg/suppliers', sidebar(page), false],
+    ['データ取込', '/enterprise/imports', sidebar(page), false],
+    ['開示ドラフト', '/enterprise/disclosures/ssbj/draft', ssbjList, true],
+    ['定性情報', '/enterprise/narratives', ssbjList, true],
+    ['定性情報', '/enterprise/narratives', csrdList, true],
   ] as const) {
     const link = scope.getByRole('link', { name: label, exact: true });
     await expect(link).toHaveAttribute('href', href);
@@ -215,6 +217,11 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
     await page.waitForURL(new RegExp(`${href}$`));
     await expect(page.locator('#t4d-main')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    if (inStandardList) {
+      // SSBJ・CSRD のリンクは押した側だけが現在地（同じ画面が 2 か所に出ても aria-current は 1 つ）
+      await expect(link).toHaveAttribute('aria-current', 'page');
+      await expect(sidebar(page).locator('ul ul a[aria-current="page"]')).toHaveCount(1);
+    }
   }
 
   // 従来の Evidence 画面は拡張前の入力項目・列のまま（開示優先の入力・列・入口を出さない。REG-F7）

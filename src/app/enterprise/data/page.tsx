@@ -1,5 +1,17 @@
 import Link from 'next/link';
-import { CopyPlus, Database, Download } from 'lucide-react';
+import {
+  Check,
+  CircleDashed,
+  CircleDot,
+  CopyPlus,
+  Database,
+  Download,
+  Loader2,
+  Send,
+  Undo2,
+  type LucideIcon,
+} from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import {
   AvailabilityBadge,
   DataPointStatusBadge,
@@ -38,6 +50,24 @@ import { BulkActionBar } from './bulk-actions';
 export const metadata = { title: '非財務データ' };
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+/**
+ * 状態の内訳の帯（docs/disclosure-first.md §10.4 B6）。ラベルは絞り込みの選択肢と同じ文言。
+ * リンクにはしない（絞り込みは下の FilterBar に 1 か所だけ置き、同じ名前のリンクを重ねない）
+ */
+const STATUS_BREAKDOWN: ReadonlyArray<{
+  status: DataPointStatus;
+  label: string;
+  icon: LucideIcon;
+}> = [
+  // アイコンは状態のバッジ（DataPointStatusBadge）と同じもの
+  { status: 'not_started', label: '未着手', icon: CircleDashed },
+  { status: 'draft', label: '入力中', icon: CircleDot },
+  { status: 'submitted', label: '提出済み', icon: Send },
+  { status: 'in_review', label: 'レビュー中', icon: Loader2 },
+  { status: 'returned', label: '差戻し', icon: Undo2 },
+  { status: 'approved', label: '承認済み', icon: Check },
+];
 
 function toArray(value: string | string[] | undefined): string[] {
   if (value === undefined) return [];
@@ -103,6 +133,21 @@ export default async function DataListPage({
 
   const reportableUnits = shell.units.filter((u) => u.unitType !== 'supplier');
 
+  // 当期の状態の内訳（絞り込みに関係なく、当期の全件）。一覧と同じ条件（組織・期間・削除済み除く）で数える
+  const statusCounts = await Promise.all(
+    STATUS_BREAKDOWN.map(({ status }) =>
+      shell.db.count('dataPoints', {
+        where: {
+          organizationId: shell.ctx.workspace.organizationId,
+          reportingPeriodId: shell.currentPeriod.id,
+          deletedAt: { isNull: true },
+          status,
+        },
+      }),
+    ),
+  );
+  const statusTotal = statusCounts.reduce((sum, count) => sum + count, 0);
+
   return (
     <>
       <PageHeader
@@ -158,7 +203,20 @@ export default async function DataListPage({
       <div className="px-4 pt-3">
         <FlashMessage searchParams={params} />
       </div>
-      <div className="p-4">
+      <div className="space-y-3 p-4">
+        {statusTotal > 0 && (
+          <Card className="px-3 py-2">
+            <StatusBreakdown
+              label={`${shell.currentPeriod.code} の状態の内訳（全 ${statusTotal} 件）`}
+              items={STATUS_BREAKDOWN.map(({ status, label, icon }, index) => ({
+                key: status,
+                label,
+                count: statusCounts[index] ?? 0,
+                icon,
+              }))}
+            />
+          </Card>
+        )}
         <Card className="overflow-hidden">
           <FilterBar
             total={pageData.total}

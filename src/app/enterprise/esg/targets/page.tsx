@@ -90,7 +90,12 @@ export default async function KpiTargetsPage({
     <>
       <PageHeader
         title="ESG 経営の目標"
-        description="目標は版として追記します。改訂しても以前の版は残り、過去の開示で示した目標と比べられます。"
+        description="目標は版として追記します（以前の版は残ります）"
+        help={
+          <p>
+            目標は版として追記します。改訂しても以前の版は残り、過去の開示で示した目標と比べられます。
+          </p>
+        }
         breadcrumbs={[
           { label: '企業ワークスペース' },
           { label: 'ESG 経営', href: '/enterprise/esg' },

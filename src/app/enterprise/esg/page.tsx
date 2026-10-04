@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { GitCompare, Info, Target } from 'lucide-react';
+import { GitCompare, Target } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { cn } from '@/lib/utils';
@@ -80,9 +81,11 @@ function SnapshotComparisonView({ comparison }: { comparison: KpiSnapshotCompari
           照合中: {snapshot.projectName} ／ {snapshot.kindLabel} No.{snapshot.snapshotNo}（作成{' '}
           {formatJst(snapshot.createdAt)}・内容ハッシュ {snapshot.contentHash.slice(0, 12)}）
         </p>
-        <p className="mt-0.5 text-[11px]">
-          左はスナップショットに固定した版の値です。最新承認値と違う場合は、更新理由とともに並べます。最新の値が変わっても、このスナップショットと、そこから出力したレポートの値は変わりません。
-        </p>
+        <MoreInfo label="照合の見方" className="mt-0.5">
+          <p>
+            左はスナップショットに固定した版の値です。最新承認値と違う場合は、更新理由とともに並べます。最新の値が変わっても、このスナップショットと、そこから出力したレポートの値は変わりません。
+          </p>
+        </MoreInfo>
       </div>
       {KPI_KEYS.map((key) => {
         const rows = comparison.rows[key];
@@ -207,7 +210,18 @@ export default async function EsgPage({ searchParams }: { searchParams: Promise<
     <>
       <PageHeader
         title="ESG 経営"
-        description="開示業務で承認した数値をそのまま使った KPI（KPI 用のデータの写しは作りません）"
+        description="開示業務で承認した数値で計算した KPI"
+        help={
+          <>
+            <p>
+              KPI
+              用のデータの写しは作らず、開示業務で承認した数値をそのまま使います。年度は「対象年度」のリンクで切り替えます。
+            </p>
+            <p>
+              「スナップショット照合」では、レポートに固定した値と最新承認値の差と更新理由を並べます（過去のレポートの値は変わりません）。
+            </p>
+          </>
+        }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'ESG 経営' }]}
         actions={
           <Button asChild variant="outline" size="sm">
@@ -277,11 +291,12 @@ export default async function EsgPage({ searchParams }: { searchParams: Promise<
 
         {dashboard ? (
           <>
-            <p className="flex items-start gap-1.5 rounded-t4d border border-line bg-surface px-3 py-2 text-[12px] text-ink-muted">
-              <Info className="mt-0.5 size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
-              実績は、対象の全拠点が承認済みの最新年度の値です（GHG
-              画面と同じ連結値）。未承認の値・承認後の訂正で未承認の値は含めず、集計中の年度は承認済み分の途中集計として別に示します。進捗率・前年差は、目標・前年と範囲や算定方法が同じときだけ計算します。
-            </p>
+            <MoreInfo label="実績・進捗率・前年差の数え方">
+              <p>
+                実績は、対象の全拠点が承認済みの最新年度の値です（GHG
+                画面と同じ連結値）。未承認の値・承認後の訂正で未承認の値は含めず、集計中の年度は承認済み分の途中集計として別に示します。進捗率・前年差は、目標・前年と範囲や算定方法が同じときだけ計算します。
+              </p>
+            </MoreInfo>
             <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
               {dashboard.cards.map((card) => (
                 <KpiCard

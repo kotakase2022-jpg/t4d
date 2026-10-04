@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * CRUD の永続化とバリデーションの実操作検証（自己検証ミッション用）。
@@ -103,7 +103,10 @@ test('Data Point: 値の編集がDBへ反映され、リロード後も保持さ
   // **リロードしても保持される**（＝実際に永続化されている）
   await page.goto(url);
   await expect(page.locator('input[name="value"]')).toHaveValue(next);
-  // 変更理由が履歴に残る
+  // 変更理由が履歴に残る。Version 履歴は既定で閉じた折りたたみで、DOM の順で最初に出るのは
+  // その表の「変更理由」の列（docs/disclosure-first.md §10.4 B6）。開いてから同じ文言を確かめる
+  const history = await openCollapsible(page, /^版の一覧/);
+  await expect(history.getByText(reason).first()).toBeVisible();
   await expect(page.getByText(reason).first()).toBeVisible();
 });
 

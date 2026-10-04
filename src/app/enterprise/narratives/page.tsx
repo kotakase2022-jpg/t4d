@@ -1,5 +1,22 @@
 import Link from 'next/link';
-import { BookText, FilePlus2, History, Quote, Search, Tag } from 'lucide-react';
+import {
+  Banknote,
+  BookText,
+  Check,
+  CircleDot,
+  Compass,
+  FilePlus2,
+  FileText,
+  History,
+  Landmark,
+  Quote,
+  RefreshCcw,
+  Search,
+  Tag,
+  TriangleAlert,
+  type LucideIcon,
+} from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -7,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { AuthorizationError, can } from '@/lib/authorization/can';
@@ -20,11 +38,30 @@ import {
 } from '@/lib/services/narrative';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { cn } from '@/lib/utils';
-import { NARRATIVE_STATUSES, NARRATIVE_THEMES } from '@/types/domain';
+import {
+  NARRATIVE_STATUSES,
+  NARRATIVE_THEMES,
+  type NarrativeStatus,
+  type NarrativeTheme,
+} from '@/types/domain';
 import { carryForwardNarrativeAction } from './actions';
 import { CandidateBadge, NarrativeStatusBadge } from './_components/narrative-badges';
 
 export const metadata = { title: '定性情報' };
+
+/** 内訳の帯のアイコン（状態は状態バッジと同じもの。色だけで区別しない） */
+const NARRATIVE_STATUS_ICONS: Record<NarrativeStatus, LucideIcon> = {
+  draft: CircleDot,
+  confirmed: Check,
+  needs_recheck: RefreshCcw,
+};
+const NARRATIVE_THEME_ICONS: Record<NarrativeTheme, LucideIcon> = {
+  risk_opportunity: TriangleAlert,
+  financial_impact: Banknote,
+  governance: Landmark,
+  strategy: Compass,
+  policy_other: FileText,
+};
 
 /**
  * 定性情報の一覧（§6.5）。原稿とは別の、再利用できる記録。
@@ -62,6 +99,9 @@ export default async function NarrativesPage({
   }
   const canWrite = can(ctx, 'enterprise.disclosure.write');
   const target = shell.currentPeriod;
+  // 状態別・種別の内訳は絞り込みに関係なく全件で数える（絞り込むと内訳が 1 区分だけになるため）
+  const filtered = theme !== null || status !== null || q !== '';
+  const allRows = filtered ? await listNarratives(db, ctx, {}) : rows;
 
   const hrefWith = (patch: Record<string, string | null>) => {
     const params = new URLSearchParams();
@@ -75,7 +115,12 @@ export default async function NarrativesPage({
     <>
       <PageHeader
         title="定性情報"
-        description="リスク・機会、ガバナンス、戦略・対応策、方針などを、原稿とは別の再利用できる記録として管理します。原稿は引用した時点の版を持ち、ここを更新しても原稿は自動では書き換わりません。"
+        description="原稿とは別に管理する、再利用できる定性情報の記録"
+        help={
+          <p>
+            リスク・機会、ガバナンス、戦略・対応策、方針などを、原稿とは別の再利用できる記録として管理します。原稿は引用した時点の版を持ち、ここを更新しても原稿は自動では書き換わりません。
+          </p>
+        }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: '定性情報' }]}
         actions={
           canWrite ? (
@@ -98,6 +143,30 @@ export default async function NarrativesPage({
       />
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
+
+        {allRows.length > 0 && (
+          <Card className="grid gap-3 px-3 py-2 md:grid-cols-2">
+            {/* ラベルは絞り込みの選択肢と同じ文言。リンクにはしない（同じ名前のリンクを重ねない） */}
+            <StatusBreakdown
+              label={`状態別（全 ${allRows.length} 件）`}
+              items={NARRATIVE_STATUSES.map((s) => ({
+                key: s,
+                label: NARRATIVE_STATUS_LABELS[s],
+                count: allRows.filter((row) => row.record.status === s).length,
+                icon: NARRATIVE_STATUS_ICONS[s],
+              }))}
+            />
+            <StatusBreakdown
+              label={`情報種別別（全 ${allRows.length} 件）`}
+              items={NARRATIVE_THEMES.map((t) => ({
+                key: t,
+                label: NARRATIVE_THEME_LABELS[t],
+                count: allRows.filter((row) => row.record.theme === t).length,
+                icon: NARRATIVE_THEME_ICONS[t],
+              }))}
+            />
+          </Card>
+        )}
 
         <Card>
           <div className="flex flex-wrap items-center gap-2 px-3 py-2">
@@ -290,10 +359,12 @@ export default async function NarrativesPage({
             </div>
           )}
         </Card>
-        <p className="text-[11px] text-ink-muted">
-          前年から引継ぎは {target.code}{' '}
-          の下書きの版を作ります。前年の確認（承認）や前年の資料の引用は引き継がず、当年度の根拠を改めて付けます。
-        </p>
+        <MoreInfo label="前年から引継ぎについて">
+          <p>
+            前年から引継ぎは {target.code}{' '}
+            の下書きの版を作ります。前年の確認（承認）や前年の資料の引用は引き継がず、当年度の根拠を改めて付けます。
+          </p>
+        </MoreInfo>
       </div>
     </>
   );

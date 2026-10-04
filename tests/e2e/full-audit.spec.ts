@@ -60,11 +60,17 @@ const ENTERPRISE_PATHS = [
   '/enterprise/disclosures/ftse',
   '/enterprise/alerts',
   '/enterprise/ai',
-  // 分析（閲覧専用。§9.5・§9.6）。/enterprise/analysis は現状診断へ redirect する
+  // 分析（閲覧専用。§9.5・§9.6・§10.2・§10.3）。/enterprise/analysis は現状診断へ redirect する
   '/enterprise/analysis',
   '/enterprise/analysis/diagnosis',
   '/enterprise/analysis/regulations',
+  '/enterprise/analysis/trends',
+  '/enterprise/analysis/trends?group=ghg&change=needs_check',
+  '/enterprise/analysis/trends?empty=1',
   '/enterprise/analysis/benchmark',
+  '/enterprise/analysis/financial-impact',
+  '/enterprise/analysis/financial-impact?sc=target',
+  '/enterprise/analysis/financial-impact?sc=custom&r_scope1=-5&a_carbonPriceStart=2000&p_P10=1',
   '/enterprise/reports',
   '/enterprise/settings',
   '/enterprise/roadmap',
@@ -153,9 +159,11 @@ test('拠点担当: 権限外の画面へ入れず、権限内の画面は描画
     '/enterprise/data',
     '/enterprise/imports',
     '/enterprise/evidence',
-    // 分析の現状診断・他社比較は data.read で開ける（開示の領域は出さない）
+    // 分析の現状診断・自社経年比較・他社比較・財務影響分析は data.read で開ける（開示の領域は出さない）
     '/enterprise/analysis/diagnosis',
+    '/enterprise/analysis/trends',
     '/enterprise/analysis/benchmark',
+    '/enterprise/analysis/financial-impact',
   ]);
   expect(allowed.map((p) => `${p.kind} ${p.path} — ${p.detail}`).join('\n')).toBe('');
 

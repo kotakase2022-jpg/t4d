@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   ArrowLeft,
+  CalendarClock,
   CircleCheck,
   ClipboardList,
   Clock,
@@ -8,6 +9,7 @@ import {
   RotateCcw,
   Upload,
 } from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { DataPointStatusBadge } from '@/components/shared/badges';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -15,13 +17,13 @@ import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatNumber } from '@/lib/format/datetime';
 import { loadApprovalProgressMap } from '@/lib/services/approval-route';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { loadDataCollection } from '@/lib/services/ssbj-gap';
 import type { DataPointStatus } from '@/types/domain';
+import { collectionStatusItems } from '../_components/breakdown-items';
 
 export const metadata = { title: 'SSBJ データ収集' };
 
@@ -41,8 +43,6 @@ export default async function SsbjCollectionPage({
     rows.map((r) => r.dataPointId).filter((id): id is string => Boolean(id)),
   );
 
-  const submitted = rows.filter((r) => r.collectedStatus === 'approved').length;
-  const rate = rows.length === 0 ? 0 : Math.round((submitted / rows.length) * 100);
   const overdue = rows.filter(
     (r) => r.daysLeft !== null && r.daysLeft < 0 && r.collectedStatus !== 'approved',
   );
@@ -86,41 +86,37 @@ export default async function SsbjCollectionPage({
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
-        <div className="grid grid-cols-4 gap-2">
-          <Card className="space-y-1 p-2.5">
-            <p className="text-[11px] text-ink-muted">収集対象</p>
-            <p className="text-[20px] font-semibold leading-none tabular-nums text-ink">
-              {rows.length}
+        {/* 収集の進捗。状態の内訳を 1 本の帯（合計 = 収集対象）にし、各区分を「n / 収集対象 件」で書く。
+            期限超過は状態と重なるため帯の外に書く */}
+        <Card className="space-y-2 p-3">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
+            <h2 className="text-[13px] font-semibold text-ink">収集の進捗</h2>
+            <p className="flex items-baseline gap-1">
+              <span className="text-ink-muted">収集対象</span>
+              <span className="text-[20px] font-semibold leading-none tabular-nums text-ink">
+                {rows.length}
+              </span>
+              <span className="text-ink-muted">件</span>
             </p>
-          </Card>
-          <Card className="space-y-1 p-2.5">
-            <p className="text-[11px] text-ink-muted">承認済み</p>
-            <p className="text-[20px] font-semibold leading-none tabular-nums text-ink">
-              {submitted}
+            <p className="flex items-center gap-1">
+              <CalendarClock className="size-3.5 text-ink-muted" aria-hidden="true" />
+              <span className="text-ink-muted">期限超過</span>
+              <span
+                className={`font-semibold tabular-nums ${overdue.length > 0 ? 'text-danger' : 'text-ink'}`}
+              >
+                {overdue.length}
+              </span>
+              <span className="text-ink-muted">件（承認済み以外）</span>
             </p>
-          </Card>
-          <Card className="space-y-1 p-2.5">
-            <p className="text-[11px] text-ink-muted">期限超過</p>
-            <p
-              className={`text-[20px] font-semibold leading-none tabular-nums ${
-                overdue.length > 0 ? 'text-danger' : 'text-ink'
-              }`}
-            >
-              {overdue.length}
-            </p>
-          </Card>
-          <Card className="space-y-1.5 p-2.5">
-            <p className="text-[11px] text-ink-muted">収集の進捗</p>
-            <div className="flex items-center gap-1.5">
-              <Progress
-                value={rate}
-                tone={rate >= 80 ? 'success' : rate >= 50 ? 'warning' : 'danger'}
-                label={`収集の進捗 ${rate}%`}
-              />
-              <span className="text-[13px] font-semibold tabular-nums text-ink">{rate}%</span>
-            </div>
-          </Card>
-        </div>
+          </div>
+          {rows.length > 0 && (
+            <StatusBreakdown
+              label="収集状況の内訳"
+              items={collectionStatusItems(rows)}
+              denominator={rows.length}
+            />
+          )}
+        </Card>
 
         <Card className="overflow-hidden">
           <SectionTitle

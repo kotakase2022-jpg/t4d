@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import {
   AlertTriangle,
+  ArrowRight,
   Calculator,
   CircleAlert,
   CircleCheck,
@@ -8,6 +9,7 @@ import {
   Scale,
   Upload,
 } from 'lucide-react';
+import { FractionBar } from '@/components/charts/fraction-bar';
 import {
   AggregationIncompleteBadge,
   AvailabilityBadge,
@@ -17,7 +19,8 @@ import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { Collapsible, CollapsibleSection } from '@/components/ui/collapsible';
+import { MoreInfo } from '@/components/ui/more-info';
 import { StackedBar, StackedBarLegendChip } from '@/components/ui/stacked-bar';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
@@ -39,8 +42,17 @@ import {
 } from '@/lib/services/scope3-suppliers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { AvailabilityStatus, CalculationDataClass } from '@/types/domain';
+import { GhgTrendMetric } from './_components/ghg-trend';
+import { Scope3CategoryGrid } from './_components/scope3-category-grid';
 
 export const metadata = { title: 'GHG' };
+
+/*
+ * 文字を減らすため（docs/disclosure-first.md §10.4）: 脚注・照合の扱い・算定版の注記・排出係数マスターは既定で閉じる。
+ * 連結集計表・推移（見出しと数値・前年比）・Cat.1 の見出しとサプライヤー表・一次データ比率の定義・
+ * 架空値のバッジ・空状態は閉じない。推移は小さな折れ線、Scope3 は 15 カテゴリーの格子（表は閉じる）、
+ * 内訳合計の区分は積み上げ帯で示す。
+ */
 
 /** 値の無い行の状態のうち、画面に出すもの（人が判断した状態を未入力より優先） */
 function absentStateOf(totals: MetricTotals): AvailabilityStatus {
@@ -136,11 +148,34 @@ export default async function GhgPage() {
     .filter((c) => c.state !== 'value_present' && c.state !== 'not_applicable')
     .map((c) => `Cat.${c.category}`);
 
+  // 内訳合計の区分別（金額×係数＝推計を一次データと混ぜない。W0 O6）。区分不明は値があるときだけ
+  const classSegments = [
+    ...DATA_CLASS_ORDER.map((key) => ({
+      label: CALCULATION_DATA_CLASS_LABELS[key],
+      value: breakdown.totalsByClass[key],
+    })),
+    ...(breakdown.totalsByClass.unclassified > 0
+      ? [{ label: '区分不明（旧形式）', value: breakdown.totalsByClass.unclassified }]
+      : []),
+  ];
+
   return (
     <>
       <PageHeader
         title="GHG"
-        description={`${shell.currentPeriod.label} ／ Scope1・2（2 方式）・3 の算定状況と算定根拠。Scope3 はカテゴリー別の登録状況を示します`}
+        description={`${shell.currentPeriod.label} ／ Scope1・2・3 の算定状況と算定根拠`}
+        help={
+          <>
+            <p>
+              Scope2 はロケーション基準とマーケット基準の 2
+              方式を別の行で示し、両者を足した値は出しません。
+            </p>
+            <p>
+              Scope3 はカテゴリー 1〜15 の登録状況を示します。カテゴリー 1 の値を Scope3
+              全体として扱いません。
+            </p>
+          </>
+        }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'GHG' }]}
       />
 
@@ -221,106 +256,49 @@ export default async function GhgPage() {
               </TBody>
             </Table>
           </div>
-          <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
-            Scope2 はロケーション基準とマーケット基準を別の行で示し、両者を足した値は出しません。
-            推計は実績と分けて「推計込み」の列にだけ加えます。
-          </p>
-          {consolidation.metrics[0] && consolidation.metrics[0].excludedUnits.length > 0 && (
-            <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
-              連結対象外:{' '}
-              {consolidation.metrics[0].excludedUnits
-                .map(
-                  (u) =>
-                    `${u.unitName}（${u.method === 'equity' ? '持分法' : '除外'}・持分 ${u.ownershipPercent}%${u.reason ? `・${u.reason}` : ''}）`,
-                )
-                .join(' ／ ')}
-            </p>
-          )}
+          <div className="border-t border-line px-3 py-1.5">
+            <MoreInfo label="連結集計の注記（Scope2 の 2 方式・推計・連結対象外）">
+              <p>
+                Scope2
+                はロケーション基準とマーケット基準を別の行で示し、両者を足した値は出しません。
+                推計は実績と分けて「推計込み」の列にだけ加えます。
+              </p>
+              {consolidation.metrics[0] && consolidation.metrics[0].excludedUnits.length > 0 && (
+                <p>
+                  連結対象外:{' '}
+                  {consolidation.metrics[0].excludedUnits
+                    .map(
+                      (u) =>
+                        `${u.unitName}（${u.method === 'equity' ? '持分法' : '除外'}・持分 ${u.ownershipPercent}%${u.reason ? `・${u.reason}` : ''}）`,
+                    )
+                    .join(' ／ ')}
+                </p>
+              )}
+            </MoreInfo>
+          </div>
 
-          {/* 直近3年の変化。年度は同一色相の明→暗（古い→新しい）で塗り、
-              値と前年比は必ず数値で併記する（色だけで状態を表さない） */}
-          <div className="border-t border-line px-3 py-3">
-            <h3 className="mb-2 text-[12px] font-semibold text-ink">
+          {/* 直近3年の変化。指標ごとの小さな折れ線（値の無い年は線を切る）に、数値と前年比を文字で添える
+              （色だけで状態を表さない・増減の良し悪しを赤緑で示さない） */}
+          <div className="space-y-2 border-t border-line px-3 py-3">
+            <h3 className="text-[12px] font-semibold text-ink">
               直近3年の推移（連結値・推計込み）
             </h3>
-            <div className="grid grid-cols-3 gap-4">
-              {trendMetricCodes.map((code) => {
-                // 値の無い年度（その指標だけ未入力）は value = null。0 のバーを描かず「未入力」と示す
-                const series = consolidatedTrendSeries(trend, code);
-                const metric = [...series].reverse().find((row) => row.metric)?.metric;
-                if (!metric) return null;
-                const max = Math.max(...series.map((row) => row.value ?? 0), 1);
-                const YEAR_BAR_CLASSES = ['bg-brand-300', 'bg-brand-500', 'bg-brand-700'];
-                return (
-                  <div key={code}>
-                    <p className="mb-1 text-[12px] font-medium text-ink">
-                      {metric.name}
-                      <span className="ml-1 text-[11px] font-normal text-ink-muted">
-                        {metric.unit}
-                      </span>
-                    </p>
-                    <ul className="space-y-1">
-                      {series.map((row, index) => {
-                        const value = row.value;
-                        const prev = index > 0 ? (series[index - 1]?.value ?? null) : null;
-                        // 前年比は両年に値があるときだけ（未入力の年と比べない）
-                        const yoy =
-                          value !== null && prev !== null && prev !== 0
-                            ? Math.round(((value - prev) / prev) * 1000) / 10
-                            : null;
-                        return (
-                          <li key={row.period.id} className="flex items-center gap-2">
-                            <span className="w-14 shrink-0 font-mono text-[11px] text-ink-muted">
-                              {row.period.code}
-                            </span>
-                            <span className="h-2.5 w-full overflow-hidden rounded-full bg-surface-muted">
-                              {value !== null && (
-                                <span
-                                  aria-hidden="true"
-                                  className={`block h-full rounded-full ${YEAR_BAR_CLASSES[index] ?? 'bg-brand-700'}`}
-                                  style={{ width: `${Math.max((value / max) * 100, 2)}%` }}
-                                />
-                              )}
-                            </span>
-                            <span className="w-20 shrink-0 text-right text-[12px] tabular-nums text-ink">
-                              {value === null ? (
-                                <span className="text-ink-muted">未入力</span>
-                              ) : (
-                                formatNumber(value)
-                              )}
-                            </span>
-                            <span
-                              className={`w-14 shrink-0 text-right text-[11px] tabular-nums ${
-                                yoy === null
-                                  ? 'text-ink-muted'
-                                  : yoy > 0
-                                    ? 'text-danger'
-                                    : 'text-success'
-                              }`}
-                            >
-                              {yoy === null ? '—' : `${yoy > 0 ? '+' : ''}${yoy}%`}
-                            </span>
-                            {/* バーの軌道幅を全行で揃えるため、バッジ枠は常に確保する */}
-                            <span className="w-16 shrink-0">
-                              {row.estimated && (
-                                <Badge tone="warning">
-                                  <Calculator className="size-3" aria-hidden="true" />
-                                  推計込み
-                                </Badge>
-                              )}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                );
-              })}
+            <div className="grid gap-4 md:grid-cols-2">
+              {trendMetricCodes.map((code) => (
+                <GhgTrendMetric key={code} series={consolidatedTrendSeries(trend, code)} />
+              ))}
             </div>
-            <p className="mt-2 text-[11px] text-ink-muted">
-              バーは指標ごとの 3 年間の最大値を 100% とした相対値。前年比は排出量の増加を赤、
-              減少を緑で表示（数値併記）。内部取引控除は FY2026 から適用（過年度は控除前の値）。
+            {/* 控除の有無が年度で違うことは見えている前年比の読み方を変えるため、1 行は閉じない */}
+            <p className="text-[11px] text-ink-muted">
+              内部取引控除は FY2026 から適用（過年度は控除前の値）。
             </p>
+            <MoreInfo label="推移の見方">
+              <p>
+                値は連結値（推計込み）です。値の無い年度は線を切り「未入力」と書きます（0
+                として描きません）。
+              </p>
+              <p>前年比は矢印と符号で示し、増減の良し悪しを色で示しません。</p>
+            </MoreInfo>
           </div>
         </Card>
 
@@ -378,11 +356,15 @@ export default async function GhgPage() {
                 ))}
             </TBody>
           </Table>
-          <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
-            「未入力」は Data Point が無い（又は値が入っていない）指標で、排出ゼロではありません。
-            Scope2 の 2 方式は別の指標として並べ、合算しません。Scope3
-            は下のカテゴリー別の表で示します。
-          </p>
+          <div className="border-t border-line px-3 py-1.5">
+            <MoreInfo label="「未入力」と合算の扱い">
+              <p>
+                「未入力」は Data Point
+                が無い（又は値が入っていない）指標で、排出ゼロではありません。 Scope2 の 2
+                方式は別の指標として並べ、合算しません。Scope3 は下のカテゴリー別の状況で示します。
+              </p>
+            </MoreInfo>
+          </div>
         </Card>
 
         {/* Scope3: カテゴリー 1〜15 の状況。Cat.1 だけが登録された状態を Scope3 全体として見せない（A09）。
@@ -413,9 +395,8 @@ export default async function GhgPage() {
             )}
             {scope3.completeness !== 'complete' && (
               <span className="text-[11px] text-ink-muted">
-                未登録のカテゴリーがあるため、Scope3 全体は確定していません
-                {scope3PendingLabels.length > 0 && `（${scope3PendingLabels.join('・')}）`}。
-                カテゴリー 1 の値を Scope3 全体として扱いません。
+                未登録のカテゴリーがあるため、Scope3 全体は確定していません。カテゴリー 1 の値を
+                Scope3 全体として扱いません。
               </span>
             )}
           </div>
@@ -441,58 +422,66 @@ export default async function GhgPage() {
                   要確認（許容 ±{formatNumber(scope3.reconciliation.tolerance)}）
                 </Badge>
               )}
-              <span className="text-[11px] text-ink-muted">
-                合計とカテゴリーは照合用で、足し合わせません（二重計上の防止）。
-              </span>
+              <MoreInfo label="照合の扱い">
+                <p>合計とカテゴリーは照合用で、足し合わせません（二重計上の防止）。</p>
+              </MoreInfo>
             </div>
           )}
-          <div className="t4d-scroll-x">
-            <Table>
-              <THead>
-                <TR>
-                  <TH>カテゴリー</TH>
-                  <TH>状態</TH>
-                  <TH align="right">
-                    全体合計<span className="normal-case">(t-CO2e)</span>
-                  </TH>
-                  <TH>理由・備考</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {scope3.categories.map((category) => (
-                  <TR key={category.code}>
-                    <TD className="text-[12px]">
-                      {category.metric ? (
-                        <Link
-                          href={`/enterprise/data?q=${encodeURIComponent(category.metric.name)}`}
-                          className="text-brand-700 hover:underline"
-                        >
-                          {category.metric.name}
-                        </Link>
-                      ) : (
-                        `Category ${category.category}`
-                      )}
-                    </TD>
-                    <TD>
-                      <AvailabilityBadge status={category.state} />
-                    </TD>
-                    <TD align="right" className="tnum">
-                      {category.total === null ? '—' : formatNumber(category.total)}
-                      {category.estimateTotal !== null && (
-                        <span className="ml-1 inline-flex items-center gap-1 text-[11px]">
-                          <ValueKindBadge kind="estimate" />
-                          {formatNumber(category.estimateTotal)}
-                        </span>
-                      )}
-                    </TD>
-                    <TD className="text-[11px] text-ink-muted">
-                      {category.reasons.join(' ／ ') ||
-                        (category.state === 'not_entered' ? 'Data Point がありません' : '—')}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
+          <div className="space-y-2 px-3 py-2.5">
+            <Scope3CategoryGrid categories={scope3.categories} />
+            <Collapsible
+              variant="plain"
+              summary={`カテゴリーごとの値と理由の表（${scope3.categories.length} 行）`}
+            >
+              <div className="t4d-scroll-x">
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>カテゴリー</TH>
+                      <TH>状態</TH>
+                      <TH align="right">
+                        全体合計<span className="normal-case">(t-CO2e)</span>
+                      </TH>
+                      <TH>理由・備考</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {scope3.categories.map((category) => (
+                      <TR key={category.code}>
+                        <TD className="text-[12px]">
+                          {category.metric ? (
+                            <Link
+                              href={`/enterprise/data?q=${encodeURIComponent(category.metric.name)}`}
+                              className="text-brand-700 hover:underline"
+                            >
+                              {category.metric.name}
+                            </Link>
+                          ) : (
+                            `Category ${category.category}`
+                          )}
+                        </TD>
+                        <TD>
+                          <AvailabilityBadge status={category.state} />
+                        </TD>
+                        <TD align="right" className="tnum">
+                          {category.total === null ? '—' : formatNumber(category.total)}
+                          {category.estimateTotal !== null && (
+                            <span className="ml-1 inline-flex items-center gap-1 text-[11px]">
+                              <ValueKindBadge kind="estimate" />
+                              {formatNumber(category.estimateTotal)}
+                            </span>
+                          )}
+                        </TD>
+                        <TD className="text-[11px] text-ink-muted">
+                          {category.reasons.join(' ／ ') ||
+                            (category.state === 'not_entered' ? 'Data Point がありません' : '—')}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </div>
+            </Collapsible>
           </div>
         </Card>
 
@@ -520,48 +509,50 @@ export default async function GhgPage() {
           />
 
           <div className="space-y-3 px-3 pb-3">
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div className="space-y-1.5 rounded-t4d border border-line bg-surface-muted p-2.5">
-                <p className="text-[11px] text-ink-muted">サプライヤー提出</p>
-                <div className="flex items-center gap-1.5">
-                  <Progress
-                    value={
-                      breakdown.suppliers.length === 0
-                        ? 0
-                        : (breakdown.submittedCount / breakdown.suppliers.length) * 100
-                    }
-                    tone={missingSuppliers.length === 0 ? 'success' : 'warning'}
-                    label={`サプライヤー提出 ${breakdown.submittedCount} / ${breakdown.suppliers.length} 社`}
-                  />
-                  <span className="shrink-0 text-[13px] font-semibold tabular-nums text-ink">
-                    {breakdown.submittedCount} / {breakdown.suppliers.length} 社
+                <FractionBar
+                  label="サプライヤー提出"
+                  numerator={breakdown.submittedCount}
+                  denominator={breakdown.suppliers.length}
+                  unit="社"
+                />
+                <p className="flex flex-wrap items-center gap-x-2 text-[11px] text-ink">
+                  <span>
+                    未提出 <span className="tabular-nums">{missingSuppliers.length}</span> 社
                   </span>
-                </div>
+                  {missingSuppliers.length > 0 && (
+                    <Link
+                      href="/enterprise/ghg/suppliers"
+                      className="inline-flex items-center gap-0.5 text-brand-700 hover:underline"
+                    >
+                      取込画面で依頼データを取り込む
+                      <ArrowRight className="size-3" aria-hidden="true" />
+                    </Link>
+                  )}
+                </p>
               </div>
-              <div className="space-y-1 rounded-t4d border border-line bg-surface-muted p-2.5">
+              <div className="space-y-1.5 rounded-t4d border border-line bg-surface-muted p-2.5">
                 <p className="text-[11px] text-ink-muted">内訳合計（区分を問わない）</p>
                 <p className="text-[18px] font-semibold leading-none tabular-nums text-ink">
                   {formatNumber(breakdown.breakdownTotal)}
                   <span className="ml-1 text-[11px] font-normal text-ink-muted">t-CO2e</span>
                 </p>
-                {/* 金額×係数（推計）を一次データと混ぜない（W0 O6） */}
-                <ul className="space-y-0.5 text-[10px] text-ink-muted">
-                  {DATA_CLASS_ORDER.map((key) => (
-                    <li key={key} className="flex justify-between gap-2">
-                      <span>{CALCULATION_DATA_CLASS_LABELS[key]}</span>
-                      <span className="tabular-nums">
-                        {formatNumber(breakdown.totalsByClass[key])}
+                {/* 金額×係数（推計）を一次データと混ぜない（W0 O6）。区分の帯は凡例と同じ内容 */}
+                <StackedBar segments={classSegments} label="内訳合計の区分別" unit=" t-CO2e" />
+                <ul
+                  aria-label="内訳合計の区分別"
+                  className="space-y-0.5 text-[11px] text-ink-muted"
+                >
+                  {classSegments.map((segment, index) => (
+                    <li key={segment.label} className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1">
+                        <StackedBarLegendChip index={index} />
+                        {segment.label}
                       </span>
+                      <span className="tabular-nums">{formatNumber(segment.value)}</span>
                     </li>
                   ))}
-                  {breakdown.totalsByClass.unclassified > 0 && (
-                    <li className="flex justify-between gap-2">
-                      <span>区分不明（旧形式）</span>
-                      <span className="tabular-nums">
-                        {formatNumber(breakdown.totalsByClass.unclassified)}
-                      </span>
-                    </li>
-                  )}
                 </ul>
               </div>
               <div className="space-y-1 rounded-t4d border border-line bg-surface-muted p-2.5">
@@ -571,25 +562,7 @@ export default async function GhgPage() {
                 <p className="text-[18px] font-semibold leading-none tabular-nums text-ink">
                   {breakdown.primaryDataPercent === null ? '—' : `${breakdown.primaryDataPercent}%`}
                 </p>
-                <p className="text-[10px] text-ink-muted">{PRIMARY_DATA_RATIO_DEFINITION}</p>
-              </div>
-              <div className="space-y-1 rounded-t4d border border-line bg-surface-muted p-2.5">
-                <p className="text-[11px] text-ink-muted">未提出</p>
-                <p
-                  className={`text-[18px] font-semibold leading-none tabular-nums ${
-                    missingSuppliers.length > 0 ? 'text-danger' : 'text-ink'
-                  }`}
-                >
-                  {missingSuppliers.length} 社
-                </p>
-                {missingSuppliers.length > 0 && (
-                  <Link
-                    href="/enterprise/ghg/suppliers"
-                    className="text-[10px] text-brand-700 hover:underline"
-                  >
-                    取込画面で依頼データを取り込む
-                  </Link>
-                )}
+                <p className="text-[11px] text-ink-muted">{PRIMARY_DATA_RATIO_DEFINITION}</p>
               </div>
             </div>
 
@@ -725,14 +698,18 @@ export default async function GhgPage() {
             </div>
 
             {breakdown.calculation ? (
-              <p className="text-[11px] text-ink-muted">
-                算定版: 第 {breakdown.calculationCount} 版（
-                {formatJst(breakdown.calculation.calculatedAt)}
-                ）／ 過去の版は Data Point の詳細で確認できます。 内訳は確定値（
-                {formatNumber(breakdown.dataPoint?.value)} t-CO2e・算定方法:{' '}
-                {breakdown.dataPoint?.methodology ?? '—'}）を置き換えません。
-                確定値の変更は承認フローで行います。
-              </p>
+              <MoreInfo label={`算定版（第 ${breakdown.calculationCount} 版）と確定値の関係`}>
+                <p>
+                  算定版: 第 {breakdown.calculationCount} 版（
+                  {formatJst(breakdown.calculation.calculatedAt)}
+                  ）／ 過去の版は Data Point の詳細で確認できます。
+                </p>
+                <p>
+                  内訳は確定値（{formatNumber(breakdown.dataPoint?.value)} t-CO2e・算定方法:{' '}
+                  {breakdown.dataPoint?.methodology ?? '—'}
+                  ）を置き換えません。確定値の変更は承認フローで行います。
+                </p>
+              </MoreInfo>
             ) : (
               <p className="text-[11px] text-ink-muted">
                 算定内訳がまだありません。サプライヤーデータ取込からサプライヤーのデータを取り込んでください。
@@ -741,43 +718,48 @@ export default async function GhgPage() {
           </div>
         </Card>
 
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`排出係数マスター（${factors.length}）`}
-            action={
-              <Badge tone="warning">
-                <AlertTriangle className="size-3" aria-hidden="true" />
-                架空値（実係数ではありません）
-              </Badge>
-            }
-          />
-          <Table>
-            <THead>
-              <TR>
-                <TH>コード</TH>
-                <TH>名称</TH>
-                <TH>区分</TH>
-                <TH align="right">係数</TH>
-                <TH>単位</TH>
-                <TH align="right">係数年度</TH>
-                <TH>出典</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {factors.map((factor) => (
-                <TR key={factor.id}>
-                  <TD className="font-mono text-[11px]">{factor.code}</TD>
-                  <TD>{factor.name}</TD>
-                  <TD>{factor.category}</TD>
-                  <TD align="right">{factor.factorValue}</TD>
-                  <TD>{factor.factorUnit}</TD>
-                  <TD align="right">{factor.factorYear}</TD>
-                  <TD className="text-[11px] text-ink-muted">{factor.factorSource}</TD>
+        {/* 架空値のバッジは見出しの横（折りたたみの外）に置き、閉じていても見えるようにする */}
+        <CollapsibleSection
+          id="ghg-emission-factors"
+          title={`排出係数マスター（${factors.length}）`}
+          summary={`係数 ${factors.length} 件（コード・係数・単位・係数年度・出典）`}
+          actions={
+            <Badge tone="warning">
+              <AlertTriangle className="size-3" aria-hidden="true" />
+              架空値（実係数ではありません）
+            </Badge>
+          }
+          className="overflow-hidden"
+        >
+          <div className="t4d-scroll-x">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>コード</TH>
+                  <TH>名称</TH>
+                  <TH>区分</TH>
+                  <TH align="right">係数</TH>
+                  <TH>単位</TH>
+                  <TH align="right">係数年度</TH>
+                  <TH>出典</TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
-        </Card>
+              </THead>
+              <TBody>
+                {factors.map((factor) => (
+                  <TR key={factor.id}>
+                    <TD className="font-mono text-[11px]">{factor.code}</TD>
+                    <TD>{factor.name}</TD>
+                    <TD>{factor.category}</TD>
+                    <TD align="right">{factor.factorValue}</TD>
+                    <TD>{factor.factorUnit}</TD>
+                    <TD align="right">{factor.factorYear}</TD>
+                    <TD className="text-[11px] text-ink-muted">{factor.factorSource}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+        </CollapsibleSection>
       </div>
     </>
   );

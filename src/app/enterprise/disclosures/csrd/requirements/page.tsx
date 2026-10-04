@@ -8,6 +8,7 @@ import {
   Settings2,
   UserCheck,
 } from 'lucide-react';
+import { FunnelSteps } from '@/components/charts/funnel-steps';
 import { FilterBar, type FilterGroup } from '@/components/shared/filter-bar';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -15,6 +16,7 @@ import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { CSRD_SECTION_LABEL } from '@/lib/domain/csrd';
@@ -80,6 +82,9 @@ function ReviewCell({ view }: { view: CsrdRequirementView }) {
  * CSRD 要求事項の評価（docs/disclosure-first.md §9.4）。12 行。
  * 適用は DMA（人の判断）から導出し、どの観点（インパクト・財務）で適用になったかを行ごとに示す。
  * DMA が未確定の間は「暫定（DMA 確定前）」を併記する。AI ギャップ分析は詳細で 1 件ずつ（候補）。
+ *
+ * 文字量を減らす（§10.4）: 件数の流れは図（FunnelSteps）、画面の使い方は「この画面について」、
+ * SSBJ との違いは 1 行（未発効の注記を含む）＋閉じた全文。DMA 未確定の注記・表・架空の縮小サンプルは常に見せる。
  */
 export default async function CsrdRequirementsPage({
   searchParams,
@@ -185,11 +190,23 @@ export default async function CsrdRequirementsPage({
         description={
           <span className="flex flex-wrap items-center gap-2">
             <span>
-              {loaded.versionLabel} ／ {shell.currentPeriod.label} ／
-              ダブル・マテリアリティで決めた適用に沿って、3 観点で評価します
+              {loaded.versionLabel} ／ {shell.currentPeriod.label} ／ DMA で決めた適用を 3
+              観点で評価
             </span>
             {loaded.isFixture && <SampleMasterBadge />}
           </span>
+        }
+        help={
+          <>
+            <p>
+              ダブル・マテリアリティ評価（DMA）で決めた適用に沿って、開示・データ・業務プロセスの 3
+              観点で評価します。
+            </p>
+            <p>
+              コードを選ぶと、適用の根拠・3 観点・AI
+              の候補・対応計画・回答への導線を確認できます。優先度は評価対象（常に適用・重要）だけに付けます。
+            </p>
+          </>
         }
         breadcrumbs={breadcrumbs}
         actions={
@@ -224,27 +241,28 @@ export default async function CsrdRequirementsPage({
 
         <DoubleMaterialityNote compact />
 
-        {/* 件数の流れ。「なぜこの件数なのか」を画面上で検算できるようにする */}
-        <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
-          <span className="rounded-t4d border border-line bg-surface px-2 py-1">
-            サンプル（架空）マスター <strong className="tabular-nums">{loaded.masterTotal}</strong>{' '}
-            項目
-          </span>
-          <span aria-hidden="true">→</span>
-          <span className="rounded-t4d border border-line bg-surface px-2 py-1">
-            ESRS 2（常に適用） <strong className="tabular-nums">{count('always')}</strong>{' '}
-            件・重要と判断 <strong className="tabular-nums">{count('material')}</strong> 件
-          </span>
-          <span aria-hidden="true">→</span>
-          <span className="rounded-t4d border border-line bg-surface px-2 py-1">
-            対象外 <strong className="tabular-nums">{count('not_material')}</strong> 件・未判定{' '}
-            <strong className="tabular-nums">{count('undetermined')}</strong> 件を除外
-          </span>
-          <span aria-hidden="true">→</span>
-          <span className="rounded-t4d border border-brand-300 bg-brand-50 px-2 py-1 font-medium text-brand-800">
-            評価対象 <strong className="tabular-nums">{inScope}</strong> / {loaded.views.length} 件
-          </span>
-        </div>
+        {/* 件数の流れ。「なぜこの件数なのか」を画面上で検算できるようにする（段ごとの内訳は閉じた説明に） */}
+        <Card className="max-w-2xl space-y-1.5 p-3">
+          <FunnelSteps
+            label="評価対象の件数の流れ"
+            steps={[
+              { label: 'サンプル（架空）マスター', count: loaded.masterTotal, unit: '項目' },
+              { label: '未判定を除く', count: loaded.views.length - count('undetermined') },
+              {
+                label: '対象外を除く（評価対象）',
+                count: inScope,
+                href: `${CSRD_REQUIREMENTS_PATH}?applicability=always&applicability=material`,
+              },
+            ]}
+          />
+          <MoreInfo label="件数の内訳">
+            <p>
+              評価対象 {inScope} / {loaded.views.length} 件 ＝ ESRS 2（常に適用）{count('always')}{' '}
+              件＋重要と判断 {count('material')} 件。対象外 {count('not_material')} 件・未判定{' '}
+              {count('undetermined')} 件は評価対象から除きます。
+            </p>
+          </MoreInfo>
+        </Card>
 
         <FilterBar
           groups={groups}
@@ -275,14 +293,8 @@ export default async function CsrdRequirementsPage({
         />
 
         <Card className="overflow-hidden">
-          <SectionTitle
-            title={`要求事項（${filtered.length} / ${loaded.views.length} 件）`}
-            action={
-              <span className="text-[11px] text-ink-muted">
-                コードを選ぶと、適用の根拠・3 観点・AI の候補・対応計画・回答への導線を確認できます
-              </span>
-            }
-          />
+          {/* コードの行き先の説明は「この画面について」に置く（§10.4） */}
+          <SectionTitle title={`要求事項（${filtered.length} / ${loaded.views.length} 件）`} />
           {filtered.length === 0 ? (
             <EmptyState
               title="該当する要求事項がありません"
@@ -380,10 +392,10 @@ export default async function CsrdRequirementsPage({
               </Table>
             </div>
           )}
+          {/* AI は候補・確定は人、架空の縮小サンプルであることは閉じずに見せる */}
           <p className="border-t border-line px-3 py-2 text-[11px] leading-relaxed text-ink-muted">
             3 観点・総合は担当者が確定した値です（AI の候補は「AI
-            の候補」列に分けて表示し、確定値には入れません）。
-            優先度は評価対象（常に適用・重要）だけに付けます。収録は ESRS の架空の縮小サンプル{' '}
+            の候補」列に分け、確定値には入れません）。収録は ESRS の架空の縮小サンプル{' '}
             {loaded.masterTotal} 項目で、正式な ESRS の全量ではありません。
           </p>
         </Card>

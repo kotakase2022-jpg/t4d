@@ -1,8 +1,10 @@
 import Link from 'next/link';
-import { ArrowRight, Info, Inbox } from 'lucide-react';
+import { ArrowRight, Inbox } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { isDemoMode } from '@/lib/config';
@@ -20,17 +22,22 @@ import {
   DemoBenchmarkBanner,
   UndisclosedBadge,
 } from '../_components/analysis-badges';
+import { BenchmarkRange, BenchmarkRangeLegend } from '../_components/benchmark-range';
 
 export const metadata = { title: '他社比較' };
 
 /**
- * 他社比較（docs/disclosure-first.md §9.5）。閲覧専用。
+ * 他社比較（docs/disclosure-first.md §9.5・§10.4）。閲覧専用。
  *
  * 比較データは Demo Mode のときだけの架空データ。Supabase モードでは「比較データが登録されていません」
  * と示す（他テナントの値を比較データとして使わない）。順位・総合スコアは出さず、値の高低を色で示さない。
  *
  * 数値の列は右寄せ（桁をそろえる）にし、値・中央値・範囲には必ず単位を付ける（行の単位と同じでも省かない。
  * 横にスクロールした先で単位が分からなくならないように）。1 列目（指標）は横スクロールしても見えるよう固定する。
+ *
+ * 文字を減らすため（§10.4）: 比較の決まり・指標の定義と注記・比較先の会社の表は既定で閉じる。
+ * 架空データのバナーと表の caption、比較対象外の理由は閉じない。
+ * 範囲の列に中立色の範囲帯（比較できる社だけ・並べ替えない）を添える。
  */
 
 /** 値と単位（常に単位を付ける） */
@@ -129,10 +136,17 @@ function StatsCells({ row }: { row: BenchmarkRow }) {
       </TD>
       <TD align="right" className="py-2 align-top text-[12px]">
         {stats.min !== null && stats.max !== null ? (
-          <span className="tnum">
-            {formatNumber(stats.min)}〜{formatNumber(stats.max)}
-            <span className="ml-0.5 text-[11px] text-ink-muted">{row.metric.unit}</span>
-          </span>
+          <>
+            <span className="tnum">
+              {formatNumber(stats.min)}〜{formatNumber(stats.max)}
+              <span className="ml-0.5 text-[11px] text-ink-muted">{row.metric.unit}</span>
+            </span>
+            <BenchmarkRange
+              peerValues={comparablePeerValues(row)}
+              median={stats.median}
+              own={row.own.value}
+            />
+          </>
         ) : (
           <span className="text-[11px] text-ink-muted">—</span>
         )}
@@ -141,13 +155,21 @@ function StatsCells({ row }: { row: BenchmarkRow }) {
   );
 }
 
+/** 比較できる社（開示あり・条件が同じ）の値。集計（stats）と同じ社だけ */
+function comparablePeerValues(row: BenchmarkRow): number[] {
+  return row.peers
+    .filter((cell) => cell.disclosed && cell.comparability?.comparable)
+    .map((cell) => cell.value?.value)
+    .filter((value): value is number => typeof value === 'number');
+}
+
 export default async function BenchmarkPage() {
   const shell = await loadEnterpriseShell();
   const { db, ctx } = shell;
   const header = (
     <PageHeader
       title="他社比較"
-      description="自社の確定値と、比較の条件が同じ会社の開示値を並べます（順位・総合スコアは出しません）"
+      description="自社の確定値と、比較の条件が同じ会社の開示値を並べます"
       breadcrumbs={[{ label: '企業ワークスペース' }, { label: '分析' }, { label: '他社比較' }]}
     />
   );
@@ -188,15 +210,12 @@ export default async function BenchmarkPage() {
       <div className="space-y-3 p-4">
         <DemoBenchmarkBanner />
 
-        <section
-          aria-labelledby="benchmark-rules"
-          className="rounded-t4d border border-line bg-surface px-3 py-2 text-[12px] text-ink"
+        <Collapsible
+          id="benchmark-rules"
+          summary="比較の決まり: 同条件の会社だけ・換算しない・順位なし"
+          meta={`比較の年度 ${view.fiscalYear}`}
         >
-          <h2 id="benchmark-rules" className="flex items-center gap-1.5 text-[13px] font-semibold">
-            <Info className="size-3.5 text-brand-600" aria-hidden="true" />
-            比較の決まり
-          </h2>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+          <ul className="list-disc space-y-0.5 pl-5">
             <li>
               比較の年度は {view.fiscalYear}（比較データの年度）です。自社の値は
               {view.ownPeriod
@@ -219,7 +238,7 @@ export default async function BenchmarkPage() {
             </li>
             <li>第三者保証の有無は注記です（比較の可否には使いません）。</li>
           </ul>
-        </section>
+        </Collapsible>
 
         <div className="t4d-scroll-x rounded-t4d-lg border border-line bg-surface">
           <Table className="min-w-[1280px]">
@@ -249,15 +268,11 @@ export default async function BenchmarkPage() {
                   >
                     <span className="font-semibold text-ink">{row.metric.label}</span>
                     <span className="block font-normal text-ink-muted">（{row.metric.unit}）</span>
-                    {row.metric.ownMethod && (
-                      <span className="block text-[11px] font-normal text-ink-muted">
-                        自社の定義: {row.metric.ownMethod}
-                      </span>
-                    )}
-                    {row.metric.note && (
-                      <span className="block text-[11px] font-normal text-ink-muted">
-                        {row.metric.note}
-                      </span>
+                    {(row.metric.ownMethod || row.metric.note) && (
+                      <MoreInfo label="定義・注記" className="mt-0.5 font-normal">
+                        {row.metric.ownMethod && <p>自社の定義: {row.metric.ownMethod}</p>}
+                        {row.metric.note && <p>{row.metric.note}</p>}
+                      </MoreInfo>
                     )}
                   </th>
                   <TD align="right" className="max-w-[200px] py-2 align-top">
@@ -275,31 +290,35 @@ export default async function BenchmarkPage() {
           </Table>
         </div>
 
-        <div className="t4d-scroll-x rounded-t4d-lg border border-line bg-surface">
-          <Table>
-            <caption className="px-3 py-2 text-left text-[13px] font-semibold text-ink">
-              比較先の会社（{DEMO_BENCHMARK_NOTICE}）
-            </caption>
-            <THead>
-              <TR>
-                <TH>会社</TH>
-                <TH>業種</TH>
-                <TH>規模</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {view.peers.map((peer) => (
-                <TR key={peer.id}>
-                  <th scope="row" className="px-2 text-left text-[12px] font-medium">
-                    {peer.name}
-                  </th>
-                  <TD className="text-[12px]">{peer.industry}</TD>
-                  <TD className="text-[12px]">{peer.sizeBand}</TD>
+        <BenchmarkRangeLegend />
+
+        <Collapsible summary={`比較先の会社（${view.peers.length} 社・すべて架空）`}>
+          <div className="t4d-scroll-x">
+            <Table>
+              <caption className="px-3 py-2 text-left text-[13px] font-semibold text-ink">
+                比較先の会社（{DEMO_BENCHMARK_NOTICE}）
+              </caption>
+              <THead>
+                <TR>
+                  <TH>会社</TH>
+                  <TH>業種</TH>
+                  <TH>規模</TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
-        </div>
+              </THead>
+              <TBody>
+                {view.peers.map((peer) => (
+                  <TR key={peer.id}>
+                    <th scope="row" className="px-2 text-left text-[12px] font-medium">
+                      {peer.name}
+                    </th>
+                    <TD className="text-[12px]">{peer.industry}</TD>
+                    <TD className="text-[12px]">{peer.sizeBand}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+        </Collapsible>
       </div>
     </>
   );

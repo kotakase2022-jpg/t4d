@@ -115,6 +115,8 @@ test('対応状況: DMA は未確定で、テーマ別の要求事項の適用�
   await page.waitForURL(`**${BASE}/settings`);
   await expect(main(page).getByRole('button', { name: 'DMA を確定する' })).toBeDisabled();
   await expect(main(page).getByText(/未評価: G1 企業行動/)).toBeVisible();
+  // 取り消す確定が無い間は、保存で「確定が取り消される」とは書かない（§10.4）
+  await expect(main(page)).not.toContainText('保存すると DMA の確定は取り消されます');
 });
 
 test('DMA: G1 をインパクト=重要でない・財務=重要と根拠付きで判断し、DMA を確定する', async ({
@@ -152,6 +154,13 @@ test('DMA: G1 をインパクト=重要でない・財務=重要と根拠付き�
   await expect(flash(page)).toContainText('ダブル・マテリアリティ評価（DMA）を確定しました');
   await expect(main(page).getByText('DMA 確定済み')).toBeVisible();
   await expect(main(page).getByRole('button', { name: 'DMA を確定する' })).toHaveCount(0);
+  // 確定の後は、各フォームの保存で確定が取り消されることを閉じずに見せる
+  await expect(
+    main(page).getByText('保存すると DMA の確定は取り消されます（前提が変わるため）。'),
+  ).toBeVisible();
+  await expect(
+    main(page).getByText('保存すると DMA の確定は取り消されます（人の判断は変わりません）。'),
+  ).toBeVisible();
 });
 
 test('要求事項: G1-1・G1-4 が「適用（財務）」になり、暫定が消える（評価対象 11 / 12）', async ({

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { formatJst } from '@/lib/format/datetime';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -82,18 +83,22 @@ export default async function SsbjDraftPage({
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
-        <Card className="p-3">
-          <p className="text-[12px] leading-relaxed text-ink">
-            人工知能が書けるのは、
-            <span className="font-medium">
-              担当者が確認して「対応済み」または「おおむね対応」とした要求事項
-            </span>
-            だけです。未確認・未対応の事項は本文に含めず、「書けなかった箇所」として理由とともに示します。
-            数値は承認済みのものだけを使います。
-          </p>
-          <p className="mt-1 text-[11px] text-ink-muted">
+        {/* 「草案である・人が確認して確定する」は常に見せる（誠実さの注記）。
+            何を根拠に書くかの説明は既定で閉じる（docs/disclosure-first.md §10.4） */}
+        <Card className="space-y-1 p-3">
+          <p className="text-[12px] text-ink">
             生成されるのは草案です。そのまま開示せず、内容を確認し、必要な修正を加えてから確定してください。
           </p>
+          <MoreInfo label="人工知能が書ける範囲">
+            <p>
+              人工知能が書けるのは、
+              <span className="font-medium text-ink">
+                担当者が確認して「対応済み」または「おおむね対応」とした要求事項
+              </span>
+              だけです。未確認・未対応の事項は本文に含めず、「書けなかった箇所」として理由とともに示します。
+              数値は承認済みのものだけを使います。
+            </p>
+          </MoreInfo>
         </Card>
 
         {overview.areas.map((view) => {

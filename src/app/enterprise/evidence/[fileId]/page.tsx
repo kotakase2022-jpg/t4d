@@ -9,6 +9,7 @@ import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { CollapsibleSection } from '@/components/ui/collapsible';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { fileTypeLabel } from '@/lib/domain/evidence-limits';
@@ -527,8 +528,13 @@ export default async function EvidenceViewerPage({
             </Card>
           )}
 
-          <Card>
-            <SectionTitle title={`版の履歴（${versions.length}）`} />
+          {/* 履歴は既定で閉じる（見出しは常に見せる。docs/disclosure-first.md §10.4 B6） */}
+          <CollapsibleSection
+            id="evidence-versions"
+            title={`版の履歴（${versions.length}）`}
+            summary={`版の一覧（${versions.length} 版・表示中 v${current.versionNo}）`}
+            bodyClassName="px-0 pb-0"
+          >
             <ul className="divide-y divide-line">
               {versions.map((v) => (
                 <li
@@ -549,7 +555,7 @@ export default async function EvidenceViewerPage({
                 </li>
               ))}
             </ul>
-          </Card>
+          </CollapsibleSection>
         </div>
       </div>
     </>

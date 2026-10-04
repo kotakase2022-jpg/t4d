@@ -32,6 +32,27 @@ const PATHS = [
   '/enterprise/evidence',
   '/enterprise/settings',
   '/enterprise/ai',
+  // 図（SVG・帯）と既定で閉じる折りたたみを入れた画面（docs/disclosure-first.md §10.4。
+  // SVG は viewBox＋w-full で、1280/1440/1920 のどれでも横にはみ出さない）
+  '/enterprise/esg',
+  '/enterprise/disclosures/ssbj/requirements',
+  '/enterprise/disclosures/csrd',
+  '/enterprise/disclosures/csrd/requirements',
+  '/enterprise/analysis/diagnosis',
+  '/enterprise/analysis/regulations',
+  '/enterprise/analysis/trends',
+  '/enterprise/analysis/benchmark',
+  '/enterprise/analysis/financial-impact',
+  // 仮定の入力欄を開いた状態（URL に仮定があると開いて描く）
+  '/enterprise/analysis/financial-impact?sc=custom&r_energy=5',
+];
+
+/** 折りたたみを開くと中の表・図が増える画面（開いた状態でも body が横に溢れないこと） */
+const EXPANDED_PATHS = [
+  '/enterprise/analysis/trends',
+  '/enterprise/analysis/financial-impact',
+  '/enterprise/esg',
+  '/enterprise/ghg',
 ];
 
 for (const size of PC_SIZES) {
@@ -53,6 +74,29 @@ for (const size of PC_SIZES) {
     expect(overflowing.join('\n')).toBe('');
   });
 }
+
+test('1280px: 折りたたみをすべて開いても body に横スクロールが出ない', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await loginAs(page, DEMO_USERS.enterpriseAdmin);
+
+  const overflowing: string[] = [];
+  for (const path of EXPANDED_PATHS) {
+    await page.goto(path);
+    await expect(page.locator('#t4d-main')).toBeVisible();
+    const opened = await page.evaluate(() => {
+      const all = [...document.querySelectorAll<HTMLDetailsElement>('#t4d-main details')];
+      for (const details of all) details.open = true;
+      return all.length;
+    });
+    expect(opened, `${path} に折りたたみが無い`).toBeGreaterThan(0);
+    const overflow = await page.evaluate(() => {
+      const doc = document.documentElement;
+      return doc.scrollWidth - doc.clientWidth;
+    });
+    if (overflow > 2) overflowing.push(`${path} (+${overflow}px)`);
+  }
+  expect(overflowing.join('\n')).toBe('');
+});
 
 test('1280px: サイドバー・ヘッダー・本文が重ならない', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });

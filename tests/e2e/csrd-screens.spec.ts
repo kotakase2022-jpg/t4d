@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { CSRD_IDS } from '@/lib/fixtures/csrd';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * CSRD の 対応計画・データ収集・開示ドラフトと DMA の事項の画面（docs/disclosure-first.md §9.4）。
@@ -41,6 +41,18 @@ test('対応計画: CSRD の計画だけを並べ、要求事項の詳細へ進�
     'href',
     detailHref('ESRS-S1-9'),
   );
+  // 状態の件数は帯＋凡例（分母付き。§10.4）。操作の説明は「この画面について」（既定で閉じる）
+  const counts = main(page).getByRole('list', { name: '対応計画の件数' });
+  await expect(counts.getByRole('listitem').filter({ hasText: '未着手' })).toContainText(
+    '1 / 2 件',
+  );
+  await expect(counts.getByRole('listitem').filter({ hasText: '対応中' })).toContainText(
+    '1 / 2 件',
+  );
+  const help = main(page).getByText(/計画の追加は要求事項の詳細画面/);
+  await expect(help).toBeHidden();
+  await openCollapsible(main(page), 'この画面について');
+  await expect(help).toBeVisible();
   // 次の工程（データ収集）への主導線
   await expect(main(page).getByRole('link', { name: 'CSRD データ収集' })).toHaveAttribute(
     'href',
@@ -68,6 +80,13 @@ test('データ収集: 評価対象の要求事項 × 指標 × 拠点の状況�
   await expect(status).not.toContainText('ESRS-E5-5');
   // 当期のデータも割当も無い指標は「未入力」（0 として扱わない）
   await expect(status.locator('tbody tr', { hasText: 'scope2_location' })).toContainText('未入力');
+  // 状況の件数はリンク付きの内訳（分母付き。§10.4）。各状況はその行だけに絞った表へ
+  const stateCounts = main(page).getByRole('list', { name: '当期の状況の件数' });
+  await expect(stateCounts.getByRole('listitem')).toHaveCount(4);
+  await expect(stateCounts.getByRole('link', { name: '未入力' })).toHaveAttribute(
+    'href',
+    `${BASE}/collection?state=not_entered#csrd-collection-requirement-rows`,
+  );
 
   // S1-9 の計画から作った収集項目（EU 子会社・JV）
   const created = page.getByRole('table', { name: '計画から作成した収集項目' });
@@ -79,6 +98,11 @@ test('データ収集: 評価対象の要求事項 × 指標 × 拠点の状況�
   // 収集項目の作成フォーム（計画・指標・拠点・担当・期限）と、次の工程（開示ドラフト）
   await expect(page.getByRole('combobox', { name: '対象の対応計画' })).toBeVisible();
   await expect(page.getByRole('button', { name: '収集項目を作成' })).toBeVisible();
+  // 既にある指標・割当を選んだときの扱いは既定で閉じる（開いてから確かめる）
+  const rule = main(page).getByText(/既にある指標のコードを選ぶと/);
+  await expect(rule).toBeHidden();
+  await openCollapsible(main(page), '既にある指標・割当を選んだときの扱い');
+  await expect(rule).toBeVisible();
   await expect(main(page).getByRole('link', { name: 'CSRD 開示ドラフト' })).toHaveAttribute(
     'href',
     `${BASE}/draft`,
@@ -125,11 +149,26 @@ test('開示ドラフト: 節ごとの領域に AI 草案（候補）と本文�
   await expect(page.getByRole('region', { name: 'E5 資源利用と循環経済' })).toContainText('対象外');
   await expect(page.getByRole('region', { name: 'G1 企業行動' })).toContainText('未評価');
 
-  // 書けなかった箇所・節の要求事項のコードは要求事項の詳細へ
+  // 書けなかった箇所・節の要求事項のコードは要求事項の詳細へ。節の要求事項の一覧は既定で閉じる
+  // （§10.4。summary に件数）ため、開いてから一覧と書けなかった箇所の両方を確かめる
+  await openCollapsible(s1, /^この節の要求事項（2 件・担当者確認済み \d+ 件）$/);
+  await expect(s1.getByRole('link', { name: 'ESRS-S1-9' })).toHaveCount(2);
   await expect(s1.getByRole('link', { name: 'ESRS-S1-9' }).first()).toHaveAttribute(
     'href',
     detailHref('ESRS-S1-9'),
   );
+  // AI 草案は候補で、採用と確定は担当者が行うことは閉じずに見せる。件数は分母付きの帯
+  await expect(
+    main(page).getByText('「本文に採用」を押すまで本文には入らず、確定も担当者が行います', {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(main(page).getByRole('img', { name: /^評価対象の節: \d+ \/ 6 節$/ })).toBeVisible();
+  // 草案に書ける範囲の説明は既定で閉じる（開いてから確かめる）
+  const scope = main(page).getByText(/が草案に書けるのは/);
+  await expect(scope).toBeHidden();
+  await openCollapsible(main(page), 'AI 草案に書ける範囲');
+  await expect(scope).toBeVisible();
   // 定性情報（全基準共通の資産）へは右上から
   await expect(main(page).getByRole('link', { name: '定性情報' })).toHaveAttribute(
     'href',
@@ -156,6 +195,12 @@ test('DMA の事項（E1）: IRO と算定結果（提案）・軸ごとの人�
   await expect(
     page.getByRole('group', { name: /財務的重要性/ }).getByLabel('重要', { exact: true }),
   ).toBeChecked();
+  // AI は判断しないことは閉じずに見せ、判断の決まり（根拠が必須など）は閉じる（§10.4）
+  await expect(main(page).getByText(/AI は判断しません/)).toBeVisible();
+  const rules = main(page).getByText(/算定結果（提案）と違う判断もできます/);
+  await expect(rules).toBeHidden();
+  await openCollapsible(main(page), '判断の決まり');
+  await expect(rules).toBeVisible();
   // 設定画面（メニュー外）にいる間は、CSRD の子に現在地を付けない（§9.1）
   await expect(csrdList(page).locator('a[aria-current="page"]')).toHaveCount(0);
 });

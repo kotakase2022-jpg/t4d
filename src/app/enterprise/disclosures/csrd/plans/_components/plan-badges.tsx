@@ -11,7 +11,8 @@ export { PlanPriorityBadge } from '../../_components/csrd-badges';
  * アイコンは装飾なので読み上げない。
  */
 
-const STATUS_ICON: Record<SsbjActionStatus, typeof Eye> = {
+/** 対応状況のアイコン（バッジと、件数の内訳の凡例で同じ印を使う） */
+export const ACTION_STATUS_ICON: Record<SsbjActionStatus, typeof Eye> = {
   not_started: CircleDashed,
   in_progress: CircleDot,
   in_review: Eye,
@@ -19,7 +20,7 @@ const STATUS_ICON: Record<SsbjActionStatus, typeof Eye> = {
 };
 
 export function ActionStatusBadge({ status }: { status: SsbjActionStatus }) {
-  const Icon = STATUS_ICON[status];
+  const Icon = ACTION_STATUS_ICON[status];
   return (
     <Badge tone={ACTION_STATUS_TONE[status]}>
       <Icon className="size-3" aria-hidden="true" />

@@ -516,7 +516,8 @@ export function createFixtureDb(): FixtureDb {
 
   db.periods.push(
     {
-      // GHG「直近3年の推移」用の過年度。承認済みの GHG 3 指標だけを持つ
+      // 過年度（closed）。GHG「直近3年の推移」と自社経年比較（§10.2）用に、収集 21 指標の
+      // 承認済み実績を全拠点分持つ（値の決め方は dataset.ts の FY2024_RATIO・FY2024_UNIT_VALUE）
       id: PERIOD_IDS.fy2024,
       organizationId: ORG_IDS.aomi,
       code: 'FY2024',

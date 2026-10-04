@@ -13,6 +13,7 @@ import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { requireEnterpriseContext } from '@/lib/auth/session';
@@ -248,11 +249,13 @@ export async function OutputsTab({
           </span>
         </p>
         {db.mode === 'demo' && (
-          <p className="pl-5 text-[11px]">
-            デモではスナップショットの目録をこのブラウザの Cookie
-            で持ち回します。別のブラウザや、Cookie
-            の容量不足で古い操作が押し出された後は一覧から消えることがあります（本番は追記専用の表に保存します）。
-          </p>
+          <MoreInfo label="デモでのスナップショットの保存" className="pl-5">
+            <p>
+              デモではスナップショットの目録をこのブラウザの Cookie
+              で持ち回します。別のブラウザや、Cookie
+              の容量不足で古い操作が押し出された後は一覧から消えることがあります（本番は追記専用の表に保存します）。
+            </p>
+          </MoreInfo>
         )}
       </div>
 
@@ -267,8 +270,13 @@ export async function OutputsTab({
           </CardHeader>
           <CardContent className="space-y-2">
             <CardDescription>
-              保存済みの版をそのまま固定します（自動保存中の本文は含めません）。未承認の節・不足情報は出力に「草稿・未承認箇所あり」として明示します。
+              保存済みの版を固定して出力します（未承認の箇所は出力に明示）。
             </CardDescription>
+            <MoreInfo label="草稿に含めるもの">
+              <p>
+                保存済みの版をそのまま固定します（自動保存中の本文は含めません）。未承認の節・不足情報は出力に「草稿・未承認箇所あり」として明示します。
+              </p>
+            </MoreInfo>
             {canDraft ? (
               <form action={createReviewDraftSnapshotAction}>
                 <input type="hidden" name="projectId" value={projectId} />
@@ -474,10 +482,12 @@ export async function OutputsTab({
             出力の記録
           </CardTitle>
         </CardHeader>
-        <p className="px-3 pt-2 text-[11px] text-ink-muted">
-          同じスナップショットから再出力すると、内容ハッシュ（本文・数値・参照）は一致します。ファイルのハッシュは生成日時を含むため、DOCX・XLSX
-          では出力ごとに変わります。
-        </p>
+        <MoreInfo label="ハッシュの見方" className="px-3 pt-2">
+          <p>
+            同じスナップショットから再出力すると、内容ハッシュ（本文・数値・参照）は一致します。ファイルのハッシュは生成日時を含むため、DOCX・XLSX
+            では出力ごとに変わります。
+          </p>
+        </MoreInfo>
         {artifacts.length === 0 ? (
           <p className="px-3 py-3 text-[12px] text-ink-muted">まだ出力していません。</p>
         ) : (

@@ -67,7 +67,12 @@ export default async function AlertsPage() {
     <>
       <PageHeader
         title="統合アラートセンター"
-        description="未提出・期限超過・異常値・資料依頼・開示質問の更新を集約します。行をクリックすると対象へ直接遷移します。"
+        description="未提出・期限超過・異常値・資料依頼・開示質問の更新"
+        help={
+          <p>
+            未提出・期限超過・異常値・資料依頼・開示質問の更新を集約します。行をクリックすると対象へ直接遷移します。
+          </p>
+        }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'アラート' }]}
       />
 

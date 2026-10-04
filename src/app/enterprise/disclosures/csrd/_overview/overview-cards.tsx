@@ -7,11 +7,12 @@ import {
   Settings2,
   ShieldCheck,
 } from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { SSBJ_VS_CSRD_MATERIALITY_NOTE } from '@/lib/domain/csrd';
+import { DMA_OUTCOME_LABEL, applicabilityLabel } from '@/lib/domain/csrd';
 import { COVERAGE_LABEL } from '@/lib/domain/ssbj';
 import { formatJst } from '@/lib/format/datetime';
 import type { CsrdOverview } from '@/lib/services/csrd/requirements';
@@ -21,12 +22,19 @@ import {
   SSBJ_COVERAGE_STATUSES,
   type CsrdApplicabilityKind,
 } from '@/types/domain';
-import { ApplicabilityBadge, DmaOutcomeBadge, ProvisionalBadge } from '../_components/csrd-badges';
+import {
+  APPLICABILITY_ICON,
+  COVERAGE_ICON,
+  DMA_OUTCOME_ICON,
+  ProvisionalBadge,
+} from '../_components/csrd-badges';
+import { SsbjDifferenceLine } from '../settings/_components/materiality-note';
 
 /**
- * CSRD 対応状況の要約カード（docs/disclosure-first.md §9.4）。
+ * CSRD 対応状況の要約カード（docs/disclosure-first.md §9.4・§10.4）。
  * 対応状況の画面の表は既存のギャップ分析表 1 つだけにするため、ここでは表を使わず
- * 一覧（ul / dl）で件数を示す。件数は必ず分母と並べる。
+ * 内訳の図（StatusBreakdown: 帯＋凡例の一覧）で件数を示す。件数は必ず分母と並べる（「n / N 件」）。
+ * 帯の色は区分の識別だけで、良し悪しは示さない（ラベルとアイコンを必ず併記）。
  */
 
 const BASE = '/enterprise/disclosures/csrd';
@@ -51,23 +59,19 @@ export function DmaSummaryCard({ dma }: { dma: CsrdOverview['dma'] }) {
           )
         }
       />
-      <div className="space-y-2 px-3 pb-3">
-        <p className="text-[11px] leading-relaxed text-ink-muted">
-          {SSBJ_VS_CSRD_MATERIALITY_NOTE}
-        </p>
-        <ul aria-label="事項の結果（人の判断）" className="grid grid-cols-5 gap-1.5">
-          {DMA_OUTCOMES.map((outcome) => (
-            <li key={outcome} className="space-y-1 rounded-t4d border border-line p-2">
-              <DmaOutcomeBadge outcome={outcome} />
-              <p className="text-[12px] text-ink">
-                <span className="text-[16px] font-semibold tabular-nums">
-                  {dma.outcomeCounts[outcome]}
-                </span>{' '}
-                / {dma.matterTotal} 事項
-              </p>
-            </li>
-          ))}
-        </ul>
+      <div className="space-y-2.5 px-3 pb-3">
+        <SsbjDifferenceLine />
+        <StatusBreakdown
+          label="事項の結果（人の判断）"
+          unit="事項"
+          denominator={dma.matterTotal}
+          items={DMA_OUTCOMES.map((outcome) => ({
+            key: outcome,
+            label: DMA_OUTCOME_LABEL[outcome],
+            count: dma.outcomeCounts[outcome],
+            icon: DMA_OUTCOME_ICON[outcome],
+          }))}
+        />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] text-ink-muted">
             {dma.confirmed
@@ -93,7 +97,7 @@ const KIND_QUERY: Record<CsrdApplicabilityKind, string> = {
   undetermined: 'applicability=undetermined',
 };
 
-/** 要求事項の適用の内訳（n / 12） */
+/** 要求事項の適用の内訳（n / 12）。各区分は要求事項の一覧（絞込）へのリンク */
 export function ApplicabilityCard({ counts }: { counts: CsrdOverview['applicabilityCounts'] }) {
   return (
     <Card className="overflow-hidden">
@@ -109,25 +113,18 @@ export function ApplicabilityCard({ counts }: { counts: CsrdOverview['applicabil
           </span>
         }
       />
-      <div className="space-y-2 px-3 pb-3">
-        <ul aria-label="適用の内訳" className="grid grid-cols-2 gap-1.5">
-          {CSRD_APPLICABILITY_KINDS.map((kind) => (
-            <li key={kind}>
-              <Link
-                href={`${BASE}/requirements?${KIND_QUERY[kind]}`}
-                className="flex items-center justify-between gap-2 rounded-t4d border border-line p-2 transition-colors hover:border-brand-300 hover:bg-brand-50"
-              >
-                <ApplicabilityBadge
-                  applicability={{ kind, perspectives: [], provisional: false }}
-                />
-                <span className="text-[12px] text-ink">
-                  <span className="text-[16px] font-semibold tabular-nums">{counts[kind]}</span> /{' '}
-                  {counts.total} 件
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+      <div className="space-y-2.5 px-3 pb-3">
+        <StatusBreakdown
+          label="適用の内訳"
+          denominator={counts.total}
+          items={CSRD_APPLICABILITY_KINDS.map((kind) => ({
+            key: kind,
+            label: applicabilityLabel({ kind, perspectives: [] }),
+            count: counts[kind],
+            icon: APPLICABILITY_ICON[kind],
+            href: `${BASE}/requirements?${KIND_QUERY[kind]}`,
+          }))}
+        />
         {counts.provisional > 0 && (
           <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
             <ProvisionalBadge />
@@ -147,7 +144,7 @@ const PERSPECTIVES = [
   { key: 'combined', label: '総合（最も遅れている観点）', Icon: CircleCheck },
 ] as const;
 
-/** 評価対象の 3 観点・総合の件数（重み付きの対応度%は出さない） */
+/** 評価対象の 3 観点・総合の件数（観点ごとに積み上げ 1 本。重み付きの対応度%は出さない） */
 export function CoverageCountsCard({
   counts,
   inScope,
@@ -165,27 +162,23 @@ export function CoverageCountsCard({
           </span>
         }
       />
-      <div className="grid grid-cols-4 gap-1.5 px-3 pb-3">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-3 pb-3">
         {PERSPECTIVES.map(({ key, label, Icon }) => (
-          <section
-            key={key}
-            aria-label={`${label}の件数`}
-            className="rounded-t4d border border-line p-2"
-          >
-            <h3 className="mb-1 flex items-center gap-1 text-[12px] font-semibold text-ink">
+          <section key={key} aria-label={`${label}の件数`} className="min-w-0 space-y-1">
+            <h3 className="flex items-center gap-1 text-[12px] font-semibold text-ink">
               <Icon className="size-3.5 text-ink-muted" aria-hidden="true" />
               {label}
             </h3>
-            <dl className="space-y-0.5 text-[11px]">
-              {SSBJ_COVERAGE_STATUSES.map((status) => (
-                <div key={status} className="flex items-center justify-between gap-2">
-                  <dt className="text-ink-muted">{COVERAGE_LABEL[status]}</dt>
-                  <dd className="tabular-nums text-ink">
-                    {counts[key][status]} / {inScope}
-                  </dd>
-                </div>
-              ))}
-            </dl>
+            <StatusBreakdown
+              label={`${label}の内訳`}
+              denominator={inScope}
+              items={SSBJ_COVERAGE_STATUSES.map((status) => ({
+                key: status,
+                label: COVERAGE_LABEL[status],
+                count: counts[key][status],
+                icon: COVERAGE_ICON[status],
+              }))}
+            />
           </section>
         ))}
       </div>

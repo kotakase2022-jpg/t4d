@@ -66,12 +66,18 @@ export default async function WorkflowsPage({
 
   return (
     <>
+      {/* デモの基準日で期限を判定していることは隠さない（説明の 1 行に残し、help に入れない） */}
       <PageHeader
         title="ワークフロー"
         description={
           reference.label
-            ? `タスク・承認・監査法人からの資料依頼（PBC）を一元管理します。期限は${reference.label}で判定しています。`
-            : 'タスク・承認・監査法人からの資料依頼（PBC）を一元管理します。'
+            ? `タスク・承認・資料依頼（PBC）。期限は${reference.label}で判定しています`
+            : 'タスク・承認・監査法人からの資料依頼（PBC）'
+        }
+        help={
+          <p>
+            タスク・承認・監査法人からの資料依頼（PBC）を一元管理します。開示本文のレビュー・最終承認があなたの段階になると「自分のレビュー」に並びます。
+          </p>
         }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'ワークフロー' }]}
         actions={

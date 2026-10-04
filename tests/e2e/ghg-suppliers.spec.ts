@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { buildSupplierDemoFiles } from '../../src/lib/fixtures/supplier-demo-files';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * Scope3 Cat.1 のサプライヤー内訳の可視化と、一次データ（素データ）取込。
@@ -175,6 +175,16 @@ test('確定済みの素データ行は「原単位の紐づけ状況」から�
 }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/ghg/suppliers');
+
+  // 紐づけ状況の表は既定で閉じている（docs/disclosure-first.md §10.4）。見出しは閉じていても見える
+  const linksRegion = page.getByRole('region', { name: /^排出量原単位の紐づけ状況/ });
+  await expect(linksRegion.getByRole('heading', { level: 2 })).toBeVisible();
+  await expect(
+    page
+      .getByRole('table')
+      .filter({ has: page.getByRole('columnheader', { name: '現在の原単位' }) }),
+  ).toHaveCount(0);
+  await openCollapsible(linksRegion, /行の原単位と変更/);
 
   // 紐づけ状況テーブルは固有の列見出し「現在の原単位」でスコープする
   // （見出しを持つ祖先 div でのスコープはページ全体に一致してしまう）

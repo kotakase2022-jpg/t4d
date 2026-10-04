@@ -313,8 +313,11 @@ export function targetComparability(
   return { comparable: reasons.length === 0, reasons };
 }
 
-/** 実績に入った（承認済み・連結対象・内部取引の明細以外の）行の算定方法 */
-function actualMethodologiesOf(state: MetricPeriodState | null): Array<string | null> {
+/**
+ * 実績に入った（承認済み・連結対象・内部取引の明細以外の）行の算定方法。
+ * 目標の比較可否（targetComparability）に渡す。財務影響分析の目標シナリオも同じ規則で選ぶため公開する
+ */
+export function actualMethodologiesOf(state: MetricPeriodState | null): Array<string | null> {
   if (!state) return [];
   return state.contributions
     .filter((c) => c.status === 'approved' && c.factor > 0 && c.boundary !== '内部取引')
@@ -396,22 +399,30 @@ interface KpiData {
   periods: ReportingPeriod[];
   metrics: MetricDefinition[];
   units: OrganizationUnit[];
+  /** 読み込んだ指標のコード（Data Point と連結集計はこの指標だけ） */
+  metricCodes: readonly string[];
   dataPoints: DataPoint[];
   versions: DataPointVersion[];
   approvedVersionIds: Set<Uuid>;
   aggregations: Map<Uuid, Promise<ConsolidatedAggregation>>;
 }
 
-async function loadKpiData(db: DbClient, ctx: AuthorizationContext): Promise<KpiData> {
+/**
+ * KPI・経年比較の計算に要る行をまとめて読む（書かない）。指標は metricCodes に絞る
+ * （既定は ESG経営の KPI の指標。自社経年比較は数値指標すべてを渡す。docs/disclosure-first.md §10.2）
+ */
+async function loadKpiData(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  metricCodes: readonly string[] = ALL_KPI_METRIC_CODES,
+): Promise<KpiData> {
   const organizationId = ctx.workspace.organizationId;
   const [periods, metrics, units] = await Promise.all([
     db.select('periods', { where: { organizationId } }),
     db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),
     db.select('units', { where: { organizationId, deletedAt: { isNull: true } } }),
   ]);
-  const kpiMetricIds = metrics
-    .filter((m) => ALL_KPI_METRIC_CODES.includes(m.code))
-    .map((m) => m.id);
+  const kpiMetricIds = metrics.filter((m) => metricCodes.includes(m.code)).map((m) => m.id);
   const dataPoints =
     kpiMetricIds.length === 0
       ? []
@@ -437,6 +448,7 @@ async function loadKpiData(db: DbClient, ctx: AuthorizationContext): Promise<Kpi
     periods: [...periods].sort((a, b) => (a.startDate < b.startDate ? -1 : 1)),
     metrics,
     units,
+    metricCodes,
     dataPoints,
     versions,
     approvedVersionIds: new Set(
@@ -454,7 +466,7 @@ function aggregationFor(
 ): Promise<ConsolidatedAggregation> {
   let pending = data.aggregations.get(period.id);
   if (!pending) {
-    pending = computeConsolidatedAggregation(db, ctx, period, data.periods, ALL_KPI_METRIC_CODES);
+    pending = computeConsolidatedAggregation(db, ctx, period, data.periods, [...data.metricCodes]);
     data.aggregations.set(period.id, pending);
   }
   return pending;
@@ -724,6 +736,47 @@ function retroactiveNotes(state: MetricPeriodState, data: KpiData): string[] {
   return notes;
 }
 
+/**
+ * 隣り合う 2 年度の比較（A34）。ESG経営の前年比（buildCard）と自社経年比較（loadMetricYearStates）が
+ * 同じ規則を使う: 両年度とも確定（全拠点が承認済み）で値があり、対象拠点・境界・算定方法が同じときだけ差を出す。
+ * 違えば needs_check（理由つき）、どちらかが未確定なら unavailable（0 として比べない）
+ */
+function compareAdjacentYears(
+  data: KpiData,
+  current: MetricPeriodState,
+  previous: MetricPeriodState,
+): YoyResult {
+  if (!current.computable) {
+    return {
+      status: 'unavailable',
+      reason: current.nonComputableReason ?? '全社値は算定できません。',
+    };
+  }
+  if (!current.complete || current.approvedValue === null) {
+    return { status: 'unavailable', reason: `${current.period.code} の確定値がありません。` };
+  }
+  const notes = retroactiveNotes(previous, data);
+  if (!previous.complete || previous.approvedValue === null) {
+    return {
+      status: 'unavailable',
+      reason: `前年（${previous.period.code}）の確定値がありません。`,
+    };
+  }
+  const reasons = comparisonConditionChanges(current, previous);
+  if (reasons.length > 0) {
+    return { status: 'needs_check', previousPeriod: previous.period, reasons, notes };
+  }
+  const diff = current.approvedValue - previous.approvedValue;
+  return {
+    status: 'ok',
+    previousPeriod: previous.period,
+    previousValue: previous.approvedValue,
+    diff,
+    diffRate: previous.approvedValue === 0 ? null : (diff / previous.approvedValue) * 100,
+    notes,
+  };
+}
+
 // ======================================================================
 // カード
 // ======================================================================
@@ -960,28 +1013,9 @@ async function buildCard(
         .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0] ?? null;
     if (previousPeriod) {
       const previous = await metricPeriodState(db, ctx, data, metric, previousPeriod);
-      const notes = retroactiveNotes(previous, data);
-      if (!previous.complete || previous.approvedValue === null) {
-        yoy = {
-          status: 'unavailable',
-          reason: `前年（${previousPeriod.code}）の確定値がありません。`,
-        };
-      } else {
-        const reasons = comparisonConditionChanges(confirmed, previous);
-        if (reasons.length > 0) {
-          yoy = { status: 'needs_check', previousPeriod, reasons, notes };
-        } else {
-          const diff = actualValue - previous.approvedValue;
-          yoy = {
-            status: 'ok',
-            previousPeriod,
-            previousValue: previous.approvedValue,
-            diff,
-            diffRate: previous.approvedValue === 0 ? null : (diff / previous.approvedValue) * 100,
-            notes,
-          };
-        }
-      }
+      // confirmed は全拠点承認済みで値がある（actualValue = confirmed.approvedValue）ため、
+      // 結果は前年側の確定・比較条件だけで決まる
+      yoy = compareAdjacentYears(data, confirmed, previous);
     }
   }
 
@@ -1084,6 +1118,94 @@ export async function loadEsgDashboard(
     cards.push(await buildCard(db, ctx, data, KPI_SPECS[key], selectedPeriod, targets, ownerNames));
   }
   return { periods: data.periods, selectedPeriod, cards };
+}
+
+// ======================================================================
+// 指標 × 年度の集計状態（自社経年比較・財務影響分析の値の源。docs/disclosure-first.md §10.2・§10.3）
+// ======================================================================
+
+export interface MetricYearState {
+  period: ReportingPeriod;
+  /** ESG経営と同じ集計状態（承認済みの連結値・確定かどうか・拠点ごとの内訳） */
+  state: MetricPeriodState;
+  /** ESG経営と同じ状態の表示（「確定（全拠点承認済み）」「集計中（承認済み n/N 拠点）」等） */
+  display: KpiDataState;
+  /**
+   * 参考: 推計込みの連結値（合計の指標で推計〔当年の推計値・前年値での補完〕があるときだけ）。
+   * 値の欄・前年比・試算の起点には使わない
+   */
+  referenceWithEstimates: number | null;
+}
+
+export interface MetricYearRow {
+  metric: MetricDefinition;
+  /** periods と同じ順（startDate 昇順） */
+  years: MetricYearState[];
+  /** 隣り合う年度の比較。changes[i] は years[i] → years[i+1]（古 → 新）。長さは years − 1 */
+  changes: YoyResult[];
+}
+
+export interface MetricYearStates {
+  /** 求めた期間のうちこの組織のもの（startDate 昇順） */
+  periods: ReportingPeriod[];
+  /** 求めた指標コードの順（この組織に無い・削除済みの指標は除く） */
+  rows: MetricYearRow[];
+}
+
+/**
+ * 指標ごと・年度ごとの集計状態を、ESG経営の KPI と同じ規則でまとめて返す（読むだけ。書かない）。
+ *
+ * 全社値は ESG経営・他社比較と同じ: 合計は承認済みの連結値（持分調整・内部取引控除後）、比率は分子・分母の
+ * 加重平均、それ以外の集計方法は「全社値は算定不可」（computable = false）。推計・前年値補完・目標・途中合計は
+ * state.approvedValue に入らない（途中合計は complete = false で区別する）。
+ * changes は隣り合う年度の比較で、ESG経営の前年比と同じ補助関数（両年度とも確定・同条件のときだけ差）を使う。
+ * periodIds は連続した期間を渡す前提（間の年度を飛ばすと、離れた年度どうしを「前年比」として比べる）。
+ */
+export async function loadMetricYearStates(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  { metricCodes, periodIds }: { metricCodes: readonly string[]; periodIds: readonly Uuid[] },
+): Promise<MetricYearStates> {
+  assertEnterpriseWorkspace(ctx);
+  assertCan(ctx, 'enterprise.data.read');
+  const codes = [...new Set(metricCodes)];
+  const data = await loadKpiData(db, ctx, codes);
+  // 他組織の期間 ID を渡されても、この組織の期間だけを使う（data.periods は組織で絞ってある）
+  const periods = data.periods.filter((p) => periodIds.includes(p.id));
+  const rows: MetricYearRow[] = [];
+  for (const code of codes) {
+    const metric = metricByCode(data, code);
+    if (!metric) continue;
+    const years: MetricYearState[] = [];
+    for (const period of periods) {
+      const state = await metricPeriodState(db, ctx, data, metric, period);
+      years.push({
+        period,
+        state,
+        display: describeState(state),
+        referenceWithEstimates: await referenceWithEstimates(db, ctx, data, state),
+      });
+    }
+    const changes: YoyResult[] = [];
+    for (let i = 1; i < years.length; i += 1) {
+      changes.push(compareAdjacentYears(data, years[i]!.state, years[i - 1]!.state));
+    }
+    rows.push({ metric, years, changes });
+  }
+  return { periods, rows };
+}
+
+/** 推計込みの連結値（参考）。合計の指標で推計（当年の推計値・前年値での補完）があるときだけ */
+async function referenceWithEstimates(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  data: KpiData,
+  state: MetricPeriodState,
+): Promise<number | null> {
+  if (state.metric.aggregationMethod !== 'sum' || state.estimateCount === 0) return null;
+  const aggregation = await aggregationFor(db, ctx, data, state.period);
+  const aggregate = aggregation.metrics.find((m) => m.metric.id === state.metric.id);
+  return aggregate ? aggregate.consolidatedWithEstimates : null;
 }
 
 // ======================================================================

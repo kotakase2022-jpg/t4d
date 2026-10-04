@@ -1,10 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { AlertTriangle, FileText, History, MessageSquareWarning } from 'lucide-react';
+import { LineChart } from '@/components/charts/line-chart';
 import { PageHeader } from '@/components/shared/page-header';
 import { DataPointStatusBadge } from '@/components/shared/badges';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import {
   AVAILABILITY_STATUS_LABELS,
@@ -13,7 +16,7 @@ import {
   kpiTargetLabel,
 } from '@/lib/domain/disclosure-status';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
-import { isKpiKey, KPI_SPECS, loadKpiDetail } from '@/lib/services/kpi';
+import { isKpiKey, KPI_SPECS, loadKpiDetail, type KpiTrendRow } from '@/lib/services/kpi';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { DataStateBadge, KpiCard, NeedsCheckBadge, targetText } from '../kpi-card';
 
@@ -26,6 +29,62 @@ export const metadata = { title: 'ESG 経営 KPI の詳細' };
 
 function one(value: string | string[] | undefined): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+/**
+ * 年次の推移の図（docs/disclosure-first.md §10.4 B6）。全拠点が承認済みの確定値と、集計中の年度の
+ * 承認済み分のみの途中集計を別の系列（線種・点の形も違う）に分け、途中集計を確定値の線でつながない。
+ * 承認済みの値が 1 つも無い年度は図に入れず（図は値の無い年を「未入力」と書くが、データはあるため）、
+ * その旨を注記する。全社値を算定できない指標は図にしない（拠点値を足した値を作らない）
+ */
+function TrendChart({ rows, unit, label }: { rows: KpiTrendRow[]; unit: string; label: string }) {
+  if (rows.some((row) => !row.state.computable)) {
+    return (
+      <p className="text-[12px] text-ink">
+        全社値は算定できません（拠点値は組織別の内訳で確認できます）。
+      </p>
+    );
+  }
+  const plotted = rows.filter((row) => row.state.approvedValue !== null);
+  const omitted = rows.filter((row) => row.state.approvedValue === null);
+  if (plotted.length === 0) {
+    return <p className="text-[12px] text-ink-muted">承認済みの値がある年度はまだありません。</p>;
+  }
+  const confirmed = plotted.map((row) => (row.state.complete ? row.state.approvedValue : null));
+  const partial = plotted.map((row) => (row.state.complete ? null : row.state.approvedValue));
+  const series = [
+    { label: '確定値（全拠点承認済み）', values: confirmed },
+    ...(partial.some((value) => value !== null)
+      ? [{ label: '承認済み分のみ（集計中・比較に使いません）', values: partial, dashed: true }]
+      : []),
+  ];
+  // 図の代替文は年度ごとに 1 つの値と区分で書く（系列ごとに書くと、もう一方の系列の年が「未入力」と
+  // 読まれ、データのある集計中の年度まで未入力に見えるため）
+  const summary = `${label} の年次の推移（単位: ${unit}）。${plotted
+    .map(
+      (row) =>
+        `${row.period.code} ${formatNumber(row.state.approvedValue)}（${
+          row.state.complete ? '確定' : '集計中・承認済み分のみ'
+        }）`,
+    )
+    .join('、')}。`;
+  return (
+    <LineChart
+      title={`${label} の年次の推移`}
+      xLabels={plotted.map((row) => row.period.code)}
+      series={series}
+      unit={unit}
+      summary={summary}
+      table={false}
+      width={560}
+      height={200}
+      note={
+        omitted.length > 0
+          ? `承認済みの値が無い年度（${omitted.map((row) => row.period.code).join('、')}）は図に含めません`
+          : undefined
+      }
+    />
+  );
 }
 
 const CONFIDENTIALITY_TEXT: Record<string, string> = {
@@ -52,6 +111,9 @@ export default async function KpiDetailPage({
   const { card } = detail;
   const unit = card.metric?.unit ?? '';
   const spec = KPI_SPECS[kpiKey];
+  const discontinuityCount = detail.trend.filter(
+    (row) => row.discontinuityReasons.length > 0,
+  ).length;
 
   return (
     <>
@@ -90,78 +152,90 @@ export default async function KpiDetailPage({
                 この指標のデータはまだ登録されていません（0 としては扱いません）。
               </p>
             ) : (
-              <div className="t4d-scroll-x">
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>年度</TH>
-                      <TH align="right">全社値（承認済み）</TH>
-                      <TH>状態</TH>
-                      <TH>前年との連続性・遡及修正</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {detail.trend.map((row) => (
-                      <TR key={row.period.id} className="align-top">
-                        <TD className="align-top">{row.period.code}</TD>
-                        <TD align="right" className="align-top">
-                          {!row.state.computable
-                            ? '算定できません'
-                            : row.state.approvedValue === null
-                              ? '承認済みの値なし'
-                              : `${formatNumber(row.state.approvedValue)} ${unit}`}
-                          {!row.state.complete && row.state.approvedValue !== null && (
-                            <span className="block text-[11px] text-ink-muted">承認済み分のみ</span>
-                          )}
-                        </TD>
-                        <TD className="align-top">
-                          <DataStateBadge
-                            state={{
-                              label: !row.state.computable
-                                ? '全社値は算定できません'
-                                : row.state.complete
-                                  ? '確定'
-                                  : '集計中',
-                              tone:
-                                !row.state.computable || !row.state.complete
-                                  ? 'warning'
-                                  : 'success',
-                              details: [],
-                            }}
-                          />
-                        </TD>
-                        <TD className="align-top text-[12px]">
-                          {row.discontinuityReasons.length > 0 && (
-                            <div className="space-y-0.5">
-                              <NeedsCheckBadge />
-                              <ul className="list-disc pl-4 text-[11px] text-ink-muted">
-                                {row.discontinuityReasons.map((reason) => (
-                                  <li key={reason}>非連続: {reason}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                          {row.retroactiveNotes.length > 0 && (
-                            <ul className="list-disc pl-4 text-[11px] text-ink-muted">
-                              {row.retroactiveNotes.map((note) => (
-                                <li key={note}>{note}</li>
-                              ))}
-                            </ul>
-                          )}
-                          {row.discontinuityReasons.length === 0 &&
-                            row.retroactiveNotes.length === 0 && (
-                              <span className="text-ink-muted">—</span>
-                            )}
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
+              <div className="space-y-2 px-3 py-2">
+                <TrendChart rows={detail.trend} unit={unit} label={spec.label} />
+                <Collapsible
+                  summary={`年度ごとの値と前年との連続性（${detail.trend.length} 年度${
+                    discontinuityCount > 0 ? `・比較条件の確認が必要 ${discontinuityCount} 件` : ''
+                  }）`}
+                  bodyClassName="px-0 py-0"
+                >
+                  <div className="t4d-scroll-x">
+                    <Table>
+                      <THead>
+                        <TR>
+                          <TH>年度</TH>
+                          <TH align="right">全社値（承認済み）</TH>
+                          <TH>状態</TH>
+                          <TH>前年との連続性・遡及修正</TH>
+                        </TR>
+                      </THead>
+                      <TBody>
+                        {detail.trend.map((row) => (
+                          <TR key={row.period.id} className="align-top">
+                            <TD className="align-top">{row.period.code}</TD>
+                            <TD align="right" className="align-top">
+                              {!row.state.computable
+                                ? '算定できません'
+                                : row.state.approvedValue === null
+                                  ? '承認済みの値なし'
+                                  : `${formatNumber(row.state.approvedValue)} ${unit}`}
+                              {!row.state.complete && row.state.approvedValue !== null && (
+                                <span className="block text-[11px] text-ink-muted">
+                                  承認済み分のみ
+                                </span>
+                              )}
+                            </TD>
+                            <TD className="align-top">
+                              <DataStateBadge
+                                state={{
+                                  label: !row.state.computable
+                                    ? '全社値は算定できません'
+                                    : row.state.complete
+                                      ? '確定'
+                                      : '集計中',
+                                  tone:
+                                    !row.state.computable || !row.state.complete
+                                      ? 'warning'
+                                      : 'success',
+                                  details: [],
+                                }}
+                              />
+                            </TD>
+                            <TD className="align-top text-[12px]">
+                              {row.discontinuityReasons.length > 0 && (
+                                <div className="space-y-0.5">
+                                  <NeedsCheckBadge />
+                                  <ul className="list-disc pl-4 text-[11px] text-ink-muted">
+                                    {row.discontinuityReasons.map((reason) => (
+                                      <li key={reason}>非連続: {reason}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {row.retroactiveNotes.length > 0 && (
+                                <ul className="list-disc pl-4 text-[11px] text-ink-muted">
+                                  {row.retroactiveNotes.map((note) => (
+                                    <li key={note}>{note}</li>
+                                  ))}
+                                </ul>
+                              )}
+                              {row.discontinuityReasons.length === 0 &&
+                                row.retroactiveNotes.length === 0 && (
+                                  <span className="text-ink-muted">—</span>
+                                )}
+                            </TD>
+                          </TR>
+                        ))}
+                      </TBody>
+                    </Table>
+                  </div>
+                  <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
+                    月次の値は登録されていないため、年次だけを示します。未承認・未入力の年度を補完して線をつなぐことはしません。
+                  </p>
+                </Collapsible>
               </div>
             )}
-            <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
-              月次の値は登録されていないため、年次だけを示します。未承認・未入力の年度を補完して線をつなぐことはしません。
-            </p>
           </Card>
 
           {/* 組織別内訳 */}
@@ -323,9 +397,11 @@ export default async function KpiDetailPage({
                 ))}
               </ul>
             )}
-            <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
-              数値の相関から原因を断定する表示はしません。要因は担当者のコメントと訂正の記録だけを示します。
-            </p>
+            <MoreInfo label="要因の示し方" className="border-t border-line px-3 py-1.5">
+              <p>
+                数値の相関から原因を断定する表示はしません。要因は担当者のコメントと訂正の記録だけを示します。
+              </p>
+            </MoreInfo>
           </Card>
 
           {/* 根拠 */}

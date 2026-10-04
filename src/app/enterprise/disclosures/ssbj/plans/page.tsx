@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ArrowLeft, CircleAlert, Database } from 'lucide-react';
+import { ArrowLeft, CalendarClock, CircleAlert, Database } from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
@@ -21,6 +22,7 @@ import { loadEnterpriseShell } from '@/lib/services/shell';
 import { loadActionPlans } from '@/lib/services/ssbj-gap';
 import type { SsbjActionStatus } from '@/types/domain';
 import { createSsbjDataCollectionAction, updateSsbjActionPlanAction } from '../../../actions';
+import { planStatusItems } from '../_components/breakdown-items';
 
 export const metadata = { title: 'SSBJ 対応計画' };
 
@@ -40,10 +42,6 @@ export default async function SsbjPlansPage({
     listMentionCandidates(shell.db, shell.ctx),
   ]);
 
-  const counts = STATUS_ORDER.map((status) => ({
-    status,
-    value: plans.filter((p) => p.plan.status === status).length,
-  }));
   const overdue = plans.filter(
     (p) => p.daysLeft !== null && p.daysLeft < 0 && p.plan.status !== 'done',
   );
@@ -80,30 +78,33 @@ export default async function SsbjPlansPage({
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
-        <ul className="grid grid-cols-5 gap-2">
-          {counts.map((c) => (
-            <li key={c.status}>
-              <Card className="space-y-1 p-2.5">
-                <p className="text-[11px] text-ink-muted">{ACTION_STATUS_LABEL[c.status]}</p>
-                <p className="text-[20px] font-semibold leading-none tabular-nums text-ink">
-                  {c.value}
-                </p>
-              </Card>
-            </li>
-          ))}
-          <li>
-            <Card className="space-y-1 p-2.5">
-              <p className="text-[11px] text-ink-muted">期限超過</p>
-              <p
-                className={`text-[20px] font-semibold leading-none tabular-nums ${
-                  overdue.length > 0 ? 'text-danger' : 'text-ink'
-                }`}
+        {/* 対応状況の内訳（4 区分の合計 = 計画の件数）。期限超過は状態と重なるため帯の外に書く */}
+        <Card className="space-y-2 p-3">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
+            <p className="flex items-baseline gap-1">
+              <span className="text-ink-muted">対応計画</span>
+              <span className="text-[20px] font-semibold leading-none tabular-nums text-ink">
+                {plans.length}
+              </span>
+              <span className="text-ink-muted">件</span>
+            </p>
+            <p className="flex items-center gap-1">
+              <CalendarClock className="size-3.5 text-ink-muted" aria-hidden="true" />
+              <span className="text-ink-muted">期限超過</span>
+              <span
+                className={`font-semibold tabular-nums ${overdue.length > 0 ? 'text-danger' : 'text-ink'}`}
               >
                 {overdue.length}
-              </p>
-            </Card>
-          </li>
-        </ul>
+              </span>
+              <span className="text-ink-muted">件（完了以外）</span>
+            </p>
+          </div>
+          <StatusBreakdown
+            label="対応状況の内訳"
+            items={planStatusItems(plans)}
+            denominator={plans.length}
+          />
+        </Card>
 
         <Card className="overflow-hidden">
           <SectionTitle

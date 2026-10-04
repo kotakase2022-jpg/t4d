@@ -8,10 +8,10 @@ import {
   Tag,
 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageHeader } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { CollapsibleSection } from '@/components/ui/collapsible';
 import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { NARRATIVE_THEME_LABELS } from '@/lib/domain/disclosure-status';
 import { NARRATIVE_TEMPLATE_FIELDS } from '@/lib/domain/narrative-template';
@@ -78,6 +78,13 @@ export default async function NarrativeDetailPage({
     fragmentCount: d.fragmentCount,
     periodCode: shell.periods.find((p) => p.id === d.periodId)?.code ?? null,
   }));
+  const currentVersionNo = data.versions.find((v) => v.isCurrent)?.version.versionNo ?? null;
+  // 版を作った直後（保存・前年から引継ぎ）はフラッシュが指す版が履歴にあるので開いて描く。
+  // 版が 1 つも無いことは空状態として見せる（§10.4: 空状態は閉じない）
+  const versionsOpen =
+    query.flash === 'narrativeSaved' ||
+    query.flash === 'narrativeCarried' ||
+    data.versions.length === 0;
   const firstLinked = data.anchors.find(
     (a) => a.fileId && documents.some((d) => d.fileId === a.fileId),
   );
@@ -187,8 +194,16 @@ export default async function NarrativeDetailPage({
           />
         )}
 
-        <Card>
-          <SectionTitle title={`版の履歴（${data.versions.length}）`} />
+        {/* 履歴は既定で閉じる（見出しは常に見せる。docs/disclosure-first.md §10.4 B6） */}
+        <CollapsibleSection
+          id="narrative-versions"
+          title={`版の履歴（${data.versions.length}）`}
+          summary={`版の一覧（${data.versions.length} 版${
+            currentVersionNo !== null ? `・現在 版 ${currentVersionNo}` : ''
+          }）`}
+          open={versionsOpen || undefined}
+          bodyClassName="px-0 pb-0"
+        >
           <ol className="divide-y divide-line">
             {data.versions.map((v) => (
               <li key={v.version.id} className="px-3 py-2 text-[12px]">
@@ -235,7 +250,7 @@ export default async function NarrativeDetailPage({
               <li className="px-3 py-2 text-[12px] text-ink-muted">版がありません。</li>
             )}
           </ol>
-        </Card>
+        </CollapsibleSection>
       </div>
     </>
   );

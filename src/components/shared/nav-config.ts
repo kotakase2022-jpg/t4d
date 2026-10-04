@@ -18,6 +18,7 @@ import {
   FolderKanban,
   FolderOpen,
   Gauge,
+  History,
   Home,
   Inbox,
   Landmark,
@@ -32,6 +33,7 @@ import {
   Signature,
   Stethoscope,
   Upload,
+  Waypoints,
   Workflow,
 } from 'lucide-react';
 import type { PermissionKey } from '@/types/domain';
@@ -65,7 +67,7 @@ export interface NavItem {
 }
 
 /**
- * 定性情報は SSBJ 専用ではなく全基準共通の資産（§9.1 ①）。両ツリーで同じ検索語を使う。
+ * 定性情報は SSBJ 専用ではなく全基準共通の資産（§9.1 ①）。両ツリー・SSBJ と CSRD の両方で同じ項目を使う。
  * 開示の閲覧権限が無い役割（拠点担当など）は画面を開けない（listNarratives が拒む）ため出さない
  */
 const NARRATIVES_ITEM: NavItem = {
@@ -93,8 +95,12 @@ const NARRATIVES_ITEM: NavItem = {
  * 2026-10-01 の追加要望（docs/disclosure-first.md §9.1）:
  *  ① SSBJ の データ収集 と 開示ドラフト の間に「定性情報」（集めた事実を文章へ移す前の工程）
  *  ② AI Copilot と 管理 の間に「分析」（閲覧専用の横断画面）
- *  ③ CSRD を SSBJ と同じ 5 画面のグループへ。定性情報は入れない（共通資産であり、同じ href が
- *     2 つの枝に出て現在地が 2 つ付くのを避ける。CSRD 開示ドラフト画面から定性情報へリンクする）
+ *  ③ CSRD を SSBJ と同じ 5 画面のグループへ
+ * 2026-10-02 の追加要望（§10.1）:
+ *  ① CSRD にも データ収集 と 開示ドラフト の間に「定性情報」（§9.1 ③「CSRD に入れない」を置き換え）。
+ *     同じ href が SSBJ と CSRD の 2 か所に出るため、現在地はどちらか 1 つを「優先枝」で選ぶ（resolveNavCurrent）
+ *  ② 分析に「自社経年比較」（規制対応度 と 他社比較 の間）
+ *  ③ 分析に「財務影響分析」（他社比較 の次の兄弟）
  */
 export const ENTERPRISE_NAV: NavItem[] = [
   {
@@ -190,6 +196,7 @@ export const ENTERPRISE_NAV: NavItem[] = [
             icon: Database,
             keywords: ['CSRD', 'ESRS', 'データ収集', '不足データ'],
           },
+          NARRATIVES_ITEM,
           {
             label: '開示ドラフト',
             href: '/enterprise/disclosures/csrd/draft',
@@ -301,7 +308,7 @@ export const ENTERPRISE_NAV: NavItem[] = [
     // 閲覧専用の横断画面。単一の総合点は作らない（§9.6）。入口は現状診断
     label: '分析',
     href: '/enterprise/analysis/diagnosis',
-    // 規制対応度・他社比較も分析の画面として、最上位の現在地を付ける
+    // 入口以外（規制対応度・自社経年比較・他社比較・財務影響分析）も分析の画面として、最上位の現在地を付ける
     currentPrefix: '/enterprise/analysis',
     icon: ChartColumnBig,
     keywords: ['分析', 'analysis', '診断', '比較'],
@@ -321,10 +328,26 @@ export const ENTERPRISE_NAV: NavItem[] = [
         keywords: ['分析', '規制', '対応度', '基準', 'SSBJ', 'CSRD', 'ESRS', 'CDP', 'MSCI', 'FTSE'],
       },
       {
+        // 直近 3 年度の確定値の経年変化（§10.2）。数値を読むだけなので権限は付けない
+        // （enterprise.data.read は全 enterprise 役割が持つ）
+        label: '自社経年比較',
+        href: '/enterprise/analysis/trends',
+        icon: History,
+        keywords: ['経年', '推移', '前年比', '年度比較'],
+      },
+      {
         label: '他社比較',
         href: '/enterprise/analysis/benchmark',
         icon: Building2,
         keywords: ['分析', '他社', '比較', 'ベンチマーク', 'benchmark', '同業', 'ピア'],
+      },
+      {
+        // 承認済みの非財務データ × 画面に示した仮定による決定論的な試算（§10.3）。
+        // 他社比較の子ではなく次の兄弟。定性・IRO は画面側で開示の閲覧権限があるときだけ出す
+        label: '財務影響分析',
+        href: '/enterprise/analysis/financial-impact',
+        icon: Waypoints,
+        keywords: ['財務', '影響', 'シミュレーション', '経路', '炭素価格', 'シナリオ'],
       },
     ],
   },
@@ -397,8 +420,8 @@ function legacyItemWithSecondaryChild(href: string, label: string, secondaryHref
  *  - GHG 算定・Scope3 は「情報・根拠」の関連導線に置き、既存の直リンクは変えない
  *  - AI Copilot は補助メニューとして最後に残す（AI は各作業画面の補助として出す）
  *  - 分析は 管理 の直前（従来ツリーと同じく「管理の直上」。§9.1 ②）
- *  - 定性情報の正規の位置は「情報・根拠」。SSBJ 配下の定性情報は従来ツリーと同じ並びを保つための
- *    別導線（secondary）で、現在地を付けない（同じ画面で aria-current が 2 つ並ばない。§9.1 ①）
+ *  - 定性情報の正規の位置は「情報・根拠」。SSBJ・CSRD 配下の定性情報は従来ツリーと同じ並びを保つための
+ *    別導線（secondary）で、現在地を付けない（同じ画面で aria-current が 2 つ並ばない。§9.1 ①・§10.1 ①）
  *
  * 機能設定が false の組織には ENTERPRISE_NAV（従来ツリー）をそのまま使う（A39）。
  */
@@ -414,7 +437,7 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
     keywords: ['開示', 'プロジェクト', '原稿', 'レビュー', '承認', '出力'],
     children: [
       legacyItemWithSecondaryChild('/enterprise/disclosures/ssbj', 'SSBJ', NARRATIVES_ITEM.href),
-      legacyItem('/enterprise/disclosures/csrd', 'CSRD'),
+      legacyItemWithSecondaryChild('/enterprise/disclosures/csrd', 'CSRD', NARRATIVES_ITEM.href),
       {
         label: 'その他の開示',
         href: '/enterprise/disclosures/cdp',
@@ -558,23 +581,44 @@ interface NavCandidate {
   topKey: string;
   depth: number;
   rank: number;
+  /** 祖先ラベルの経路（navBranchOf と同じ形） */
+  branch: string | null;
+}
+
+/** 枝の識別子の区切り（Command Palette の経路ラベルと同じ） */
+const BRANCH_SEPARATOR = ' / ';
+
+/** 祖先ラベルの列から枝の識別子を作る（サイドバーが押したリンクの枝を覚えるときにも使う） */
+export function joinNavBranch(labels: readonly string[]): string {
+  return labels.join(BRANCH_SEPARATOR);
 }
 
 /**
  * 現在地にする項目の位置（navItemKey）を返す。描画するのと同じ（権限で絞った後の）ツリーを渡す。
  *
  * 候補が複数あれば、一致が強いもの → 深いもの（親子が同じ href のときは子。例: SSBJ → 対応状況）→
- * 木の順で先のもの、の順で 1 つに決める。どの順で呼んでも同じ結果になる（決定的）。
+ * 優先枝（preferredBranch）に一致するもの → 木の順で先のもの、の順で 1 つに決める。
+ * 優先枝は同点（同じ href が別の枝に同じ深さで出る。例: 従来ツリーの SSBJ と CSRD の定性情報）の解消にだけ効き、
+ * 一致しなければ木の順（＝SSBJ）。どの順で呼んでも同じ結果になる（決定的）。
  * 折りたたみ中は子を描画しないため、`single` は現在地の項目を含む最上位に付け、
  * `top-and-leaf` は最上位の前方一致だけを残す（従来どおり）。
  */
 export function resolveNavCurrent(
   items: NavItem[],
   pathname: string,
-  { mode, collapsed }: { mode: NavCurrentMode; collapsed: boolean },
+  {
+    mode,
+    collapsed,
+    preferredBranch = null,
+  }: { mode: NavCurrentMode; collapsed: boolean; preferredBranch?: string | null },
 ): Set<string> {
   const candidates: NavCandidate[] = [];
-  const visit = (siblings: NavItem[], parentKey: string | null, topKey: string | null) => {
+  const visit = (
+    siblings: NavItem[],
+    parentKey: string | null,
+    topKey: string | null,
+    trail: string[],
+  ) => {
     siblings.forEach((item, index) => {
       const key = navItemKey(parentKey, index);
       const depth = parentKey === null ? 0 : parentKey.split('.').length;
@@ -582,15 +626,27 @@ export function resolveNavCurrent(
       // top-and-leaf の最上位は下で別に決める（2 階層目以下の 1 つとは独立に付く既存仕様）
       if (!(isTop && mode === 'top-and-leaf')) {
         const rank = matchRank(pathname, item, siblings, isTop);
-        if (rank > 0) candidates.push({ key, topKey: topKey ?? key, depth, rank });
+        if (rank > 0) {
+          candidates.push({
+            key,
+            topKey: topKey ?? key,
+            depth,
+            rank,
+            branch: trail.length === 0 ? null : trail.join(BRANCH_SEPARATOR),
+          });
+        }
       }
-      if (item.children) visit(item.children, key, topKey ?? key);
+      if (item.children) visit(item.children, key, topKey ?? key, [...trail, item.label]);
     });
   };
-  visit(items, null, null);
+  visit(items, null, null, []);
 
+  const preference = (candidate: NavCandidate) =>
+    preferredBranch !== null && candidate.branch === preferredBranch ? 0 : 1;
   // Array.prototype.sort は安定ソートなので、同点は木の順（先に見つけたもの）が残る
-  const best = [...candidates].sort((a, b) => b.rank - a.rank || b.depth - a.depth)[0];
+  const best = [...candidates].sort(
+    (a, b) => b.rank - a.rank || b.depth - a.depth || preference(a) - preference(b),
+  )[0];
   const current = new Set<string>();
 
   if (mode === 'top-and-leaf') {
@@ -605,6 +661,92 @@ export function resolveNavCurrent(
 
   if (best) current.add(collapsed ? best.topKey : best.key);
   return current;
+}
+
+/** 位置（navItemKey）の項目と、その祖先のラベル（上から順）。位置がツリーに無ければ null */
+function navEntryAt(items: NavItem[], key: string): { item: NavItem; trail: string[] } | null {
+  let nodes = items;
+  let item: NavItem | undefined;
+  const trail: string[] = [];
+  const indexes = key.split('.').map(Number);
+  for (const [position, index] of indexes.entries()) {
+    item = nodes[index];
+    if (!item) return null;
+    if (position < indexes.length - 1) trail.push(item.label);
+    nodes = item.children ?? [];
+  }
+  return item ? { item, trail } : null;
+}
+
+/**
+ * 枝の識別子＝祖先ラベルの経路（例: 従来ツリーの CSRD 配下の定性情報 → `開示対応 / CSRD`）。
+ * 最上位の項目・ツリーに無い位置は null。位置キー（添字）は権限で項目が隠れるとずれるため、保存にはこちらを使う
+ */
+export function navBranchOf(items: NavItem[], key: string): string | null {
+  const entry = navEntryAt(items, key);
+  if (!entry || entry.trail.length === 0) return null;
+  return entry.trail.join(BRANCH_SEPARATOR);
+}
+
+/** 2 階層目以下に現在地があるか（無ければ強調表示は従来の isNavSubtreeActive に戻す） */
+export function hasDeepNavCurrent(currentKeys: ReadonlySet<string>): boolean {
+  return [...currentKeys].some((key) => key.includes('.'));
+}
+
+/**
+ * key の項目が現在地の祖先か（強調表示: グループ行の太字・最上位の背景）。
+ * 位置で判定するため、同じ href が SSBJ と CSRD に出ても現在地のある側だけが true になる
+ */
+export function isNavAncestorOfCurrent(key: string, currentKeys: ReadonlySet<string>): boolean {
+  return [...currentKeys].some((current) => current.startsWith(`${key}.`));
+}
+
+/**
+ * 同じ深さ（2 階層目以下）に 2 回以上出る href＝現在地が優先枝で決まる画面（従来ツリーの定性情報）。
+ * 別導線（secondary）は現在地にならないため数えない（開示優先ツリーでは空になる）
+ */
+function branchAmbiguousHrefs(items: NavItem[]): Set<string> {
+  const counts = new Map<string, number>();
+  const walk = (nodes: NavItem[], depth: number) => {
+    for (const node of nodes) {
+      if (depth > 0 && !node.secondary) {
+        const id = `${depth}\u0000${node.href}`;
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      walk(node.children ?? [], depth + 1);
+    }
+  };
+  walk(items, 0);
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([id]) => id.slice(id.indexOf('\u0000') + 1)),
+  );
+}
+
+/**
+ * 遷移後に覚える優先枝（docs/disclosure-first.md §10.1 の書く時機 (b)）。
+ * 2 階層目以下の現在地が「枝で迷わない画面」で、その親に枝で迷う子（同じ href が別の枝にもある子）が
+ * あるとき、その親の経路を返す（例: CSRD の開示ドラフトを開いた後に画面内のリンクで定性情報へ移ると
+ * CSRD 側を現在地にする）。それ以外は undefined（覚えている枝を変えない）。
+ * 定性情報そのものでは変えない（サイドバーのどちらのリンクから来たかを上書きしないため）
+ */
+export function branchToRemember(
+  items: NavItem[],
+  currentKeys: ReadonlySet<string>,
+): string | null | undefined {
+  const deep = [...currentKeys].filter((key) => key.includes('.'));
+  if (deep.length !== 1) return undefined;
+  const key = deep[0]!;
+  const entry = navEntryAt(items, key);
+  if (!entry || entry.item.secondary) return undefined;
+  const ambiguous = branchAmbiguousHrefs(items);
+  if (ambiguous.has(entry.item.href)) return undefined;
+  const parent = navEntryAt(items, key.slice(0, key.lastIndexOf('.')));
+  const parentHasAmbiguousChild =
+    parent?.item.children?.some((child) => !child.secondary && ambiguous.has(child.href)) ?? false;
+  if (!parentHasAmbiguousChild) return undefined;
+  return navBranchOf(items, key);
 }
 
 export function assuranceNav(engagementId: string | null): NavItem[] {

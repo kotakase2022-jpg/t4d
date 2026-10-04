@@ -7,12 +7,18 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Hint } from '@/components/ui/tooltip';
 import { DemoTour } from './demo-tour';
 import { cn } from '@/lib/utils';
+import { rememberNavBranch, useNavBranch } from './nav-branch';
 import {
+  branchToRemember,
+  hasDeepNavCurrent,
+  isNavAncestorOfCurrent,
   isNavPathActive,
   isNavSubtreeActive,
+  joinNavBranch,
   navItemKey,
   navTreeFor,
   resolveNavCurrent,
+  type NavCurrentMode,
   type NavItem,
   type NavVariant,
 } from './nav-config';
@@ -59,17 +65,31 @@ export function Sidebar({
   const items = useNavItems(variant, hiddenHrefs);
   const [collapsed, setCollapsed] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
-  // 現在地は描画するツリー全体で 1 か所で決める（リストごとに判定すると、同じ href が
-  // 別の枝に出たときに aria-current が 2 つ並ぶ。docs/disclosure-first.md §9.1）。
   // 開示優先モードは最上位も含めて 1 つ、従来メニューは「最上位＋葉」の既存仕様を保つ（A39）
+  const mode: NavCurrentMode = variant === 'enterprise-disclosure' ? 'single' : 'top-and-leaf';
+  // 同じ href が SSBJ と CSRD に出る画面（定性情報）で、どちらを現在地にするか（§10.1）。
+  // SSR と初回描画は null（SSBJ 側）で、マウント後に保存値を当てる
+  const preferredBranch = useNavBranch();
+  // 現在地は描画するツリー全体で 1 か所で決める（リストごとに判定すると、同じ href が
+  // 別の枝に出たときに aria-current が 2 つ並ぶ。docs/disclosure-first.md §9.1）
   const currentKeys = React.useMemo(
-    () =>
-      resolveNavCurrent(items, pathname, {
-        mode: variant === 'enterprise-disclosure' ? 'single' : 'top-and-leaf',
-        collapsed,
-      }),
-    [items, pathname, variant, collapsed],
+    () => resolveNavCurrent(items, pathname, { mode, collapsed, preferredBranch }),
+    [items, pathname, mode, collapsed, preferredBranch],
   );
+
+  // 遷移後の優先枝の書き換え（§10.1 の (b)）。開いた画面だけで決まる値にする（優先枝・折りたたみに
+  // 依存させない）: サイドバーのリンクを押して枝を書いた直後、遷移前の画面で上書きしないため
+  const branchAfterNavigation = React.useMemo(
+    () =>
+      branchToRemember(
+        items,
+        resolveNavCurrent(items, pathname, { mode, collapsed: false, preferredBranch: null }),
+      ),
+    [items, pathname, mode],
+  );
+  React.useEffect(() => {
+    if (branchAfterNavigation !== undefined) rememberNavBranch(branchAfterNavigation);
+  }, [branchAfterNavigation, pathname]);
 
   React.useEffect(() => {
     setHydrated(true);
@@ -135,6 +155,12 @@ export function Sidebar({
   );
 }
 
+/**
+ * 強調表示の種類（data-nav-emphasis。テストと支援の目印）。current = 現在地、ancestor = 現在地の祖先
+ * （2 階層目以下に現在地が無い画面では、従来どおり配下の画面かどうか）
+ */
+type NavEmphasis = 'current' | 'ancestor' | undefined;
+
 function SidebarEntry({
   item,
   itemKey,
@@ -149,9 +175,14 @@ function SidebarEntry({
   pathname: string;
   collapsed: boolean;
 }) {
-  const active = isNavPathActive(pathname, item.href);
-  const hasActiveChild = item.children?.some((c) => isNavSubtreeActive(pathname, c)) ?? false;
   const current = currentKeys.has(itemKey);
+  // 2 階層目以下に現在地があれば、その祖先だけを強調する（同じ href が SSBJ と CSRD に出ても片方だけ。§10.1）。
+  // 無い画面（設定・折りたたみ中）は従来の判定（自分か配下の画面か）に戻す
+  const emphasized = hasDeepNavCurrent(currentKeys)
+    ? current || isNavAncestorOfCurrent(itemKey, currentKeys)
+    : isNavPathActive(pathname, item.href) ||
+      (item.children?.some((c) => isNavSubtreeActive(pathname, c)) ?? false);
+  const emphasis: NavEmphasis = current ? 'current' : emphasized ? 'ancestor' : undefined;
   const Icon = item.icon;
 
   const link = (
@@ -159,12 +190,13 @@ function SidebarEntry({
       href={item.href}
       aria-current={current ? 'page' : undefined}
       aria-label={collapsed ? item.label : undefined}
+      data-nav-emphasis={emphasis}
+      // 最上位のリンクを押したら優先枝を忘れる（§10.1 の (a)。定性情報は既定の SSBJ 側に戻る）
+      onClick={() => rememberNavBranch(null)}
       className={cn(
         'flex items-center gap-2 rounded-t4d px-2 py-1.5 text-[13px] transition-colors',
         collapsed && 'justify-center px-0',
-        active || hasActiveChild
-          ? 'bg-brand-100 font-medium text-brand-900'
-          : 'text-ink hover:bg-brand-50',
+        emphasized ? 'bg-brand-100 font-medium text-brand-900' : 'text-ink hover:bg-brand-50',
       )}
     >
       <Icon className="size-4 shrink-0" aria-hidden="true" />
@@ -179,7 +211,7 @@ function SidebarEntry({
         <SidebarChildList
           items={item.children}
           parentKey={itemKey}
-          parentLabel={item.label}
+          parentTrail={[item.label]}
           currentKeys={currentKeys}
           pathname={pathname}
           depth={1}
@@ -199,18 +231,22 @@ function SidebarEntry({
 function SidebarChildList({
   items,
   parentKey,
-  parentLabel,
+  parentTrail,
   currentKeys,
   pathname,
   depth,
 }: {
   items: NavItem[];
   parentKey: string;
-  parentLabel: string;
+  /** 親までのラベルの経路（最後が親）。押したリンクの枝として覚える */
+  parentTrail: string[];
   currentKeys: Set<string>;
   pathname: string;
   depth: number;
 }) {
+  const parentLabel = parentTrail[parentTrail.length - 1] ?? '';
+  const branch = joinNavBranch(parentTrail);
+  const deepCurrent = hasDeepNavCurrent(currentKeys);
   return (
     <ul
       aria-label={parentLabel}
@@ -220,14 +256,25 @@ function SidebarChildList({
         const key = navItemKey(parentKey, index);
         const hasChildren = (child.children?.length ?? 0) > 0;
         // 現在地の判定規則（グループ行・兄弟と重なる入口行は完全一致のみ、親子が同じ href なら子、
-        // 別導線は付けない）は resolveNavCurrent にまとめてある
+        // 別導線は付けない、同じ href が別の枝に出たら優先枝）は resolveNavCurrent にまとめてある
         const selfActive = currentKeys.has(key);
-        const childActive = !selfActive && hasChildren && isNavSubtreeActive(pathname, child);
+        // グループ行の太字は現在地の祖先だけ（SSBJ と CSRD が同時に太字にならない）。
+        // 2 階層目以下に現在地が無い画面（設定など）は従来どおり配下の画面かで決める
+        const childActive =
+          !selfActive &&
+          hasChildren &&
+          (deepCurrent
+            ? isNavAncestorOfCurrent(key, currentKeys)
+            : isNavSubtreeActive(pathname, child));
+        const emphasis: NavEmphasis = selfActive ? 'current' : childActive ? 'ancestor' : undefined;
         return (
           <li key={`${child.href}-${child.label}`}>
             <Link
               href={child.href}
               aria-current={selfActive ? 'page' : undefined}
+              data-nav-emphasis={emphasis}
+              // 押したリンクの枝を覚える（§10.1 の (a)。定性情報を CSRD 側から開いたら CSRD を現在地にする）
+              onClick={() => rememberNavBranch(branch)}
               className={cn(
                 'block rounded-t4d px-2 py-1 text-[12px]',
                 selfActive
@@ -243,7 +290,7 @@ function SidebarChildList({
               <SidebarChildList
                 items={child.children}
                 parentKey={key}
-                parentLabel={child.label}
+                parentTrail={[...parentTrail, child.label]}
                 currentKeys={currentKeys}
                 pathname={pathname}
                 depth={depth + 1}

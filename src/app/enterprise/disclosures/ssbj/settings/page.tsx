@@ -5,6 +5,7 @@ import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { formatJst } from '@/lib/format/datetime';
 import { loadMateriality } from '@/lib/services/materiality';
@@ -120,9 +121,10 @@ export default async function SsbjSettingsPage({
                 内容を変更すると確定は取り消されます。
               </p>
             ) : (
-              <p className="text-[11px] text-ink-muted">
-                3 項目すべてを決めると確定できます。確定は人の操作でのみ行われます。
-              </p>
+              // 補助の説明は既定で閉じる（docs/disclosure-first.md §10.4）。確定ボタンは右に見えている
+              <MoreInfo label="確定の条件">
+                <p>3 項目すべてを決めると確定できます。確定は人の操作でのみ行われます。</p>
+              </MoreInfo>
             )}
             {view.canEdit && !view.confirmed && (
               <form action={confirmSsbjSettingsAction}>
@@ -242,10 +244,12 @@ export default async function SsbjSettingsPage({
               <legend className="text-[12px] font-medium text-ink">
                 報告対象に含める組織・拠点
               </legend>
-              <p className="text-[11px] text-ink-muted">
-                何も選ばなければ全社を対象とします。SSBJ の報告範囲は連結財務諸表と
-                同一が基本なので、有価証券報告書から自動で選ぶこともできます。
-              </p>
+              <MoreInfo label="選び方">
+                <p>
+                  何も選ばなければ全社を対象とします。SSBJ の報告範囲は連結財務諸表と
+                  同一が基本なので、有価証券報告書から自動で選ぶこともできます。
+                </p>
+              </MoreInfo>
               <UnitScopeSelector
                 units={units.map((unit) => ({
                   id: unit.id,
@@ -295,9 +299,9 @@ export default async function SsbjSettingsPage({
                 <SubmitButton size="sm" pendingLabel="保存中…">
                   分析条件を保存
                 </SubmitButton>
-                <span className="text-[11px] text-ink-muted">
-                  保存しただけでは確定になりません。内容を変えると確定は取り消されます。
-                </span>
+                <MoreInfo label="保存と確定の関係">
+                  <p>保存しただけでは確定になりません。内容を変えると確定は取り消されます。</p>
+                </MoreInfo>
               </div>
             )}
           </form>
@@ -309,9 +313,9 @@ export default async function SsbjSettingsPage({
           <SectionTitle
             title={`マテリアリティ評価（${view.assessedTopicCount} / ${view.totalTopicCount} 件を評価済み）`}
             action={
-              <span className="text-[11px] text-ink-muted">
-                重要と評価した課題の指標が、あとの「データ収集」の対象になります
-              </span>
+              <MoreInfo label="評価の使われ方">
+                <p>重要と評価した課題の指標が、あとの「データ収集」の対象になります。</p>
+              </MoreInfo>
             }
           />
           <MaterialityManager

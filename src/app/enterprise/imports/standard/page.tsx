@@ -1,9 +1,23 @@
-import { Check, CircleDot, FileSpreadsheet, FlaskConical, XCircle } from 'lucide-react';
+import {
+  Check,
+  CircleDot,
+  CircleMinus,
+  Equal,
+  FileSpreadsheet,
+  FlaskConical,
+  PenLine,
+  Plus,
+  TriangleAlert,
+  XCircle,
+} from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
@@ -51,6 +65,10 @@ const COLUMN_NOTES: Record<StandardColumn, { required: string; note: string }> =
   source_reference: { required: '任意', note: '出所（資料名・シート・セルなど）' },
 };
 
+function sum<T>(items: readonly T[], pick: (item: T) => number): number {
+  return items.reduce((total, item) => total + pick(item), 0);
+}
+
 const BATCH_STATUS_META: Record<
   QuantitativeImportStatus,
   { tone: 'outline' | 'success' | 'neutral'; Icon: typeof Check }
@@ -86,7 +104,13 @@ export default async function StandardImportPage() {
     <>
       <PageHeader
         title="数値を登録（CSV・手入力）"
-        description="標準 CSV・貼り付け・手入力で数値を登録します。検証 → 差分の確認 → 登録確定の順に進み、確定するまで台帳は変わりません。"
+        description="検証 → 差分の確認 → 登録確定。確定するまで台帳は変わりません"
+        help={
+          <p>
+            標準 CSV・貼り付け・手入力で数値を登録します。列の書き方は「標準 CSV
+            の列」を開くと確認できます。
+          </p>
+        }
         breadcrumbs={[
           { label: '企業ワークスペース' },
           { label: 'データ取込', href: '/enterprise/imports' },
@@ -115,15 +139,22 @@ export default async function StandardImportPage() {
       />
 
       <div className="space-y-3 p-4">
+        {/* 架空である旨は常に見せる。保存のしくみ（技術的な説明）だけを既定で閉じる（§10.4 B6） */}
         {demo && (
-          <p className="flex items-start gap-1.5 rounded-t4d border border-brand-200 bg-brand-50 px-3 py-1.5 text-[11px] text-brand-900">
-            <FlaskConical className="mt-0.5 size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
-            <span>
-              デモデータ｜組織・指標・値はすべて架空です。検証結果（取込バッチ）はサーバーのメモリにだけ置き、
-              「登録を確定」では画面が検証した元の入力をもう一度送り、サーバーが検証し直してから確定します
-              （別のサーバーへ振り分けられても確定できます）。検証の後に台帳が変わっていれば、確定を止めて差分を示します。
-            </span>
-          </p>
+          <div className="rounded-t4d border border-brand-200 bg-brand-50 px-3 py-1.5 text-[11px] text-brand-900">
+            <p className="flex items-start gap-1.5">
+              <FlaskConical
+                className="mt-0.5 size-3.5 shrink-0 text-brand-600"
+                aria-hidden="true"
+              />
+              <span>デモデータ｜組織・指標・値はすべて架空です。</span>
+            </p>
+            <MoreInfo label="デモでの検証と確定のしくみ" className="mt-0.5 pl-5">
+              <p>
+                検証結果（取込バッチ）はサーバーのメモリにだけ置き、「登録を確定」では画面が検証した元の入力をもう一度送り、サーバーが検証し直してから確定します（別のサーバーへ振り分けられても確定できます）。検証の後に台帳が変わっていれば、確定を止めて差分を示します。
+              </p>
+            </MoreInfo>
+          </div>
         )}
 
         {!allowed ? (
@@ -132,11 +163,10 @@ export default async function StandardImportPage() {
           </Card>
         ) : (
           <>
-            <details className="rounded-t4d-lg border border-line bg-surface px-3 py-2 text-[12px]">
-              <summary className="cursor-pointer font-medium text-ink">
-                標準 CSV の列（見出し 1 行目に書く列名）
-              </summary>
-              <div className="mt-2 overflow-x-auto">
+            <Collapsible
+              summary={`標準 CSV の列（見出し 1 行目に書く列名・${STANDARD_COLUMNS.length} 列）`}
+            >
+              <div className="overflow-x-auto">
                 <Table>
                   <THead>
                     <TR>
@@ -162,7 +192,7 @@ export default async function StandardImportPage() {
                 既存テンプレート（拠点・項目・値・単位・期間）もそのまま読み、標準列の「候補」として対応付けます。
                 同じ指標・組織・期間・集計範囲の値は、ファイル名に関係なく同じ値として扱います（同じ内容の再登録は「変更なし」）。
               </p>
-            </details>
+            </Collapsible>
 
             <StandardImport
               periods={periods}
@@ -191,51 +221,97 @@ export default async function StandardImportPage() {
                 }
               />
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>ファイル</TH>
-                      <TH>状態</TH>
-                      <TH align="right">新規</TH>
-                      <TH align="right">変更</TH>
-                      <TH align="right">変更なし</TH>
-                      <TH align="right">エラー</TH>
-                      <TH align="right">除外（未登録）</TH>
-                      <TH>検証</TH>
-                      <TH>確定</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {history.map((item) => {
-                      const meta = BATCH_STATUS_META[item.status];
-                      return (
-                        <TR key={item.id}>
-                          <TD className="max-w-[260px] truncate" title={item.fileName}>
-                            {item.fileName}
-                          </TD>
-                          <TD>
-                            <Badge tone={meta.tone}>
-                              <meta.Icon className="size-3" aria-hidden="true" />
-                              {item.statusLabel}
-                            </Badge>
-                          </TD>
-                          <TD align="right">{item.counts.new}</TD>
-                          <TD align="right">{item.counts.changed}</TD>
-                          <TD align="right">{item.counts.unchanged}</TD>
-                          <TD align="right">{item.counts.error}</TD>
-                          <TD align="right">{item.excludedCount}</TD>
-                          <TD className="whitespace-nowrap text-[11px] text-ink-muted">
-                            {formatJst(item.createdAt)}
-                          </TD>
-                          <TD className="whitespace-nowrap text-[11px] text-ink-muted">
-                            {item.committedAt ? formatJst(item.committedAt) : '—'}
-                          </TD>
+              <div className="space-y-2 px-3 pb-3">
+                {/* 直近の取込の行を区分ごとに合計した帯。取込ごとの数は既定で閉じた表に置く（§10.4 B6） */}
+                <StatusBreakdown
+                  label={`直近 ${history.length} 件の取込の行の内訳`}
+                  unit="行"
+                  items={[
+                    {
+                      key: 'new',
+                      label: '新規',
+                      count: sum(history, (h) => h.counts.new),
+                      icon: Plus,
+                    },
+                    {
+                      key: 'changed',
+                      label: '変更',
+                      count: sum(history, (h) => h.counts.changed),
+                      icon: PenLine,
+                    },
+                    {
+                      key: 'unchanged',
+                      label: '変更なし',
+                      count: sum(history, (h) => h.counts.unchanged),
+                      icon: Equal,
+                    },
+                    {
+                      key: 'error',
+                      label: 'エラー',
+                      count: sum(history, (h) => h.counts.error),
+                      icon: TriangleAlert,
+                    },
+                    {
+                      key: 'excluded',
+                      label: '除外（未登録）',
+                      count: sum(history, (h) => h.excludedCount),
+                      icon: CircleMinus,
+                    },
+                  ]}
+                />
+                <Collapsible
+                  variant="plain"
+                  summary={`取込ごとの内訳（${history.length} 件・確定 ${
+                    history.filter((h) => h.status === 'committed').length
+                  } 件）`}
+                >
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <THead>
+                        <TR>
+                          <TH>ファイル</TH>
+                          <TH>状態</TH>
+                          <TH align="right">新規</TH>
+                          <TH align="right">変更</TH>
+                          <TH align="right">変更なし</TH>
+                          <TH align="right">エラー</TH>
+                          <TH align="right">除外（未登録）</TH>
+                          <TH>検証</TH>
+                          <TH>確定</TH>
                         </TR>
-                      );
-                    })}
-                  </TBody>
-                </Table>
+                      </THead>
+                      <TBody>
+                        {history.map((item) => {
+                          const meta = BATCH_STATUS_META[item.status];
+                          return (
+                            <TR key={item.id}>
+                              <TD className="max-w-[260px] truncate" title={item.fileName}>
+                                {item.fileName}
+                              </TD>
+                              <TD>
+                                <Badge tone={meta.tone}>
+                                  <meta.Icon className="size-3" aria-hidden="true" />
+                                  {item.statusLabel}
+                                </Badge>
+                              </TD>
+                              <TD align="right">{item.counts.new}</TD>
+                              <TD align="right">{item.counts.changed}</TD>
+                              <TD align="right">{item.counts.unchanged}</TD>
+                              <TD align="right">{item.counts.error}</TD>
+                              <TD align="right">{item.excludedCount}</TD>
+                              <TD className="whitespace-nowrap text-[11px] text-ink-muted">
+                                {formatJst(item.createdAt)}
+                              </TD>
+                              <TD className="whitespace-nowrap text-[11px] text-ink-muted">
+                                {item.committedAt ? formatJst(item.committedAt) : '—'}
+                              </TD>
+                            </TR>
+                          );
+                        })}
+                      </TBody>
+                    </Table>
+                  </div>
+                </Collapsible>
               </div>
             )}
           </Card>

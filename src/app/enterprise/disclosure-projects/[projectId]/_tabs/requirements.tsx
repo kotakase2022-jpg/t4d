@@ -4,6 +4,7 @@ import { SectionTitle } from '@/components/shared/page-header';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { getReferenceDate } from '@/lib/clock';
 import { formatJstDate, isOverdue } from '@/lib/format/datetime';
@@ -309,11 +310,13 @@ export async function RequirementsTab({
               </div>
             )}
           </Card>
-          <p className="text-[11px] text-ink-muted">
-            内容評価は既存の SSBJ
-            評価（対応済み／おおむね対応／一部対応／未対応／未確認）で、原稿の工程（本文状態）とは別の値です。
-            資料を登録しただけでは要求事項を対応済みにしません。
-          </p>
+          <MoreInfo label="内容評価と本文状態の違い">
+            <p>
+              内容評価は既存の SSBJ
+              評価（対応済み／おおむね対応／一部対応／未対応／未確認）で、原稿の工程（本文状態）とは別の値です。
+              資料を登録しただけでは要求事項を対応済みにしません。
+            </p>
+          </MoreInfo>
         </>
       )}
     </div>

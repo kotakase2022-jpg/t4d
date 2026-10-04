@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, ExternalLink, FlaskConical, Info } from 'lucide-react';
+import { FractionBar } from '@/components/charts/fraction-bar';
 import { SectionTitle } from '@/components/shared/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -53,12 +54,17 @@ export async function OverviewTab({
         <Card>
           <SectionTitle title="進捗（分母つき）" />
           <div className="space-y-3 px-3 pb-3">
-            <p className="text-[12px] text-ink">
-              原稿: {detail.blocks.length} 節中、承認済み {approvedBlocks.length} 節
-              <span className="ml-1 text-[11px] text-ink-muted">
-                （承認は企業内の承認です。保証の結論ではありません）
-              </span>
-            </p>
+            <div className="space-y-0.5">
+              <FractionBar
+                label="原稿のうち承認済み"
+                numerator={approvedBlocks.length}
+                denominator={detail.blocks.length}
+                unit="節"
+              />
+              <p className="text-[11px] text-ink-muted">
+                承認は企業内の承認です。保証の結論ではありません。
+              </p>
+            </div>
             {summaries.map(({ framework, summary, mode }) => (
               <div
                 key={framework.projectFramework.id}
@@ -76,11 +82,16 @@ export async function OverviewTab({
                   </p>
                 ) : (
                   <dl className="mt-1 grid gap-x-4 gap-y-0.5 text-[12px] sm:grid-cols-2">
-                    <div>
-                      <dt className="inline text-ink-muted">適用確定済み: </dt>
-                      <dd className="inline font-medium">
-                        {summary.applicableConfirmed} 項目中、承認済み{' '}
-                        {summary.approvedOfApplicable} 項目
+                    {/* 基準別の進捗は分母つきの帯（準拠率のような 1 つの数字にしない。§10.4 B6） */}
+                    <div className="sm:col-span-2">
+                      <dt className="sr-only">適用確定済みのうち承認済み</dt>
+                      <dd>
+                        <FractionBar
+                          label="適用確定済みのうち承認済み"
+                          numerator={summary.approvedOfApplicable}
+                          denominator={summary.applicableConfirmed}
+                          unit="項目"
+                        />
                       </dd>
                     </div>
                     <div>

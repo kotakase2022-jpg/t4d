@@ -27,6 +27,7 @@ import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { CollapsibleSection } from '@/components/ui/collapsible';
 import { Input, Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
@@ -163,6 +164,9 @@ export default async function DataPointDetailPage({
   );
   /** 承認の道筋が進行中（＝一発承認は使えない） */
   const routeActive = approvalProgress.totalCount > 0 && !approvalProgress.complete;
+
+  const currentVersionNo =
+    versions.find((v) => v.id === dataPoint.currentVersionId)?.versionNo ?? null;
 
   const fileVersionIds = evidenceLinks.map((l) => l.fileVersionId);
   const fileVersions =
@@ -513,8 +517,15 @@ export default async function DataPointDetailPage({
             </Card>
           )}
 
-          <Card>
-            <SectionTitle title={`Version 履歴（${versions.length}）`} />
+          {/* 履歴は既定で閉じる（見出しは常に見せる。docs/disclosure-first.md §10.4 B6） */}
+          <CollapsibleSection
+            id="version-history"
+            title={`Version 履歴（${versions.length}）`}
+            summary={`版の一覧（${versions.length} 版${
+              currentVersionNo !== null ? `・現在 v${currentVersionNo}` : ''
+            }）`}
+            bodyClassName="px-0 pb-0"
+          >
             <Table>
               <THead>
                 <TR>
@@ -557,7 +568,7 @@ export default async function DataPointDetailPage({
                 ))}
               </TBody>
             </Table>
-          </Card>
+          </CollapsibleSection>
         </div>
 
         {/* 右: Validation / Evidence / 履歴 */}
@@ -712,8 +723,12 @@ export default async function DataPointDetailPage({
           </Card>
 
           {disclosureItems.length > 0 && (
-            <Card>
-              <SectionTitle title="開示マッピング" />
+            <CollapsibleSection
+              id="disclosure-mapping"
+              title="開示マッピング"
+              summary={`この指標を使う開示項目（${disclosureItems.length} 件）`}
+              bodyClassName="px-0 pb-0"
+            >
               <ul className="divide-y divide-line">
                 {disclosureItems.map((item) => (
                   <li key={item.id} className="px-3 py-1.5">
@@ -727,7 +742,7 @@ export default async function DataPointDetailPage({
                   </li>
                 ))}
               </ul>
-            </Card>
+            </CollapsibleSection>
           )}
 
           {/* 承認の道筋（最大 5 階層）。どこまで進んでいて、次が誰かを必ず出す */}
@@ -911,8 +926,14 @@ export default async function DataPointDetailPage({
             )}
           </Card>
 
-          <Card>
-            <SectionTitle title="Audit Timeline" />
+          <CollapsibleSection
+            id="audit-timeline"
+            title="Audit Timeline"
+            summary={`監査ログ（直近 ${auditEvents.length} 件）`}
+            // 記録が無いことは空状態として見せる（空状態は閉じない）
+            defaultOpen={auditEvents.length === 0}
+            bodyClassName="px-0 pb-0"
+          >
             {auditEvents.length === 0 ? (
               <EmptyState title="監査ログはありません" icon={<History className="size-5" />} />
             ) : (
@@ -928,7 +949,7 @@ export default async function DataPointDetailPage({
                 ))}
               </ul>
             )}
-          </Card>
+          </CollapsibleSection>
         </div>
       </div>
     </>

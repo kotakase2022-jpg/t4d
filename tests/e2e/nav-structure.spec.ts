@@ -9,6 +9,9 @@ import { DEMO_USERS, loginAs } from './helpers';
  * 開示対応の配下は基準ごとにまとめ、SSBJ → 対応状況/要求事項/… の 3 階層にする。
  * 2026-10-01（docs/disclosure-first.md §9.1）: SSBJ の データ収集 と 開示ドラフト の間に 定性情報、
  * CSRD は SSBJ と同じ 5 画面のグループ、AI Copilot と 管理 の間に 分析（現状診断/規制対応度/他社比較）。
+ * 2026-10-02（§10.1）: CSRD にも データ収集 と 開示ドラフト の間に 定性情報（同じ画面が SSBJ と CSRD の
+ * 2 か所に出る。現在地は押した側の 1 つだけ）、分析に 自社経年比較（規制対応度 と 他社比較 の間）と
+ * 財務影響分析（他社比較 の次）。
  * SSBJ と CSRD には同名のリンクが並ぶため、子のリンクは親の名前が付いたリスト
  * （getByRole('list', { name })）で範囲を絞って確かめる。
  * 「開示ドラフト」への導線が左メニュー・SSBJ データ収集・データ取込の
@@ -67,19 +70,21 @@ test('2 つの入口とグルーピングで並ぶ', async ({ page }) => {
     'href',
     '/enterprise/narratives',
   );
-  // CSRD 配下（3 階層目）: SSBJ と同じ 5 画面。定性情報は入れない
+  // CSRD 配下（3 階層目）: SSBJ と同じ 6 項目。定性情報は データ収集 と 開示ドラフト の間（§10.1 ①）
   const csrd = childList(page, 'CSRD');
   await expect(csrd.getByRole('link')).toHaveText([
     '対応状況',
     '要求事項',
     '対応計画',
     'データ収集',
+    '定性情報',
     '開示ドラフト',
   ]);
   for (const [label, href] of [
     ['対応状況', '/enterprise/disclosures/csrd'],
     ['要求事項', '/enterprise/disclosures/csrd/requirements'],
     ['対応計画', '/enterprise/disclosures/csrd/plans'],
+    ['定性情報', '/enterprise/narratives'],
     ['開示ドラフト', '/enterprise/disclosures/csrd/draft'],
   ] as const) {
     await expect(csrd.getByRole('link', { name: label, exact: true })).toHaveAttribute(
@@ -103,13 +108,21 @@ test('2 つの入口とグルーピングで並ぶ', async ({ page }) => {
   for (const child of ['ワークフロー', 'アラート', 'レポート']) {
     await expect(sidebar.getByRole('link', { name: child, exact: true })).toBeVisible();
   }
-  // 分析配下（閲覧専用の横断画面）
+  // 分析配下（閲覧専用の横断画面）。自社経年比較は 規制対応度 と 他社比較 の間、財務影響分析は 他社比較 の次
   const analysis = childList(page, '分析');
-  await expect(analysis.getByRole('link')).toHaveText(['現状診断', '規制対応度', '他社比較']);
+  await expect(analysis.getByRole('link')).toHaveText([
+    '現状診断',
+    '規制対応度',
+    '自社経年比較',
+    '他社比較',
+    '財務影響分析',
+  ]);
   for (const [label, href] of [
     ['現状診断', '/enterprise/analysis/diagnosis'],
     ['規制対応度', '/enterprise/analysis/regulations'],
+    ['自社経年比較', '/enterprise/analysis/trends'],
     ['他社比較', '/enterprise/analysis/benchmark'],
+    ['財務影響分析', '/enterprise/analysis/financial-impact'],
   ] as const) {
     await expect(analysis.getByRole('link', { name: label, exact: true })).toHaveAttribute(
       'href',
@@ -173,13 +186,45 @@ test('同じ名前のリンクが SSBJ と CSRD に並んでも、現在地は�
 }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   const current = nav(page).locator('a[aria-current="page"]');
+  const narrativesIn = (list: 'SSBJ' | 'CSRD') =>
+    childList(page, list).getByRole('link', { name: '定性情報', exact: true });
+  /** 定性情報の現在地が list 側の 1 つだけ（もう一方には付かない） */
+  const expectNarrativesCurrentIn = async (list: 'SSBJ' | 'CSRD') => {
+    await expect(narrativesIn(list)).toHaveAttribute('aria-current', 'page');
+    await expect(narrativesIn(list === 'SSBJ' ? 'CSRD' : 'SSBJ')).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(current).toHaveCount(1);
+  };
 
-  // 定性情報（従来メニューでは SSBJ 配下の通常の項目）
+  // 定性情報（従来メニューでは SSBJ と CSRD の 2 か所に出る）: URL を直接開くと SSBJ 側 1 つ
   await page.goto('/enterprise/narratives');
-  await expect(current).toHaveCount(1);
-  await expect(
-    childList(page, 'SSBJ').getByRole('link', { name: '定性情報', exact: true }),
-  ).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { level: 1, name: '定性情報' })).toBeVisible();
+  await expectNarrativesCurrentIn('SSBJ');
+
+  // CSRD の定性情報を押す → CSRD 側だけ。再読込しても CSRD（タブ内で覚えている）
+  await narrativesIn('CSRD').click();
+  await expectNarrativesCurrentIn('CSRD');
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: '定性情報' })).toBeVisible();
+  await expectNarrativesCurrentIn('CSRD');
+
+  // SSBJ の定性情報を押す → SSBJ 側に戻る
+  await narrativesIn('SSBJ').click();
+  await expectNarrativesCurrentIn('SSBJ');
+
+  // CSRD の開示ドラフトから画面右上のリンクで定性情報へ → CSRD 側（開いていた枝に従う）
+  await page.goto('/enterprise/disclosures/csrd/draft');
+  await page.locator('#t4d-main').getByRole('link', { name: '定性情報' }).click();
+  await page.waitForURL('**/enterprise/narratives');
+  await expectNarrativesCurrentIn('CSRD');
+
+  // 最上位のリンク（ホーム）を押すと覚えた枝を忘れ、直接開いた定性情報は SSBJ 側に戻る
+  await nav(page).getByRole('link', { name: 'ホーム', exact: true }).click();
+  await page.waitForURL('**/enterprise/dashboard');
+  await page.goto('/enterprise/narratives');
+  await expectNarrativesCurrentIn('SSBJ');
 
   // CSRD の対応計画: SSBJ の対応計画には付かない
   await page.goto('/enterprise/disclosures/csrd/plans');
@@ -203,8 +248,13 @@ test('設定と規制対応度は権限のある利用者だけに左メニュ�
   await expect(nav(page).getByRole('link', { name: '定性情報', exact: true })).toHaveCount(0);
   await expect(nav(page).getByRole('link', { name: 'CSRD', exact: true })).toHaveCount(0);
   await expect(nav(page).getByRole('list', { name: 'CSRD', exact: true })).toHaveCount(0);
-  // 分析そのもの（現状診断・他社比較）は出る
-  await expect(childList(page, '分析').getByRole('link')).toHaveText(['現状診断', '他社比較']);
+  // 分析そのもの（現状診断・自社経年比較・他社比較・財務影響分析）は出る（数値を読むだけで開示の権限は要らない）
+  await expect(childList(page, '分析').getByRole('link')).toHaveText([
+    '現状診断',
+    '自社経年比較',
+    '他社比較',
+    '財務影響分析',
+  ]);
 
   // 企業管理者には「管理」配下に出る
   await loginAs(page, DEMO_USERS.enterpriseAdmin);

@@ -10,13 +10,15 @@ import {
   RotateCcw,
   Upload,
 } from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { FlashMessage } from '@/components/shared/flash';
-import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { PreservingForm } from '@/components/shared/preserving-form';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { AuthorizationError } from '@/lib/authorization/can';
@@ -41,6 +43,7 @@ import {
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { MetricDefinition, Uuid } from '@/types/domain';
 import {
+  CSRD_DATA_STATE_ICON,
   CsrdDataStateBadge,
   EstimateValueBadge,
   SampleMasterBadge,
@@ -166,6 +169,9 @@ function ApprovedValue({
  *  - CSRD の計画から作った収集項目（既存の承認の道筋の進み具合）
  *  - 計画から収集項目を作る（新しい指標の出所は CSRD。既存の指標は作り直さず割当だけを作る）
  * 読込は書かない。SSBJ の計画・収集項目は出さない。
+ *
+ * 文字量を減らす（§10.4）: 状況の件数はリンク付きの内訳の図、画面の説明は「この画面について」、
+ * 既存の指標・割当の扱いは閉じた説明。両方の表・権限が無いことの説明・空状態は常に見せる。
  */
 export default async function CsrdCollectionPage({
   searchParams,
@@ -243,12 +249,21 @@ export default async function CsrdCollectionPage({
         title="CSRD データ収集"
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <span>
-              {shell.currentPeriod.label} ／
-              評価対象の要求事項に必要なデータと、対応計画から作った収集項目の状況
-            </span>
+            <span>{shell.currentPeriod.label} ／ 評価対象の要求事項のデータと収集項目</span>
             <SampleMasterBadge />
           </span>
+        }
+        help={
+          <>
+            <p>
+              評価対象（常に適用・重要と判断した事項）の要求事項に対応付いた指標を、拠点ごとの当期の状況で並べます。
+            </p>
+            <p>
+              2 つ目の表は CSRD の対応計画から作った収集項目だけです（SSBJ
+              の計画・収集項目は出しません）。不足しているデータは「計画から収集項目を作成」で、担当部署へ収集依頼できる形（指標
+              × 拠点 × 期限）にします。
+            </p>
+          </>
         }
         breadcrumbs={BREADCRUMBS}
         actions={
@@ -279,34 +294,35 @@ export default async function CsrdCollectionPage({
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
-        <ul className="grid grid-cols-5 gap-2" aria-label="当期の状況の件数">
-          {CSRD_DATA_STATES.map((state) => (
-            <li key={state}>
-              <KpiCard
-                href={`${BASE}?state=${state}#csrd-collection-requirement-rows`}
-                label={CSRD_DATA_STATE_LABEL[state]}
-                value={stateCounts[state]}
-                suffix={`/ ${requirementRows.length} 行`}
-                tone={
-                  state === 'approved'
-                    ? 'success'
-                    : state === 'not_entered' && stateCounts[state] > 0
-                      ? 'warning'
-                      : 'neutral'
-                }
-              />
-            </li>
-          ))}
-          <li>
-            <KpiCard
+        {/* 当期の状況の件数（分母付き）。各状況はその行だけに絞った表へのリンク */}
+        <Card className="flex flex-wrap items-start gap-x-6 gap-y-2 p-3">
+          <StatusBreakdown
+            label="当期の状況の件数"
+            unit="行"
+            className="min-w-[320px] flex-1"
+            denominator={requirementRows.length}
+            items={CSRD_DATA_STATES.map((state) => ({
+              key: state,
+              label: CSRD_DATA_STATE_LABEL[state],
+              count: stateCounts[state],
+              icon: CSRD_DATA_STATE_ICON[state],
+              href: `${BASE}?state=${state}#csrd-collection-requirement-rows`,
+            }))}
+          />
+          <p className="flex items-center gap-1 text-[12px]">
+            <ClipboardList className="size-3.5 text-ink-muted" aria-hidden="true" />
+            <Link
               href={`${BASE}#csrd-collection-plan-rows`}
-              label="計画から作った収集項目"
-              value={planRows.length}
-              suffix={overdueItems > 0 ? `件（期限超過 ${overdueItems}）` : '件'}
-              tone={overdueItems > 0 ? 'danger' : 'neutral'}
-            />
-          </li>
-        </ul>
+              className="text-brand-700 hover:underline"
+            >
+              計画から作った収集項目
+            </Link>
+            <span className="tabular-nums text-ink">{planRows.length} 件</span>
+            {overdueItems > 0 && (
+              <span className="font-semibold text-danger">（期限超過 {overdueItems} 件）</span>
+            )}
+          </p>
+        </Card>
 
         <Card className="overflow-hidden" id="csrd-collection-requirement-rows">
           <SectionTitle
@@ -445,14 +461,7 @@ export default async function CsrdCollectionPage({
         </Card>
 
         <Card className="overflow-hidden" id="csrd-collection-plan-rows">
-          <SectionTitle
-            title={`計画から作成した収集項目（${planRows.length}）`}
-            action={
-              <span className="text-[11px] text-ink-muted">
-                CSRD の対応計画から作った収集項目だけが並びます
-              </span>
-            }
-          />
+          <SectionTitle title={`計画から作成した収集項目（${planRows.length}）`} />
           {planRows.length === 0 ? (
             <EmptyState
               icon={<ClipboardList className="size-5" aria-hidden="true" />}
@@ -528,14 +537,7 @@ export default async function CsrdCollectionPage({
         </Card>
 
         <Card className="overflow-hidden" id="csrd-collection-create">
-          <SectionTitle
-            title="計画から収集項目を作成"
-            action={
-              <span className="text-[11px] text-ink-muted">
-                不足しているデータを、担当部署へ収集依頼できる形（指標 × 拠点 × 期限）にします
-              </span>
-            }
-          />
+          <SectionTitle title="計画から収集項目を作成" />
           {!canCreateCollection ? (
             <p className="flex items-start gap-2 px-3 pb-3 text-[12px] text-ink-muted">
               <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -680,10 +682,15 @@ export default async function CsrdCollectionPage({
                 />
                 証跡資料の添付を必須にする（第三者保証に備える）
               </label>
-              <p className="text-[11px] text-ink-muted">
-                既にある指標のコードを選ぶと、指標は作り直さず、この拠点・期間の担当と期限だけを作ります。同じ指標・拠点・期間の割当が既にあれば、割当は作り直さず（担当・期限は変えず）計画に結び付けます。新しいコードは
-                CSRD を出所とする指標として作ります。
-              </p>
+              <MoreInfo label="既にある指標・割当を選んだときの扱い">
+                <p>
+                  既にある指標のコードを選ぶと、指標は作り直さず、この拠点・期間の担当と期限だけを作ります。
+                </p>
+                <p>
+                  同じ指標・拠点・期間の割当が既にあれば、割当は作り直さず（担当・期限は変えず）計画に結び付けます。新しいコードは
+                  CSRD を出所とする指標として作ります。
+                </p>
+              </MoreInfo>
               <SubmitButton
                 size="sm"
                 icon={<Database aria-hidden="true" />}

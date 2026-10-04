@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { FolderKanban, Plus } from 'lucide-react';
+import { FractionBar } from '@/components/charts/fraction-bar';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -55,7 +56,12 @@ export default async function DisclosureProjectsPage({
     <>
       <PageHeader
         title="開示プロジェクト"
-        description="報告期間・制度目的・基準の版・担当を束ねた開示の作業単位です。基準の版はプロジェクトごとに固定され、新しい版が出ても自動では切り替わりません。"
+        description="報告期間・目的・基準の版・担当を束ねた開示の作業単位"
+        help={
+          <p>
+            報告期間・制度目的・基準の版・担当を束ねた開示の作業単位です。基準の版はプロジェクトごとに固定され、新しい版が出ても自動では切り替わりません。
+          </p>
+        }
         breadcrumbs={[{ label: '企業ワークスペース' }, { label: '開示プロジェクト' }]}
         actions={
           canWrite ? (
@@ -95,7 +101,7 @@ export default async function DisclosureProjectsPage({
                     <TH>目的</TH>
                     <TH>基準・版と適用判断</TH>
                     <TH>状態</TH>
-                    <TH align="right">承認済みの節</TH>
+                    <TH>承認済みの節</TH>
                     <TH>担当</TH>
                     <TH>期限</TH>
                   </TR>
@@ -154,8 +160,14 @@ export default async function DisclosureProjectsPage({
                         <TD>
                           <ProjectStatusBadge status={row.project.status} />
                         </TD>
-                        <TD align="right" className="whitespace-nowrap text-[12px]">
-                          {row.blockCount} 節中 {row.approvedBlockCount} 節
+                        <TD className="min-w-[140px]">
+                          {/* 承認済みの節（分母つき）。企業内の承認で、保証の結論ではない */}
+                          <FractionBar
+                            label="承認済み"
+                            numerator={row.approvedBlockCount}
+                            denominator={row.blockCount}
+                            unit="節"
+                          />
                         </TD>
                         <TD className="whitespace-nowrap text-[12px]">{row.ownerName ?? '未定'}</TD>
                         <TD className="whitespace-nowrap text-[12px]">

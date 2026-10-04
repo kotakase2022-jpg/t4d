@@ -13,6 +13,8 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { runSsbjGapAnalysisBulkAction } from '@/app/enterprise/actions';
+import { FractionBar } from '@/components/charts/fraction-bar';
+import { FunnelSteps } from '@/components/charts/funnel-steps';
 import { DataCoverageBadge } from '@/components/shared/badges';
 import { FilterBar, type FilterGroup } from '@/components/shared/filter-bar';
 import { FlashMessage } from '@/components/shared/flash';
@@ -21,6 +23,8 @@ import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
+import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
@@ -44,6 +48,7 @@ import {
   loadSsbjScopeMapping,
   OPEN_HIGH_PRIORITY_QUERY,
 } from '@/lib/services/ssbj-gap';
+import { mappingFunnelSteps } from '../_components/breakdown-items';
 
 export const metadata = { title: 'SSBJ 要求事項の評価' };
 
@@ -241,6 +246,39 @@ export default async function SsbjRequirementsPage({
     { label: '実務対応（第1号）', applied: mapping.applied.practical },
   ];
 
+  // 紐づけの集計対象（サービスと同じ: 適用基準の要求事項から対象外を除いたもの）
+  const linkageBase = mapping.counts.afterStandards - mapping.counts.notApplicable;
+  const linkageTiles = [
+    {
+      label: '資料と紐づけ済み',
+      count: mapping.linkage.document,
+      query: 'linkage=document',
+      icon: FileText,
+      note: '人工知能の分析で、取込資料に該当箇所が見つかった要求事項です',
+    },
+    {
+      label: 'データあり',
+      count: mapping.linkage.data,
+      query: 'linkage=data',
+      icon: Database,
+      note: '要求する指標のすべてに当期の値が登録されている要求事項です（一部だけの項目は含めません）',
+    },
+    {
+      label: '未分析',
+      count: mapping.linkage.unanalyzed,
+      query: 'linkage=unanalyzed',
+      icon: Bot,
+      note: '人工知能の分析を実行していない要求事項です',
+    },
+    {
+      label: '紐づけできず',
+      count: mapping.linkage.none,
+      query: 'linkage=none',
+      icon: CircleAlert,
+      note: '分析済みだが、資料にもデータにも紐づかなかった要求事項です',
+    },
+  ];
+
   return (
     <>
       <PageHeader
@@ -276,33 +314,44 @@ export default async function SsbjRequirementsPage({
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
-        {/* 旧・工程③〜⑥を 1 画面に統合。どの工程に何件残っているかを先頭で示す */}
-        <ul className="grid grid-cols-4 gap-2">
-          {stages.map((stage) => (
-            <li key={stage.title}>
-              <Link
-                href={`/enterprise/disclosures/ssbj/requirements?${stage.query}`}
-                className="block h-full rounded-t4d-lg border border-line bg-surface p-3 shadow-[0_1px_2px_rgba(23,32,51,0.04)] transition-colors hover:border-brand-300 hover:bg-brand-50"
-              >
-                <p className="flex items-center gap-1.5 text-[11px] text-ink-muted">
-                  <stage.icon className="size-3.5" aria-hidden="true" />
-                  {stage.step}
-                </p>
-                <p className="mt-1 text-[13px] font-semibold text-ink">{stage.title}</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+        {/* 旧・工程③〜⑥を 1 画面に統合。どの工程に何件残っているかを先頭で示す。
+            段階の説明は下の「各工程の説明」に寄せて既定で閉じる（docs/disclosure-first.md §10.4）。
+            説明側に段階名を重ねて書かない（段階名が画面に 2 回出ないように） */}
+        <div className="space-y-1">
+          <ul className="grid grid-cols-4 gap-2">
+            {stages.map((stage) => (
+              <li key={stage.title}>
+                <Link
+                  href={`/enterprise/disclosures/ssbj/requirements?${stage.query}`}
+                  className="block h-full rounded-t4d-lg border border-line bg-surface p-3 shadow-[0_1px_2px_rgba(23,32,51,0.04)] transition-colors hover:border-brand-300 hover:bg-brand-50"
+                >
+                  <p className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+                    <stage.icon className="size-3.5" aria-hidden="true" />
+                    {stage.step}
+                  </p>
+                  <p className="mt-1 text-[13px] font-semibold text-ink">{stage.title}</p>
+                  <p className="mt-1.5 text-[12px]">
+                    <span
+                      className={`font-semibold tabular-nums ${stage.count > 0 ? 'text-brand-700' : 'text-ink-muted'}`}
+                    >
+                      {stage.countLabel} {stage.count} 件
+                    </span>
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <MoreInfo label="各工程の説明">
+            <ul className="space-y-0.5">
+              {stages.map((stage) => (
+                <li key={stage.title}>
+                  <span className="mr-1.5 tabular-nums">{stage.step}</span>
                   {stage.description}
-                </p>
-                <p className="mt-1.5 text-[12px]">
-                  <span
-                    className={`font-semibold tabular-nums ${stage.count > 0 ? 'text-brand-700' : 'text-ink-muted'}`}
-                  >
-                    {stage.countLabel} {stage.count} 件
-                  </span>
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
+                </li>
+              ))}
+            </ul>
+          </MoreInfo>
+        </div>
 
         {/* ③ 必要な要求項目のみが正しく表示されているか（SSBJ 要求事項とのマッピング） */}
         <Card className="overflow-hidden">
@@ -318,27 +367,15 @@ export default async function SsbjRequirementsPage({
             }
           />
 
-          {/* 件数の流れ。「なぜこの件数なのか」を画面上で検算できるようにする */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[12px] text-ink">
-            <span className="rounded-t4d border border-line bg-surface-muted px-2 py-1">
-              正式基準マスター{' '}
-              <strong className="tabular-nums">{mapping.counts.masterTotal}</strong> 項目
-            </span>
-            <span aria-hidden="true">→</span>
-            <span className="rounded-t4d border border-line bg-surface-muted px-2 py-1">
-              適用基準で <strong className="tabular-nums">{mapping.counts.afterStandards}</strong>{' '}
-              項目
-            </span>
-            <span aria-hidden="true">→</span>
-            <span className="rounded-t4d border border-line bg-surface-muted px-2 py-1">
-              対象外 <strong className="tabular-nums">{mapping.counts.notApplicable}</strong>{' '}
-              件・重要性なし <strong className="tabular-nums">{mapping.counts.notMaterial}</strong>{' '}
-              件を除外
-            </span>
-            <span aria-hidden="true">→</span>
-            <span className="rounded-t4d border border-brand-300 bg-brand-50 px-2 py-1 font-medium text-brand-800">
-              評価対象 <strong className="tabular-nums">{mapping.counts.inScope}</strong> 項目
-            </span>
+          {/* 件数の流れ。「なぜこの件数なのか」を画面上で検算できるようにする（各段の件数は文字で書く） */}
+          <div className="space-y-1 border-b border-line px-3 py-2">
+            <FunnelSteps label="要求事項の件数の流れ" steps={mappingFunnelSteps(mapping.counts)} />
+            <p className="text-[11px] text-ink-muted">
+              除外した件数: 対象外{' '}
+              <span className="tabular-nums text-ink">{mapping.counts.notApplicable}</span>{' '}
+              件・重要性なし{' '}
+              <span className="tabular-nums text-ink">{mapping.counts.notMaterial}</span> 件
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
@@ -370,61 +407,72 @@ export default async function SsbjRequirementsPage({
               }
             />
           ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>マテリアリティ</TH>
-                  <TH>区分</TH>
-                  <TH>評価</TH>
-                  <TH align="center">一般開示基準</TH>
-                  <TH align="center">気候関連開示基準</TH>
-                  <TH align="right">項目（対象指標）</TH>
-                  <TH align="right">紐づく要求事項</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {mapping.rows.map((row) => (
-                  <TR key={row.title}>
-                    <TD className="font-medium text-ink">
-                      <span className="flex items-center gap-1.5">
-                        <Target className="size-3.5 text-ink-muted" aria-hidden="true" />
-                        {row.title}
-                      </span>
-                    </TD>
-                    <TD>{CATEGORY_LABEL[row.category]}</TD>
-                    <TD>
-                      <Badge tone={row.materiality === 'high' ? 'danger' : 'neutral'}>
-                        {MATERIALITY_LEVEL_LABEL[row.materiality]}
-                      </Badge>
-                    </TD>
-                    {/* 一般開示基準はサステナビリティ課題すべてが対象。
-                        気候関連開示基準は、気候に関わる課題だけが対象になる */}
-                    <TD align="center">
-                      <MappingCell active={mapping.applied.general} />
-                    </TD>
-                    <TD align="center">
-                      <MappingCell active={mapping.applied.climate && row.climate} />
-                    </TD>
-                    <TD align="right" className="tabular-nums">
-                      {row.metricCount}
-                    </TD>
-                    <TD align="right" className="tabular-nums">
-                      {row.linkedItemCount > 0 ? (
-                        row.linkedItemCount
-                      ) : (
-                        <span className="text-ink-muted">0</span>
-                      )}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
+            // マテリアリティ × 基準の表と凡例は既定で閉じる（docs/disclosure-first.md §10.4。
+            // 件数の流れと適用中の基準は上に見えている）。未登録の空状態は閉じない
+            <Collapsible
+              variant="plain"
+              summary={`マテリアリティ × 基準の対応表（${mapping.rows.length} 件）`}
+              className="px-3 py-1"
+              bodyClassName="pl-0"
+            >
+              <div className="t4d-scroll-x">
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>マテリアリティ</TH>
+                      <TH>区分</TH>
+                      <TH>評価</TH>
+                      <TH align="center">一般開示基準</TH>
+                      <TH align="center">気候関連開示基準</TH>
+                      <TH align="right">項目（対象指標）</TH>
+                      <TH align="right">紐づく要求事項</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {mapping.rows.map((row) => (
+                      <TR key={row.title}>
+                        <TD className="font-medium text-ink">
+                          <span className="flex items-center gap-1.5">
+                            <Target className="size-3.5 text-ink-muted" aria-hidden="true" />
+                            {row.title}
+                          </span>
+                        </TD>
+                        <TD>{CATEGORY_LABEL[row.category]}</TD>
+                        <TD>
+                          <Badge tone={row.materiality === 'high' ? 'danger' : 'neutral'}>
+                            {MATERIALITY_LEVEL_LABEL[row.materiality]}
+                          </Badge>
+                        </TD>
+                        {/* 一般開示基準はサステナビリティ課題すべてが対象。
+                            気候関連開示基準は、気候に関わる課題だけが対象になる */}
+                        <TD align="center">
+                          <MappingCell active={mapping.applied.general} />
+                        </TD>
+                        <TD align="center">
+                          <MappingCell active={mapping.applied.climate && row.climate} />
+                        </TD>
+                        <TD align="right" className="tabular-nums">
+                          {row.metricCount}
+                        </TD>
+                        <TD align="right" className="tabular-nums">
+                          {row.linkedItemCount > 0 ? (
+                            row.linkedItemCount
+                          ) : (
+                            <span className="text-ink-muted">0</span>
+                          )}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </div>
+              <p className="pt-2 text-[11px] leading-relaxed text-ink-muted">
+                ● = 開示対象になりやすい基準／— = 対象になりにくい基準。区分の判定は登録時と同じ規則
+                （名前・内容・リスク・機会の記述に含まれる語）で行っています。「紐づく要求事項」は、
+                マテリアリティの項目（対象指標）を要求する評価対象の要求事項の数です。
+              </p>
+            </Collapsible>
           )}
-          <p className="border-t border-line px-3 py-2 text-[11px] leading-relaxed text-ink-muted">
-            ● = 開示対象になりやすい基準／— = 対象になりにくい基準。区分の判定は登録時と同じ規則
-            （名前・内容・リスク・機会の記述に含まれる語）で行っています。「紐づく要求事項」は、
-            マテリアリティの項目（対象指標）を要求する評価対象の要求事項の数です。
-          </p>
         </Card>
 
         {/* ③ 必要な要求項目のうち、取込資料・データによって紐づけ可能／不可 */}
@@ -433,60 +481,44 @@ export default async function SsbjRequirementsPage({
             title="取込資料・データとの紐づけ"
             action={
               <span className="text-[11px] text-ink-muted">
-                対象外を除く {mapping.counts.afterStandards - mapping.counts.notApplicable}{' '}
-                件で集計。選ぶと一覧を絞り込みます
+                対象外を除く {linkageBase} 件で集計。選ぶと一覧を絞り込みます
               </span>
             }
           />
-          <ul className="grid grid-cols-4 gap-2 p-3">
-            {[
-              {
-                label: '資料と紐づけ済み',
-                count: mapping.linkage.document,
-                query: 'linkage=document',
-                icon: FileText,
-                note: '人工知能の分析で、取込資料に該当箇所が見つかった要求事項',
-              },
-              {
-                label: 'データあり',
-                count: mapping.linkage.data,
-                query: 'linkage=data',
-                icon: Database,
-                note: '要求する指標のすべてに当期の値が登録されている要求事項（一部だけの項目は含めない）',
-              },
-              {
-                label: '未分析',
-                count: mapping.linkage.unanalyzed,
-                query: 'linkage=unanalyzed',
-                icon: Bot,
-                note: '人工知能の分析を実行していない要求事項',
-              },
-              {
-                label: '紐づけできず',
-                count: mapping.linkage.none,
-                query: 'linkage=none',
-                icon: CircleAlert,
-                note: '分析済みだが、資料にもデータにも紐づかなかった要求事項',
-              },
-            ].map((tile) => (
+          {/* 4 分類は重なりうる（資料とデータの両方に紐づく要求事項は両方に数える）ため、
+              1 本の積み上げにせず、分類ごとに「n / 集計対象 件」の帯で示す（帯の幅が嘘にならないように） */}
+          <ul className="grid grid-cols-4 gap-2 px-3 pt-3 pb-1">
+            {linkageTiles.map((tile) => (
               <li key={tile.label}>
                 <Link
                   href={`/enterprise/disclosures/ssbj/requirements?${tile.query}`}
-                  className="block h-full rounded-t4d border border-line p-2.5 transition-colors hover:border-brand-300 hover:bg-brand-50"
+                  aria-label={`${tile.label} ${tile.count} / ${linkageBase} 件（一覧を絞り込む）`}
+                  className="flex h-full items-start gap-1.5 rounded-t4d border border-line p-2.5 transition-colors hover:border-brand-300 hover:bg-brand-50"
                 >
-                  <p className="flex items-center gap-1.5 text-[12px] font-medium text-ink">
-                    <tile.icon className="size-3.5 text-ink-muted" aria-hidden="true" />
-                    {tile.label}
-                  </p>
-                  <p className="mt-1 text-[20px] font-semibold leading-none tabular-nums text-ink">
-                    {tile.count}
-                    <span className="ml-0.5 text-[12px] font-normal text-ink-muted">件</span>
-                  </p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">{tile.note}</p>
+                  <tile.icon
+                    className="mt-0.5 size-3.5 shrink-0 text-ink-muted"
+                    aria-hidden="true"
+                  />
+                  <FractionBar
+                    label={tile.label}
+                    numerator={tile.count}
+                    denominator={linkageBase}
+                    className="flex-1"
+                  />
                 </Link>
               </li>
             ))}
           </ul>
+          <MoreInfo label="紐づけの数え方" className="px-3 pb-2">
+            <ul className="space-y-0.5">
+              {linkageTiles.map((tile) => (
+                <li key={tile.label}>
+                  「{tile.label}」は、{tile.note}。
+                </li>
+              ))}
+              <li>資料とデータの両方に紐づく要求事項は、両方に数えています。</li>
+            </ul>
+          </MoreInfo>
         </Card>
 
         <FilterBar

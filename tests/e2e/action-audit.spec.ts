@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { ENGAGEMENT_IDS } from '@/lib/fixtures/dataset';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * Server Action の実動作監査。
@@ -86,6 +86,10 @@ test('Data Point の値編集が履歴に残る', async ({ page }) => {
   await submitAndSettle(page, () => page.getByRole('button', { name: '保存' }).click());
 
   await expect(page.locator('input[name="value"]')).toHaveValue(next);
+  // 変更理由は Version 履歴（既定で閉じた折りたたみ。docs/disclosure-first.md §10.4 B6）の
+  // 「変更理由」の列に残る。開いてから、履歴の中と画面の最初の出現の両方を確かめる
+  const history = await openCollapsible(page, /^版の一覧/);
+  await expect(history.getByText('監査テスト: 値編集の動作確認').first()).toBeVisible();
   await expect(page.getByText('監査テスト: 値編集の動作確認').first()).toBeVisible();
 });
 

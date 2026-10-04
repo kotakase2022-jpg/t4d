@@ -6,7 +6,8 @@ import { CSRD_IDS } from '@/lib/fixtures/csrd';
 import { ORG_IDS, PERIOD_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
-import { decideCsrdDmaMatter } from '@/lib/services/csrd/settings';
+import { CSRD_GAP_KIND_QUESTION } from '@/lib/domain/csrd';
+import { confirmCsrdDma, decideCsrdDmaMatter } from '@/lib/services/csrd/settings';
 import type { EnterpriseShell } from '@/lib/services/shell';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
 
@@ -18,6 +19,8 @@ import type { AuthorizationContext, RoleKey } from '@/types/domain';
  *  - 要求事項: 行ごとに適用と、適用になった観点。暫定の併記。URL の絞り込み
  *  - 詳細: 適用の根拠、AI の候補（デモ生成）と人の確定、回答（版・承認）への導線
  *  - 権限: 閲覧だけの役割には操作を出さない。開示を読めない役割には権限なしと示す
+ *  - 文字量（§10.4）: 説明・算定式・補助の一覧は既定で閉じ、誠実さの注記（架空・未発効・暫定・AI は候補）・
+ *    分母付きの主要数値・表・図・フォームは閉じない。閉じた中身は DOM にあるため、details の内外で確かめる
  */
 
 const shellState = vi.hoisted(() => ({ shell: null as unknown }));
@@ -130,6 +133,25 @@ function expectIconsHidden(element: HTMLElement): void {
   for (const icon of icons) expect(icon.getAttribute('aria-hidden')).toBe('true');
 }
 
+/** 既定で閉じた折りたたみの中か（§10.4。閉じた中は画面に見えない） */
+function inClosedDetails(element: Element): boolean {
+  const details = element.closest('details');
+  return details !== null && !details.open;
+}
+
+/** 要素を含む折りたたみの要点の 1 行（Collapsible・MoreInfo の summary） */
+function summaryOf(element: Element): string {
+  return (
+    element.closest('details')?.querySelector('summary [data-collapsible-summary]')?.textContent ??
+    ''
+  );
+}
+
+/** 閉じていない（details の外にある）。誠実さの注記・エラー・主要数値・主表に使う */
+function expectOutsideDetails(element: Element): void {
+  expect(element.closest('details')).toBeNull();
+}
+
 async function notFoundDigest(run: () => Promise<unknown>): Promise<string | null> {
   try {
     await run();
@@ -215,6 +237,54 @@ describe('CSRD 対応状況', () => {
     expect(screen.getByRole('alert').textContent).toContain('アクセス権限がありません');
     expect(screen.queryByRole('table')).toBeNull();
   });
+
+  it('文字量を減らす（§10.4）: SSBJ との違いは 1 行＋閉じた全文、件数は内訳の図、使い方は「この画面について」', async () => {
+    await renderOverview();
+    const short = screen.getByText(
+      'SSBJ は財務的重要性のみ（シングル）。CSRD はインパクトか財務のどちらかで重要なら適用（ダブル）',
+    );
+    expectOutsideDetails(short);
+    const full = screen.getByText(/投資家の意思決定に影響する情報/);
+    expect(inClosedDetails(full)).toBe(true);
+    expect(summaryOf(full)).toBe('SSBJ との違い');
+
+    // 結果・適用は積み上げの帯（読み上げない）＋凡例の一覧（名前付き・分母付き）
+    for (const name of ['事項の結果（人の判断）', '適用の内訳']) {
+      const list = screen.getByRole('list', { name });
+      expectOutsideDetails(list);
+      expect(list.previousElementSibling?.getAttribute('aria-hidden')).toBe('true');
+    }
+    const kinds = screen.getByRole('list', { name: '適用の内訳' });
+    expect(
+      within(kinds).getByRole('link', { name: '対象外（重要でない）' }).getAttribute('href'),
+    ).toBe('/enterprise/disclosures/csrd/requirements?applicability=not_material');
+    // 3 観点は観点ごとに積み上げ 1 本。件数は評価対象（9 件）を分母に書く
+    for (const label of [
+      '開示',
+      'データ',
+      '業務プロセス・内部統制',
+      '総合（最も遅れている観点）',
+    ]) {
+      const list = screen.getByRole('list', { name: `${label}の内訳` });
+      expect(list.textContent).toContain('/ 9 件');
+      expectIconsHidden(list);
+    }
+
+    // 架空の縮小マスター・DMA 未確定・暫定と、分母付きの評価対象は閉じない
+    for (const text of [
+      /架空の縮小マスター/,
+      /DMA が未確定のため、テーマ別の要求事項の適用は暫定です/,
+      /10 \/ 12 件の適用は DMA 確定前の暫定です/,
+    ]) {
+      expectOutsideDetails(screen.getByText(text));
+    }
+    expectOutsideDetails(screen.getByText(/評価対象（常に適用・重要）/));
+
+    // 表のコードの行き先の説明は「この画面について」（既定で閉じる）
+    const hint = screen.getByText(/ギャップ分析表のコードを選ぶと/);
+    expect(inClosedDetails(hint)).toBe(true);
+    expect(summaryOf(hint)).toBe('この画面について');
+  });
 });
 
 describe('CSRD 設定（ダブル・マテリアリティ）', () => {
@@ -276,6 +346,52 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
     await renderSettings();
     expect(screen.getByRole('alert').textContent).toContain('アクセス権限がありません');
   });
+
+  it('文字量を減らす（§10.4）: SSBJ／CSRD の見出しは見せ、考え方の詳細・算定式・マトリクスの読み方は閉じる。未発効は summary に見せる', async () => {
+    await renderSettings();
+    for (const name of ['SSBJ: シングル・マテリアリティ', 'CSRD: ダブル・マテリアリティ']) {
+      expectOutsideDetails(screen.getByRole('heading', { level: 2, name }));
+    }
+    // 改正 ESRS が未発効であることは、閉じていても summary で見える
+    const revised = screen.getByText(/2026-07-03 採択の改正（簡素化）ESRS は官報掲載まで未発効/);
+    expect(inClosedDetails(revised)).toBe(true);
+    expect(summaryOf(revised)).toContain(
+      '改正 ESRS（2026-07-03 採択）は未発効・本サンプルに未反映',
+    );
+    // 算定式は閉じる。「ESRS は数値の閾値を定めていない」ことは summary に見せる
+    const formula = screen.getByText(/√\(発生可能性 × 財務影響の大きさ\)/);
+    expect(inClosedDetails(formula)).toBe(true);
+    expect(summaryOf(formula)).toContain('ESRS は数値の閾値を定めていません');
+    // マトリクスの読み方・事項ごとの一覧（表と同じ内容）は閉じる。要点の件数は summary に
+    const reading = screen.getByText(/閾値の線より上ならインパクト重要性/);
+    expect(inClosedDetails(reading)).toBe(true);
+    expect(summaryOf(reading)).toBe(
+      'マトリクスの読み方・事項ごとの判断（提案と人の判断が違う事項 1 件）',
+    );
+
+    // 確定の不足一覧・AI は判断しない旨・表・図・フォームは閉じない
+    expectOutsideDetails(screen.getByText('未評価の事項があります: G1 企業行動'));
+    expectOutsideDetails(screen.getByText(/AI は DMA の判断・確定を行いません/));
+    expectOutsideDetails(
+      screen.getByRole('table', { name: 'サステナビリティ事項のダブル・マテリアリティ評価' }),
+    );
+    expectOutsideDetails(screen.getByRole('img', { name: /ダブル・マテリアリティ・マトリクス/ }));
+    expectOutsideDetails(screen.getByLabelText('インパクトの閾値（インパクト重要性）'));
+    // DMA が未確定の間は、取り消す確定が無いので「確定が取り消される」とは書かない
+    expect(document.body.textContent).not.toContain('保存すると DMA の確定は取り消されます');
+  });
+
+  it('DMA の確定後は、保存で確定が取り消されることを各フォームの横に見せる', async () => {
+    await decideG1FinancialOnly();
+    await confirmCsrdDma(db, manager(), PERIOD_IDS.fy2026);
+    await renderSettings();
+    expectOutsideDetails(
+      screen.getByText('保存すると DMA の確定は取り消されます（前提が変わるため）。'),
+    );
+    expectOutsideDetails(
+      screen.getByText('保存すると DMA の確定は取り消されます（人の判断は変わりません）。'),
+    );
+  });
 });
 
 describe('CSRD サステナビリティ事項', () => {
@@ -326,6 +442,22 @@ describe('CSRD サステナビリティ事項', () => {
     expect(screen.queryAllByRole('button', { name: /を削除$/ })).toEqual([]);
     expect(document.body.textContent).toContain('判断を変えるには開示対応の編集権限が必要です');
   });
+
+  it('文字量を減らす（§10.4）: 「AI は判断しません」は見せ、判断の決まり・削除の扱いは閉じる', async () => {
+    await renderMatter('S1');
+    const ai = screen.getByText(/AI は判断しません/);
+    expectOutsideDetails(ai);
+    // DMA が未確定なので、確定の取り消しは書かない
+    expect(ai.textContent).not.toContain('確定は取り消されます');
+    const rules = screen.getByText(/算定結果（提案）と違う判断もできます/);
+    expect(inClosedDetails(rules)).toBe(true);
+    expect(summaryOf(rules)).toBe('判断の決まり');
+    const deletion = screen.getByText(/削除は論理削除です/);
+    expect(inClosedDetails(deletion)).toBe(true);
+    expect(summaryOf(deletion)).toBe('削除の扱い');
+    // 閾値がデモ既定で ESRS が数値の閾値を定めていないことは閉じない
+    expectOutsideDetails(screen.getByText(/ESRS\s*は数値の閾値を定めていません/));
+  });
 });
 
 describe('CSRD 要求事項の評価', () => {
@@ -363,6 +495,36 @@ describe('CSRD 要求事項の評価', () => {
     ]);
     expect(rowWith(table, 'ESRS-G1-1').textContent).toContain('適用（財務）');
     second.unmount();
+  });
+
+  it('文字量を減らす（§10.4）: SSBJ との違いは 1 行（未発効を含む）＋閉じた全文、件数の流れは図、架空の縮小サンプルと AI 候補の扱いは見せる', async () => {
+    await renderRequirements();
+    const line = screen.getByText(/改正 ESRS（2026-07-03 採択）は未発効・本サンプルに未反映/);
+    expectOutsideDetails(line);
+    expect(line.textContent).toContain('SSBJ は財務的重要性のみ（シングル）');
+    expect(inClosedDetails(screen.getByText(/官報掲載まで未発効/))).toBe(true);
+
+    const funnel = screen.getByRole('list', { name: '評価対象の件数の流れ' });
+    expectOutsideDetails(funnel);
+    expect([...funnel.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'サンプル（架空）マスター12 項目',
+      '未判定を除く10 件',
+      '対象外を除く（評価対象）9 件',
+    ]);
+    expect(
+      within(funnel).getByRole('link', { name: '対象外を除く（評価対象）' }).getAttribute('href'),
+    ).toBe('/enterprise/disclosures/csrd/requirements?applicability=always&applicability=material');
+    const breakdown = screen.getByText(/ESRS 2（常に適用）2 件＋重要と判断 7 件/);
+    expect(inClosedDetails(breakdown)).toBe(true);
+    expect(summaryOf(breakdown)).toBe('件数の内訳');
+
+    // DMA 未確定の注記・架空の縮小サンプル・AI の候補は確定値に入れないことは閉じない
+    expectOutsideDetails(screen.getByText(/DMA）が未確定のため/));
+    expectOutsideDetails(screen.getByText(/収録は ESRS の架空の縮小サンプル 12 項目/));
+    expectOutsideDetails(screen.getByText(/列に分け、確定値には入れません/));
+    // コードの行き先の説明は「この画面について」
+    const hint = screen.getByText(/コードを選ぶと、適用の根拠/);
+    expect(summaryOf(hint)).toBe('この画面について');
   });
 });
 
@@ -447,5 +609,31 @@ describe('CSRD 要求事項の詳細', () => {
     expect(await notFoundDigest(() => renderDetail(ssbjItem.id))).toBe(
       'NEXT_HTTP_ERROR_FALLBACK;404',
     );
+  });
+
+  it('文字量を減らす（§10.4）: 候補の注記・承認の制約・架空の要求事項は見せ、3 観点の問い・回答画面の説明は閉じる。「確認待ち」は 1 つだけ', async () => {
+    await renderDetail(item('ESRS2-SBM-3'));
+    expectOutsideDetails(screen.getByText(/この判定は候補です/));
+    expectOutsideDetails(screen.getByText(/AI の下書きのままでは承認できません/));
+    expectOutsideDetails(screen.getByText(/架空の縮小サンプルの要求事項です/));
+    // 「確認待ち」と完全一致する表示を新しく作らない（E2E がその数で確認待ちの有無を確かめる）
+    expect(screen.getAllByText('確認待ち')).toHaveLength(1);
+
+    const question = screen.getByText(CSRD_GAP_KIND_QUESTION.data);
+    expect(inClosedDetails(question)).toBe(true);
+    expect(summaryOf(question)).toBe('3 観点が問うこと');
+    const answer = screen.getByText(/回答本文の作成・版の履歴/);
+    expect(inClosedDetails(answer)).toBe(true);
+    expect(summaryOf(answer)).toBe('回答画面でできること');
+  });
+
+  it('文字量を減らす（§10.4）: 評価対象外の優先度は 1 行で示し、付け方の説明は閉じる', async () => {
+    await renderDetail(item('ESRS-E5-5'));
+    expectOutsideDetails(screen.getByText('優先度なし（評価対象外）'));
+    const rule = screen.getByText(
+      '優先度は評価対象（常に適用・重要と判断した事項）の要求事項だけに付けます。',
+    );
+    expect(inClosedDetails(rule)).toBe(true);
+    expect(summaryOf(rule)).toBe('優先度の付け方');
   });
 });

@@ -1,21 +1,70 @@
 import Link from 'next/link';
-import { ArrowRight, Bot, Info, UserCheck } from 'lucide-react';
+import {
+  ArrowRight,
+  Bot,
+  CircleCheck,
+  CircleCheckBig,
+  CircleHelp,
+  CircleX,
+  TriangleAlert,
+  UserCheck,
+  type LucideIcon,
+} from 'lucide-react';
+import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { PageHeader } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { COVERAGE_LABEL } from '@/lib/domain/ssbj';
-import { loadRegulatoryCoverage, type RegulationRow } from '@/lib/services/analysis/regulations';
+import {
+  CSRD_BREAKDOWN_NOTE,
+  loadRegulatoryCoverage,
+  SSBJ_BREAKDOWN_AI_NOTE,
+  type RegulationRow,
+} from '@/lib/services/analysis/regulations';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { SSBJ_COVERAGE_STATUSES } from '@/types/domain';
+import { SSBJ_COVERAGE_STATUSES, type SsbjCoverageStatus } from '@/types/domain';
 import { PositioningBadge } from '../_components/analysis-badges';
 
 export const metadata = { title: '規制対応度' };
 
 /**
- * 各規制への対応度（docs/disclosure-first.md §9.6）。閲覧専用。
+ * 各規制への対応度（docs/disclosure-first.md §9.6・§10.4）。閲覧専用。
  * 重み付きの割合・単一の総合点は出さず、件数と分母、人の確認と AI 判定のみを分けて示す。
+ *
+ * 状況の内訳は行ごとの積み上げ帯＋凡例（StatusBreakdown。% を出さない。セルに表を入れない）。
+ * 画面の説明と「数え方」の注記は閉じる。算定しない理由・未発効・暫定・収録状況（架空サンプル・公開草案）は閉じない。
+ * AI 判定の扱い（人が未確認の判定を含むか）は全文を閉じても要点の 1 行を見せる。
  */
+
+/** 対応状況のアイコン（要求事項の画面のバッジと同じ形。色だけで区別しない） */
+const COVERAGE_ICON: Record<SsbjCoverageStatus, LucideIcon> = {
+  covered: CircleCheckBig,
+  mostly_covered: CircleCheck,
+  partial: TriangleAlert,
+  not_covered: CircleX,
+  unconfirmed: CircleHelp,
+};
+
+/**
+ * 数え方の説明（閉じてよい注記）。評価対象の定義と内訳の数え方は「数え方」に入れ、
+ * 未発効・暫定・集計未対応のような状態の注記は行に見せたままにする
+ */
+function isCountingNote(note: string): boolean {
+  return (
+    note.startsWith('評価対象は') || note === SSBJ_BREAKDOWN_AI_NOTE || note === CSRD_BREAKDOWN_NOTE
+  );
+}
+
+/**
+ * AI 判定の扱いは「AI は候補・確定は人」の注記なので閉じない（§10.4）。
+ * 長い全文は「数え方」に入れ、要点の 1 行を行に見せる
+ */
+const AI_NOTE_SUMMARY = new Map<string, string>([
+  [SSBJ_BREAKDOWN_AI_NOTE, '内訳には人が未確認の AI 判定も含みます'],
+  [CSRD_BREAKDOWN_NOTE, '内訳は人が確定した値だけで数えます（AI の候補だけなら「未確認」）'],
+]);
 
 function InScopeCell({ row }: { row: RegulationRow }) {
   if (!row.inScope) return <span className="text-ink-muted">—</span>;
@@ -40,14 +89,16 @@ function BreakdownCell({ row }: { row: RegulationRow }) {
   }
   const { counts, humanConfirmed, aiOnly } = row.breakdown;
   return (
-    <div className="space-y-1">
-      <ul className="flex flex-wrap gap-x-2 gap-y-0.5">
-        {SSBJ_COVERAGE_STATUSES.map((status) => (
-          <li key={status} className="whitespace-nowrap">
-            {COVERAGE_LABEL[status]} <span className="tnum font-semibold">{counts[status]}</span> 件
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-1.5">
+      <StatusBreakdown
+        label={`${row.name} の状況の内訳`}
+        items={SSBJ_COVERAGE_STATUSES.map((status) => ({
+          key: status,
+          label: COVERAGE_LABEL[status],
+          count: counts[status],
+          icon: COVERAGE_ICON[status],
+        }))}
+      />
       <p className="flex flex-wrap gap-x-3 text-[11px] text-ink-muted">
         <span className="inline-flex items-center gap-1">
           <UserCheck className="size-3" aria-hidden="true" />
@@ -67,12 +118,41 @@ function ResponsesCell({ row }: { row: RegulationRow }) {
     return <span className="text-[11px] text-ink-muted">{row.responsesNote ?? '—'}</span>;
   }
   return (
-    <>
-      <span className="tnum font-semibold">
-        承認済み {row.responses.approved} / {row.responses.total} 件
-      </span>
-      <span className="block text-[11px] text-ink-muted">下書き・レビュー中は数えません</span>
-    </>
+    <span className="tnum font-semibold">
+      承認済み {row.responses.approved} / {row.responses.total} 件
+    </span>
+  );
+}
+
+function NotesCell({ row }: { row: RegulationRow }) {
+  const counting = row.notes.filter(isCountingNote);
+  const visible = [
+    ...counting.flatMap((note) => AI_NOTE_SUMMARY.get(note) ?? []),
+    ...row.notes.filter((note) => !isCountingNote(note)),
+  ];
+  if (!row.notCalculatedReason && row.notes.length === 0) {
+    return <span className="text-ink-muted">—</span>;
+  }
+  return (
+    <div className="space-y-1">
+      {row.notCalculatedReason && (
+        <p className="font-semibold text-ink">{row.notCalculatedReason}</p>
+      )}
+      {visible.length > 0 && (
+        <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink-muted">
+          {visible.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+      {counting.length > 0 && (
+        <MoreInfo label="評価対象と内訳の数え方">
+          {counting.map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+        </MoreInfo>
+      )}
+    </div>
   );
 }
 
@@ -82,7 +162,22 @@ export default async function RegulationsPage() {
   const header = (
     <PageHeader
       title="規制対応度"
-      description={`${shell.currentPeriod.label} ／ 基準ごとの位置付け・評価対象・対応状況の内訳（年度はヘッダーで切り替えます）`}
+      description={`${shell.currentPeriod.label} ／ 基準ごとの評価対象と対応状況の内訳`}
+      help={
+        <>
+          <p>
+            基準をまたいだ単一の点数や、重み付きの割合は出しません。評価対象の件数と分母、対応状況の内訳（3
+            観点のうち最も遅れている観点）を件数で示し、人が確認した件数と AI
+            判定だけの件数を分けます。
+          </p>
+          <p>
+            要求事項・評価項目を収録していない基準（ESRS-40a・MSCI・FTSE）は算定せず、理由を示します。CSRD
+            の要求事項は架空のサンプル 12 項目です。
+          </p>
+          <p>回答は承認済みだけを数えます（下書き・レビュー中は数えません）。</p>
+          <p>年度は画面上部のヘッダーで切り替えます。</p>
+        </>
+      }
       breadcrumbs={[{ label: '企業ワークスペース' }, { label: '分析' }, { label: '規制対応度' }]}
     />
   );
@@ -103,21 +198,6 @@ export default async function RegulationsPage() {
     <>
       {header}
       <div className="space-y-3 p-4">
-        <div className="flex items-start gap-1.5 rounded-t4d border border-line bg-surface px-3 py-2 text-[12px] text-ink-muted">
-          <Info className="mt-0.5 size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
-          <div className="space-y-0.5">
-            <p>
-              基準をまたいだ単一の点数や、重み付きの割合は出しません。評価対象の件数と分母、対応状況の内訳（3
-              観点のうち最も遅れている観点）を件数で示し、人が確認した件数と AI
-              判定だけの件数を分けます。
-            </p>
-            <p>
-              要求事項・評価項目を収録していない基準（ESRS-40a・MSCI・FTSE）は算定せず、理由を示します。CSRD
-              の要求事項は架空のサンプル 12 項目です。
-            </p>
-          </div>
-        </div>
-
         <div className="t4d-scroll-x rounded-t4d-lg border border-line bg-surface">
           <Table className="min-w-[1180px]">
             <caption className="px-3 py-2 text-left text-[13px] font-semibold text-ink">
@@ -160,6 +240,7 @@ export default async function RegulationsPage() {
                     {row.coverage.itemCount !== null && (
                       <span className="block tnum">{row.coverage.itemCount} 件</span>
                     )}
+                    {/* 収録状況の注記（架空サンプル・公開草案など）は誠実さの注記なので閉じない */}
                     {row.coverage.note && (
                       <span className="block max-w-[220px] text-[11px] text-ink-muted">
                         {row.coverage.note}
@@ -169,26 +250,14 @@ export default async function RegulationsPage() {
                   <TD className="py-2 align-top text-[12px]">
                     <InScopeCell row={row} />
                   </TD>
-                  <TD className="max-w-[300px] py-2 align-top text-[12px]">
+                  <TD className="w-[320px] max-w-[320px] py-2 align-top text-[12px]">
                     <BreakdownCell row={row} />
                   </TD>
                   <TD className="py-2 align-top text-[12px]">
                     <ResponsesCell row={row} />
                   </TD>
                   <TD className="max-w-[260px] py-2 align-top text-[12px]">
-                    {row.notCalculatedReason && (
-                      <p className="font-semibold text-ink">{row.notCalculatedReason}</p>
-                    )}
-                    {row.notes.length > 0 && (
-                      <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink-muted">
-                        {row.notes.map((note) => (
-                          <li key={note}>{note}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {!row.notCalculatedReason && row.notes.length === 0 && (
-                      <span className="text-ink-muted">—</span>
-                    )}
+                    <NotesCell row={row} />
                   </TD>
                   <TD className="py-2 align-top text-[12px]">
                     <ul className="space-y-0.5">

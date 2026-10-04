@@ -1,4 +1,11 @@
-import { expect, test, type BrowserContext, type Cookie, type Page } from '@playwright/test';
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Cookie,
+  type Locator,
+  type Page,
+} from '@playwright/test';
 
 /**
  * E2E 共通ヘルパー。
@@ -156,6 +163,83 @@ export async function switchDemoRole(page: Page, displayName: string): Promise<v
     page.getByRole('button', { name: new RegExp(`^役割切替（デモ） 現在: ${name}・`) }),
   ).toBeVisible();
   await expect(page.locator('#t4d-main')).toBeVisible();
+}
+
+// ----------------------------------------------------------------------
+// 既定で閉じた折りたたみ（docs/disclosure-first.md §10.4）
+// ----------------------------------------------------------------------
+
+function pageOf(scope: Page | Locator): Page {
+  return 'goto' in scope ? scope : scope.page();
+}
+
+/**
+ * 折りたたみ（details）を開く。閉じていれば summary を押し、開いていれば何もしない（何度呼んでもよい）。
+ * 閉じた中身は toBeVisible・getByRole・fill が失敗するため、中身を確かめる前に呼ぶ。
+ *
+ * summary は文字列（部分一致・大文字小文字を区別しない）か正規表現。Collapsible・MoreInfo の要点の文
+ * （data-collapsible-summary。「開く／閉じる」の印を含まない）で照合するので、`^…$` も使える。
+ * 既存の素の details は summary 全体の文字で照合する。入れ子の内側は外側を先に開く。
+ * 戻り値は開いた details（中身の確認の範囲に使う）
+ */
+export async function openCollapsible(
+  scope: Page | Locator,
+  summary: string | RegExp,
+): Promise<Locator> {
+  const page = pageOf(scope);
+  const byLabel = scope
+    .locator('summary')
+    .filter({ has: page.locator('[data-collapsible-summary]', { hasText: summary }) });
+  const byText = scope.locator('summary').filter({ hasText: summary });
+  const target = byLabel.or(byText).first();
+  await expect(target, `折りたたみ「${String(summary)}」が見つからない`).toBeVisible();
+  const details = target.locator('xpath=..');
+  const isOpen = await details.evaluate((el) => (el as HTMLDetailsElement).open);
+  if (!isOpen) await target.click();
+  await expect(details).toHaveJSProperty('open', true);
+  return details;
+}
+
+/**
+ * 支援技術に渡る開閉の状態（Chromium のアクセシビリティ・ツリーの expanded）。
+ * ネイティブの <summary> は aria-expanded 属性を持たず、ブラウザが親の details の open から expanded を渡す。
+ * 属性ではなくツリーを読むことで、「閉じている／開いている」が読み上げに届いていることを確かめる。
+ * selector は 1 つの要素に当たる CSS セレクタ（例 `#trend-rules > summary`）。expanded を持たなければ undefined
+ */
+export async function accessibleExpanded(
+  page: Page,
+  selector: string,
+): Promise<boolean | undefined> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const { root } = await cdp.send('DOM.getDocument', { depth: 0 });
+    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+    if (!nodeId) throw new Error(`要素「${selector}」が見つからない`);
+    const { nodes } = await cdp.send('Accessibility.getPartialAXTree', {
+      nodeId,
+      fetchRelatives: false,
+    });
+    const expanded = nodes[0]?.properties?.find((p) => p.name === 'expanded');
+    return expanded === undefined ? undefined : expanded.value.value === true;
+  } finally {
+    await cdp.detach();
+  }
+}
+
+/** フォーカス中の要素がキーボードのフォーカスとして扱われ、輪郭線（フォーカスリング）が描かれているか */
+export async function focusRingOfActiveElement(
+  page: Page,
+): Promise<{ tag: string; focusVisible: boolean; outlined: boolean }> {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el) return { tag: '', focusVisible: false, outlined: false };
+    const style = getComputedStyle(el);
+    return {
+      tag: el.tagName.toLowerCase(),
+      focusVisible: el.matches(':focus-visible'),
+      outlined: style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0,
+    };
+  });
 }
 
 export async function gotoEnterprise(page: Page, path: string): Promise<void> {

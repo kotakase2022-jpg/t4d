@@ -1363,17 +1363,54 @@ const FY2025_BASE: Record<string, number> = {
 };
 
 /**
- * FY2024 の対 FY2025 比率（GHG 3 指標のみ）。
+ * FY2024（closed の過年度）の対 FY2025 比率。
  *
- * GHG 画面の「直近3年の推移」用の過年度。全指標を遡及させるとギャップ体験が
- * 消えるため、推移を見せたい GHG だけに限定する。
- * 比率は FY2025 との差が YoY 検証の閾値（scope1/2: 30%・scope3: 40%）に
- * 収まるように選ぶ（FY2025 の検証が FY2024 を基準に再計算されるため）。
+ * 当初は GHG 画面の「直近3年の推移」用に GHG 3 指標だけを遡及させていた。自社経年比較
+ * （docs/disclosure-first.md §10.2）が直近 3 年を指標ごとに並べるため、FY2025 に実績のある
+ * 収集 21 指標すべてに承認済みの FY2024 を持たせた（2026-10-02。GHG 3 指標の値は変えていない）。
+ * 過年度の実績を足しても SSBJ・CSRD のデータギャップは消えない（基準から取り込んだ未収集の指標は
+ * demoData が無く、どの年度にも値を作らない）。
+ *
+ * 比率は FY2025 との差が YoY 検証の閾値（指標の yoyWarningRatio。scope1/2: 30%・scope3: 40% 等）に
+ * 収まるように選ぶ（FY2025 の検証が FY2024 を前年として再計算されるため。超えると FY2025 に
+ * 新しい警告が出る）。増減の向きは Evidence の紙面（evidence-documents.ts の PERIOD_FACTOR・
+ * HR_FACTOR）とそろえる（電力・燃料・廃棄物は FY2024 の方が多く、人員は少ない）。
+ * 拠点別に値を決めるもの・比率指標（分子・分母あり）はここに書かない（FY2024_UNIT_VALUE・fy2024Value）。
  */
 const FY2024_RATIO: Record<string, number> = {
   scope1: 1.09,
   scope2: 1.06,
   scope3_cat1: 0.93,
+  energy: 1.05,
+  water: 0.98,
+  waste: 1.04,
+  employees: 0.97,
+  female_employees: 0.95,
+  new_hires: 0.88,
+  turnover_rate: 1.06,
+  avg_tenure: 0.98,
+  training_hours: 0.9,
+  gender_pay_gap: 0.983,
+};
+
+/**
+ * FY2024 の拠点別の値（比率を掛けて作らないもの）。
+ *  - ltifr: 安全衛生記録の紙面（evidence-documents.ts の SAFETY_RECORD.FY2024）の各行から計算した
+ *    度数率と一致させる（書類と台帳の値が食い違うと、証跡として説明できない）
+ *  - 本社だけの人数（管理職・役員・取締役）: 比率を掛けると丸めで不自然な人数になるため、人数で書く。
+ *    女性は FY2025 より少なく、比率は FY2024 → FY2025 で上がる（女性管理職 14.0% → 15%、女性役員 9.1% → 16.7%）
+ */
+const FY2024_UNIT_VALUE: Record<string, number> = {
+  'HQ/ltifr': 2.2,
+  'EAST/ltifr': 5.3,
+  'WEST/ltifr': 4.0,
+  'EU/ltifr': 1.0,
+  'JV/ltifr': 0.6,
+  'HQ/managers_total': 114,
+  'HQ/female_managers': 16,
+  'HQ/officers_total': 11,
+  'HQ/female_officers': 1,
+  'HQ/directors_count': 8,
 };
 
 /** FY2026 の対 FY2025 変化率 */
@@ -1458,6 +1495,39 @@ function roundFor(metricCode: string, value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+/** FY2025 の拠点の基準値（比率・ガバナンス・本社だけの指標は拠点の規模を掛けない） */
+function scaledBaseOf(unit: UnitSpec, metric: MetricSpec): number {
+  const base = FY2025_BASE[metric.code] ?? 0;
+  const isRatioOrCount =
+    metric.dataType === 'ratio' || metric.category === 'governance' || metric.hqOnly === true;
+  return isRatioOrCount ? base : base * unit.scale;
+}
+
+/**
+ * FY2024 の値。比率指標（分子・分母あり）は FY2024 の分子・分母から計算する
+ * （validation の formula_mismatch と同じ丸め。比率だけを比率で縮めると分子・分母と食い違う）。
+ * 決め方の無い指標は例外にする（収集指標を増やしたとき、黙って FY2025 と同じ値を作らない）
+ */
+function fy2024Value(unit: UnitSpec, metric: MetricSpec): number {
+  const fixed = FY2024_UNIT_VALUE[`${unit.code}/${metric.code}`];
+  if (fixed !== undefined) return fixed;
+  if (metric.numerator && metric.denominator) {
+    const specOf = (code: string) => {
+      const spec = METRIC_SPECS.find((m) => m.code === code);
+      if (!spec) throw new Error(`FY2024: 分子・分母の指標が無い: ${code}`);
+      return spec;
+    };
+    const numerator = fy2024Value(unit, specOf(metric.numerator));
+    const denominator = fy2024Value(unit, specOf(metric.denominator));
+    return Math.round((numerator / denominator) * 1000) / 10;
+  }
+  const ratio = FY2024_RATIO[metric.code];
+  if (ratio === undefined) {
+    throw new Error(`FY2024 の値の決め方が無い指標: ${unit.code}/${metric.code}`);
+  }
+  return roundFor(metric.code, scaledBaseOf(unit, metric) * ratio);
+}
+
 export function buildDataPointSeeds(): DataPointSeed[] {
   const seeds: DataPointSeed[] = [];
 
@@ -1469,20 +1539,16 @@ export function buildDataPointSeeds(): DataPointSeed[] {
         // 基準から取り込んだだけでまだ社内に値が無い指標は、実績値を作らない。
         // 架空の値で埋めるとデータギャップが消え、SSBJ 対応の主題が体験できなくなる
         if (!metric.demoData) continue;
-        // FY2024 は GHG 推移用の過年度。対象 3 指標以外は遡及させない
-        if (period === 'FY2024' && FY2024_RATIO[metric.code] === undefined) continue;
 
-        const base = FY2025_BASE[metric.code] ?? 0;
-        const isRatioOrCount =
-          metric.dataType === 'ratio' || metric.category === 'governance' || metric.hqOnly === true;
-        const scaled = isRatioOrCount ? base : base * unit.scale;
-        const growth =
-          period === 'FY2026'
-            ? (FY2026_GROWTH[metric.code] ?? 1)
-            : period === 'FY2024'
-              ? (FY2024_RATIO[metric.code] ?? 1)
-              : 1;
-        let value = roundFor(metric.code, scaled * growth);
+        const scaled = scaledBaseOf(unit, metric);
+        // FY2024 は closed の過年度（全指標・全拠点が承認済み。値の決め方は fy2024Value）
+        let value =
+          period === 'FY2024'
+            ? fy2024Value(unit, metric)
+            : roundFor(
+                metric.code,
+                scaled * (period === 'FY2026' ? (FY2026_GROWTH[metric.code] ?? 1) : 1),
+              );
         let unitOfMeasure = metric.unit;
         let anomaly: string | undefined;
         const key = `${unit.code}/${metric.code}`;

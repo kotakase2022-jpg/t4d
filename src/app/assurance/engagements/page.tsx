@@ -46,7 +46,12 @@ export default async function EngagementsPage() {
     <>
       <PageHeader
         title="保証契約"
-        description="アサインされている案件のみ表示されます（監査法人管理者でも未アサイン案件は閲覧できません）。"
+        description="アサインされた案件のみ表示（未アサイン案件は管理者も閲覧不可）"
+        help={
+          <p>
+            アサインされている案件のみ表示されます（監査法人管理者でも未アサイン案件は閲覧できません）。
+          </p>
+        }
         breadcrumbs={[{ label: '監査法人ワークスペース' }, { label: '保証契約' }]}
       />
 

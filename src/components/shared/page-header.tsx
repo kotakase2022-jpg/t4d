@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
+import { MoreInfo } from '@/components/ui/more-info';
 import { cn } from '@/lib/utils';
 
 export interface Crumb {
@@ -7,15 +8,23 @@ export interface Crumb {
   href?: string;
 }
 
+/**
+ * 画面の見出し。description は 1 行（40 字程度まで）にし、画面の使い方・数え方などの長い説明は
+ * help に渡す（既定で閉じた「この画面について」。docs/disclosure-first.md §10.4）。
+ * 誠実さ・安全の注記（架空・未発効・試算 など）は help に入れず、画面の本文に見せる
+ */
 export function PageHeader({
   title,
   description,
+  help,
   breadcrumbs,
   actions,
   className,
 }: {
   title: string;
   description?: React.ReactNode;
+  /** 「この画面について」（既定で閉じる）の中身 */
+  help?: React.ReactNode;
   breadcrumbs?: Crumb[];
   actions?: React.ReactNode;
   className?: string;
@@ -44,6 +53,11 @@ export function PageHeader({
         <div className="min-w-0">
           <h1 className="truncate text-[15px] font-semibold text-ink">{title}</h1>
           {description && <div className="mt-0.5 text-[12px] text-ink-muted">{description}</div>}
+          {help && (
+            <MoreInfo label="この画面について" className="mt-1">
+              {help}
+            </MoreInfo>
+          )}
         </div>
         {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
       </div>

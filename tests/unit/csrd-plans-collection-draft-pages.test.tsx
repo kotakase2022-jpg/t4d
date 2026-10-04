@@ -19,6 +19,7 @@ import type { AuthorizationContext, RoleKey } from '@/types/domain';
  *  - 値は承認済みだけ。収集項目の初期値は URL の値を照合してから使う
  *  - 節ごとに AI 草案（候補）と本文を分け、押せない操作は理由を文で示す。権限に応じて操作を出さない
  *  - 状態のバッジはラベルとアイコン（読み上げない）を併記する
+ *  - 文字量（§10.4）: 説明・補助の一覧は既定で閉じ、AI は候補・権限なし・作れない理由・表・フォームは閉じない
  */
 
 const shellState = vi.hoisted(() => ({ shell: null as unknown }));
@@ -105,6 +106,25 @@ function expectIconsHidden(element: HTMLElement): void {
   const icons = element.querySelectorAll('svg');
   expect(icons.length).toBeGreaterThan(0);
   for (const icon of icons) expect(icon.getAttribute('aria-hidden')).toBe('true');
+}
+
+/** 既定で閉じた折りたたみの中か（§10.4。閉じた中は画面に見えない） */
+function inClosedDetails(element: Element): boolean {
+  const details = element.closest('details');
+  return details !== null && !details.open;
+}
+
+/** 要素を含む折りたたみの要点の 1 行（Collapsible・MoreInfo の summary） */
+function summaryOf(element: Element): string {
+  return (
+    element.closest('details')?.querySelector('summary [data-collapsible-summary]')?.textContent ??
+    ''
+  );
+}
+
+/** 閉じていない（details の外にある）。誠実さの注記・権限なし・主要数値・主表・操作に使う */
+function expectOutsideDetails(element: Element): void {
+  expect(element.closest('details')).toBeNull();
 }
 
 async function decideG1AndConfirmDma(): Promise<void> {
@@ -194,6 +214,28 @@ describe('CSRD 対応計画', () => {
     await renderPlans();
     expect(screen.getByRole('alert').textContent).toContain('アクセス権限がありません');
     expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('文字量を減らす（§10.4）: 状態の件数は帯＋凡例（分母付き）、操作の説明は「この画面について」、権限が無いことは見せる', async () => {
+    const first = await renderPlans();
+    const counts = screen.getByRole('list', { name: '対応計画の件数' });
+    expectOutsideDetails(counts);
+    expect(counts.previousElementSibling?.getAttribute('aria-hidden')).toBe('true');
+    // Fixture: E1-4 は対応中、S1-9 は未着手（2 件中）
+    expect(counts.textContent).toContain('未着手1 / 2 件');
+    expect(counts.textContent).toContain('対応中1 / 2 件');
+    expect(counts.textContent).toContain('完了0 / 2 件');
+    expectIconsHidden(counts);
+    expectOutsideDetails(screen.getByText('期限超過（完了を除く）'));
+    expectOutsideDetails(screen.getByText('対象外の要求事項の計画'));
+    const help = screen.getByText(/計画の追加は要求事項の詳細画面/);
+    expect(inClosedDetails(help)).toBe(true);
+    expect(summaryOf(help)).toBe('この画面について');
+    first.unmount();
+
+    useShell(approver());
+    await renderPlans();
+    expectOutsideDetails(screen.getByText('閲覧のみ（更新には開示の編集権限が必要です）'));
   });
 });
 
@@ -332,6 +374,43 @@ describe('CSRD データ収集', () => {
     expect(
       screen.getByText(/収集項目の作成には、開示の編集権限と指標の管理権限の両方が必要です/),
     ).toBeTruthy();
+    // 権限が無いことの説明は閉じない
+    expectOutsideDetails(
+      screen.getByText(/収集項目の作成には、開示の編集権限と指標の管理権限の両方が必要です/),
+    );
+  });
+
+  it('文字量を減らす（§10.4）: 状況の件数はリンク付きの内訳（分母付き）、既存の指標・割当の扱いは閉じる。両方の表とフォームは閉じない', async () => {
+    const collection = await loadCsrdDataCollection(
+      db,
+      manager(),
+      fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!,
+    );
+    await renderCollection();
+    const total = collection.requirementRows.length;
+    const approved = collection.requirementRows.filter((r) => r.state === 'approved').length;
+    const counts = screen.getByRole('list', { name: '当期の状況の件数' });
+    expectOutsideDetails(counts);
+    expect(counts.textContent).toContain(`承認済み${approved} / ${total} 行`);
+    expect(within(counts).getByRole('link', { name: '未入力' }).getAttribute('href')).toBe(
+      '/enterprise/disclosures/csrd/collection?state=not_entered#csrd-collection-requirement-rows',
+    );
+    expectIconsHidden(counts);
+    expect(screen.getByRole('link', { name: '計画から作った収集項目' }).getAttribute('href')).toBe(
+      '/enterprise/disclosures/csrd/collection#csrd-collection-plan-rows',
+    );
+
+    const rule = screen.getByText(/既にある指標のコードを選ぶと/);
+    expect(inClosedDetails(rule)).toBe(true);
+    expect(summaryOf(rule)).toBe('既にある指標・割当を選んだときの扱い');
+    for (const name of [
+      '評価対象の要求事項 × 指標 × 拠点の当期の状況',
+      '計画から作成した収集項目',
+    ]) {
+      expectOutsideDetails(screen.getByRole('table', { name }));
+    }
+    expectOutsideDetails(screen.getByRole('combobox', { name: '対象の対応計画' }));
+    expectOutsideDetails(screen.getByRole('button', { name: '収集項目を作成' }));
   });
 });
 
@@ -474,5 +553,49 @@ describe('CSRD 開示ドラフト', () => {
     expect(screen.getByRole('region', { name: 'S1 自社の労働力' }).textContent).toContain(
       '本文はまだありません。',
     );
+  });
+
+  it('文字量を減らす（§10.4）: 「AI 草案は候補・採用と確定は担当者」は見せ、書ける範囲・節の要求事項は閉じる。件数は分母付きの帯', async () => {
+    await renderDraft();
+    expectOutsideDetails(
+      screen.getByText(/「本文に採用」を押すまで本文には入らず、確定も担当者が行います/),
+    );
+    expectOutsideDetails(screen.getByText(/DMA）が未確定です/));
+    const scope = screen.getByText(/が草案に書けるのは/);
+    expect(inClosedDetails(scope)).toBe(true);
+    expect(summaryOf(scope)).toBe('AI 草案に書ける範囲');
+
+    const counts = screen.getByRole('list', { name: '開示ドラフトの件数' });
+    // 6 節のうち評価対象は ESRS 2・E1・E3・S1、AI 草案は S1 だけ、確定はまだ無い（Fixture）
+    for (const name of [
+      '評価対象の節: 4 / 6 節',
+      'AI 草案のある節: 1 / 6 節',
+      '確定済みの節: 0 / 6 節',
+    ]) {
+      expect(within(counts).getByRole('img', { name })).toBeTruthy();
+    }
+    expect(counts.textContent).toContain('4 / 6 節');
+
+    // 節の要求事項の一覧は閉じ、件数を summary に出す。AI 草案の枠・本文・操作は閉じない
+    const s1 = screen.getByRole('region', { name: 'S1 自社の労働力' });
+    const [listLink] = within(s1).getAllByRole('link', { name: 'ESRS-S1-6' });
+    expect(inClosedDetails(listLink!)).toBe(true);
+    expect(summaryOf(listLink!)).toBe('この節の要求事項（2 件・担当者確認済み 1 件）');
+    expectOutsideDetails(within(s1).getByText(/AI 草案（候補・デモ生成）/));
+    expectOutsideDetails(within(s1).getByRole('button', { name: '本文に採用' }));
+    expectOutsideDetails(within(s1).getByRole('textbox', { name: 'S1 自社の労働力の本文' }));
+    expectOutsideDetails(
+      within(s1).getByText(
+        '確定できません: ダブル・マテリアリティ評価（DMA）を確定してから確定してください。',
+        { exact: false },
+      ),
+    );
+    // 作れない節の理由は閉じない
+    const e5 = screen.getByRole('region', { name: 'E5 資源利用と循環経済' });
+    expect(
+      within(e5)
+        .getAllByText(/重要でないと判断した事項の節のため、草案は作れません/)
+        .every((el) => el.closest('details') === null),
+    ).toBe(true);
   });
 });

@@ -50,6 +50,18 @@ const OUTCOME_MAP: Record<DmaOutcome, { tone: Tone; Icon: typeof Check }> = {
   not_assessed: { tone: 'warning', Icon: CircleHelp },
 };
 
+/**
+ * 状態ごとのアイコン（内訳の図の凡例で、バッジと同じ印を使うため。docs/disclosure-first.md §10.4）。
+ * 凡例ではラベルの文字と一緒に出す（色だけで示さない）
+ */
+export const DMA_OUTCOME_ICON: Record<DmaOutcome, typeof Check> = {
+  both: OUTCOME_MAP.both.Icon,
+  impact_only: OUTCOME_MAP.impact_only.Icon,
+  financial_only: OUTCOME_MAP.financial_only.Icon,
+  not_material: OUTCOME_MAP.not_material.Icon,
+  not_assessed: OUTCOME_MAP.not_assessed.Icon,
+};
+
 /** 事項の結果（両面で重要／インパクトのみ／財務のみ／重要でない／未評価） */
 export function DmaOutcomeBadge({ outcome }: { outcome: DmaOutcome }) {
   const s = OUTCOME_MAP[outcome];
@@ -89,6 +101,13 @@ const APPLICABILITY_MAP: Record<CsrdApplicability['kind'], { tone: Tone; Icon: t
   material: { tone: 'success', Icon: Check },
   not_material: { tone: 'neutral', Icon: CircleMinus },
   undetermined: { tone: 'warning', Icon: CircleHelp },
+};
+
+export const APPLICABILITY_ICON: Record<CsrdApplicability['kind'], typeof Check> = {
+  always: APPLICABILITY_MAP.always.Icon,
+  material: APPLICABILITY_MAP.material.Icon,
+  not_material: APPLICABILITY_MAP.not_material.Icon,
+  undetermined: APPLICABILITY_MAP.undetermined.Icon,
 };
 
 /** 暫定（DMA 確定前） */
@@ -139,6 +158,13 @@ const DATA_STATE_MAP: Record<CsrdDataState, { tone: Tone; Icon: typeof Check }> 
   not_entered: { tone: 'warning', Icon: CircleDashed },
 };
 
+export const CSRD_DATA_STATE_ICON: Record<CsrdDataState, typeof Check> = {
+  approved: DATA_STATE_MAP.approved.Icon,
+  in_review: DATA_STATE_MAP.in_review.Icon,
+  awaiting_submission: DATA_STATE_MAP.awaiting_submission.Icon,
+  not_entered: DATA_STATE_MAP.not_entered.Icon,
+};
+
 /**
  * 当期のデータの状況（承認済み／レビュー中／提出待ち／未入力）。要求事項の詳細とデータ収集の画面で
  * 同じ状況を同じ見た目にするため、ここに 1 つだけ置く
@@ -153,7 +179,7 @@ export function CsrdDataStateBadge({ state }: { state: CsrdDataState }) {
   );
 }
 
-const COVERAGE_ICON: Record<SsbjCoverageStatus, typeof Check> = {
+export const COVERAGE_ICON: Record<SsbjCoverageStatus, typeof Check> = {
   covered: CircleCheck,
   mostly_covered: CircleCheck,
   partial: TriangleAlert,

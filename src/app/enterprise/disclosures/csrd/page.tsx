@@ -68,6 +68,9 @@ const BASE = '/enterprise/disclosures/csrd';
  * 以前の画面で使われていたもの（初年度対応の表示・整合チェック・ESRS 項目 × 保有データの
  * ギャップ分析表・回答の状況）はそのまま残す。表はギャップ分析表 1 つだけで、
  * 要求事項コードから要求事項の詳細（適用の根拠・3 観点・計画・回答への導線）へ進む。
+ *
+ * 文字量を減らす（§10.4）: 画面の使い方は「この画面について」（既定で閉じる）、件数は内訳の図。
+ * 架空の縮小マスター・DMA 未確定・暫定の注記と、分母付きの「評価対象 n / N 件」は常に見せる。
  */
 export default async function CsrdOverviewPage({
   searchParams,
@@ -133,6 +136,18 @@ export default async function CsrdOverviewPage({
               ダブル・マテリアリティ
             </Badge>
           </span>
+        }
+        help={
+          <>
+            <p>
+              SSBJ と同じ工程（①設定 → ②要求事項の評価 → ③対応計画 → ④データ収集 →
+              ⑤開示ドラフト）で進めます。要求事項の適用は、設定のダブル・マテリアリティ評価（人の判断）から決まります。
+            </p>
+            <p>
+              ギャップ分析表のコードを選ぶと、要求事項の詳細（適用の根拠・3
+              観点・回答への導線）を開きます。件数は分母と並べ、重み付きの対応度は出しません。
+            </p>
+          </>
         }
         breadcrumbs={breadcrumbs}
         actions={
@@ -297,14 +312,8 @@ export default async function CsrdOverviewPage({
         )}
 
         <Card className="overflow-hidden">
-          <SectionTitle
-            title={`ギャップ分析（${rows.length} 項目）`}
-            action={
-              <span className="text-[11px] text-ink-muted">
-                コードを選ぶと要求事項の詳細（適用の根拠・3 観点・回答への導線）を開きます
-              </span>
-            }
-          />
+          {/* 表の見方（コードの行き先）は画面上部の「この画面について」に置く（§10.4） */}
+          <SectionTitle title={`ギャップ分析（${rows.length} 項目）`} />
           {rows.length === 0 ? (
             <EmptyState title="ESRS 項目マスターが登録されていません" />
           ) : (

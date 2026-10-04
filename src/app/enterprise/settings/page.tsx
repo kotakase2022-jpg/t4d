@@ -5,6 +5,7 @@ import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { FlashMessage } from '@/components/shared/flash';
 import { can } from '@/lib/authorization/can';
@@ -137,13 +138,19 @@ export default async function SettingsPage({
             <p className="flex items-start gap-1.5 text-[12px] text-ink-muted">
               <LayoutPanelLeft className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
               <span>
-                有効にすると、左メニューとホームが開示業務を中心とした構成（開示プロジェクト／情報・根拠／ESG経営／タスク・承認）に切り替わります。
-                既存の画面はすべてメニューから開け、URL
-                も変わりません。設定は組織単位で、この組織の全メンバーに反映されます。
+                左メニューとホームを開示業務中心の構成に切り替えます（組織の全メンバーに反映）。
+                {/* デモで他の閲覧者にも影響することは隠さない（折りたたみに入れない） */}
                 {shell.ctx.demo &&
                   ' デモ環境では、同じサーバーで表示している他の閲覧者にも反映される場合があります。'}
               </span>
             </p>
+            <MoreInfo label="開示優先モードで変わること" className="pl-5">
+              <p>
+                有効にすると、左メニューとホームが開示業務を中心とした構成（開示プロジェクト／情報・根拠／ESG経営／タスク・承認）に切り替わります。
+                既存の画面はすべてメニューから開け、URL
+                も変わりません。設定は組織単位で、この組織の全メンバーに反映されます。
+              </p>
+            </MoreInfo>
             <fieldset className="flex flex-wrap items-center gap-3 text-[12px] text-ink">
               <legend className="sr-only">開示優先モード</legend>
               <label className="flex items-center gap-1">

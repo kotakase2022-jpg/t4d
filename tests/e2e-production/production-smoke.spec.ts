@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { buildHeterogeneousDataset } from '../../scripts/hetero-dataset';
+import { openCollapsible } from '../e2e/helpers';
 
 /**
  * 本番スモークテスト（自己検証ミッション用）。
@@ -803,7 +804,9 @@ test('本番: 開示ドラフトを人工知能に書かせられる', async ({ 
   await page.goto(`${BASE}/enterprise/disclosures/ssbj/draft`);
   const main = page.locator('#t4d-main');
   await expect(main).toBeVisible();
-  await expect(main.getByText(/対応済み.*おおむね対応.*とした要求事項/)).toBeVisible();
+  // 書ける範囲の説明は既定で閉じた「人工知能が書ける範囲」にある（docs/disclosure-first.md §10.4）。開いて確かめる
+  const scopeNote = await openCollapsible(main, /^人工知能が書ける範囲$/);
+  await expect(scopeNote.getByText(/対応済み.*おおむね対応.*とした要求事項/)).toBeVisible();
 
   await main.getByRole('button', { name: '人工知能に草案を作らせる' }).first().click();
   await page.waitForURL(/generated=/, { timeout: 120_000 });
@@ -904,7 +907,7 @@ test('本番: 開示優先モードを ON にするとメニューとホーム�
   await expect(page.getByRole('link', { name: '開示業務' })).toHaveCount(0);
 });
 
-test('本番: CSRD の 6 画面と分析の 3 画面が開き、サンプル・架空の表示がある（閲覧のみ）', async ({
+test('本番: CSRD の 6 画面と分析の 5 画面が開き、サンプル・架空の表示がある（閲覧のみ）', async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -918,7 +921,7 @@ test('本番: CSRD の 6 画面と分析の 3 画面が開き、サンプル・�
   await prodLogin(page, '海野 みどり');
   const main = page.locator('#t4d-main');
 
-  // docs/disclosure-first.md §9.4（CSRD）・§9.5〜9.6（分析）。どれも状態を変えない
+  // docs/disclosure-first.md §9.4（CSRD）・§9.5〜9.6・§10.2〜10.3（分析）。どれも状態を変えない
   for (const [path, heading] of [
     ['/enterprise/disclosures/csrd', /^CSRD 開示対応（ESRS）/],
     ['/enterprise/disclosures/csrd/settings', /^CSRD 設定/],
@@ -928,7 +931,9 @@ test('本番: CSRD の 6 画面と分析の 3 画面が開き、サンプル・�
     ['/enterprise/disclosures/csrd/draft', /^CSRD 開示ドラフト/],
     ['/enterprise/analysis/diagnosis', /^現状診断/],
     ['/enterprise/analysis/regulations', /^規制対応度/],
+    ['/enterprise/analysis/trends', /^自社経年比較$/],
     ['/enterprise/analysis/benchmark', /^他社比較/],
+    ['/enterprise/analysis/financial-impact', /^財務影響分析$/],
   ] as const) {
     const res = await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });
     expect(res?.status(), `${path} が ${res?.status()}`).toBeLessThan(400);
@@ -957,14 +962,70 @@ test('本番: CSRD の 6 画面と分析の 3 画面が開き、サンプル・�
   // 分析には単一の総合点・準拠率を出さない
   await expect(main).not.toContainText('準拠率');
 
-  // 左メニュー: CSRD の 5 画面と分析の 3 画面（同名の項目があるのでリストに絞る）
+  // 自社経年比較: 年度の列見出しはヘッダーの年度（既定 FY2026）を終点に 3 つ（§10.2）
+  await page.goto(`${BASE}/enterprise/analysis/trends`);
+  const trends = main.getByRole('table', { name: /^指標ごとの確定値/ });
+  await expect(trends).toBeVisible();
+  await expect(trends.getByRole('columnheader', { name: /^FY20\d\d$/ })).toHaveText([
+    'FY2024',
+    'FY2025',
+    'FY2026',
+  ]);
+  await expect(main).not.toContainText('準拠率');
+
+  // 財務影響分析: 試算・架空の前提・データの厚みの注記 3 種は折りたたまずに見える（§10.3。文言固定）
+  await page.goto(`${BASE}/enterprise/analysis/financial-impact`);
+  const impactNotes = main.getByRole('note', { name: '試算についての注記' });
+  await expect(impactNotes).toBeVisible();
+  await expect(
+    impactNotes.getByText(
+      '試算（仮定に基づく）。予測・保証ではありません。経路と係数は画面に示した仮定で、相関から因果を推定していません',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    impactNotes.getByText('架空の財務ベースライン・単価（デモ用）。実在企業の数値ではありません', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    impactNotes.getByText(/^確定データは最長 \d+ 年分のため、統計的な推定は行いません$/),
+  ).toBeVisible();
+  await expect(
+    main.getByRole('img', { name: /^経路図（起点 → 仕組み → 財務項目 → 時間帯/ }),
+  ).toBeVisible();
+  await expect(main).not.toContainText('準拠率');
+
+  // 左メニュー: CSRD の 6 画面（定性情報を含む。§10.1 ①）と分析の 5 画面（§10.1 ②）。
+  // 同名の項目があるのでリストに絞る
   const sidebar = page.getByRole('navigation', { name: 'メインナビゲーション' });
+  const csrdList = sidebar.getByRole('list', { name: 'CSRD', exact: true });
+  await expect(csrdList.getByRole('link')).toHaveText([
+    '対応状況',
+    '要求事項',
+    '対応計画',
+    'データ収集',
+    '定性情報',
+    '開示ドラフト',
+  ]);
+  await expect(csrdList.getByRole('link', { name: '定性情報', exact: true })).toHaveAttribute(
+    'href',
+    '/enterprise/narratives',
+  );
+  const analysisList = sidebar.getByRole('list', { name: '分析', exact: true });
+  await expect(analysisList.getByRole('link')).toHaveText([
+    '現状診断',
+    '規制対応度',
+    '自社経年比較',
+    '他社比較',
+    '財務影響分析',
+  ]);
   await expect(
-    sidebar.getByRole('list', { name: 'CSRD', exact: true }).getByRole('link'),
-  ).toHaveText(['対応状況', '要求事項', '対応計画', 'データ収集', '開示ドラフト']);
+    analysisList.getByRole('link', { name: '自社経年比較', exact: true }),
+  ).toHaveAttribute('href', '/enterprise/analysis/trends');
   await expect(
-    sidebar.getByRole('list', { name: '分析', exact: true }).getByRole('link'),
-  ).toHaveText(['現状診断', '規制対応度', '他社比較']);
+    analysisList.getByRole('link', { name: '財務影響分析', exact: true }),
+  ).toHaveAttribute('href', '/enterprise/analysis/financial-impact');
 
   expect(problems.join('\n')).toBe('');
 });

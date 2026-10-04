@@ -135,6 +135,8 @@ describe('Collapsible', () => {
     expect(summaryClass).toContain('list-none');
     expect(summaryClass).toContain('[&::-webkit-details-marker]:hidden');
     expect(summaryClass).not.toMatch(/outline-none|outline-0/);
+    // card の summary は details の枠いっぱい。外側のリングは祖先の overflow で切れうるため内側に描く
+    expect(summaryClass).toContain('focus-visible:outline-offset-[-2px]');
   });
 
   it('variant: card は枠付き、plain は枠なし', () => {

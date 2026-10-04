@@ -30,6 +30,7 @@ import type {
   MaterialityBasis,
   NarrativeStatus,
   NarrativeTheme,
+  PeriodStatus,
   QuantitativeImportDiffKind,
   QuantitativeImportStatus,
   RecheckDecisionKind,
@@ -263,6 +264,14 @@ export const MATERIALITY_BASIS_LABELS: Record<MaterialityBasis, string> = {
   impact: 'インパクト重要性',
   double: 'ダブル・マテリアリティ',
   not_specified: '指定なし',
+};
+
+/** 報告期間の状態（DB の値 closed 等を画面にそのまま出さない。組織・拠点の画面と同じ表記） */
+export const PERIOD_STATUS_LABELS: Record<PeriodStatus, string> = {
+  planning: '計画中',
+  collecting: '収集中',
+  reviewing: 'レビュー中',
+  closed: 'クローズ',
 };
 
 export const QUANTITATIVE_IMPORT_STATUS_LABELS: Record<QuantitativeImportStatus, string> = {

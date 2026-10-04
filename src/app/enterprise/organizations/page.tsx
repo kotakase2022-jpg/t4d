@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { PERIOD_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import {
   AGGREGATION_METHOD_LABEL,
   MATERIALITY_LABEL,
@@ -24,13 +25,6 @@ import {
   EditMetricButton,
   EditUnitButton,
 } from './master-forms';
-
-const PERIOD_STATUS_LABEL: Record<string, string> = {
-  planning: '計画中',
-  collecting: '収集中',
-  reviewing: 'レビュー中',
-  closed: 'クローズ',
-};
 
 export const metadata = { title: '組織・拠点' };
 
@@ -231,7 +225,7 @@ export default async function OrganizationsPage({
                   <TD className="text-[12px] text-ink-muted">{period.submissionDueDate ?? '—'}</TD>
                   <TD>
                     <Badge tone={period.status === 'collecting' ? 'brand' : 'neutral'}>
-                      {PERIOD_STATUS_LABEL[period.status]}
+                      {PERIOD_STATUS_LABELS[period.status]}
                     </Badge>
                   </TD>
                 </TR>

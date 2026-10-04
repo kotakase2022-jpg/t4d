@@ -190,6 +190,13 @@ describe('SSBJ 対応状況', () => {
     // 正式基準（転載許可取得済み）のバッジと出所の表記は閉じない（誠実さの注記）
     expectOutsideDetails(screen.getByText('正式基準準拠（転載許可取得済み）'));
     expectOutsideDetails(screen.getByText(SSBJ_FRAMEWORK_INFO.attribution));
+    // 収録範囲（ユニバーサル基準は未収録・全条項ではない）もバッジ・全要求事項と一緒に見せる。
+    // 閉じた「件数の数え方」の中だけに置くと、基準の全量を収録しているように見えるため
+    const coverage = screen.getByText(
+      '収録範囲: 一般開示基準33・気候関連開示基準96・実務対応基準第1号4の計133項目。ユニバーサル基準（適用）は未収録。基準のすべての条項ではありません。',
+    );
+    expectOutsideDetails(coverage);
+    expect(coverage.closest('div')?.textContent).toContain('全要求事項');
     // 指示された禁止語を新しい凡例・要約に持ち込まない（閉じた中も含めて数える）
     for (const banned of ['ダッシュボード', 'アセスメント', 'ステータス', 'コンプライアント']) {
       expect(document.body.textContent).not.toContain(banned);
@@ -221,6 +228,12 @@ describe('SSBJ 要求事項の評価', () => {
     expect(steps[3]).toMatch(/^評価対象（重要性なしも除く）\d+ 項目$/);
     expectOutsideDetails(funnel);
     expectOutsideDetails(screen.getByText(/^除外した件数: 対象外/));
+    // 「正式基準マスター n 項目」が基準の全条項に見えないよう、収録範囲を件数の流れの下に見せる
+    expectOutsideDetails(
+      screen.getByText(
+        /^収録範囲: .*ユニバーサル基準（適用）は未収録。基準のすべての条項ではありません。$/,
+      ),
+    );
 
     // 工程チップ（題と残件数）は見え、説明だけを閉じる
     for (const title of [
@@ -381,7 +394,10 @@ describe('ホーム（開示業務）', () => {
 
     // 拠点の未提出は補助表示（既定で閉じる）
     const unitsSummary = screen.getByText('拠点の未提出（補助表示）');
-    expect(unitsSummary.closest('details')!.open).toBe(false);
+    const unitsDetails = unitsSummary.closest('details')!;
+    expect(unitsDetails.open).toBe(false);
+    // details に overflow を付けない（枠いっぱいの summary のフォーカスリングが切れて見えなくなる）
+    expect(unitsDetails.className).not.toMatch(/overflow-(hidden|clip)/);
   });
 
   it('リセット: 確認のチェックと、それが指す範囲の 1 行は閉じない。戻す表の一覧だけを閉じる', () => {

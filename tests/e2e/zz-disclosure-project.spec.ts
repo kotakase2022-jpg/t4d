@@ -7,6 +7,7 @@ import {
   DEMO_USERS,
   carriesDemoState,
   carryDemoState,
+  focusRingClipIssues,
   loginAs,
   openCollapsible,
   peakCarriedCookieHeader,
@@ -228,6 +229,11 @@ test('A01: 管理者が開示優先モードを有効にすると、新しいメ
   ).toBeVisible();
   await expect(page.getByText(/適用確定済み \d+ 項目中、承認済み \d+ 項目/)).toBeVisible();
   await expect(page.getByText(/適用未判定 \d+ 件/)).toBeVisible();
+  // 「拠点の未提出（補助表示）」の開閉にキーボードでフォーカスすると、フォーカスリングが切れずに見える
+  // （details の overflow で枠いっぱいの summary のリングが全部切れていた）
+  const unitsRing = await focusRingClipIssues(page, '#home-unit-submissions > summary');
+  expect(unitsRing.checked).toBe(1);
+  expect(unitsRing.issues).toEqual([]);
   // 報告期間の日付は 1 回だけ（期間名に日付が入っているため重ねて出さない）
   await expect(page.getByText(/^青海テクノロジー株式会社 ／ 2026年度/)).toHaveText(
     '青海テクノロジー株式会社 ／ 2026年度（2026-04-01〜2027-03-31）',

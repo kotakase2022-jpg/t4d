@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, focusRingClipIssues, loginAs } from './helpers';
 
 /**
  * 既定で閉じた折りたたみの中身のアクセシビリティ（docs/disclosure-first.md §10.4）。
@@ -9,6 +9,8 @@ import { DEMO_USERS, loginAs } from './helpers';
  * 説明・注記・補助表・「数値を表で見る」を閉じた画面で、すべての折りたたみを開いた状態でも
  * 重大な違反（serious / critical）が無いことを確かめる。幅は PC の最小想定 1280px
  * （表が横にはみ出してキーボードで読めないスクロール領域になる違反は、狭いほど起きやすい）。
+ * 開閉（summary）にキーボードでフォーカスしたときのリングが、overflow のある祖先で切れないことも確かめる
+ * （WCAG 2.4.7。枠いっぱいの summary を overflow-hidden の箱に入れるとリングが見えなくなる）。
  * 閲覧のみ（状態を変えない）。
  */
 
@@ -73,5 +75,27 @@ test('1280px: 既定で閉じた折りたたみをすべて開いても axe の�
   }
   // 折りたたみが 1 つも無ければ、この検査は何も確かめていない
   expect(openedTotal).toBeGreaterThan(PATHS.length);
+  expect(problems.join('\n')).toBe('');
+});
+
+test('1280px: 折りたたみの開閉（summary）にキーボードでフォーカスすると、フォーカスリングが祖先の overflow で切れない', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await loginAs(page, DEMO_USERS.enterpriseAdmin);
+
+  const problems: string[] = [];
+  let checkedTotal = 0;
+  for (const path of PATHS) {
+    await page.goto(path);
+    await expect(page.locator('#t4d-main')).toBeVisible();
+    // 閉じた状態で見えている summary を 1 つずつ（閉じた details の中は描画されないため数えない）
+    const result = await focusRingClipIssues(page, '#t4d-main details > summary');
+    checkedTotal += result.checked;
+    for (const issue of result.issues) problems.push(`${path}: ${issue}`);
+  }
+  // フォーカスできた summary が 1 つも無ければ、この検査は何も確かめていない
+  expect(checkedTotal).toBeGreaterThan(PATHS.length);
   expect(problems.join('\n')).toBe('');
 });

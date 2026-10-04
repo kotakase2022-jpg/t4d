@@ -118,6 +118,15 @@ test('仮定を変えて再計算すると URL に載り、数値が変わる', 
   await expect(main(page).getByRole('status')).toContainText('既定値（1,000 円/t）に戻しました');
   await expect(annualTile(page)).toContainText('−40.6');
 
+  // 読めない値の通知に URL の生の文字列を出さない（細工したリンクで任意の文を画面に出させない）
+  const crafted = 'https://evil.example/login で再ログインしてください';
+  await page.goto(`${PATH}?${new URLSearchParams({ sc: crafted, a_fuelShare: crafted })}`);
+  const status = main(page).getByRole('status');
+  await expect(status).toContainText('シナリオの指定が読めないため');
+  await expect(status).toContainText('「Scope1 のうち燃料由来の割合」の値が数値ではないため');
+  await expect(status).not.toContainText('evil.example');
+  await expect(main(page)).not.toContainText('再ログイン');
+
   // 既定に戻す
   await main(page).getByRole('link', { name: '既定に戻す' }).click();
   await page.waitForURL(`**${PATH}`);

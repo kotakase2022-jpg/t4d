@@ -3,6 +3,7 @@ import { PageHeader } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Card } from '@/components/ui/card';
 import { can } from '@/lib/authorization/can';
+import { PERIOD_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import { isDemoMode } from '@/lib/config';
 import { loadFinancialImpact } from '@/lib/services/analysis/financial-impact';
 import { loadEnterpriseShell } from '@/lib/services/shell';
@@ -38,7 +39,8 @@ export default async function FinancialImpactPage({
         <>
           <p>
             基準年度は、ヘッダーの年度（{shell.currentPeriod.code}
-            ）以前で締めた（closed）最新の報告期間です。起点はその年度の確定値（全拠点承認済みの連結値）だけで、当年度の途中の値・推計・前年値の補完は使いません。
+            ）以前で締め済み（{PERIOD_STATUS_LABELS.closed}
+            ）の最新の報告期間です。起点はその年度の確定値（全拠点承認済みの連結値）だけで、当年度の途中の値・推計・前年値の補完は使いません。
           </p>
           <p>
             試算期間は基準年度の翌年度から 10 年間です。年度は画面上部のヘッダーで切り替えます。
@@ -87,7 +89,7 @@ export default async function FinancialImpactPage({
             <EmptyState
               icon={<CalendarOff className="size-5" aria-hidden="true" />}
               title="基準年度がありません"
-              description={`ヘッダーの年度（${view.period.code}）以前に、締めた（closed）報告期間がありません。起点の確定値を決められないため試算しません。`}
+              description={`ヘッダーの年度（${view.period.code}）以前に、締め済み（${PERIOD_STATUS_LABELS.closed}）の報告期間がありません。起点の確定値を決められないため試算しません。`}
             />
           </Card>
         )}

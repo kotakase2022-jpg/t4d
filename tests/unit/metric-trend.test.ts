@@ -16,6 +16,7 @@ import {
   sortTrendRows,
   summarizeTrends,
   trendCellOf,
+  trendEmptyReason,
   trendFilterQuery,
   trendGroupOf,
   trendWindowNote,
@@ -548,5 +549,31 @@ describe('表示の補助', () => {
         denominatorMetricCode: null,
       }),
     ).toBe('全社値は算定不可（集計方法: 比率計算。拠点の値は内訳に年度ごとに示す）');
+  });
+});
+
+describe('表が空のときの理由（trendEmptyReason）', () => {
+  it('指標が無い → no_metrics、どの指標にもデータが無い（絞込なし）→ no_data、絞込で 0 件 → filtered', () => {
+    expect(trendEmptyReason(NO_TREND_FILTERS, { rowCount: 0, dataMetricCount: 0 })).toBe(
+      'no_metrics',
+    );
+    // データが無い指標を既定で隠しているだけ。絞り込みの問題ではない
+    expect(trendEmptyReason(NO_TREND_FILTERS, { rowCount: 21, dataMetricCount: 0 })).toBe(
+      'no_data',
+    );
+    // 絞り込んでいても、そもそもデータが無ければデータが無いと示す
+    expect(
+      trendEmptyReason({ ...NO_TREND_FILTERS, group: 'ghg' }, { rowCount: 21, dataMetricCount: 0 }),
+    ).toBe('no_data');
+    expect(
+      trendEmptyReason({ ...NO_TREND_FILTERS, q: 'zzz' }, { rowCount: 21, dataMetricCount: 15 }),
+    ).toBe('filtered');
+    // データの無い指標も表示していて 0 件なら、区分・検索の絞込のせい
+    expect(
+      trendEmptyReason(
+        { ...NO_TREND_FILTERS, empty: true, q: 'zzz' },
+        { rowCount: 21, dataMetricCount: 0 },
+      ),
+    ).toBe('filtered');
   });
 });

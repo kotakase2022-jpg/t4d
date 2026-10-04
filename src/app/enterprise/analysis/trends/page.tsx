@@ -15,7 +15,9 @@ import {
   TREND_CHANGE_FILTERS,
   TREND_GROUP_LABEL,
   TREND_GROUPS,
+  trendEmptyReason,
   trendFilterQuery,
+  type TrendEmptyReason,
   type TrendFilters,
 } from '@/lib/domain/metric-trend';
 import { loadMetricTrends, type MetricTrendRow } from '@/lib/services/analysis/trends';
@@ -77,51 +79,125 @@ function detailMeta(row: MetricTrendRow): string {
   return `承認済み ${counts.join('・')} 拠点`;
 }
 
+/**
+ * 指標の行と、その下の「内訳」の行。
+ *
+ * 行見出し（th scope=row）には指標名と単位だけを置く。内訳（年度ごとの承認の状況・理由・リンク）を
+ * 行見出しの中に置くと、その文が行見出しの名前になり、表を読み上げで移動するたびに内訳の全文
+ * （開いていれば定義・理由・リンクまで）が値より先に読まれるため、表の幅いっぱいの次の行に分ける
+ */
 function TrendRow({
   row,
   periodCodes,
+  columnCount,
   openDetail,
 }: {
   row: MetricTrendRow;
   periodCodes: string[];
+  columnCount: number;
   openDetail: boolean;
 }) {
   const { metric } = row;
   return (
-    <TR className="align-top" data-metric-code={metric.code}>
-      <th
-        scope="row"
-        className={cn(
-          'min-w-[240px] max-w-[320px] px-2 py-2 text-left align-top text-[12px]',
-          STICKY_FIRST_COLUMN,
-        )}
-      >
-        <span className="font-semibold text-ink">{metric.name}</span>
-        <span className="ml-1 font-normal text-ink-muted">（{metric.unit}）</span>
-        <Collapsible
-          variant="plain"
-          summary="内訳"
-          meta={detailMeta(row)}
-          open={openDetail || undefined}
-          className="mt-0.5 font-normal"
+    <>
+      <TR className="border-b-0 align-top" data-metric-code={metric.code}>
+        <th
+          scope="row"
+          className={cn(
+            'min-w-[240px] max-w-[320px] px-2 pt-2 pb-0.5 text-left align-top text-[12px]',
+            STICKY_FIRST_COLUMN,
+          )}
         >
-          <TrendDetail row={row} />
-        </Collapsible>
-      </th>
-      {row.cells.map((cell, index) => (
-        <TD key={periodCodes[index] ?? index} align="right" className="py-2 align-top">
-          <TrendCellView cell={cell} unit={metric.unit} />
+          <span className="font-semibold text-ink">{metric.name}</span>
+          <span className="ml-1 font-normal text-ink-muted">（{metric.unit}）</span>
+        </th>
+        {row.cells.map((cell, index) => (
+          <TD key={periodCodes[index] ?? index} align="right" className="pt-2 pb-0.5 align-top">
+            <TrendCellView cell={cell} unit={metric.unit} />
+          </TD>
+        ))}
+        <TD align="center" className="pt-2 pb-0.5 align-top">
+          <MiniBars values={row.cells.map((cell) => cell.value)} labels={periodCodes} decorative />
         </TD>
-      ))}
-      <TD align="center" className="py-2 align-top">
-        <MiniBars values={row.cells.map((cell) => cell.value)} labels={periodCodes} decorative />
-      </TD>
-      {row.changes.map((change, index) => (
-        <TD key={row.changeLabels[index] ?? index} align="right" className="py-2 align-top">
-          <TrendChangeCell change={change} />
-        </TD>
-      ))}
-    </TR>
+        {row.changes.map((change, index) => (
+          <TD
+            key={row.changeLabels[index] ?? index}
+            align="right"
+            className="pt-2 pb-0.5 align-top"
+          >
+            <TrendChangeCell change={change} />
+          </TD>
+        ))}
+      </TR>
+      <tr className="border-b border-line last:border-b-0" data-trend-detail={metric.code}>
+        <td colSpan={columnCount} className="px-0 pb-1.5 pt-0 text-[12px]">
+          {/* 横にスクロールしても内訳の開閉が左端に見えるように固定する */}
+          <div className="sticky left-0 w-fit max-w-[340px] px-2">
+            <Collapsible
+              variant="plain"
+              // 行見出しから離れるため、読み上げではどの指標の内訳かを名前に含める
+              summary={
+                <>
+                  <span className="sr-only">{metric.name}の</span>内訳
+                </>
+              }
+              meta={detailMeta(row)}
+              open={openDetail || undefined}
+            >
+              <TrendDetail row={row} />
+            </Collapsible>
+          </div>
+        </td>
+      </tr>
+    </>
+  );
+}
+
+/** 表が空のときの状態（理由ごとに文言を分ける。絞り込んでいないのに「絞り込み解除」を案内しない） */
+function TrendEmptyState({
+  reason,
+  windowLabel,
+}: {
+  reason: TrendEmptyReason;
+  windowLabel: string;
+}) {
+  if (reason === 'no_metrics') {
+    return (
+      <EmptyState
+        title="数値の指標が登録されていません"
+        description="指標マスターに数値の指標を登録すると、年度ごとの確定値を並べます。"
+        action={
+          <Link
+            href="/enterprise/organizations"
+            className="text-[12px] text-brand-700 underline underline-offset-2"
+          >
+            組織・拠点（指標マスター）
+          </Link>
+        }
+      />
+    );
+  }
+  if (reason === 'no_data') {
+    return (
+      <EmptyState
+        title="比較できるデータがまだありません"
+        description={`${windowLabel} のどの年度にも、指標のデータが登録されていません（0 ではありません）。データを登録すると、確定値を年度ごとに並べます。`}
+        action={
+          <Link
+            href="/enterprise/imports"
+            className="text-[12px] text-brand-700 underline underline-offset-2"
+          >
+            データ取込
+          </Link>
+        }
+      />
+    );
+  }
+  return (
+    <EmptyState
+      title="該当する指標がありません"
+      description="絞り込みの条件を変えるか、「絞り込み解除」を押してください。"
+    />
   );
 }
 
@@ -252,9 +328,12 @@ export default async function TrendsPage({
 
         {filtered.length === 0 ? (
           <Card>
-            <EmptyState
-              title="該当する指標がありません"
-              description="絞り込みの条件を変えるか、「絞り込み解除」を押してください。"
+            <TrendEmptyState
+              reason={trendEmptyReason(filters, {
+                rowCount: view.rows.length,
+                dataMetricCount: view.summary.dataMetricCount,
+              })}
+              windowLabel={firstCode === lastCode ? firstCode : `${firstCode}〜${lastCode}`}
             />
           </Card>
         ) : (
@@ -301,6 +380,7 @@ export default async function TrendsPage({
                         key={row.metric.id}
                         row={row}
                         periodCodes={periodCodes}
+                        columnCount={columnCount}
                         openDetail={openDetail && row.changes.some((c) => c.kind === 'needs_check')}
                       />
                     ))}

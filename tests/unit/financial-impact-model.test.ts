@@ -9,6 +9,7 @@ import {
   describeFormula,
   driverValueAt,
   emptyAssumptionValues,
+  gxEtsReferenceNote,
   formatMillionYen,
   lagBandOf,
   parseImpactParams,
@@ -17,6 +18,7 @@ import {
   sensitivity,
   serializeImpactParams,
   simulateFinancialImpact,
+  targetAlreadyAchieved,
   type AssumptionValues,
   type PathwayId,
   type PathwayResult,
@@ -150,6 +152,46 @@ describe('目標達成シナリオ（比較可の目標だけ、基準年度の�
     expect(valueAt(target, 'P2', 2034)).toBeCloseTo(-40_070_450, 0);
   });
 
+  it('基準年度の実績が既に達成している目標（削減 9,500 t・実績 8,931.6 t）で起点を目標値へ戻さない', () => {
+    const beaten = input({
+      scenario: 'target',
+      targets: { scope1: { targetYear: 2030, targetValue: 9500, direction: 'reduce' } },
+    });
+    expect(
+      targetAlreadyAchieved(8931.6, { targetYear: 2030, targetValue: 9500, direction: 'reduce' }),
+    ).toBe(true);
+    expect(driverValueAt(beaten, 'scope1', 2030)).toBe(8931.6);
+    const bau = simulateFinancialImpact(input());
+    const target = simulateFinancialImpact(beaten);
+    expect(valueAt(target, 'P1', 2030)).toBeCloseTo(valueAt(bau, 'P1', 2030)!, 6);
+    // 回避コストは負にならない（「目標達成」で悪化させない）
+    const comparison = compareWithBau(bau, target, beaten);
+    expect(comparison.avoided).toBe(0);
+    expect(comparison.abatement).toBe(0);
+
+    // 未達の削減目標は従来どおり直線（向きを渡しても変わらない）
+    const reduce = input({
+      scenario: 'target',
+      targets: { scope1: { targetYear: 2030, targetValue: 7840, direction: 'reduce' } },
+    });
+    expect(driverValueAt(reduce, 'scope1', 2028)).toBeCloseTo(8276.64, 6);
+  });
+
+  it('増加の目標も向きで判断する（新規採用 302 人: 目標 200 人は達成済みで一定、400 人へは直線）', () => {
+    const achieved = input({
+      scenario: 'target',
+      targets: { new_hires: { targetYear: 2030, targetValue: 200, direction: 'increase' } },
+    });
+    expect(driverValueAt(achieved, 'new_hires', 2030)).toBe(302);
+    const notYet = input({
+      scenario: 'target',
+      targets: { new_hires: { targetYear: 2030, targetValue: 400, direction: 'increase' } },
+    });
+    expect(driverValueAt(notYet, 'new_hires', 2030)).toBeCloseTo(400, 6);
+    // 向きの無い目標は判断しない（従来どおり直線）
+    expect(targetAlreadyAchieved(302, { targetYear: 2030, targetValue: 200 })).toBe(false);
+  });
+
   it('目標年が基準年度以前の目標は使わない（一定）', () => {
     const i = input({
       scenario: 'target',
@@ -163,8 +205,14 @@ describe('P2 Scope2 → 発電事業者の負担金の転嫁（L=1）', () => {
   const bau = simulateFinancialImpact(input());
 
   it('FY2033 は 0（負担金は FY2033 から、転嫁は 1 年遅れ）、FY2034 = −40,070,450 円', () => {
+    // 制度が無い FY2032 までは「制度開始前」。FY2033 は制度が始まっているので「時間差」
+    // （制度の表・経路の「制度の開始 FY2033」と食い違う「制度開始前」と書かない）
+    expect(noteAt(bau, 'P2', 2032)).toBe('pre_start');
     expect(valueAt(bau, 'P2', 2033)).toBe(0);
-    expect(noteAt(bau, 'P2', 2033)).toBe('pre_start');
+    expect(noteAt(bau, 'P2', 2033)).toBe('lag');
+    expect(describeFormula(pathway(bau, 'P2'), input(), 2033)).toBe(
+      'FY2033 は時間差（1 年）のため未反映（0 円）',
+    );
     // 22,897.4 t × P(2033) 3,500 円/t × 転嫁率 50%
     expect(valueAt(bau, 'P2', 2034)).toBeCloseTo(-40_070_450, 0);
   });
@@ -185,6 +233,168 @@ describe('P2 Scope2 → 発電事業者の負担金の転嫁（L=1）', () => {
     expect(valueAt(p1Lag2, 'P1', 2029)).toBe(0);
     expect(valueAt(p1Lag2, 'P1', 2030)).toBeCloseTo(-8_931_600, 0);
     expect(pathway(p1Lag2, 'P1').firstEffectYear).toBe(2030);
+    // 制度は FY2028 に始まっている。0 の理由は時間差（制度開始前ではない）
+    expect(noteAt(p1Lag2, 'P1', 2027)).toBe('pre_start');
+    expect(noteAt(p1Lag2, 'P1', 2028)).toBe('lag');
+    expect(noteAt(p1Lag2, 'P1', 2029)).toBe('lag');
+    expect(noteAt(p1Lag2, 'P1', 2030)).toBeNull();
+  });
+
+  it('P10（L=3）は炭素価格が始まる FY2028 以降の 0 を「時間差」、FY2027 までを「制度開始前」と書く', () => {
+    const result = simulateFinancialImpact(
+      input({
+        enabled: { ...defaultImpactParams(DEMO_ASSUMPTION_DEFAULTS).enabled, P10: true },
+        assumptions: { ...DEMO_ASSUMPTION_DEFAULTS, passThroughSupplier: 10 },
+      }),
+    );
+    expect(noteAt(result, 'P10', 2027)).toBe('pre_start');
+    for (const year of [2028, 2029, 2030]) {
+      expect(noteAt(result, 'P10', year)).toBe('lag');
+      expect(valueAt(result, 'P10', year)).toBe(0);
+    }
+    expect(noteAt(result, 'P10', 2031)).toBeNull();
+  });
+});
+
+describe('水準の経路（P1・P2・P9・P10）は基準年度に計上済みの分を差し引く', () => {
+  const productInputs = {
+    productRevenue: 1_000_000_000,
+    productMarginRate: 30,
+    productRampYears: 1,
+  } as const;
+
+  it('P9: 販売開始が基準年度以前（FY2024）なら、基準年度の売上に含まれるため増減は 0', () => {
+    const i = input({
+      assumptions: { ...DEMO_ASSUMPTION_DEFAULTS, ...productInputs, productStartYear: 2024 },
+    });
+    const result = simulateFinancialImpact(i);
+    const p9 = pathway(result, 'P9');
+    expect(p9.status).toBe('quantified');
+    for (const y of p9.years) {
+      expect(y.value).toBe(0);
+      expect(y.note).toBeNull();
+    }
+    expect(p9.cumulative).toBe(0);
+    // 式に、差し引いた基準年度の分を書く
+    expect(describeFormula(p9, i, 2030)).toBe(
+      '+1,000,000,000 円 × 30% × 立上り 1 = 300,000,000 円 − 基準年度 FY2025 に計上済みの分（300,000,000 円）= 0 円',
+    );
+  });
+
+  it('P9: 時間差は曲線をずらすだけで、効き始めた後の年を 0 にしない（FY2024 開始・L=2）', () => {
+    const result = simulateFinancialImpact(
+      input({
+        assumptions: {
+          ...DEMO_ASSUMPTION_DEFAULTS,
+          ...productInputs,
+          productStartYear: 2024,
+          lag_P9: 2,
+        },
+      }),
+    );
+    const p9 = pathway(result, 'P9');
+    // 基準年度 FY2025 の損益には FY2023 の水準（販売前 = 0）が入っている。FY2026 から FY2024 の売上が効く
+    for (const y of p9.years) {
+      expect(y.value).toBeCloseTo(300_000_000, 0);
+      expect(y.note).toBeNull();
+    }
+    expect(p9.cumulative).toBeCloseTo(3_000_000_000, 0);
+  });
+
+  it('P9: 基準年度に立上り途中なら、基準年度の水準からの増分だけ（FY2025 開始・立上り 3 年）', () => {
+    const result = simulateFinancialImpact(
+      input({
+        assumptions: {
+          ...DEMO_ASSUMPTION_DEFAULTS,
+          ...productInputs,
+          productRevenue: 900_000_000,
+          productStartYear: 2025,
+          productRampYears: 3,
+        },
+      }),
+    );
+    // 水準: FY2025 = 270M × 1/3、FY2026 = 270M × 2/3、FY2027 以降 = 270M
+    expect(valueAt(result, 'P9', 2026)).toBeCloseTo(90_000_000, 0);
+    expect(valueAt(result, 'P9', 2027)).toBeCloseTo(180_000_000, 0);
+    expect(valueAt(result, 'P9', 2035)).toBeCloseTo(180_000_000, 0);
+  });
+
+  it('P9: 販売開始 FY2027・L=1 は FY2026 が販売開始前、FY2027 が時間差（販売開始前と書かない）', () => {
+    const result = simulateFinancialImpact(
+      input({
+        assumptions: {
+          ...DEMO_ASSUMPTION_DEFAULTS,
+          ...productInputs,
+          productStartYear: 2027,
+          productRampYears: 2,
+          lag_P9: 1,
+        },
+      }),
+    );
+    expect(noteAt(result, 'P9', 2026)).toBe('pre_start');
+    expect(noteAt(result, 'P9', 2027)).toBe('lag');
+    expect(valueAt(result, 'P9', 2027)).toBe(0);
+    expect(valueAt(result, 'P9', 2028)).toBeCloseTo(150_000_000, 0);
+    expect(pathway(result, 'P9').firstEffectYear).toBe(2028);
+  });
+
+  it('P1: 基準年度が制度の開始後（FY2028）なら、基準年度の負担を差し引く（二重に数えない）', () => {
+    const base2028 = input({ baseYear: 2028, targets: {} });
+    const result = simulateFinancialImpact(base2028);
+    // FY2028 の負担（8,931.6 t × 1,000 円/t）は基準年度の費用構造に入っている。増分は価格の上昇分だけ
+    expect(valueAt(result, 'P1', 2029)).toBeCloseTo(-8931.6 * 500, 0);
+    expect(valueAt(result, 'P1', 2030)).toBeCloseTo(-8931.6 * 1000, 0);
+    expect(noteAt(result, 'P1', 2029)).toBeNull();
+    expect(describeFormula(pathway(result, 'P1'), base2028, 2029)).toContain(
+      '基準年度 FY2028 に計上済みの分（−8,931,600 円）= −4,465,800 円',
+    );
+  });
+
+  it('P1: 基準年度 FY2028・L=2 は FY2030 に FY2028 の負担が効く（起点は D(B)。0 にしない）', () => {
+    const result = simulateFinancialImpact(
+      input({
+        baseYear: 2028,
+        targets: {},
+        assumptions: { ...DEMO_ASSUMPTION_DEFAULTS, lag_P1: 2 },
+      }),
+    );
+    // 基準年度 FY2028 の損益には FY2026 の水準（制度前 = 0）が入っている
+    expect(noteAt(result, 'P1', 2029)).toBe('lag');
+    expect(valueAt(result, 'P1', 2029)).toBe(0);
+    expect(noteAt(result, 'P1', 2030)).toBeNull();
+    expect(valueAt(result, 'P1', 2030)).toBeCloseTo(-8_931_600, 0);
+    expect(valueAt(result, 'P1', 2031)).toBeCloseTo(-8931.6 * 1500, 0);
+  });
+
+  it('不変条件: 注記のある年は 0。暦の年が開始前のときだけ「開始前」。基準年度・時間差を変えても成り立つ', () => {
+    const enabled = { ...defaultImpactParams(DEMO_ASSUMPTION_DEFAULTS).enabled, P10: true };
+    for (const baseYear of [2025, 2028, 2033]) {
+      for (const lag of [0, 1, 3]) {
+        const assumptions: AssumptionValues = {
+          ...DEMO_ASSUMPTION_DEFAULTS,
+          passThroughSupplier: 10,
+          injuryCount: 1,
+          injuryCost: 1_000_000,
+          ...productInputs,
+          productStartYear: 2027,
+        };
+        for (const id of PATHWAY_IDS) assumptions[`lag_${id}`] = lag;
+        const result = simulateFinancialImpact(
+          input({ baseYear, targets: {}, enabled, assumptions }),
+        );
+        for (const p of result.pathways) {
+          const start = p.pathway.id === 'P9' ? 2027 : p.pathway.startYear;
+          for (const y of p.years) {
+            if (p.status === 'quantified' && y.note !== null) {
+              expect(y.value, `${p.pathway.id} ${y.year}`).toBe(0);
+            }
+            expect(y.note === 'pre_start', `${p.pathway.id} ${y.year}`).toBe(
+              start !== null && y.year < start,
+            );
+          }
+        }
+      }
+    }
   });
 });
 
@@ -453,6 +663,34 @@ describe('URL の仮定（parse／serialize）', () => {
     expect(parsed.customized).toBe(true);
   });
 
+  it('受け付けなかった URL の生の値を通知に入れない（細工したリンクで任意の文を画面に出させない）', () => {
+    const crafted = {
+      sc: 'セッションの有効期限が切れました。https://evil.example/login で再ログインしてください',
+      a_carbonPriceStart: 'サポート窓口 03-0000-0000 へ',
+      r_energy: 'https://evil.example/r',
+      p_P3: '至急 https://evil.example/p へ連絡',
+    };
+    const parsed = parseImpactParams(crafted, defaults);
+    expect(parsed.notices).toHaveLength(4);
+    const text = parsed.notices.join('\n');
+    for (const value of Object.values(crafted)) expect(text).not.toContain(value);
+    for (const fragment of ['evil.example', '03-0000-0000', '再ログイン', '至急']) {
+      expect(text).not.toContain(fragment);
+    }
+    // 項目名と規則は書く（何を既定に戻したかは分かる）
+    expect(parsed.notices).toEqual([
+      'シナリオの指定が読めないため（現状維持・目標達成・カスタム のどれでもない）、現状維持で表示しています。',
+      '「炭素価格（開始年 FY2028）」の値が数値ではないため、既定値（1,000 円/t）に戻しました。',
+      '「エネルギー使用量の年率」の値が数値ではないため、0 %/年に戻しました。',
+      '経路 P3 の有効・無効の値が読めないため（1 か 0）、既定（有効）に戻しました。',
+    ]);
+    // 既定に戻した値で試算する
+    expect(parsed.scenario).toBe('bau');
+    expect(parsed.assumptions.carbonPriceStart).toBe(1000);
+    expect(parsed.growthRates.energy).toBe(0);
+    expect(parsed.enabled.P3).toBe(true);
+  });
+
   it('桁区切り・全角は数値として読み、桁は仕様の小数桁に丸める。空欄は未入力（null）', () => {
     const parsed = parseImpactParams(
       {
@@ -535,6 +773,54 @@ describe('URL の仮定（parse／serialize）', () => {
     // 架空の財務ベースライン（営業利益比の参考表示だけ）
     expect(DEMO_FINANCIAL_BASELINE.revenue).toBe(60_000_000_000);
     expect(DEMO_FINANCIAL_BASELINE.operatingProfit).toBe(5_000_000_000);
+  });
+});
+
+describe('制度の前提: GX-ETS の参加義務の参考表示', () => {
+  const collecting = { code: 'FY2026', closed: false, statusLabel: '収集中' };
+  const closed = { code: 'FY2025', closed: true, statusLabel: 'クローズ' };
+
+  it('目安（10 万 t）を大きく下回る規模だけ「直接の義務対象外」と書く（デモ 8,931.6 t）', () => {
+    expect(
+      gxEtsReferenceNote({ scope1: 8931.6, basePeriodCode: 'FY2025', headerPeriod: collecting }),
+    ).toBe(
+      '参考: 直接の義務対象外の規模（FY2025 の Scope1 は約 0.9 万 t-CO2e。CO2e であり、FY2026 は収集中のため 3 年平均も出しません）',
+    );
+  });
+
+  it('10 万 t 以上の会社に「義務対象外」と書かない', () => {
+    const text = gxEtsReferenceNote({
+      scope1: 250_000,
+      basePeriodCode: 'FY2025',
+      headerPeriod: collecting,
+    });
+    expect(text).not.toContain('義務対象外');
+    expect(text).toContain('約 25.0 万 t-CO2e');
+    expect(text).toContain('参加義務の対象になりえます');
+    expect(text).toContain('直近 3 年度平均の直接 CO2');
+  });
+
+  it('目安に近い規模（5 万〜10 万 t）は判断できないと書く', () => {
+    const text = gxEtsReferenceNote({
+      scope1: 80_000,
+      basePeriodCode: 'FY2025',
+      headerPeriod: collecting,
+    });
+    expect(text).not.toContain('義務対象外');
+    expect(text).toContain('判断できません');
+  });
+
+  it('ヘッダーの期間が締め済みなら「収集中」と書かない。確定値が無ければ参考も示さない', () => {
+    const text = gxEtsReferenceNote({
+      scope1: 8931.6,
+      basePeriodCode: 'FY2025',
+      headerPeriod: closed,
+    });
+    expect(text).not.toContain('収集中');
+    expect(text).toContain('直接 CO2 の値ではないため、3 年平均も出しません');
+    expect(
+      gxEtsReferenceNote({ scope1: null, basePeriodCode: 'FY2025', headerPeriod: closed }),
+    ).toBe('参考: Scope1 の確定値が無いため、義務対象かの参考も示しません');
   });
 });
 

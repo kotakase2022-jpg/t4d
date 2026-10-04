@@ -6,6 +6,7 @@ import {
   Database,
   FileText,
   FlaskConical,
+  Info,
   ListChecks,
   ScrollText,
   ShieldCheck,
@@ -257,6 +258,16 @@ export default async function SsbjPage({
               <span className="text-ink-muted">件</span>
             </p>
           </div>
+          {/* 収録範囲は誠実さの注記（基準のすべての条項ではない）。「正式基準準拠」のバッジと
+              全要求事項の件数が見えている間は、閉じた「件数の数え方」の中だけに置かない */}
+          <p className="flex items-start gap-1 text-[11px] text-ink-muted">
+            <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+            <span>
+              {overview.coverageNote
+                ? `収録範囲: ${overview.coverageNote}。基準のすべての条項ではありません。`
+                : '収録範囲が一部の場合、基準のすべての条項ではありません。'}
+            </span>
+          </p>
           <StatusBreakdown
             label="全要求事項の内訳"
             items={ssbjRequirementItems(counts)}
@@ -269,9 +280,6 @@ export default async function SsbjPage({
               {overview.masterTotal !== counts.total
                 ? ` マスターの収録は計 ${overview.masterTotal} 項目で、設定で適用しない基準の ${overview.masterTotal - counts.total} 項目は数えていません。`
                 : ''}
-              {overview.coverageNote
-                ? ` 収録範囲: ${overview.coverageNote}。基準のすべての条項ではありません。`
-                : ' 収録範囲が一部の場合、基準のすべての条項ではありません。'}
             </p>
             <p>
               対応済み〜未対応・確認待ち・優先度「高」は、評価対象（対象外・重要性なしを除く）で数えています。

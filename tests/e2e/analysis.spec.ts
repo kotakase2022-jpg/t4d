@@ -181,7 +181,8 @@ test('他社比較: 架空の比較データと明示し、比較対象外の理
   await expect(page.getByRole('note', { name: '比較データについて' })).toContainText(NOTICE);
   const table = page.getByRole('table', { name: new RegExp(`^${NOTICE}`) });
   await expect(table).toBeVisible();
-  await expect(table.locator('tbody tr')).toHaveCount(12);
+  // 指標の行は 12（定義・注記は行見出しの外の全幅の行に分けているので、行見出しのある行で数える）
+  await expect(table.locator('tbody tr:has(th[scope="row"])')).toHaveCount(12);
   for (const name of [
     'ピアA社（架空）',
     'ピアB社（架空）',
@@ -224,6 +225,16 @@ test('他社比較: 架空の比較データと明示し、比較対象外の理
   const scope2 = row('Scope2（マーケット基準）');
   await expect(scope2).toContainText('未開示');
   await expect(scope2).toContainText('出しません（3 社未満）');
+
+  // 定義・注記は行見出しの名前に含めない（読み上げで値より先に読まれないよう、次の全幅の行に閉じて置く）
+  await expect(scope2.locator('th[scope="row"]')).toHaveText('Scope2（マーケット基準）（t-CO2e）');
+  const scope2Notes = await openCollapsible(
+    table.locator('tr[data-benchmark-notes="scope2_market"]'),
+    /^Scope2（マーケット基準） の定義・注記$/,
+  );
+  await expect(
+    scope2Notes.getByText('ロケーション基準とは別の指標です。読み替え・合算はしません。'),
+  ).toBeVisible();
 
   // 換算しない: 男女の賃金の格差率・LTIFR の 20 万時間当たりは比較対象外
   await expect(row('男女の賃金')).toContainText('定義が異なる');

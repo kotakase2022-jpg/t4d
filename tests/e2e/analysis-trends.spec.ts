@@ -35,6 +35,10 @@ const rowOf = (page: Page, name: string) =>
     .getByRole('row')
     .filter({ has: page.getByRole('rowheader', { name: new RegExp(`^${escapeRegExp(name)}`) }) });
 
+/** 指標の行のすぐ下の「内訳」の行（行見出しの外に分けている） */
+const detailOf = (page: Page, name: string) =>
+  rowOf(page, name).locator('xpath=following-sibling::tr[1][@data-trend-detail]');
+
 test('メニューの「分析」から開け、年度の列見出しは FY2024〜FY2026 の 3 つ', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/analysis/diagnosis');
@@ -98,14 +102,15 @@ test('内訳は既定で閉じ、開くと算定できない理由と拠点の�
   for (const index of [0, 1, 2]) {
     await expect(turnover.getByRole('cell').nth(index)).toHaveText('全社値は算定不可');
   }
-  // 理由は行見出しの内訳の中（前年比のセルには読み上げ用にだけある）
+  // 理由は行の下の内訳の中（前年比のセルには読み上げ用にだけある）。行見出しは指標名と単位だけ
   const reasonText = /分子・分母が登録されていないため算定できません/;
-  await expect(turnover.getByRole('rowheader').getByText(reasonText).first()).toBeHidden();
-  const details = await openCollapsible(turnover, /^内訳$/);
+  await expect(turnover.getByRole('rowheader')).toHaveText('離職率（%）');
+  await expect(detailOf(page, '離職率').getByText(reasonText).first()).toBeHidden();
+  const details = await openCollapsible(detailOf(page, '離職率'), /^離職率の内訳$/);
   await expect(details.getByText(reasonText).first()).toBeVisible();
   await expect(details.getByRole('list', { name: 'FY2025 の拠点の値' })).toContainText('本社');
 
-  const scope1 = await openCollapsible(rowOf(page, 'Scope1 排出量'), /^内訳$/);
+  const scope1 = await openCollapsible(detailOf(page, 'Scope1 排出量'), /^Scope1 排出量の内訳$/);
   await scope1.getByRole('link', { name: /^ESG経営の KPI/ }).click();
   await page.waitForURL('**/enterprise/esg/scope1');
 });
@@ -186,7 +191,7 @@ test('「準拠率」が無く、重大なアクセシビリティ違反が無�
   await expect(main(page)).toBeVisible();
   await expect(main(page)).not.toContainText('準拠率');
   // 内訳を 1 つ開いた状態でも確かめる
-  await openCollapsible(rowOf(page, 'Scope1 排出量'), /^内訳$/);
+  await openCollapsible(detailOf(page, 'Scope1 排出量'), /^Scope1 排出量の内訳$/);
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
   const serious = results.violations.filter(
     (v) => v.impact === 'critical' || v.impact === 'serious',

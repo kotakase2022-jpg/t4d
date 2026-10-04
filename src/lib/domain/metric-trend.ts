@@ -562,6 +562,24 @@ export function filterMetricTrendRows<T extends TrendRowForFilter>(
   });
 }
 
+/**
+ * 表が空のときの理由（空の状態の文言を決める）。
+ *  - no_metrics: 数値の指標が 1 つも無い
+ *  - no_data: どの指標にも窓の年度のデータが無い（既定でデータの無い指標を隠しているだけで、
+ *    絞り込みの問題ではない。「絞り込み解除」を案内しない）
+ *  - filtered: 区分・前年比・検索の絞込で 0 件になった
+ */
+export type TrendEmptyReason = 'no_metrics' | 'no_data' | 'filtered';
+
+export function trendEmptyReason(
+  filters: TrendFilters,
+  counts: { rowCount: number; dataMetricCount: number },
+): TrendEmptyReason {
+  if (counts.rowCount === 0) return 'no_metrics';
+  if (counts.dataMetricCount === 0 && !filters.empty) return 'no_data';
+  return 'filtered';
+}
+
 // ======================================================================
 // 要約（分母付きの件数。総合点は作らない）
 // ======================================================================

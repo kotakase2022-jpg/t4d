@@ -83,6 +83,19 @@ function rowOf(name: string): HTMLElement {
   return row;
 }
 
+/** 指標の行のすぐ下の「内訳」の行（行見出しの外に分けている） */
+function detailOf(name: string): HTMLElement {
+  const row = rowOf(name);
+  const detail = row.nextElementSibling as HTMLElement | null;
+  if (
+    !detail ||
+    detail.getAttribute('data-trend-detail') !== row.getAttribute('data-metric-code')
+  ) {
+    throw new Error(`${name} の内訳の行が無い`);
+  }
+  return detail;
+}
+
 /** 年度・推移・前年比のセル（行見出しを除く） */
 const cellsOf = (row: HTMLElement) => within(row).getAllByRole('cell');
 
@@ -157,9 +170,11 @@ describe('自社経年比較の画面', () => {
 
   it('内訳は既定で閉じ、年度ごとの承認・途中集計（比較に使わない）・リンクが入る', async () => {
     await renderPage();
-    const row = rowOf('Scope1 排出量');
-    const summary = within(row).getByText('内訳');
+    const detail = detailOf('Scope1 排出量');
+    const summary = within(detail).getByText('内訳');
     expect(summary.closest('summary')?.textContent).toContain('承認済み 4/4・4/4・3/4 拠点');
+    // 行見出しから離れるため、読み上げではどの指標の内訳かを名前に含める
+    expect(summary.closest('[data-collapsible-summary]')?.textContent).toBe('Scope1 排出量の内訳');
     const details = summary.closest('details')!;
     expect(details.open).toBe(false);
     const body = within(details);
@@ -172,23 +187,41 @@ describe('自社経年比較の画面', () => {
       '/enterprise/ghg',
     );
     expect(body.getByText('FY2025→FY2026')).toBeTruthy();
+    // 内訳の行は表の幅いっぱい（列を増やさない）
+    expect(detail.querySelector('td')?.getAttribute('colspan')).toBe('7');
+  });
+
+  it('行見出しは指標名と単位だけ（内訳の文を行見出しの名前に含めない）', async () => {
+    await renderPage({ change: 'needs_check' });
+    // 内訳を開いて描く絞込でも、行見出しの中に details・リンク・理由を置かない
+    for (const header of within(table()).getAllByRole('rowheader')) {
+      if (header.getAttribute('scope') !== 'row') continue;
+      expect(header.querySelector('details')).toBeNull();
+      expect(header.querySelector('a')).toBeNull();
+    }
+    expect(within(rowOf('Scope3 Category 1')).getByRole('rowheader').textContent).toBe(
+      'Scope3 Category 1（購入した製品・サービス）（t-CO2e）',
+    );
   });
 
   it('scope3_cat1 の FY2025→FY2026 は比較条件の確認（理由は内訳）。その絞込では内訳を開いて描く', async () => {
     await renderPage();
-    let row = rowOf('Scope3 Category 1');
+    const row = rowOf('Scope3 Category 1');
     const change2 = cellsOf(row)[5]!;
     expect(change2.textContent).toContain('比較条件の確認が必要');
-    const reason = within(row).getByText(/内部取引の控除が FY2026 だけにあります/);
+    const reason = within(detailOf('Scope3 Category 1')).getByText(
+      /内部取引の控除が FY2026 だけにあります/,
+    );
     expect(inClosedDetails(reason)).toBe(true);
 
     document.body.innerHTML = '';
     await renderPage({ change: 'needs_check' });
     expect(table().querySelector('caption')?.textContent).toContain('・1 指標）');
-    row = rowOf('Scope3 Category 1');
-    expect(inClosedDetails(within(row).getByText(/内部取引の控除が FY2026 だけにあります/))).toBe(
-      false,
-    );
+    expect(
+      inClosedDetails(
+        within(detailOf('Scope3 Category 1')).getByText(/内部取引の控除が FY2026 だけにあります/),
+      ),
+    ).toBe(false);
   });
 
   it('全社値を算定できない指標は状態の文字で示し、拠点値は内訳に出す', async () => {
@@ -199,14 +232,16 @@ describe('自社経年比較の画面', () => {
       expect(cell!.textContent).toBe('全社値は算定不可');
       expect(cell!.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
     }
-    const units = within(row).getByRole('list', { name: 'FY2025 の拠点の値' });
+    const detail = detailOf('離職率');
+    const units = within(detail).getByRole('list', { name: 'FY2025 の拠点の値' });
     expect(units.textContent).toContain('本社: 6.8 %');
     // 算定できない理由（ESG経営と同じ文）は内訳の中（既定で閉じる）
-    const header = within(row).getByRole('rowheader');
-    const reason = within(header).getAllByText(/分子・分母が登録されていないため算定できません/);
+    const reason = within(detail).getAllByText(/分子・分母が登録されていないため算定できません/);
     expect(reason.length).toBeGreaterThan(0);
     expect(reason.every((el) => inClosedDetails(el))).toBe(true);
-    expect(within(header).getByText(/^全社値は算定不可（集計方法: 加重平均/)).toBeTruthy();
+    expect(within(detail).getByText(/^全社値は算定不可（集計方法: 加重平均/)).toBeTruthy();
+    // 行見出しには理由を含めない
+    expect(within(row).getByRole('rowheader').textContent).toBe('離職率（%）');
   });
 
   it('% の指標は加重平均を小数 2 桁で示し、前年比は % ポイント', async () => {
@@ -302,5 +337,44 @@ describe('自社経年比較の画面', () => {
     expect(screen.getByText('アクセス権限がありません')).toBeTruthy();
     expect(screen.queryByRole('table')).toBeNull();
     expect(document.body.textContent).not.toContain('9,735.4');
+  });
+
+  it('データがまだ無い組織（絞り込みなし）: 「絞り込み解除」を案内せず、データが無いことを示す', async () => {
+    // 新しいテナント相当: 指標はあるが、窓のどの年度にもデータが無い
+    const others = fixture.dataPoints.filter((d) => d.organizationId !== ORG_IDS.aomi);
+    fixture.dataPoints.splice(0, fixture.dataPoints.length, ...others);
+    await renderPage();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByText('比較できるデータがまだありません')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'FY2024〜FY2026 のどの年度にも、指標のデータが登録されていません（0 ではありません）。データを登録すると、確定値を年度ごとに並べます。',
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'データ取込' }).getAttribute('href')).toBe(
+      '/enterprise/imports',
+    );
+    // 絞り込んでいないので、無い操作（絞り込み解除）を案内しない
+    expect(document.body.textContent).not.toContain('絞り込み解除');
+    expect(document.body.textContent).not.toContain('該当する指標がありません');
+  });
+
+  it('絞り込みで 0 件になったときだけ「絞り込みの条件を変えるか、絞り込み解除」を案内する', async () => {
+    await renderPage({ q: '存在しない指標名' });
+    expect(screen.getByText('該当する指標がありません')).toBeTruthy();
+    expect(
+      screen.getByText('絞り込みの条件を変えるか、「絞り込み解除」を押してください。'),
+    ).toBeTruthy();
+  });
+
+  it('数値の指標が 1 つも無い組織: 指標マスターへの導線を示す', async () => {
+    const others = fixture.metrics.filter((m) => m.organizationId !== ORG_IDS.aomi);
+    fixture.metrics.splice(0, fixture.metrics.length, ...others);
+    await renderPage();
+    expect(screen.getByText('数値の指標が登録されていません')).toBeTruthy();
+    expect(
+      screen.getByRole('link', { name: '組織・拠点（指標マスター）' }).getAttribute('href'),
+    ).toBe('/enterprise/organizations');
+    expect(document.body.textContent).not.toContain('絞り込み解除');
   });
 });

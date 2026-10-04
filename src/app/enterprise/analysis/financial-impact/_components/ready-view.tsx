@@ -11,9 +11,11 @@ import {
   DRIVERS,
   fiscalYearLabel,
   formatMillionYen,
+  gxEtsReferenceNote,
   serializeImpactParams,
   type PathwayResult,
 } from '@/lib/domain/financial-impact';
+import { PERIOD_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import { formatNumber } from '@/lib/format/datetime';
 import type { FinancialImpactReady } from '@/lib/services/analysis/financial-impact';
 import { cn } from '@/lib/utils';
@@ -304,10 +306,17 @@ const INSTITUTIONS: Array<{
   },
   {
     fact: 'GX-ETS: 直近 3 年度平均の直接 CO2 排出が 10 万 t 以上の事業者は FY2026 から参加義務',
+    // 規模で書き分ける（目安の 10 万 t を超える・近い会社に「義務対象外」と書かない）
     handling: (view) =>
-      view.scope1Reference === null
-        ? '参考: Scope1 の確定値が無いため、義務対象かの参考も示しません'
-        : `参考: 直接の義務対象外（${view.basePeriod.code} の Scope1 は約 ${(view.scope1Reference / 10_000).toFixed(1)} 万 t-CO2e。CO2e であり、当年度は収集中のため 3 年平均も出しません）`,
+      gxEtsReferenceNote({
+        scope1: view.scope1Reference,
+        basePeriodCode: view.basePeriod.code,
+        headerPeriod: {
+          code: view.period.code,
+          closed: view.period.status === 'closed',
+          statusLabel: PERIOD_STATUS_LABELS[view.period.status],
+        },
+      }),
     href: 'https://www.meti.go.jp/shingikai/sankoshin/sangyo_gijutsu/emissions_trading/pdf/001_03_00.pdf',
   },
   {
@@ -380,6 +389,7 @@ function InstitutionTable({ view }: { view: FinancialImpactReady }) {
 const TARGET_STATUS_TEXT: Record<FinancialImpactReady['targets'][number]['status'], string> = {
   applied: '目標達成シナリオで使う（比較可）',
   not_comparable: '使わない（比較できない）',
+  achieved: '使わない（基準年度の実績が既に目標を達成。一定）',
   expired: '使わない（目標年が基準年度以前）',
   no_origin: '使わない（基準年度の確定値なし）',
   no_target: '目標なし（一定）',
@@ -438,8 +448,13 @@ function MethodNotes({ view }: { view: FinancialImpactReady }) {
         1 桁で、丸めは表示だけです。
       </li>
       <li>
+        水準で効く経路（P1・P2・P9・P10）は、基準年度に既に計上されていた分（制度の負担・販売済みの売上）を差し引いた増減です。時間差は効き始めをずらすだけで、効き始めた後の年を
+        0 にしません。
+      </li>
+      <li>
         未定量（確定値が無い・仮定が未入力）は 0
-        にせず、合計は定量化できた経路だけです。制度開始前の年は制度が無いため 0 です。
+        にせず、合計は定量化できた経路だけです。制度開始前の年は制度が無いため 0
+        です。制度は始まっていても、時間差でまだ効いていない年は「時間差」として 0 です。
       </li>
       <li>
         定性情報・IRO

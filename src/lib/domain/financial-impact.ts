@@ -7,7 +7,8 @@
  * 相関から因果を推定したものではない（画面に常に明示する）。
  *
  * 守っていること:
- *  - 符号は「基準年度の費用構造からの営業利益の増減（円/年）」。＋＝増益、−＝減益
+ *  - 符号は「基準年度の費用構造からの営業利益の増減（円/年）」。＋＝増益、−＝減益。
+ *    水準で効く経路（P1・P2・P9・P10）は基準年度に計上されていた水準を差し引く（二重に数えない）
  *  - 未定量（起点の確定値が無い・仮定が未入力）は null。0 にしない。合計は定量化できた経路だけで、
  *    件数（n / N 経路）を必ず添える。制度開始前・時間差で未反映の年は実際に 0（注記付き）
  *  - 経路は起点ごとに独立（省エネで Scope1/2 が減る等の相互作用はモデル化しない）
@@ -524,6 +525,19 @@ export function defaultImpactParams(defaults: AssumptionValues): ImpactParams {
 export interface TargetPath {
   targetYear: number;
   targetValue: number;
+  /**
+   * 目標の向き（KPI 目標の direction）。渡されたときは、基準年度の実績が既に目標を達成している
+   * （削減の目標なら実績 ≤ 目標値、増加なら実績 ≥ 目標値）目標で起点を動かさない。
+   * 「目標達成」で達成済みの値から目標値へ戻す（悪化させる）直線を引かないため
+   */
+  direction?: 'reduce' | 'increase';
+}
+
+/** 基準年度の実績が既に目標を達成しているか（向きが無ければ判断しない = false） */
+export function targetAlreadyAchieved(origin: number, target: TargetPath): boolean {
+  if (target.direction === 'reduce') return origin <= target.targetValue;
+  if (target.direction === 'increase') return origin >= target.targetValue;
+  return false;
 }
 
 export interface SimulationInput {
@@ -602,8 +616,8 @@ export function carbonPrice(assumptions: AssumptionValues, year: number): number
 
 /**
  * 起点の値 D(t)。t ≤ B は D(B)。それ以降はシナリオで決まる:
- * 現状維持 = D(B)、目標達成 = 目標年まで直線・以後一定（目標が無い・目標年が B 以前なら一定）、
- * カスタム = D(B) × (1 + r)^(t − B)
+ * 現状維持 = D(B)、目標達成 = 目標年まで直線・以後一定（目標が無い・目標年が B 以前・
+ * 基準年度の実績が既に目標を達成しているなら一定）、カスタム = D(B) × (1 + r)^(t − B)
  */
 export function driverValueAt(
   input: Pick<SimulationInput, 'baseYear' | 'origins' | 'targets' | 'scenario' | 'growthRates'>,
@@ -620,6 +634,7 @@ export function driverValueAt(
     case 'target': {
       const target = input.targets[driver];
       if (!target || target.targetYear <= input.baseYear) return origin;
+      if (targetAlreadyAchieved(origin, target)) return origin;
       const share = Math.min(1, elapsed / (target.targetYear - input.baseYear));
       return origin + (target.targetValue - origin) * share;
     }
@@ -644,20 +659,57 @@ function lagOf(input: SimulationInput, id: PathwayId): number {
   return raw === null ? PATHWAYS[id].defaultLag : raw;
 }
 
-/** その経路が年 t（= y − L）に効き始めているか。効いていなければ注記の種類 */
+/**
+ * 水準で効く経路（制度の負担・追加売上）。金額は「年 t の水準」で、基準年度の費用構造からの増減は
+ * 「その年の水準 − 基準年度に計上されていた水準」になる（基準年度に既に始まっていた負担・売上を
+ * 新たな影響として数えない）。ほかの経路は基準年度からの差（P3〜P6）か、基準年度の後に起きると
+ * 仮定した事象（P7・P8）で、基準年度以前の水準は 0
+ */
+const LEVEL_PATHWAYS: ReadonlySet<PathwayId> = new Set<PathwayId>(['P1', 'P2', 'P9', 'P10']);
+
+/** 経路が始まる年度（制度の開始・P9 は販売開始年度）。無ければ null */
+function pathwayStartOf(pathway: Pathway, input: SimulationInput): number | null {
+  return pathway.id === 'P9' ? (input.assumptions.productStartYear ?? null) : pathway.startYear;
+}
+
+/**
+ * 年 y の注記（金額が 0 になる理由）。L は時間差:
+ *  - 暦の年 y が開始年度より前 → 制度開始前（P9 は販売開始前）
+ *  - 開始年度を過ぎていても、時間差で効く年 t = y − L が開始前（水準の経路）か基準年度以前
+ *    （差・事象の経路）→ 時間差
+ * 開始年度を過ぎた年を「開始前」と書かない（制度の表・経路の開始年と食い違わないように）
+ */
 function yearNoteOf(
   pathway: Pathway,
   input: SimulationInput,
-  effectiveYear: number,
+  year: number,
+  lag: number,
 ): YearNote | null {
-  const start =
-    pathway.id === 'P9' ? (input.assumptions.productStartYear ?? null) : pathway.startYear;
-  if (start !== null && effectiveYear < start) return 'pre_start';
-  if (effectiveYear <= input.baseYear) return 'lag';
+  const start = pathwayStartOf(pathway, input);
+  if (start !== null && year < start) return 'pre_start';
+  const t = year - lag;
+  if (start !== null && t < start) return 'lag';
+  if (!LEVEL_PATHWAYS.has(pathway.id) && t <= input.baseYear) return 'lag';
   return null;
 }
 
-/** 経路の 1 年分の値（効いている年だけ呼ぶ。入力は揃っている前提） */
+/**
+ * 時間差で効く年 t の金額（水準）。開始前は 0、差・事象の経路は基準年度以前が 0。
+ * 起点は D(t)（t ≤ B は D(B)。§10.3）、炭素価格は P(t)
+ */
+function pathwayAmountAt(pathway: Pathway, input: SimulationInput, t: number): number {
+  const start = pathwayStartOf(pathway, input);
+  if (start !== null && t < start) return 0;
+  if (!LEVEL_PATHWAYS.has(pathway.id) && t <= input.baseYear) return 0;
+  return pathwayValue(pathway, input, t);
+}
+
+/** 基準年度 B に計上されていた水準（時間差 L なら年 B − L の水準）。差・事象の経路は 0 */
+function baseAmountOf(pathway: Pathway, input: SimulationInput, lag: number): number {
+  return pathwayAmountAt(pathway, input, input.baseYear - lag);
+}
+
+/** 経路の式の値（年 t の水準。開始前・基準年度の扱いは pathwayAmountAt が決める） */
 function pathwayValue(pathway: Pathway, input: SimulationInput, t: number): number {
   const a = input.assumptions;
   const d = (driver: DriverKey) => driverValueAt(input, driver, t) ?? 0;
@@ -729,7 +781,7 @@ function simulatePathway(pathway: Pathway, input: SimulationInput): PathwayResul
     driverValueAt(input, pathway.origin.driver, input.baseYear) === null;
 
   // 時間帯は構造（制度の開始・時間差・販売開始年度）で決まる。未定量でも示す
-  const notes = years.map((y) => yearNoteOf(pathway, input, y - lag));
+  const notes = years.map((y) => yearNoteOf(pathway, input, y, lag));
   const firstIndex = notes.findIndex((note) => note === null);
   const startUnknown = pathway.id === 'P9' && input.assumptions.productStartYear === null;
   const firstEffectYear = firstIndex === -1 || startUnknown ? null : (years[firstIndex] ?? null);
@@ -751,10 +803,13 @@ function simulatePathway(pathway: Pathway, input: SimulationInput): PathwayResul
   }
 
   const quantified = status === 'quantified';
+  // 基準年度の費用構造からの増減 = 年 y − L の水準 − 基準年度に計上されていた水準。
+  // 時間差は曲線をずらすだけで、効き始めた後の年を 0 にしない（開始前・時間差の年は両方 0 になる）
+  const baseAmount = quantified ? baseAmountOf(pathway, input, lag) : 0;
   const cells: PathwayYear[] = years.map((year, index) => {
     const note = notes[index] ?? null;
     if (!quantified) return { year, value: null, note };
-    const raw = note === null ? pathwayValue(pathway, input, year - lag) : 0;
+    const raw = pathwayAmountAt(pathway, input, year - lag) - baseAmount;
     // −0（変化なし × 単価）を 0 にそろえる（表示で「−0.0」にしない）
     return { year, value: raw === 0 ? 0 : raw, note };
   });
@@ -976,6 +1031,13 @@ function formatSpecValue(value: number | null, unit: string): string {
   return value === null ? '未入力' : `${formatNumber(value)} ${unit}`;
 }
 
+/**
+ * URL の値を読む。受け付けなかった値は既定に戻し、通知する。
+ *
+ * 通知には URL の生の文字列を入れない（項目名と規則だけの固定文）。共有されたリンクの値が
+ * そのまま画面の通知に出ると、細工した URL で任意の文（偽のログイン先・連絡先など）を
+ * 正規の画面の文として見せられるため。範囲外の通知に出すのは、数値として読めた値を丸めたものだけ
+ */
 export function parseImpactParams(
   input: SearchParamsInput,
   defaults: AssumptionValues,
@@ -988,7 +1050,9 @@ export function parseImpactParams(
     if ((SCENARIOS as readonly string[]).includes(sc)) {
       params.scenario = sc as ScenarioKey;
     } else {
-      notices.push(`シナリオ「${sc}」はありません。現状維持で表示しています。`);
+      notices.push(
+        `シナリオの指定が読めないため（${SCENARIOS.map((s) => SCENARIO_LABEL[s]).join('・')} のどれでもない）、現状維持で表示しています。`,
+      );
     }
   }
 
@@ -1002,7 +1066,7 @@ export function parseImpactParams(
     }
     const fallback = `既定値（${formatSpecValue(defaults[s.key], s.unit)}）に戻しました。`;
     if (parsed === 'invalid') {
-      notices.push(`「${s.label}」の値「${raw}」は数値ではないため、${fallback}`);
+      notices.push(`「${s.label}」の値が数値ではないため、${fallback}`);
       continue;
     }
     const value = roundTo(parsed, s.decimals);
@@ -1022,7 +1086,7 @@ export function parseImpactParams(
     if (parsed === 'empty') continue;
     const label = `${DRIVERS[driver].label}の年率`;
     if (parsed === 'invalid') {
-      notices.push(`「${label}」の値「${raw}」は数値ではないため、0 %/年に戻しました。`);
+      notices.push(`「${label}」の値が数値ではないため、0 %/年に戻しました。`);
       continue;
     }
     const value = roundTo(parsed, GROWTH_RATE_RANGE.decimals);
@@ -1042,7 +1106,7 @@ export function parseImpactParams(
       params.enabled[id] = raw === '1';
     } else {
       notices.push(
-        `経路 ${id} の有効・無効の値「${raw}」は読めないため、既定（${PATHWAYS[id].defaultEnabled ? '有効' : '無効'}）に戻しました。`,
+        `経路 ${id} の有効・無効の値が読めないため（1 か 0）、既定（${PATHWAYS[id].defaultEnabled ? '有効' : '無効'}）に戻しました。`,
       );
     }
   }
@@ -1129,7 +1193,14 @@ export function describeFormula(
   const base = (driver: DriverKey) =>
     `${formatNumber(input.origins[driver] ?? null)} ${DRIVERS[driver].unit}`;
   const price = `${formatNumber(carbonPrice(a, t))} 円/t`;
-  const resultText = `${formatYen(cell.value)} 円`;
+  // 水準の経路で基準年度に既に計上されていた分があれば、差し引いたことを式に書く
+  const baseAmount = LEVEL_PATHWAYS.has(result.pathway.id)
+    ? baseAmountOf(result.pathway, input, result.lag)
+    : 0;
+  const resultText =
+    baseAmount === 0
+      ? `${formatYen(cell.value)} 円`
+      : `${formatYen(pathwayAmountAt(result.pathway, input, t))} 円 − 基準年度 ${fiscalYearLabel(input.baseYear)} に計上済みの分（${formatYen(baseAmount)} 円）= ${formatYen(cell.value)} 円`;
   switch (result.pathway.id) {
     case 'P1':
       return `−${d('scope1')} × 燃料由来 ${pctText(a.fuelShare)} × 炭素価格 ${price} × 転嫁率 ${pctText(a.passThroughFuel)} = ${resultText}`;
@@ -1155,4 +1226,48 @@ export function describeFormula(
     case 'P10':
       return `−${d('scope3_cat1')} × 炭素価格 ${price} × 転嫁率 ${pctText(a.passThroughSupplier)} = ${resultText}`;
   }
+}
+
+// ======================================================================
+// 制度の前提の参考表示（GX-ETS の参加義務）
+// ======================================================================
+
+/** GX-ETS の参加義務の目安（直近 3 年度平均の直接 CO2 排出、t） */
+export const GX_ETS_THRESHOLD_T = 100_000;
+
+/**
+ * 「直接の義務対象外」と書ける Scope1 の上限（目安の半分）。判定は直近 3 年度平均の直接 CO2 で、
+ * Scope1（CO2e）の 1 年度の値では決まらないため、目安に近い値では義務の有無を書かない
+ */
+export const GX_ETS_CLEARLY_BELOW_T = GX_ETS_THRESHOLD_T / 2;
+
+export interface GxEtsReferenceInput {
+  /** 基準年度の Scope1 の確定連結値（t-CO2e）。無ければ null */
+  scope1: number | null;
+  basePeriodCode: string;
+  /** ヘッダーの報告期間。締め済みでなければ、当年度の値はまだ揃っていない */
+  headerPeriod: { code: string; closed: boolean; statusLabel: string };
+}
+
+/**
+ * GX-ETS の行の「この試算での扱い」。Scope1 の規模で書き分け、目安の 10 万 t を超える・近い会社に
+ * 「義務対象外」と書かない。3 年平均を出さない理由は、ヘッダーの期間の状態から書く
+ */
+export function gxEtsReferenceNote({
+  scope1,
+  basePeriodCode,
+  headerPeriod,
+}: GxEtsReferenceInput): string {
+  if (scope1 === null) return '参考: Scope1 の確定値が無いため、義務対象かの参考も示しません';
+  const scale = `${basePeriodCode} の Scope1 は約 ${(scope1 / 10_000).toFixed(1)} 万 t-CO2e`;
+  const noAverage = headerPeriod.closed
+    ? 'CO2e であり直接 CO2 の値ではないため、3 年平均も出しません'
+    : `CO2e であり、${headerPeriod.code} は${headerPeriod.statusLabel}のため 3 年平均も出しません`;
+  if (scope1 < GX_ETS_CLEARLY_BELOW_T) {
+    return `参考: 直接の義務対象外の規模（${scale}。${noAverage}）`;
+  }
+  if (scope1 >= GX_ETS_THRESHOLD_T) {
+    return `参考: 目安の 10 万 t 以上の規模で、参加義務の対象になりえます（${scale}）。判定は直近 3 年度平均の直接 CO2 で行うため、この画面では決めません（${noAverage}）`;
+  }
+  return `参考: 義務対象かはこの画面では判断できません（${scale}で目安の 10 万 t に近い）。判定は直近 3 年度平均の直接 CO2 で行います（${noAverage}）`;
 }

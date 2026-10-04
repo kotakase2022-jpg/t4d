@@ -13,6 +13,7 @@ import {
   referenceYearOf,
   sensitivity,
   simulateFinancialImpact,
+  targetAlreadyAchieved,
   type AssumptionValues,
   type DriverKey,
   type DriverSpec,
@@ -27,6 +28,7 @@ import {
   type TargetPath,
 } from '@/lib/domain/financial-impact';
 import { assessNarrativeFields, notQuantifiedNote } from '@/lib/domain/narrative-template';
+import { formatNumber } from '@/lib/format/datetime';
 import {
   assumptionDefaultsFor,
   financialBaselineFor,
@@ -49,6 +51,7 @@ import type {
   AuthorizationContext,
   EsrsTopic,
   IroType,
+  KpiDirection,
   MetricDefinition,
   ReportingPeriod,
   TimeHorizon,
@@ -106,7 +109,8 @@ export interface ImpactOrigin {
   href: string | null;
 }
 
-export type TargetStatus = 'applied' | 'not_comparable' | 'no_target' | 'expired' | 'no_origin';
+export type TargetStatus =
+  'applied' | 'not_comparable' | 'achieved' | 'no_target' | 'expired' | 'no_origin';
 
 export interface DriverTargetView {
   driver: DriverKey;
@@ -115,6 +119,8 @@ export interface DriverTargetView {
   targetYear: number | null;
   targetValue: number | null;
   boundary: string | null;
+  /** 目標の向き（比較可の目標だけ。シミュレーションにも渡し、達成済みの目標で起点を動かさない） */
+  direction: KpiDirection | null;
   /** 使わない理由（比較不可・期限切れ・起点なし）。使うときは空 */
   reasons: string[];
 }
@@ -348,8 +354,10 @@ function targetsOf(
   origins: ImpactOrigin[],
   states: Map<DriverKey, MetricPeriodState | null>,
   histories: Awaited<ReturnType<typeof listKpiTargets>>,
-  baseYear: number,
+  basePeriod: ReportingPeriod,
 ): DriverTargetView[] {
+  const baseYear = startYearOf(basePeriod);
+  const basePeriodCode = basePeriod.code;
   return origins.map((origin) => {
     const empty: DriverTargetView = {
       driver: origin.driver,
@@ -358,6 +366,7 @@ function targetsOf(
       targetYear: null,
       targetValue: null,
       boundary: null,
+      direction: null,
       reasons: [],
     };
     const metric = origin.metric;
@@ -410,9 +419,29 @@ function targetsOf(
       metric,
       methodologies: actualMethodologiesOf(state),
     });
-    return comparability.comparable
-      ? { ...view, status: 'applied' }
-      : { ...view, status: 'not_comparable', reasons: comparability.reasons };
+    if (!comparability.comparable) {
+      return { ...view, status: 'not_comparable', reasons: comparability.reasons };
+    }
+    // 基準年度の実績が既に目標を超えている（削減なら目標値以下・増加なら以上）目標へ直線を引くと、
+    // 「目標達成」が達成済みの値から目標値へ戻す（悪化させる）シナリオになり、回避コストの符号が逆になる
+    if (
+      targetAlreadyAchieved(origin.value, {
+        targetYear: chosen.targetYear,
+        targetValue: chosen.targetValue,
+        direction: chosen.direction,
+      })
+    ) {
+      const unit = DRIVERS[origin.driver].unit;
+      return {
+        ...view,
+        status: 'achieved',
+        direction: chosen.direction,
+        reasons: [
+          `基準年度（${basePeriodCode}）の実績 ${formatNumber(origin.value)} ${unit} が既に目標（${formatNumber(chosen.targetValue)} ${unit}${chosen.direction === 'reduce' ? ' 以下' : ' 以上'}）を達成しているため、目標値へ戻す直線は引かず一定にします。`,
+        ],
+      };
+    }
+    return { ...view, status: 'applied', direction: chosen.direction };
   });
 }
 
@@ -662,11 +691,15 @@ export async function loadFinancialImpact(
     return origin;
   });
 
-  const targets = targetsOf(origins, originStates, await listKpiTargets(db, ctx), baseYear);
+  const targets = targetsOf(origins, originStates, await listKpiTargets(db, ctx), basePeriod);
   const appliedTargets: Partial<Record<DriverKey, TargetPath>> = {};
   for (const t of targets) {
     if (t.status === 'applied' && t.targetYear !== null && t.targetValue !== null) {
-      appliedTargets[t.driver] = { targetYear: t.targetYear, targetValue: t.targetValue };
+      appliedTargets[t.driver] = {
+        targetYear: t.targetYear,
+        targetValue: t.targetValue,
+        ...(t.direction ? { direction: t.direction } : {}),
+      };
     }
   }
 

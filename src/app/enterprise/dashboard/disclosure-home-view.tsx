@@ -556,42 +556,46 @@ function UnitSubmissions({ home }: { home: DisclosureHome }) {
   return (
     // 補助表示（指示書 §6.1「拠点の未提出一覧は折りたたんだ補助表示」）。既定は閉じる。
     // 開閉の印は共通の Collapsible（docs/disclosure-first.md §10.4。入れ子でもずれない印）に揃える
+    // details に overflow-hidden を付けない（summary のフォーカスリングが切れて見えなくなる）。
+    // 角の丸めは中の表の枠だけで切る
     <Collapsible
+      id="home-unit-submissions"
       summary="拠点の未提出（補助表示）"
       meta={`${home.unitSubmissions.length} 拠点・${total} 件`}
-      className="overflow-hidden"
       bodyClassName="px-0 py-0"
     >
       {home.unitSubmissions.length === 0 ? (
         <p className="px-3 py-2 text-[12px] text-ink-muted">未提出の拠点はありません。</p>
       ) : (
-        <Table>
-          <THead>
-            <TR>
-              <TH>組織・拠点</TH>
-              <TH align="right">未提出</TH>
-              <TH align="right">対象</TH>
-            </TR>
-          </THead>
-          <TBody>
-            {home.unitSubmissions.map((row) => (
-              <TR key={row.unitId}>
-                <TD>
-                  <Link href={row.href} className="text-brand-700 hover:underline">
-                    {row.unitName}
-                  </Link>
-                  <span className="ml-1 text-[11px] text-ink-muted">{row.unitCode}</span>
-                </TD>
-                <TD align="right" className="tnum">
-                  {row.notSubmitted}
-                </TD>
-                <TD align="right" className="tnum">
-                  {row.total}
-                </TD>
+        <div className="overflow-hidden rounded-b-t4d-lg">
+          <Table>
+            <THead>
+              <TR>
+                <TH>組織・拠点</TH>
+                <TH align="right">未提出</TH>
+                <TH align="right">対象</TH>
               </TR>
-            ))}
-          </TBody>
-        </Table>
+            </THead>
+            <TBody>
+              {home.unitSubmissions.map((row) => (
+                <TR key={row.unitId}>
+                  <TD>
+                    <Link href={row.href} className="text-brand-700 hover:underline">
+                      {row.unitName}
+                    </Link>
+                    <span className="ml-1 text-[11px] text-ink-muted">{row.unitCode}</span>
+                  </TD>
+                  <TD align="right" className="tnum">
+                    {row.notSubmitted}
+                  </TD>
+                  <TD align="right" className="tnum">
+                    {row.total}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </div>
       )}
     </Collapsible>
   );

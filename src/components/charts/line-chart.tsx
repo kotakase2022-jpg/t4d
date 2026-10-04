@@ -36,6 +36,8 @@ export interface LineChartProps {
   valueFormat?: (value: number) => string;
   /** 点の隣の数値（all・last・none）。既定は 6 点以下なら all、それより多いと last */
   valueLabels?: LineValueLabels;
+  /** 値の無い x に書く文字（xLabels と同じ順。null・省略は「未入力」。表のセルも同じ文字） */
+  missingLabels?: ReadonlyArray<string | null>;
   /** 縦軸に 0 を含めるか（既定 true） */
   includeZero?: boolean;
   /** 「数値を表で見る」。既定（true）は自動で作る。数値が 12 個を超えると false でも出す */
@@ -59,6 +61,7 @@ export function LineChart({
   valueFormat = formatChartNumber,
   valueLabels,
   includeZero = true,
+  missingLabels,
   table = true,
   categoryLabel = '年度',
   summary,
@@ -73,12 +76,13 @@ export function LineChart({
     format: valueFormat,
     valueLabels,
     includeZero,
+    missingLabels,
     width,
     height,
   });
   const cellCount = xLabels.length * series.length;
-  const text = (value: ChartValue | undefined) =>
-    isChartNumber(value) ? valueFormat(value) : MISSING_LABEL;
+  const text = (value: ChartValue | undefined, index: number) =>
+    isChartNumber(value) ? valueFormat(value) : (missingLabels?.[index] ?? MISSING_LABEL);
 
   let dataTable: ChartTable | undefined;
   if (typeof table === 'object') {
@@ -92,7 +96,7 @@ export function LineChart({
       ],
       rows: xLabels.map((label, index) => ({
         key: `${label}-${index}`,
-        cells: [label, ...series.map((s) => text(s.values[index]))],
+        cells: [label, ...series.map((s) => text(s.values[index], index))],
       })),
     };
   }

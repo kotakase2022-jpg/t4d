@@ -285,3 +285,68 @@ export async function resetDisclosureDemo(page: Page): Promise<void> {
   await page.waitForURL(/flash=disclosureDemoReset/);
   await expect(page.getByText(/開示デモのデータを初期状態に戻しました/)).toBeVisible();
 }
+
+/**
+ * selector に当たる要素（summary・リンクなど）にキーボード操作のフォーカスを当て、フォーカスリング
+ * （outline）が overflow のある祖先で切れていないかを調べる。切れていれば理由の文を返す。
+ *
+ * - キーボードで 1 回操作してから focus() する（その後のスクリプトのフォーカスも :focus-visible になる）
+ * - フォーカスで端までスクロールしたときに画面の縁で切れるのは位置の問題でどこでも起きるため、
+ *   中央へ寄せてから、置かれた箱の中に収まるかだけを見る
+ * - 切り取る範囲: overflow hidden／clip は内側（padding box）。スクロールする要素はスクロールできる
+ *   中身の全体（端までスクロールしても見えない部分だけを切れたとみなす）
+ * - 描画されていない要素（閉じた details の中など）は数えない。checked は調べた要素の数
+ */
+export async function focusRingClipIssues(
+  page: Page,
+  selector: string,
+): Promise<{ issues: string[]; checked: number }> {
+  await page.keyboard.press('Tab');
+  return page.evaluate((sel) => {
+    const issues: string[] = [];
+    let checked = 0;
+    for (const target of document.querySelectorAll<HTMLElement>(sel)) {
+      target.focus();
+      target.scrollIntoView({ block: 'center', inline: 'center' });
+      const rect = target.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      if (document.activeElement !== target || !target.matches(':focus-visible')) continue;
+      checked += 1;
+      const style = getComputedStyle(target);
+      const extent = (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0);
+      const ring = {
+        left: rect.left - extent,
+        right: rect.right + extent,
+        top: rect.top - extent,
+        bottom: rect.bottom + extent,
+      };
+      for (let el = target.parentElement; el && el !== document.body; el = el.parentElement) {
+        const s = getComputedStyle(el);
+        const clips = (value: string) => value !== 'visible';
+        if (!clips(s.overflowX) && !clips(s.overflowY)) continue;
+        const r = el.getBoundingClientRect();
+        const scrolls = (value: string) => value === 'auto' || value === 'scroll';
+        const left = r.left + el.clientLeft - (scrolls(s.overflowX) ? el.scrollLeft : 0);
+        const top = r.top + el.clientTop - (scrolls(s.overflowY) ? el.scrollTop : 0);
+        const width = scrolls(s.overflowX) ? el.scrollWidth : el.clientWidth;
+        const height = scrolls(s.overflowY) ? el.scrollHeight : el.clientHeight;
+        const clippedX =
+          clips(s.overflowX) && (ring.left < left - 0.5 || ring.right > left + width + 0.5);
+        const clippedY =
+          clips(s.overflowY) && (ring.top < top - 0.5 || ring.bottom > top + height + 0.5);
+        if (clippedX || clippedY) {
+          const name = target.textContent?.replace(/\s+/g, ' ').trim().slice(0, 40) ?? '';
+          const where = `${el.tagName.toLowerCase()}.${[...el.classList].slice(0, 4).join('.')}`;
+          const px = (n: number) => Math.round(n);
+          issues.push(
+            `「${name}」のリングが ${where}（overflow ${s.overflowX}/${s.overflowY}）で切れる` +
+              `（リング x ${px(ring.left)}〜${px(ring.right)}・y ${px(ring.top)}〜${px(ring.bottom)}、` +
+              `箱 x ${px(left)}〜${px(left + width)}・y ${px(top)}〜${px(top + height)}）`,
+          );
+          break;
+        }
+      }
+    }
+    return { issues, checked };
+  }, selector);
+}

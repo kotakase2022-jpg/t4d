@@ -1239,6 +1239,11 @@ export interface KpiEvidence {
 export interface KpiDetail {
   card: KpiCardView;
   trend: KpiTrendRow[];
+  /**
+   * 年次の推移の図の横軸（データのある最初の年度から最後の年度までの、組織の報告期間すべて。古い順）。
+   * trend はデータのある年度だけなので、間のデータの無い年度を図から落とさない（線をつながない）ために使う
+   */
+  trendPeriods: ReportingPeriod[];
   narratives: NarrativeRecord[];
   factorComments: KpiFactorComment[];
   evidence: KpiEvidence[];
@@ -1398,7 +1403,14 @@ export async function loadKpiDetail(
     }
   }
 
-  return { card, trend, narratives, factorComments, evidence, targets: targetViews };
+  // 図の横軸: データのある最初の年度〜最後の年度の間の期間をすべて（間のデータの無い年度も落とさない）
+  const firstIndex =
+    trend.length === 0 ? -1 : data.periods.findIndex((p) => p.id === trend[0]!.period.id);
+  const lastIndex =
+    trend.length === 0 ? -1 : data.periods.findIndex((p) => p.id === trend.at(-1)!.period.id);
+  const trendPeriods = firstIndex === -1 ? [] : data.periods.slice(firstIndex, lastIndex + 1);
+
+  return { card, trend, trendPeriods, narratives, factorComments, evidence, targets: targetViews };
 }
 
 // ======================================================================

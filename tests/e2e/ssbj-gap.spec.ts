@@ -39,6 +39,13 @@ test.describe('SSBJ 対応状況（全体状況）', () => {
     const breakdown = main.getByRole('list', { name: '全要求事項の内訳' });
     await expect(breakdown.getByRole('listitem')).toHaveCount(6);
     await expect(breakdown.getByRole('listitem').first()).toContainText(/対応済み\d+ \/ \d+ 件/);
+    // 収録範囲（ユニバーサル基準は未収録・基準のすべての条項ではない）は「正式基準準拠」と一緒に、
+    // 折りたたみを開かずに見える
+    await expect(
+      main.getByText(
+        /^収録範囲: .*ユニバーサル基準（適用）は未収録。基準のすべての条項ではありません。$/,
+      ),
+    ).toBeVisible();
     // 件数の数え方・工程の説明は既定で閉じ、開くと読める（docs/disclosure-first.md §10.4）
     const counting = await openCollapsible(main, /^件数の数え方$/);
     await expect(

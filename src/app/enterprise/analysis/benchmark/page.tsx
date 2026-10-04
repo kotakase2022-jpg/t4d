@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Inbox } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
@@ -204,6 +205,9 @@ export default async function BenchmarkPage() {
     );
   }
 
+  // 表の列数（指標・自社・比較先・比較できる社・中央値・範囲）。定義・注記の行は全幅にする
+  const columnCount = 2 + view.peers.length + 3;
+
   return (
     <>
       {header}
@@ -260,32 +264,54 @@ export default async function BenchmarkPage() {
               </TR>
             </THead>
             <TBody>
-              {view.rows.map((row) => (
-                <TR key={row.metric.key} className="align-top">
-                  <th
-                    scope="row"
-                    className={`max-w-[200px] px-2 py-2 text-left align-top text-[12px] ${STICKY_FIRST_COLUMN}`}
-                  >
-                    <span className="font-semibold text-ink">{row.metric.label}</span>
-                    <span className="block font-normal text-ink-muted">（{row.metric.unit}）</span>
-                    {(row.metric.ownMethod || row.metric.note) && (
-                      <MoreInfo label="定義・注記" className="mt-0.5 font-normal">
-                        {row.metric.ownMethod && <p>自社の定義: {row.metric.ownMethod}</p>}
-                        {row.metric.note && <p>{row.metric.note}</p>}
-                      </MoreInfo>
+              {view.rows.map((row) => {
+                const hasNotes = Boolean(row.metric.ownMethod || row.metric.note);
+                return (
+                  <Fragment key={row.metric.key}>
+                    <TR className={hasNotes ? 'border-b-0 align-top' : 'align-top'}>
+                      {/* 行見出しは指標名と単位だけ。定義・注記を中に置くと、その文が行見出しの名前になり、
+                          表を読み上げで移動するたびに値より先に読まれるため、次の行に分ける */}
+                      <th
+                        scope="row"
+                        className={`max-w-[200px] px-2 py-2 text-left align-top text-[12px] ${STICKY_FIRST_COLUMN}`}
+                      >
+                        <span className="font-semibold text-ink">{row.metric.label}</span>
+                        <span className="block font-normal text-ink-muted">
+                          （{row.metric.unit}）
+                        </span>
+                      </th>
+                      <TD align="right" className="max-w-[200px] py-2 align-top">
+                        <OwnCell row={row} />
+                      </TD>
+                      {row.peers.map((cell) => (
+                        <TD
+                          key={cell.peer.id}
+                          align="right"
+                          className="max-w-[170px] py-2 align-top"
+                        >
+                          <PeerCell cell={cell} />
+                        </TD>
+                      ))}
+                      <StatsCells row={row} />
+                    </TR>
+                    {hasNotes && (
+                      <tr
+                        className="border-b border-line last:border-b-0"
+                        data-benchmark-notes={row.metric.key}
+                      >
+                        <td colSpan={columnCount} className="px-0 pb-1.5 pt-0 text-[12px]">
+                          <div className="sticky left-0 w-fit max-w-[480px] px-2">
+                            <MoreInfo label={`${row.metric.label} の定義・注記`}>
+                              {row.metric.ownMethod && <p>自社の定義: {row.metric.ownMethod}</p>}
+                              {row.metric.note && <p>{row.metric.note}</p>}
+                            </MoreInfo>
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </th>
-                  <TD align="right" className="max-w-[200px] py-2 align-top">
-                    <OwnCell row={row} />
-                  </TD>
-                  {row.peers.map((cell) => (
-                    <TD key={cell.peer.id} align="right" className="max-w-[170px] py-2 align-top">
-                      <PeerCell cell={cell} />
-                    </TD>
-                  ))}
-                  <StatsCells row={row} />
-                </TR>
-              ))}
+                  </Fragment>
+                );
+              })}
             </TBody>
           </Table>
         </div>

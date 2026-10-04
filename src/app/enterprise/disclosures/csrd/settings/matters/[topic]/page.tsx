@@ -297,11 +297,12 @@ export default async function CsrdMatterPage({
               </Table>
             </div>
           )}
-          {/* 編集フォームは表の外に置く（行の中で開くと表の幅が崩れる） */}
+          {/* 編集フォームは表の外に置く（行の中で開くと表の幅が崩れる）。summary は Card（overflow-hidden）の
+              端まで広がるため、フォーカスリングは内側に描く（外側に描くと切れて見えない） */}
           {detail.canEdit &&
             detail.iros.map(({ iro }) => (
               <details key={`edit-${iro.id}`} className="border-t border-line">
-                <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-[12px] text-brand-700 hover:underline">
+                <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-[12px] text-brand-700 hover:underline focus-visible:outline-offset-[-2px]">
                   <Pencil className="size-3.5" aria-hidden="true" />
                   {IRO_TYPE_LABEL[iro.iroType]}「{iro.description}」を編集
                 </summary>
@@ -321,7 +322,7 @@ export default async function CsrdMatterPage({
             ))}
           {detail.canEdit && (
             <details className="border-t border-line">
-              <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-[12px] font-medium text-brand-700 hover:underline">
+              <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-[12px] font-medium text-brand-700 hover:underline focus-visible:outline-offset-[-2px]">
                 <Plus className="size-3.5" aria-hidden="true" />
                 IRO を追加する
               </summary>

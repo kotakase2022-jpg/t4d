@@ -262,6 +262,58 @@ describe('ESG 経営の詳細（年次の推移）', () => {
     expect(summaryOf(factor)).toBe('要因の示し方');
   });
 
+  it('間の年度に承認済みの値が無ければ、その年度を横軸に残して線を切る（FY2024 と FY2026 をつながない）', async () => {
+    const scope1 = fixture.metrics.find(
+      (m) => m.organizationId === ORG_IDS.aomi && m.code === 'scope1',
+    )!;
+    const rowsOf = (periodId: string) =>
+      fixture.dataPoints.filter(
+        (d) => d.metricId === scope1.id && d.reportingPeriodId === periodId,
+      );
+    // FY2025 は全拠点が差戻し中（承認済みの値なし）。FY2026 は全拠点を承認済みにして確定値にする
+    for (const dp of rowsOf(PERIOD_IDS.fy2025)) dp.status = 'returned';
+    for (const dp of rowsOf(PERIOD_IDS.fy2026)) dp.status = 'approved';
+    render(
+      await KpiDetailPage({
+        params: Promise.resolve({ kpiKey: 'scope1' }),
+        searchParams: sp({ period: PERIOD_IDS.fy2026 }),
+      }),
+    );
+    const figure = screen.getByText('Scope1 の年次の推移').closest('figure')!;
+    const chart = within(figure).getByRole('img');
+    const label = chart.getAttribute('aria-label') ?? '';
+    expect(label).toContain('FY2024 9,735.4（確定）');
+    expect(label).toContain('FY2025 承認済みの値なし');
+    expect(label).toMatch(/FY2026 [\d,.]+（確定）/);
+    // 横軸に FY2025 を残し、値の無い位置に理由を書く。確定値の線は FY2025 で切れる（線分を引かない）
+    const svgTexts = [...chart.querySelectorAll('text')].map((t) => t.textContent);
+    expect(svgTexts).toEqual(expect.arrayContaining(['FY2024', 'FY2025', 'FY2026']));
+    expect(svgTexts).toContain('承認済みの値なし');
+    expect(chart.querySelectorAll('polyline')).toHaveLength(0);
+    expect(within(figure).getByText(/FY2025: 承認済みの値なし）で線を切っています/)).toBeTruthy();
+  });
+
+  it('間の年度にデータが 1 件も無くても、その年度を「未入力」として横軸に残す', async () => {
+    const scope1 = fixture.metrics.find(
+      (m) => m.organizationId === ORG_IDS.aomi && m.code === 'scope1',
+    )!;
+    const kept = fixture.dataPoints.filter(
+      (d) => !(d.metricId === scope1.id && d.reportingPeriodId === PERIOD_IDS.fy2025),
+    );
+    fixture.dataPoints.splice(0, fixture.dataPoints.length, ...kept);
+    render(
+      await KpiDetailPage({
+        params: Promise.resolve({ kpiKey: 'scope1' }),
+        searchParams: sp({ period: PERIOD_IDS.fy2026 }),
+      }),
+    );
+    const figure = screen.getByText('Scope1 の年次の推移').closest('figure')!;
+    const label = within(figure).getByRole('img').getAttribute('aria-label') ?? '';
+    expect(label).toContain('FY2024 9,735.4（確定）');
+    expect(label).toContain('FY2025 未入力');
+    expect(within(figure).getByText(/FY2025: 未入力）で線を切っています/)).toBeTruthy();
+  });
+
   it('全社値を算定できない指標は図にせず、その旨を外に書く', async () => {
     render(
       await KpiDetailPage({

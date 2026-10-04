@@ -58,10 +58,12 @@ async function loadView(
     roleKeys?: RoleKey[];
     source?: 'demo' | 'none';
     params?: Record<string, string>;
+    /** ヘッダーの報告期間（既定 FY2026） */
+    periodId?: string;
   } = {},
 ): Promise<FinancialImpactReady> {
   const fixture = createFixtureDb();
-  const period = fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!;
+  const period = fixture.periods.find((p) => p.id === (options.periodId ?? PERIOD_IDS.fy2026))!;
   const view = await loadFinancialImpact(
     new DemoDbClient(fixture),
     ctxFor('sustainability@demo.local', options.roleKeys ?? ['sustainability_manager']),
@@ -283,5 +285,61 @@ describe('画面の本体（デモ・現状維持）', () => {
     expect(annual.textContent).toContain('定量化できた経路のみ（0 / 9 経路）');
     expect(annual.textContent).not.toContain('営業利益');
     expect(container.textContent).toContain('定量化できた経路がありません（0 ではありません）');
+  });
+});
+
+describe('制度の前提の表（GX-ETS）と目標の扱い', () => {
+  /** 制度の前提の表で、事実の行見出しが text で始まる行の「この試算での扱い」 */
+  function handlingOf(container: HTMLElement, fact: RegExp): string {
+    const table = container.querySelector('details#fi-institutions table') as HTMLTableElement;
+    const row = within(table)
+      .getAllByRole('row')
+      .find((r) => fact.test(r.querySelector('th[scope="row"]')?.textContent ?? ''));
+    if (!row) throw new Error(`${String(fact)} の行が無い`);
+    return row.querySelector('td')?.textContent ?? '';
+  }
+
+  it('デモ（Scope1 約 0.9 万 t・ヘッダー FY2026 は収集中）: 直接の義務対象外の規模と書く', async () => {
+    const view = await loadView();
+    const { container } = render(<ReadyView view={view} />);
+    expect(handlingOf(container, /^GX-ETS/)).toBe(
+      '参考: 直接の義務対象外の規模（FY2025 の Scope1 は約 0.9 万 t-CO2e。CO2e であり、FY2026 は収集中のため 3 年平均も出しません）',
+    );
+  });
+
+  it('Scope1 が 10 万 t 以上なら「義務対象外」と書かない', async () => {
+    const view = await loadView();
+    const { container } = render(<ReadyView view={{ ...view, scope1Reference: 250_000 }} />);
+    const text = handlingOf(container, /^GX-ETS/);
+    expect(text).not.toContain('義務対象外');
+    expect(text).toContain('約 25.0 万 t-CO2e');
+    expect(text).toContain('参加義務の対象になりえます');
+  });
+
+  it('ヘッダーが締め済みの FY2025（基準年度と同じ）なら「収集中」と書かない', async () => {
+    const view = await loadView({ periodId: PERIOD_IDS.fy2025 });
+    const { container } = render(<ReadyView view={view} />);
+    const text = handlingOf(container, /^GX-ETS/);
+    expect(text).not.toContain('収集中');
+    expect(text).toContain('CO2e であり直接 CO2 の値ではないため、3 年平均も出しません');
+  });
+
+  it('達成済みの目標は「使わない（既に達成）」と理由つきで示す', async () => {
+    const view = await loadView();
+    const achieved = {
+      ...view,
+      targets: view.targets.map((t) =>
+        t.driver === 'scope1'
+          ? { ...t, status: 'achieved' as const, reasons: ['既に目標を達成しています。'] }
+          : t,
+      ),
+    };
+    const { container } = render(<ReadyView view={achieved} />);
+    const list = within(container).getByRole('list', { name: '起点ごとの目標' });
+    const item = within(list)
+      .getAllByRole('listitem')
+      .find((li) => li.textContent?.startsWith('Scope1:'));
+    expect(item?.textContent).toContain('使わない（基準年度の実績が既に目標を達成。一定）');
+    expect(item?.textContent).toContain('既に目標を達成しています。');
   });
 });

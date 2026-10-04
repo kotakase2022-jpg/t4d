@@ -376,6 +376,12 @@ export default async function SsbjRequirementsPage({
           {/* 件数の流れ。「なぜこの件数なのか」を画面上で検算できるようにする（各段の件数は文字で書く） */}
           <div className="space-y-1 border-b border-line px-3 py-2">
             <FunnelSteps label="要求事項の件数の流れ" steps={mappingFunnelSteps(mapping.counts)} />
+            {/* 「正式基準マスター n 項目」が基準の全条項に見えないよう、収録範囲を閉じずに添える */}
+            <p className="text-[11px] text-ink-muted">
+              {loaded.coverageNote
+                ? `収録範囲: ${loaded.coverageNote}。基準のすべての条項ではありません。`
+                : '収録範囲が一部の場合、基準のすべての条項ではありません。'}
+            </p>
             <p className="text-[11px] text-ink-muted">
               除外した件数: 対象外{' '}
               <span className="tabular-nums text-ink">{mapping.counts.notApplicable}</span>{' '}

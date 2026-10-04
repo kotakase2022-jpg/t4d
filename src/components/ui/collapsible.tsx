@@ -16,7 +16,8 @@ import { cn } from '@/lib/utils';
  * 開閉の印（シェブロン・「開く／閉じる」）は `group-open:` ではなく任意バリアント
  * `[details[open]>summary_&]:` で切り替える: 入れ子の details で外側が開いているだけで
  * 内側の印まで「閉じる」にならないよう、自分の summary の直上の details だけを見る。
- * フォーカスリングは globals.css の :focus-visible をそのまま使う（消さない）。
+ * フォーカスリングは globals.css の :focus-visible をそのまま使う（消さない）。card の summary は details の
+ * 枠いっぱいに広がるため、リングを内側に描く（祖先の overflow で切れて見えなくならないように）。
  */
 
 export type CollapsibleVariant = 'card' | 'plain';
@@ -87,8 +88,10 @@ export function Collapsible({
         className={cn(
           SUMMARY_RESET,
           'flex cursor-pointer items-center gap-1.5 rounded-t4d',
+          // card の summary は details の枠いっぱいに広がるため、外側に描くフォーカスリングは
+          // 祖先の overflow で切れうる。内側に描いて、どこに置いても見えるようにする
           card
-            ? 'px-3 py-2 text-[13px] font-semibold text-ink hover:bg-brand-50'
+            ? 'px-3 py-2 text-[13px] font-semibold text-ink hover:bg-brand-50 focus-visible:outline-offset-[-2px]'
             : 'py-1 text-[12px] text-ink-muted hover:text-ink',
         )}
       >

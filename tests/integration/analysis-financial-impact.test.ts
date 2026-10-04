@@ -171,6 +171,43 @@ describe('目標（目標達成シナリオ）', () => {
   });
 });
 
+describe('目標の向き（達成済みの目標で「目標達成」を悪化させない）', () => {
+  it('削減目標 9,500 t（FY2025 実績 8,931.6 t で達成済み）は使わず一定。回避コストは負にならない', async () => {
+    // 利用者が目標を改訂して、既に達成している値にした状態（ESG経営の目標の画面から登録できる）
+    const target = fixture.kpiTargets.find((t) => t.targetKey === 'scope1_reduction_2030')!;
+    target.targetValue = 9500;
+
+    const view = ready(await load());
+    const scope1 = view.targets.find((t) => t.driver === 'scope1')!;
+    expect(scope1.status).toBe('achieved');
+    expect(scope1.direction).toBe('reduce');
+    expect(scope1.reasons.join('')).toBe(
+      '基準年度（FY2025）の実績 8,931.6 t-CO2e が既に目標（9,500 t-CO2e 以下）を達成しているため、目標値へ戻す直線は引かず一定にします。',
+    );
+    // 現状維持を選んでいるときの要約タイルは「目標達成 − 現状維持」。悪化（負）にならない
+    expect(view.comparison.scenario).toBe('target');
+    expect(view.comparison.avoided).toBe(0);
+    expect(view.comparison.abatement).toBe(0);
+
+    const targetView = ready(await load(manager(), { params: { sc: 'target' } }));
+    expect(targetView.currentInput.targets.scope1).toBeUndefined();
+    expect(pathwayOf(targetView, 'P1').years.find((y) => y.year === 2030)!.value).toBeCloseTo(
+      -17_863_200,
+      0,
+    );
+  });
+
+  it('未達の削減目標（既定の 7,840 t）は向きを付けて渡し、従来どおり直線', async () => {
+    const view = ready(await load(manager(), { params: { sc: 'target' } }));
+    expect(view.currentInput.targets.scope1).toEqual({
+      targetYear: 2030,
+      targetValue: 7840,
+      direction: 'reduce',
+    });
+    expect(view.comparison.avoided).toBeGreaterThan(0);
+  });
+});
+
 describe('仮定の出所（Demo Mode と Supabase 相当）', () => {
   it('demo: 既定の仮定・架空のベースラインあり。定量化は 6 / 9 経路', async () => {
     const view = ready(await load());

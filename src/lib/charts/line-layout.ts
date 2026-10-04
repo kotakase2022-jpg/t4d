@@ -1,4 +1,4 @@
-import type { ChartText } from './bar-layout';
+import { MISSING_LABEL, type ChartText } from './bar-layout';
 import {
   estimateTextWidth,
   formatChartNumber,
@@ -60,6 +60,11 @@ export interface LineLayoutInput {
   /** 点の隣に数値を書くか（all: すべて、last: 系列ごとに最後の点、none）。既定は 6 点以下なら all、それ以上は last */
   valueLabels?: LineValueLabels;
   includeZero?: boolean;
+  /**
+   * 値の無い x に書く文字（xLabels と同じ順。null・省略は「未入力」）。データはあるが描く値が無い年度
+   * （例: 承認済みの値なし）を「未入力」と書かないために使う
+   */
+  missingLabels?: ReadonlyArray<string | null>;
   width?: number;
   height?: number;
 }
@@ -205,7 +210,7 @@ export function layoutLineChart(input: LineLayoutInput): LineLayout {
     .filter((index) => series.length > 0 && series.every((s) => !isChartNumber(s.values[index])))
     .map((index) => ({
       index,
-      text: '未入力',
+      text: input.missingLabels?.[index] ?? MISSING_LABEL,
       x: xPositions[index] ?? plot.left,
       y: plot.bottom - 10,
       anchor: 'middle' as const,

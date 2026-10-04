@@ -98,7 +98,12 @@ export function SsbjFlow({ steps }: { steps: SsbjFlowStep[] }) {
         })}
       </ol>
       {described.length > 0 && (
-        <Collapsible variant="plain" summary="各工程の説明" className="border-t border-line px-2.5">
+        // 下の余白は、閉じたときに Card（overflow-hidden）の下端に接する summary のフォーカスリングを切らないため
+        <Collapsible
+          variant="plain"
+          summary="各工程の説明"
+          className="border-t border-line px-2.5 pb-1"
+        >
           <ol className="space-y-1">
             {described.map(({ index, description }) => (
               <li key={index} className="flex items-start gap-1.5">

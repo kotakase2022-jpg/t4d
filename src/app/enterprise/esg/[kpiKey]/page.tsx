@@ -15,9 +15,11 @@ import {
   NARRATIVE_THEME_LABELS,
   kpiTargetLabel,
 } from '@/lib/domain/disclosure-status';
+import { KPI_TREND_GAP_LABEL, kpiTrendPoints } from '@/lib/charts/kpi-trend-points';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { isKpiKey, KPI_SPECS, loadKpiDetail, type KpiTrendRow } from '@/lib/services/kpi';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import type { ReportingPeriod } from '@/types/domain';
 import { DataStateBadge, KpiCard, NeedsCheckBadge, targetText } from '../kpi-card';
 
 export const metadata = { title: 'ESG 経営 KPI の詳細' };
@@ -34,10 +36,21 @@ function one(value: string | string[] | undefined): string | null {
 /**
  * 年次の推移の図（docs/disclosure-first.md §10.4 B6）。全拠点が承認済みの確定値と、集計中の年度の
  * 承認済み分のみの途中集計を別の系列（線種・点の形も違う）に分け、途中集計を確定値の線でつながない。
- * 承認済みの値が 1 つも無い年度は図に入れず（図は値の無い年を「未入力」と書くが、データはあるため）、
- * その旨を注記する。全社値を算定できない指標は図にしない（拠点値を足した値を作らない）
+ * 値を描かない年度（データが無い・承認済みの値が無い）も横軸に残して線を切り（前後を補間しない）、
+ * 「未入力」「承認済みの値なし」と書き分ける（データのある年度を「未入力」と書かない）。
+ * 全社値を算定できない指標は図にしない（拠点値を足した値を作らない）
  */
-function TrendChart({ rows, unit, label }: { rows: KpiTrendRow[]; unit: string; label: string }) {
+function TrendChart({
+  rows,
+  periods,
+  unit,
+  label,
+}: {
+  rows: KpiTrendRow[];
+  periods: ReportingPeriod[];
+  unit: string;
+  label: string;
+}) {
   if (rows.some((row) => !row.state.computable)) {
     return (
       <p className="text-[12px] text-ink">
@@ -45,42 +58,50 @@ function TrendChart({ rows, unit, label }: { rows: KpiTrendRow[]; unit: string; 
       </p>
     );
   }
-  const plotted = rows.filter((row) => row.state.approvedValue !== null);
-  const omitted = rows.filter((row) => row.state.approvedValue === null);
-  if (plotted.length === 0) {
+  if (rows.every((row) => row.state.approvedValue === null)) {
     return <p className="text-[12px] text-ink-muted">承認済みの値がある年度はまだありません。</p>;
   }
-  const confirmed = plotted.map((row) => (row.state.complete ? row.state.approvedValue : null));
-  const partial = plotted.map((row) => (row.state.complete ? null : row.state.approvedValue));
+  const points = kpiTrendPoints(periods, rows);
   const series = [
-    { label: '確定値（全拠点承認済み）', values: confirmed },
-    ...(partial.some((value) => value !== null)
-      ? [{ label: '承認済み分のみ（集計中・比較に使いません）', values: partial, dashed: true }]
+    { label: '確定値（全拠点承認済み）', values: points.confirmed },
+    ...(points.partial.some((value) => value !== null)
+      ? [
+          {
+            label: '承認済み分のみ（集計中・比較に使いません）',
+            values: points.partial,
+            dashed: true,
+          },
+        ]
       : []),
   ];
   // 図の代替文は年度ごとに 1 つの値と区分で書く（系列ごとに書くと、もう一方の系列の年が「未入力」と
-  // 読まれ、データのある集計中の年度まで未入力に見えるため）
-  const summary = `${label} の年次の推移（単位: ${unit}）。${plotted
-    .map(
-      (row) =>
-        `${row.period.code} ${formatNumber(row.state.approvedValue)}（${
-          row.state.complete ? '確定' : '集計中・承認済み分のみ'
-        }）`,
-    )
-    .join('、')}。`;
+  // 読まれ、データのある集計中の年度まで未入力に見えるため）。値を描かない年度はその理由を書く
+  const byId = new Map(rows.map((row) => [row.period.id, row]));
+  const yearTexts = points.xLabels.map((code, index) => {
+    const gap = points.missingLabels[index];
+    if (gap) return `${code} ${gap}`;
+    const row = byId.get(periods[index]?.id ?? '') ?? rows.find((r) => r.period.code === code);
+    return `${code} ${formatNumber(row?.state.approvedValue ?? null)}（${
+      row?.state.complete ? '確定' : '集計中・承認済み分のみ'
+    }）`;
+  });
+  const summary = `${label} の年次の推移（単位: ${unit}）。${yearTexts.join('、')}。`;
   return (
     <LineChart
       title={`${label} の年次の推移`}
-      xLabels={plotted.map((row) => row.period.code)}
+      xLabels={points.xLabels}
       series={series}
       unit={unit}
+      missingLabels={points.missingLabels}
       summary={summary}
       table={false}
       width={560}
       height={200}
       note={
-        omitted.length > 0
-          ? `承認済みの値が無い年度（${omitted.map((row) => row.period.code).join('、')}）は図に含めません`
+        points.gaps.length > 0
+          ? `値を描かない年度（${points.gaps
+              .map((gap) => `${gap.code}: ${KPI_TREND_GAP_LABEL[gap.kind]}`)
+              .join('、')}）で線を切っています（前後の年度をつなぎません）`
           : undefined
       }
     />
@@ -153,7 +174,12 @@ export default async function KpiDetailPage({
               </p>
             ) : (
               <div className="space-y-2 px-3 py-2">
-                <TrendChart rows={detail.trend} unit={unit} label={spec.label} />
+                <TrendChart
+                  rows={detail.trend}
+                  periods={detail.trendPeriods}
+                  unit={unit}
+                  label={spec.label}
+                />
                 <Collapsible
                   summary={`年度ごとの値と前年との連続性（${detail.trend.length} 年度${
                     discontinuityCount > 0 ? `・比較条件の確認が必要 ${discontinuityCount} 件` : ''

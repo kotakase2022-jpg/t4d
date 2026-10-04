@@ -1,7 +1,6 @@
 import {
   Check,
   CircleDot,
-  CircleMinus,
   Equal,
   FileSpreadsheet,
   FlaskConical,
@@ -9,6 +8,7 @@ import {
   Plus,
   TriangleAlert,
   XCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import { StatusBreakdown } from '@/components/charts/status-breakdown';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
@@ -32,9 +32,10 @@ import {
   STANDARD_FIELD_LABELS,
   type StandardColumn,
 } from '@/lib/imports/standard-csv';
+import { importHistoryBreakdown } from '@/lib/imports/history-breakdown';
 import { listQuantitativeImportBatches } from '@/lib/services/quantitative-import';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import type { QuantitativeImportStatus } from '@/types/domain';
+import type { QuantitativeImportDiffKind, QuantitativeImportStatus } from '@/types/domain';
 import { StandardImport } from './standard-import';
 
 export const metadata = { title: '数値を登録' };
@@ -65,9 +66,12 @@ const COLUMN_NOTES: Record<StandardColumn, { required: string; note: string }> =
   source_reference: { required: '任意', note: '出所（資料名・シート・セルなど）' },
 };
 
-function sum<T>(items: readonly T[], pick: (item: T) => number): number {
-  return items.reduce((total, item) => total + pick(item), 0);
-}
+const BREAKDOWN_ICON: Record<QuantitativeImportDiffKind, LucideIcon> = {
+  new: Plus,
+  changed: PenLine,
+  unchanged: Equal,
+  error: TriangleAlert,
+};
 
 const BATCH_STATUS_META: Record<
   QuantitativeImportStatus,
@@ -85,6 +89,7 @@ export default async function StandardImportPage() {
   const demo = getAppMode() === 'demo';
 
   const history = allowed ? await listQuantitativeImportBatches(db, ctx, 10) : [];
+  const breakdown = importHistoryBreakdown(history);
 
   const scope = ctx.workspace.unitScopeIds;
   const units = shell.units
@@ -222,48 +227,34 @@ export default async function StandardImportPage() {
               />
             ) : (
               <div className="space-y-2 px-3 pb-3">
-                {/* 直近の取込の行を区分ごとに合計した帯。取込ごとの数は既定で閉じた表に置く（§10.4 B6） */}
-                <StatusBreakdown
-                  label={`直近 ${history.length} 件の取込の行の内訳`}
-                  unit="行"
-                  items={[
-                    {
-                      key: 'new',
-                      label: '新規',
-                      count: sum(history, (h) => h.counts.new),
-                      icon: Plus,
-                    },
-                    {
-                      key: 'changed',
-                      label: '変更',
-                      count: sum(history, (h) => h.counts.changed),
-                      icon: PenLine,
-                    },
-                    {
-                      key: 'unchanged',
-                      label: '変更なし',
-                      count: sum(history, (h) => h.counts.unchanged),
-                      icon: Equal,
-                    },
-                    {
-                      key: 'error',
-                      label: 'エラー',
-                      count: sum(history, (h) => h.counts.error),
-                      icon: TriangleAlert,
-                    },
-                    {
-                      key: 'excluded',
-                      label: '除外（未登録）',
-                      count: sum(history, (h) => h.excludedCount),
-                      icon: CircleMinus,
-                    },
-                  ]}
-                />
+                {/* 確定した取込の行を区分ごとに合計した帯（重ならない区分だけ）。検証のみの取込は
+                    台帳に書いていないため数えない。取込ごとの数は既定で閉じた表に置く（§10.4 B6） */}
+                {breakdown.committedBatches === 0 ? (
+                  <p className="text-[12px] text-ink-muted">
+                    確定した取込はまだありません（検証のみ・未確定の {breakdown.otherBatches}{' '}
+                    件は行数を合計しません）。
+                  </p>
+                ) : (
+                  <>
+                    <StatusBreakdown
+                      label={`直近 ${history.length} 件のうち確定した ${breakdown.committedBatches} 件の取込の行の内訳`}
+                      unit="行"
+                      items={breakdown.items.map((item) => ({
+                        ...item,
+                        icon: BREAKDOWN_ICON[item.key],
+                      }))}
+                    />
+                    <p className="text-[11px] text-ink-muted">
+                      確定した取込の {breakdown.totalRows} 行の内訳です。エラーの{' '}
+                      {breakdown.excludedRows} 行は登録せずに除外しました。
+                      {breakdown.otherBatches > 0 &&
+                        ` 検証のみ・未確定の ${breakdown.otherBatches} 件は台帳に書いていないため数えていません。`}
+                    </p>
+                  </>
+                )}
                 <Collapsible
                   variant="plain"
-                  summary={`取込ごとの内訳（${history.length} 件・確定 ${
-                    history.filter((h) => h.status === 'committed').length
-                  } 件）`}
+                  summary={`取込ごとの内訳（${history.length} 件・確定 ${breakdown.committedBatches} 件）`}
                 >
                   <div className="overflow-x-auto">
                     <Table>

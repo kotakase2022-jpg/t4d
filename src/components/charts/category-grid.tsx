@@ -55,7 +55,7 @@ export function CategoryGrid({
             key={item.key}
             data-filled={item.filled ? 'true' : 'false'}
             className={cn(
-              'min-w-0 rounded-t4d px-2 py-1.5 text-[11px]',
+              'min-w-0 rounded-t4d px-2 py-1.5 text-caption',
               item.filled
                 ? 'border border-brand-300 bg-brand-50'
                 : 'border border-dashed border-ink-muted bg-surface',

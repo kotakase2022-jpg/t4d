@@ -4,10 +4,7 @@ import { cn } from '@/lib/utils';
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn(
-        'rounded-t4d-lg border border-line bg-surface shadow-[0_1px_2px_rgba(23,32,51,0.04)]',
-        className,
-      )}
+      className={cn('rounded-t4d-lg border border-line bg-surface shadow-raised', className)}
       {...props}
     />
   );
@@ -28,14 +25,14 @@ export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDiv
 export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   // 汎用プリミティブのため children は呼び出し側が必ず渡す（静的解析では判定できない）。
   // eslint-disable-next-line jsx-a11y/heading-has-content
-  return <h2 className={cn('text-[13px] font-semibold text-ink', className)} {...props} />;
+  return <h2 className={cn('text-body font-semibold text-ink', className)} {...props} />;
 }
 
 export function CardDescription({
   className,
   ...props
 }: React.HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn('text-[12px] text-ink-muted', className)} {...props} />;
+  return <p className={cn('text-small text-ink-muted', className)} {...props} />;
 }
 
 export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

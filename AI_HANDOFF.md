@@ -3045,3 +3045,90 @@ commit・push・deploy はしていない。`docs/disclosure-first.md` は編集
 - 2026-10-04〜05: 統合（0085c6e）→ 自己監査 19 件の修正（b4e8777）→ `vercel deploy --prod` → `vercel alias set` → 本番スモーク 32/32
   （1 件はエイリアス切替直後の一過性の React #418。再現せず）→ 本番で主デモ＋CSRD の流れ 17/17 → 共有メモリを消すため同じコードを再デプロイ。
 - 結果と残課題は `docs/disclosure-first.md` §10.7。
+
+## 2026-10-07 UI 再設計 Stage A（土台）の実装（単独・未コミット）
+
+正は `docs/ui-redesign/plan.md`（編集していない）。Stage B が使う API・規則・B への注意は `docs/ui-redesign/handoff/A.md`。
+commit・push・deploy はしていない。スキーマ・RLS・権限の定義（roles.ts・0002_identity.sql）は変えていない。
+
+### 変更
+
+- 部品（`src/components/ui`・`src/components/shared`）: Button の契約（variant を primary／secondary（既定）／quiet／ghost／danger／link に、`data-variant` を常に出す）、IconButton、Field・FormSection・NativeSelect・NativeCheckbox、StatusBadge と状態登録簿（`src/lib/ui/status`）、HonestyBadge、Notice・FlashMessage（文言のドメイン別分割）、EmptyState（kind）・ErrorState（何が・なぜ・どうする）・スケルトン、ConfirmDialog、PageActions・MoreMenu（その他）・RowActions・BulkActionBar、DataTable 一式（列の表示を URL `cols` と端末ごとの保存ビューで）、Section・MetricStrip・AttentionStrip・NavTabs・StepNav・CandidateDecision・CreatePanel、状態で変わる操作の表（`src/lib/ui/state-actions.ts`）
+- ナビ: グループの開閉（利用者ごとに記憶。開示の閲覧権限が無い役割は開示のグループを既定で閉じる）、監査法人ツリーの再編（計画・実施・結論・記録）、監査法人の役割切替、ヘッダーの「検索 Ctrl K」、Command Palette の拡張（最近・おすすめ・操作・画面・設定・データ検索）、`?` のヘルプ（用語集）、`g`＋キー、上端の遷移プログレス、ROUTE_CATALOG（page.tsx 全 78 本を 79 項目で）
+- ホーム: 先頭に「自分が次に行う作業」（MyWork）と「はじめに」（役割別 3 手順）。開示デモのリセットは見出しの「その他」→ 確認ダイアログ。開示の閲覧権限が無い利用者の既定タブは ESG経営
+- 業務エラー: `enterprise/actions.ts`・`assurance/actions.ts` の Action を withUserFacingError で包み `?error=` に（本番で文が伏せられて error.tsx に落ちていた）。権限エラーの文を「この操作には「{権限名}」の権限が必要です。{持つ役割}に依頼してください。」に。AppShell が `?error=` を出していない画面に補う（GlobalErrorNotice）
+- 即時反映: コメントの送信中の表示、通知の既読（useOptimistic）
+- トークン（文字サイズ・色・影・z・段組）と codemod（`scripts/codemod-tokens.mjs`）。約 170 ファイルの機械的な置換（見た目は Tailwind の生成する宣言の同一性で確認）
+- 自動検査: Server Action の到達性・ルートの到達性（静的・E2E）・業務エラーが届く・UI の段階的上限（ratchet）・危険な操作・権限ゲート・primary 監査（E2E。スライス別の基準）・skip ガード（レポーター）・機能 → E2E 対応表
+
+### テスト結果（2026-10-07 ローカル。E2E は単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` 合格。
+- `pnpm test`: 180 ファイル・**2,404 件**合格（2,028 件から 376 件増）。
+- `pnpm test:rls`: 2 ファイル・311 件合格。`pnpm check:rls` 合格（ポリシー 240）。
+- `E2E_PORT=3217 pnpm test:e2e`: **351 件すべて合格・15.1 分**（324 件から 27 件増。primary 監査は全件の分を基準へ merge した実行）。primary 監査の検査モード単独: 10 件合格。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: 25 件すべて合格。
+
+### 未解決・次作業
+
+- Stage B（6 スライス）: `docs/ui-redesign/handoff/A.md` の §2 の表（基準ファイル・保留の表を空にする）と §4。
+- 開示優先メニューで開くと権限なしになる項目 3 つ（拠点担当の開示プロジェクト、レビュー担当・最終承認者の標準 CSV）。メニューの permission は固定テストのため変えていない（plan Q2。発注者確認）。
+- 出力リンクが権限の無い役割にも出る（R3）: レビュー担当・拠点担当・最終承認者の 10 画面（`reachability.spec.ts` の表）。
+- 全件実行の 1 回で screen-audit（承認者）が CDP の設問の詳細で React #418 を 1 度だけ出した。次の全件実行では再現せず。
+- codemod の画素差 0 のスクリーンショット比較は行っていない（宣言の同一性で代替）。
+
+## 2026-10-07 UI 再設計 Stage C（統合）の実装（単独・未コミット）
+
+正は `docs/ui-redesign/plan.md`（編集していない）。Stage B の各スライスの依頼（`docs/ui-redesign/handoff/B*.md`）をすべて適用し、全ゲートを通した。
+回帰の判定は `docs/ui-redesign/regression.md`（画面 81・機能 144・出力 API 12 の全件。Missing・Broken 0）。
+commit・push・deploy はしていない。スキーマ・RLS・権限の定義（roles.ts・0002_identity.sql）は変えていない。
+
+### 変更
+
+- **部品（A 所有）**: `ActionSpec.shortcut: 'new'`（n キーの飛び先。作成の primary 17 か所に付けた）、`CommentBox` の送信を secondary に（データの詳細の「コメントを書く」の包みを外し、1 クリック減）、`CandidateDecision` に採用時の入力欄（`adoptFields`）と入力を残す Action（`preservingAction`）、`DetailBadge`（title= の補足を sr-only＋Hint に）、`FilterBar` の「絞り込み解除」がタブ・列・並べ替え・表示件数を保つ、`DataTable` の表を画面の高さの箱に入れて見出しの固定を実際に効かせる（溢れたときだけフォーカスできる。`data-table/scroll-region.tsx`）、`NavBreadcrumbs`・`engagementIdFromPath` が pathname=null を許す、`AssuranceNextWork` を `src/components/shared` に（型は `src/lib/ui/assurance-work.ts`）、未使用の `EvidenceBadge`・`ValidationBadge` を削除
+- **ナビ・パレット**: ROUTE_CATALOG に新ルート 3 本（指標の追加・編集、キャンペーンの作成）。開示優先メニューの「数値を登録（標準CSV）」を取込の権限で出し分け、「開示プロジェクト」の行は閲覧権限の無い役割では最初の子（SSBJ）へ（`NavItem.linkPermission`・`visibleNavTree`）。監査法人の「記録 > 出力」を出力の権限で出し分け。タスク動詞に「最優先のギャップを開く」「収集キャンペーンを作成する」、指標・拠点の追加は作成画面へ直接。パレットに CSRD 設定の 3 段・監査法人の作成 6 種（起票・資料依頼・指摘・レビューNote・サンプル・チーム）。デモ案内の文言（その他・タブ）
+- ~~権限の不一致の解消（R1・plan Q6）~~ → **統括が取り消し（2026-10-07）**: 権限の挙動を変えないため、設定の入口は企業管理者のまま。タスク動詞・パレット・ROUTE_CATALOG も管理者だけに揃えた（permission-gates の R1 は pending）
+- **業務エラー・結果の通知**: 認証の 4 Action（ログイン 2・ワークスペース選択・招待の受諾）を withUserFacingError で包み、`createInvitation`・`acceptInvitation` の入力の誤りを ValidationError に（本番で識別子に化けていた）。設定の Action の戻り先に `?tab=`（招待・許諾・セキュリティ、作成は `&new=1`）。許諾の取消・再付与の後に結果の通知（取消には「元に戻す」＝再付与。区分 3）。SSBJ の前年度評価の引継ぎ（F048）に結果の通知。SSBJ のデータ収集項目の作成の業務エラーは作成欄を開いて戻す
+- **一括の差戻し**: 理由を必須にし、`bulkTransition` に任意の `comment` を足して各行のコメント・承認の記録に残す（既存の呼び出しは不変。integration で確認）
+- **データの詳細**: 承認の権限を持つ人には、承認の道筋が進行中なら見出しの「承認フローへ（n/5 段階）」を常に出す（現段階を決められる承認者に案内が消えていた。E2E で検出）
+- **ESG経営の目標**: 新規の基準年を既定で入れず、直近の締めた年度を候補（例と説明）として示す（基準年だけが入った既定のまま送ると、サービスが「基準年と基準値は両方」で必ず拒んでいた。E2E で検出）
+- **E2E で見つけて直したもの（テストの直し）**: screen-audit の案件の概要の本文リンクは、既定で閉じた節を開いてから押す（plan §5.3 の 1）。ssbj-gap の列の切替はメニューを閉じてから見出しを確かめる（開いている間は本文が読み上げの外。table-controls と同じ手順）。本番スモークのマテリアリティ削除はダイアログ、SSBJ 要求事項の隠し列は「列」から、133 件は 100 件ずつ 2 ページ、CSV は「その他」
+- **トークン・codemod の仕上げ**: 数値の z-index を役割のトークンへ（sticky-col・sticky・pane・pane-overlay・overlay・modal・popover・skiplink）、影を `shadow-raised`／`shadow-overlay`、`rounded-sm` を `rounded-t4d-sm`、`text-[10px]`・`text-[11.5px]`・`text-[28px]` をトークンへ、素の select・checkbox・details と `Button type="submit"` を共通部品へ、kind の無い EmptyState を解消。0 にした 13 項目を ESLint の `no-restricted-syntax` でエラーにした（`eslint.config.mjs`）。ratchet の基準を最終値へ（Card 269→24、title= の補足 30→8、type Tone 5→4。iframe の title は読み上げ名なので数えない）
+- **検査の厳格化**: primary 監査の許容リスト（基準ファイル）を削除して例外なしに。サンプルにタブ・段・作成パネルの変種を足した（設定 6・組織 5・プロジェクトのタブ 6・CSRD 設定 3・監査法人の作成 6 など）。到達性の例外の表（KNOWN_MENU_DENIED・KNOWN_FORBIDDEN_EXPORTS）を空に。業務エラーの保留（PENDING）・権限ゲートの保留（R1）を解消
+- **E2E**: 横断 spec を B の依頼どおりに直した（すべて plan §5.3 の 3 種類: 開いてから確かめる・§1.17 の 1 対 1 置換）。新設 `aa-task-paths.spec.ts`（主要タスクのクリック数 C1〜C10）、`zzzz-relocated-features.spec.ts`（置き場所を変えた・UI を付けた 14 機能を新しい置き場所から実行）。feature-coverage の `NO_E2E_YET` を 24 → 13（旧版を除く）
+
+### テスト結果（2026-10-07 ローカル。E2E は単独実行）
+
+- `pnpm lint`（0 にした 13 項目の ESLint 規則を含む）/ `pnpm format:check` / `pnpm typecheck` / `pnpm build` / `pnpm check:colors` 合格。
+- `pnpm test`: 185 ファイル・**2,488 件**合格（Stage A 後 2,404 件、Stage B 統合直後は route-catalog の 1 件が失敗していた）。
+- `pnpm test:rls`: 2 ファイル・311 件合格。`pnpm check:rls`: 106 表・RLS 有効 106・ポリシー 240 で合格（変更なし）。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: **25 件すべて合格**（1.5 分）。
+- `E2E_PORT=3217 pnpm test:e2e`（全件・単独実行・retries 0）: **372 件すべて合格・16.4 分**（skip 0。primary 監査は許容リストなし、到達性は例外の表なし）。1 回目の全件実行（352 件）で 4 件が落ち（監査法人の担当者の「出力」が権限なし、案件の概要の閉じた節の中のリンク、SSBJ 要求事項の列の切替の手順、承認者への「承認フローへ」の案内）、新設 spec の 1 回目で ESG の目標の既定値の欠陥を見つけ、直してから通した。
+- `PROD_BASE_URL=http://127.0.0.1:3217 pnpm test:e2e:prod`（ローカルの `next start`・Demo Mode・単独）: **32 件すべて合格**（1 回目はマテリアリティ削除の確認ダイアログ・SSBJ の隠し列・CSV の置き場所で落ち、spec を新しい置き場所に直した）。本番（Vercel）には流していない（デプロイしていないため）。
+
+### 指標（docs/ui-redesign/metrics-before.json → metrics-after.json）
+
+| 項目                               | 変更前          | 変更後             |
+| ---------------------------------- | --------------- | ------------------ |
+| 任意値の文字サイズ                 | 1,952           | 0                  |
+| クラスの中の hex                   | 118             | 0                  |
+| 数値の z-index                     | 27              | 0                  |
+| 旧 variant="outline"               | 159             | 0                  |
+| 素の details／select／checkbox     | 19／100／29     | 0／0／0            |
+| Card                               | 269             | 24                 |
+| Button type="submit"               | 70              | 0                  |
+| title= の補足                      | 30              | 8                  |
+| 入力が 7 つ以上の Dialog           | 4               | 0                  |
+| kind の無い EmptyState             | 97              | 0                  |
+| primary が 2 つ以上の画面          | 19              | 0（E2E・例外なし） |
+| メニュー・パレットから届かない画面 | 11              | 0（E2E・例外なし） |
+| UI の無い業務の Server Action      | 2（F048・F121） | 0                  |
+
+### 未解決・次作業
+
+- 発注者確認（plan §7）: Q2（メニューの permission を画面の権限に揃えるか。今回は開示優先の 2 項目と監査法人の出力だけを出し分けた）、Q3（SSBJ・CDP の閲覧ゲート R6）、Q4（MSCI・FTSE）、Q5（デモ利用者の追加）。全社スコープの利用者の取込の拠点の既定（handoff B1 §4）
+- `CandidateDecision` を SSBJ・CSRD の要求事項の詳細へ寄せる（部品は拡張済み。画面は同じ規則を実装済み）
+- 組織・拠点のページのアダプタ（`organizations/_lib/form-adapter.ts`）: `enterprise/actions.ts` の 6 Action に戻り先を渡せる形を足せば消せる（handoff B5 C6）
+- 見出しにタブを持つ表（プロジェクトの要求事項・原稿）で検索を有効にする（「絞り込み解除」は直したので可能。サーバー側の `q` の受け手が要る）
+- feature-coverage の `NO_E2E_YET` 13 件（F025・F055・F058・F060・F080・F081・F083〜F086・F095・F097・F101）は unit／integration で確認している。E2E を足すなら開示プロジェクトの設定（F083〜F086）を優先
+- 本番は未反映（デプロイは統括の判断。手順はメモリ「本番デプロイのエイリアス手順」）

@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { FlashMessage } from '@/components/shared/flash';
-import { DemoResetCard } from '@/app/enterprise/dashboard/disclosure-home-view';
+// 開示デモのリセットはホームの「その他」から開く確認ダイアログへ移した（plan §1.16・S2）。中身は同じ
+import { DemoResetConfirm } from '@/app/enterprise/dashboard/demo-reset';
 import {
   PreservingForm,
   restoreFormValues,
@@ -25,8 +26,8 @@ const flashText = (params: Record<string, string>) => {
 };
 
 describe('F1 開示デモのリセットは、戻す範囲（CSRD を含む）をすべて示す', () => {
-  it('リセットのカードは CSRD の設定・DMA・評価・計画・ドラフト・収集項目・AI 実行記録も戻すと書く', () => {
-    render(<DemoResetCard />);
+  it('リセットの確認は CSRD の設定・DMA・評価・計画・ドラフト・収集項目・AI 実行記録も戻すと書く', () => {
+    render(<DemoResetConfirm />);
     const text = document.body.textContent ?? '';
     for (const word of [
       'CSRD の設定（報告範囲・評価方法）',

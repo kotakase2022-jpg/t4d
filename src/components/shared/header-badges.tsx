@@ -1,5 +1,5 @@
 import { CalendarClock } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { DetailBadge } from './detail-badge';
 
 /**
  * デモ基準日（src/lib/clock.ts の describeReferenceDate）。
@@ -10,9 +10,9 @@ import { Badge } from '@/components/ui/badge';
  */
 export function ReferenceDateBadge({ label }: { label: string }) {
   return (
-    <Badge
+    <DetailBadge
       tone="outline"
-      title="デモでは、期限・超過の判定をこの日を「今日」として計算しています（閲覧日とは異なります）。"
+      detail="デモでは、期限・超過の判定をこの日を「今日」として計算しています（閲覧日とは異なります）。"
     >
       <CalendarClock className="size-3" aria-hidden="true" />
       {/* 1600px 未満では「デモ」を読み上げだけにして幅を詰める（ヘッダーの開示プロジェクトの表示を潰さない） */}
@@ -24,6 +24,6 @@ export function ReferenceDateBadge({ label }: { label: string }) {
       ) : (
         label
       )}
-    </Badge>
+    </DetailBadge>
   );
 }

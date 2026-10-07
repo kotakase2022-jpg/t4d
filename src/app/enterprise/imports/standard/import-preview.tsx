@@ -15,6 +15,7 @@ import { DataPointStatusBadge } from '@/components/shared/badges';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
+import { Collapsible } from '@/components/ui/collapsible';
 import type {
   QuantitativeImportPreview,
   QuantitativeImportPreviewRow,
@@ -62,17 +63,17 @@ export function MappingSection({ preview }: { preview: QuantitativeImportPreview
   const unused = preview.mapping.filter((m) => m.field === null).length;
   return (
     <section aria-labelledby="standard-mapping-title" className="space-y-2">
-      <h3 id="standard-mapping-title" className="text-[13px] font-semibold text-ink">
+      <h3 id="standard-mapping-title" className="text-body font-semibold text-ink">
         2. 列対応（標準列の確認）
       </h3>
-      <p className="text-[12px] text-ink-muted">
+      <p className="text-small text-ink-muted">
         {preview.sourceKind === 'manual'
           ? '手入力の項目は標準列のとおりです。'
           : `${preview.formatLabel}／文字コード: ${preview.encoding}／${preview.delimiterLabel}`}
       </p>
       {candidates > 0 && (
-        <p className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-[12px] text-ink">
-          <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+        <p className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-small text-ink">
+          <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-warning-ink" aria-hidden="true" />
           標準列名と一致しない見出しが {candidates}{' '}
           列あり、標準列の「候補」に対応付けました。下の対応が正しいか確認してください。
         </p>
@@ -90,7 +91,7 @@ export function MappingSection({ preview }: { preview: QuantitativeImportPreview
             <TBody>
               {preview.mapping.map((m, index) => (
                 <TR key={`${m.header}-${index}`}>
-                  <TD className="font-mono text-[12px]">
+                  <TD className="font-mono text-small">
                     {m.header || `（見出しなし ${index + 1} 列目）`}
                   </TD>
                   <TD>{m.fieldLabel ?? '—'}</TD>
@@ -119,7 +120,7 @@ export function MappingSection({ preview }: { preview: QuantitativeImportPreview
         </div>
       )}
       {unused > 0 && (
-        <p className="text-[11px] text-ink-muted">
+        <p className="text-caption text-ink-muted">
           使わない列 {unused} 列は登録に使いません（エラーにはしません）。
         </p>
       )}
@@ -137,10 +138,10 @@ export function SummarySection({ preview }: { preview: QuantitativeImportPreview
   return (
     <section aria-labelledby="standard-summary-title" className="space-y-2">
       {/* 検証の直後にフォーカスを移す先（tabIndex=-1: Tab 順には入れない） */}
-      <h3 id="standard-summary-title" tabIndex={-1} className="text-[13px] font-semibold text-ink">
+      <h3 id="standard-summary-title" tabIndex={-1} className="text-body font-semibold text-ink">
         3. 検証
       </h3>
-      <p className="text-[12px] text-ink-muted">
+      <p className="text-small text-ink-muted">
         「{preview.fileName}」 {preview.rows.length} 行を検証しました（まだ登録していません）。
       </p>
       <ul className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -148,15 +149,15 @@ export function SummarySection({ preview }: { preview: QuantitativeImportPreview
           const meta = DIFF_META[tile.kind];
           return (
             <li key={tile.kind} className="rounded-t4d-lg border border-line bg-surface px-3 py-2">
-              <span className="flex items-center gap-1 text-[11px] font-medium text-ink-muted">
+              <span className="flex items-center gap-1 text-caption font-medium text-ink-muted">
                 <meta.Icon className="size-3" aria-hidden="true" />
                 {tile.label}
               </span>
-              <span className="tnum mt-0.5 block text-[20px] font-semibold leading-7 text-ink">
+              <span className="tnum mt-0.5 block text-figure font-semibold leading-7 text-ink">
                 {preview.counts[tile.kind]}
-                <span className="ml-1 text-[12px] font-normal text-ink-muted">行</span>
+                <span className="ml-1 text-small font-normal text-ink-muted">行</span>
               </span>
-              <span className="block text-[11px] text-ink-muted">{tile.hint}</span>
+              <span className="block text-caption text-ink-muted">{tile.hint}</span>
             </li>
           );
         })}
@@ -166,10 +167,10 @@ export function SummarySection({ preview }: { preview: QuantitativeImportPreview
           {preview.fileWarnings.map((warning) => (
             <li
               key={warning}
-              className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-[12px] text-ink"
+              className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-small text-ink"
             >
               <AlertTriangle
-                className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]"
+                className="mt-0.5 size-3.5 shrink-0 text-warning-ink"
                 aria-hidden="true"
               />
               {warning}
@@ -197,7 +198,7 @@ function ValueCell({ row }: { row: QuantitativeImportPreviewRow }) {
       <span className="text-ink">
         {row.availabilityLabel}
         {row.absenceReason && (
-          <span className="block text-[11px] text-ink-muted">理由: {row.absenceReason}</span>
+          <span className="block text-caption text-ink-muted">理由: {row.absenceReason}</span>
         )}
       </span>
     );
@@ -209,7 +210,7 @@ function ValueCell({ row }: { row: QuantitativeImportPreviewRow }) {
     <span className="tnum whitespace-nowrap">
       {row.valueDisplay}
       {row.unitOfMeasure && (
-        <span className="ml-1 text-[11px] text-ink-muted">{row.unitOfMeasure}</span>
+        <span className="ml-1 text-caption text-ink-muted">{row.unitOfMeasure}</span>
       )}
     </span>
   );
@@ -217,21 +218,21 @@ function ValueCell({ row }: { row: QuantitativeImportPreviewRow }) {
 
 function PreviousCell({ row }: { row: QuantitativeImportPreviewRow }) {
   const previous = row.previous;
-  if (!previous) return <span className="text-[11px] text-ink-muted">既存の値なし</span>;
+  if (!previous) return <span className="text-caption text-ink-muted">既存の値なし</span>;
   return (
     <div className="space-y-0.5">
       <div className="tnum whitespace-nowrap text-right">
         {previous.valueDisplay}
         {previous.availabilityStatus === 'value_present' && (
-          <span className="ml-1 text-[11px] text-ink-muted">{previous.unitOfMeasure}</span>
+          <span className="ml-1 text-caption text-ink-muted">{previous.unitOfMeasure}</span>
         )}
       </div>
-      <div className="flex items-center justify-end gap-1 text-[11px] text-ink-muted">
+      <div className="flex items-center justify-end gap-1 text-caption text-ink-muted">
         {previous.versionNo !== null && <span>v{previous.versionNo}</span>}
         <DataPointStatusBadge status={previous.status} />
       </div>
       {row.delta && row.diffKind === 'changed' && (
-        <div className="tnum text-right text-[12px] font-medium text-ink">差 {row.delta}</div>
+        <div className="tnum text-right text-small font-medium text-ink">差 {row.delta}</div>
       )}
     </div>
   );
@@ -245,14 +246,14 @@ export function DiffTable({ preview }: { preview: QuantitativeImportPreview }) {
 
   return (
     <section aria-labelledby="standard-diff-title" className="space-y-2">
-      <h3 id="standard-diff-title" className="text-[13px] font-semibold text-ink">
+      <h3 id="standard-diff-title" className="text-body font-semibold text-ink">
         4. 追加・更新差分
       </h3>
       <div role="group" aria-label="差分の絞り込み" className="flex flex-wrap gap-1">
         {FILTERS.map((f) => (
           <Button
             key={f.key}
-            variant={filter === f.key ? 'secondary' : 'outline'}
+            variant={filter === f.key ? 'quiet' : 'secondary'}
             size="xs"
             aria-pressed={filter === f.key}
             onClick={() => setFilter(f.key)}
@@ -264,7 +265,7 @@ export function DiffTable({ preview }: { preview: QuantitativeImportPreview }) {
       <div className="max-h-[560px] overflow-auto rounded-t4d border border-line">
         <Table className="min-w-[1280px]">
           {/* 列見出しは固定（縦に長い差分でも、どの列か見失わない） */}
-          <THead className="sticky top-0 z-10 bg-surface">
+          <THead className="sticky top-0 z-(--z-sticky) bg-surface">
             <TR>
               <TH className="bg-surface">行</TH>
               <TH className="bg-surface">区分</TH>
@@ -286,21 +287,21 @@ export function DiffTable({ preview }: { preview: QuantitativeImportPreview }) {
           <TBody>
             {rows.length === 0 ? (
               <TR>
-                <TD colSpan={11} className="py-6 text-center text-[12px] text-ink-muted">
+                <TD colSpan={11} className="py-6 text-center text-small text-ink-muted">
                   この区分の行はありません。
                 </TD>
               </TR>
             ) : (
               rows.map((row) => (
                 <TR key={row.rowNo} className="align-top">
-                  <TD className="tnum align-top text-[12px] text-ink-muted">
+                  <TD className="tnum align-top text-small text-ink-muted">
                     {preview.sourceKind === 'manual' ? '手入力' : row.rowNo}
                   </TD>
                   <TD className="align-top">
                     <DiffKindBadge kind={row.diffKind} label={row.diffLabel} />
                   </TD>
                   <TD className="align-top">
-                    <span className="font-mono text-[12px]">
+                    <span className="font-mono text-small">
                       {row.valueRaw === '' ? (
                         <span className="text-ink-muted">（空欄）</span>
                       ) : (
@@ -308,9 +309,8 @@ export function DiffTable({ preview }: { preview: QuantitativeImportPreview }) {
                       )}
                     </span>
                     {preview.sourceKind !== 'manual' && (
-                      <details className="mt-0.5 text-[11px] text-ink-muted">
-                        <summary className="cursor-pointer">元の行</summary>
-                        <dl className="mt-0.5 space-y-0.5">
+                      <Collapsible variant="plain" summary="元の行" className="mt-0.5">
+                        <dl className="space-y-0.5 text-caption text-ink-muted">
                           {Object.entries(row.raw).map(([header, cell]) => (
                             <div key={header} className="flex gap-1">
                               <dt className="font-mono">{header}:</dt>
@@ -318,38 +318,38 @@ export function DiffTable({ preview }: { preview: QuantitativeImportPreview }) {
                             </div>
                           ))}
                         </dl>
-                      </details>
+                      </Collapsible>
                     )}
                   </TD>
                   <TD align="right" className="align-top">
                     <ValueCell row={row} />
                   </TD>
                   <TD className="align-top">
-                    <span className="font-mono text-[12px]">{row.metricCode ?? '—'}</span>
+                    <span className="font-mono text-small">{row.metricCode ?? '—'}</span>
                     {row.metricName && (
-                      <span className="block text-[11px] text-ink-muted">{row.metricName}</span>
+                      <span className="block text-caption text-ink-muted">{row.metricName}</span>
                     )}
                   </TD>
                   <TD className="align-top whitespace-nowrap">
                     {row.periodLabel ?? '—'}
                     {row.periodRange && (
-                      <span className="block text-[11px] text-ink-muted">{row.periodRange}</span>
+                      <span className="block text-caption text-ink-muted">{row.periodRange}</span>
                     )}
                   </TD>
                   <TD className="align-top">
-                    <span className="font-mono text-[12px]">{row.entityCode ?? '—'}</span>
+                    <span className="font-mono text-small">{row.entityCode ?? '—'}</span>
                     {row.unitName && <span className="ml-1">{row.unitName}</span>}
-                    <span className="block text-[11px] text-ink-muted">
+                    <span className="block text-caption text-ink-muted">
                       集計範囲: {row.boundary ?? '—'}
                     </span>
                   </TD>
                   <TD className="align-top whitespace-nowrap">
                     {row.valueKindLabel}
-                    <span className="block text-[11px] text-ink-muted">
+                    <span className="block text-caption text-ink-muted">
                       {row.availabilityLabel}
                     </span>
                   </TD>
-                  <TD className="align-top text-[12px]">
+                  <TD className="align-top text-small">
                     <span className="block">算定方法: {row.methodology ?? '—'}</span>
                     <span className="block break-all text-ink-muted">
                       出所: {row.sourceReference ?? '—'}
@@ -359,7 +359,7 @@ export function DiffTable({ preview }: { preview: QuantitativeImportPreview }) {
                     <PreviousCell row={row} />
                   </TD>
                   <TD className="align-top">
-                    <ul className="min-w-[240px] space-y-0.5 text-[12px]">
+                    <ul className="min-w-[240px] space-y-0.5 text-small">
                       {row.errors.map((error) => (
                         <li key={error} className="flex items-start gap-1 text-ink">
                           <XCircle
@@ -375,7 +375,7 @@ export function DiffTable({ preview }: { preview: QuantitativeImportPreview }) {
                       {row.warnings.map((warning) => (
                         <li key={warning} className="flex items-start gap-1 text-ink-muted">
                           <AlertTriangle
-                            className="mt-0.5 size-3 shrink-0 text-[#8a5d00]"
+                            className="mt-0.5 size-3 shrink-0 text-warning-ink"
                             aria-hidden="true"
                           />
                           <span>

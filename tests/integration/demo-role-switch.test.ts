@@ -63,6 +63,24 @@ describe('切替候補', () => {
     ]);
   });
 
+  it('監査法人でも、同じ法人のデモ利用者を実演の順（契約責任者 → マネージャー → 担当者 → 法人管理者）で返す', async () => {
+    const manager: AuthorizationContext = {
+      ...ctxFor('assurance-manager@demo.local', ['assurance_manager'], {
+        organizationId: ORG_IDS.aoba,
+      }),
+    };
+    manager.workspace = { ...manager.workspace, organizationType: 'assurance_firm' };
+    const choices = await listDemoRoleChoices(db, manager, 'demo');
+    expect(choices.map((c) => [c.displayName, c.demoRole, c.current])).toEqual([
+      ['保 統括', '契約責任者', false],
+      ['青葉 健', 'マネージャー', true],
+      ['若葉 新', '担当者', false],
+      ['法人 管理', '法人管理者', false],
+    ]);
+    // 別法人（くろべ）の利用者は候補に出さない
+    expect(choices.some((c) => c.email === 'other-assurance-manager@demo.local')).toBe(false);
+  });
+
   it('停止中のメンバーは候補に出さない', async () => {
     const index = fixture.memberships.findIndex(
       (m) => m.userId === userId('reviewer@demo.local') && m.organizationId === ORG_IDS.aomi,

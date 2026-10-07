@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import {
@@ -72,22 +73,22 @@ export function ApplicabilityDecisionForm({
         <p
           id={errorId}
           role="alert"
-          className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1.5 text-[12px] text-ink"
+          className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1.5 text-small text-ink"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" aria-hidden="true" />
           {state.message}（入力は残っています）
         </p>
       )}
       <div>
-        <label htmlFor={`st-${pfId}`} className="block text-[12px] text-ink">
+        <label htmlFor={`st-${pfId}`} className="block text-small text-ink">
           判断（必須）
         </label>
-        <select
+        <NativeSelect
           id={`st-${pfId}`}
           name="applicabilityStatus"
           required
           defaultValue={values?.applicabilityStatus ?? ''}
-          className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+          className="mt-0.5"
         >
           <option value="" disabled>
             選択してください
@@ -97,10 +98,10 @@ export function ApplicabilityDecisionForm({
               {s.label}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <div>
-        <label htmlFor={`reason-${pfId}`} className="block text-[12px] text-ink">
+        <label htmlFor={`reason-${pfId}`} className="block text-small text-ink">
           判断の理由（必須）
         </label>
         <Textarea
@@ -114,7 +115,7 @@ export function ApplicabilityDecisionForm({
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <div>
-          <label htmlFor={`rule-${pfId}`} className="block text-[12px] text-ink">
+          <label htmlFor={`rule-${pfId}`} className="block text-small text-ink">
             参照した規則・版（必須）
           </label>
           <Input
@@ -126,7 +127,7 @@ export function ApplicabilityDecisionForm({
           />
         </div>
         <div>
-          <label htmlFor={`on-${pfId}`} className="block text-[12px] text-ink">
+          <label htmlFor={`on-${pfId}`} className="block text-small text-ink">
             規則を確認した日（必須）
           </label>
           <Input
@@ -140,7 +141,7 @@ export function ApplicabilityDecisionForm({
         </div>
       </div>
       <div>
-        <label htmlFor={`tr-${pfId}`} className="block text-[12px] text-ink">
+        <label htmlFor={`tr-${pfId}`} className="block text-small text-ink">
           経過措置・早期適用（条件・対象条項・年度）
         </label>
         <Textarea
@@ -151,8 +152,11 @@ export function ApplicabilityDecisionForm({
           className="mt-0.5"
         />
       </div>
-      <SubmitButton pendingLabel="確定中…">適用判断を確定</SubmitButton>
-      <p className="text-[11px] text-ink-muted">
+      {/* 設定タブの主操作は「変更を保存」。基準ごとの確定は副操作（主操作を基準の数だけ並べない） */}
+      <SubmitButton variant="secondary" pendingLabel="確定中…">
+        適用判断を確定
+      </SubmitButton>
+      <p className="text-caption text-ink-muted">
         判断者は操作したあなたとして記録されます。確定した判断は書き換えず、見直しは新しい判断として追記します。
       </p>
     </form>

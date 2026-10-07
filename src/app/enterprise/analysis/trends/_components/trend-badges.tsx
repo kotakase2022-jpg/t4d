@@ -46,9 +46,9 @@ const CELL_BADGE: Record<
 export function TrendCellView({ cell, unit }: { cell: TrendCell; unit: string }) {
   if (cell.kind === 'confirmed' && cell.value !== null) {
     return (
-      <span className="tnum whitespace-nowrap text-[13px] font-semibold text-ink">
+      <span className="tnum whitespace-nowrap text-body font-semibold text-ink">
         {formatTrendValue(cell.value, unit)}
-        <span className="ml-0.5 text-[11px] font-normal text-ink-muted">{unit}</span>
+        <span className="ml-0.5 text-caption font-normal text-ink-muted">{unit}</span>
         <span className="sr-only">（確定）</span>
       </span>
     );
@@ -85,13 +85,13 @@ export function TrendChangeCell({ change }: { change: TrendChangeView }) {
     const Icon = DIRECTION_ICON[change.direction];
     return (
       <div className="flex flex-col items-end gap-0.5">
-        <span className="tnum inline-flex items-center gap-0.5 whitespace-nowrap text-[12px] text-ink">
+        <span className="tnum inline-flex items-center gap-0.5 whitespace-nowrap text-small text-ink">
           <Icon className="size-3 shrink-0 text-ink-muted" aria-hidden="true" />
           {change.text}
         </span>
         {change.large && <LargeChangeBadge />}
         {change.notes.length > 0 && (
-          <span className="text-[11px] text-ink-muted">前年の値に遡及修正あり（内訳）</span>
+          <span className="text-caption text-ink-muted">前年の値に遡及修正あり（内訳）</span>
         )}
       </div>
     );
@@ -100,12 +100,12 @@ export function TrendChangeCell({ change }: { change: TrendChangeView }) {
     return (
       <div className="flex flex-col items-end gap-0.5">
         <NeedsCheckBadge />
-        <span className="text-[11px] text-ink-muted">理由は内訳</span>
+        <span className="text-caption text-ink-muted">理由は内訳</span>
       </div>
     );
   }
   return (
-    <span className="text-[12px] text-ink-muted">
+    <span className="text-small text-ink-muted">
       <span aria-hidden="true">—</span>
       <span className="sr-only">前年比なし: {change.reason}</span>
     </span>

@@ -64,6 +64,31 @@ export function csrdFlowSteps(overview: CsrdOverview): SsbjFlowStep[] {
   ];
 }
 
+/** 工程ごとの次の作業（動詞で始める。対応状況の画面の主操作の文言） */
+const STEP_ACTION_LABEL = [
+  '事項を判断して DMA を確定する',
+  '要求事項を評価する',
+  '対応計画を進める',
+  'データを収集する',
+  '開示ドラフトを書く',
+] as const;
+
+/**
+ * 対応状況の画面の主操作（plan E24「工程の現在の段の CTA」）。進行中の最初の工程の画面へ移る。
+ * 進行中が無ければ未完了の最初の工程、すべて完了なら要求事項の評価（見直しの入口）
+ */
+export function nextStepAction(
+  steps: readonly SsbjFlowStep[],
+  currentIndex: number,
+): { label: string; href: string } {
+  const pending = steps.findIndex((step) => step.state !== 'done');
+  const index = currentIndex >= 0 ? currentIndex : pending >= 0 ? pending : 1;
+  return {
+    label: STEP_ACTION_LABEL[index] ?? STEP_ACTION_LABEL[1],
+    href: steps[index]?.href ?? `${BASE}/requirements`,
+  };
+}
+
 export interface WorkspaceSummary {
   total: number;
   /** 回答本文があり、未着手以外の回答 */

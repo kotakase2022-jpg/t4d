@@ -1,10 +1,11 @@
 import Link from 'next/link';
-import { ArrowLeft, Bot, CircleCheck, Clock, Database, NotebookPen } from 'lucide-react';
+import { Bot, Database, NotebookPen } from 'lucide-react';
 import { FractionBar } from '@/components/charts/fraction-bar';
 import { FlashMessage } from '@/components/shared/flash';
+import { Notice } from '@/components/shared/notice';
+import { PageActions } from '@/components/shared/page-actions';
 import { PageHeader } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { MoreInfo } from '@/components/ui/more-info';
 import { getAiProvider } from '@/lib/ai';
@@ -16,13 +17,6 @@ import { CsrdDraftSectionCard } from './_components/draft-section-card';
 
 export const metadata = { title: 'CSRD 開示ドラフト' };
 
-const BREADCRUMBS = [
-  { label: '企業ワークスペース' },
-  { label: '開示対応' },
-  { label: 'CSRD', href: '/enterprise/disclosures/csrd' },
-  { label: '開示ドラフト' },
-];
-
 /**
  * CSRD 開示ドラフト（docs/disclosure-first.md §9.4）。マスターに要求事項がある節
  * （ESRS 2・E1・E3・E5・S1・G1）ごとに、AI 草案（候補）→ 本文に採用（人）→ 編集・保存（人）→ 確定（人）。
@@ -31,6 +25,9 @@ const BREADCRUMBS = [
  *
  * 文字量を減らす（§10.4）: 件数は分母付きの帯（FractionBar）、AI 草案に書ける範囲は閉じた説明。
  * 「AI 草案は候補・採用と確定は担当者」の 1 行と DMA の注記は常に見せる。
+ *
+ * 主操作（plan E30）: 画面の primary は置かない（節ドラフトの出力は未対応のため）。節ごとの操作
+ * （AI 草案の作成・本文に採用・保存・確定）はすべて secondary で、節の中に並べる。
  */
 export default async function CsrdDraftPage({
   searchParams,
@@ -47,43 +44,49 @@ export default async function CsrdDraftPage({
     if (error instanceof AuthorizationError) {
       return (
         <>
-          <PageHeader title="CSRD 開示ドラフト" breadcrumbs={BREADCRUMBS} />
-          <PermissionDeniedState description="CSRD の開示ドラフトを見るには、開示の閲覧権限が必要です。" />
+          <PageHeader title="CSRD 開示ドラフト" autoBreadcrumbs />
+          <PermissionDeniedState
+            description="CSRD の開示ドラフトを見るには、開示の閲覧権限が必要です。"
+            permission="enterprise.disclosure.read"
+          />
         </>
       );
     }
     throw error;
   }
 
+  // 定性情報（全基準共通の資産）と前の工程。対応状況へはパンくず・左メニューから戻る
   const headerActions = (
-    <div className="flex items-center gap-1.5">
-      <Button variant="outline" size="sm" asChild>
-        <Link href="/enterprise/narratives">
-          <NotebookPen aria-hidden="true" />
-          定性情報
-        </Link>
-      </Button>
-      <Button variant="outline" size="sm" asChild>
-        <Link href="/enterprise/disclosures/csrd/collection">
-          <Database aria-hidden="true" />
-          データ収集へ戻る
-        </Link>
-      </Button>
-      <Button variant="outline" size="sm" asChild>
-        <Link href="/enterprise/disclosures/csrd">
-          <ArrowLeft aria-hidden="true" />
-          対応状況へ戻る
-        </Link>
-      </Button>
-    </div>
+    <PageActions
+      secondary={[
+        {
+          kind: 'link',
+          id: 'narratives',
+          label: '定性情報',
+          href: '/enterprise/narratives',
+          icon: <NotebookPen aria-hidden="true" />,
+        },
+        {
+          kind: 'link',
+          id: 'collection',
+          label: 'データ収集へ戻る',
+          href: '/enterprise/disclosures/csrd/collection',
+          icon: <Database aria-hidden="true" />,
+        },
+      ]}
+    />
   );
 
   if (!overview) {
     return (
       <>
-        <PageHeader title="CSRD 開示ドラフト" breadcrumbs={BREADCRUMBS} actions={headerActions} />
+        <PageHeader title="CSRD 開示ドラフト" autoBreadcrumbs actions={headerActions} />
         <div className="p-4">
-          <EmptyState title="CSRD の要求事項マスターが登録されていません" />
+          <EmptyState
+            kind="not-applicable"
+            title="CSRD の要求事項マスターが登録されていません"
+            description="CSRD の要求事項マスター（架空の縮小サンプル）が登録されると、節ごとの草案と本文がここに並びます。マスターの登録は管理者が行います。"
+          />
         </div>
       </>
     );
@@ -115,7 +118,7 @@ export default async function CsrdDraftPage({
             <SampleMasterBadge />
           </span>
         }
-        breadcrumbs={BREADCRUMBS}
+        autoBreadcrumbs
         actions={headerActions}
       />
 
@@ -123,24 +126,29 @@ export default async function CsrdDraftPage({
         <FlashMessage searchParams={query} />
 
         {overview.dmaConfirmed ? (
-          <p className="flex items-center gap-1.5 rounded-t4d border border-success/40 bg-success-soft px-3 py-1.5 text-[12px] text-ink">
-            <CircleCheck className="size-3.5 text-success" aria-hidden="true" />
+          <Notice tone="success">
             ダブル・マテリアリティ評価（DMA）は確定済みです。節の適用は確定した判断に基づきます。
-          </p>
+          </Notice>
         ) : (
-          <p className="flex flex-wrap items-center gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-[12px] text-ink">
-            <Clock className="size-3.5 text-[#8a5d00]" aria-hidden="true" />
+          <Notice
+            tone="warning"
+            action={
+              <Link
+                href="/enterprise/disclosures/csrd/settings"
+                className="text-small text-brand-700 underline"
+              >
+                DMA の設定・確定へ
+              </Link>
+            }
+          >
             ダブル・マテリアリティ評価（DMA）が未確定です。テーマ別の節の適用は暫定（DMA
             確定前）で、節の確定は DMA を確定してからできます。
-            <Link href="/enterprise/disclosures/csrd/settings" className="text-brand-700 underline">
-              DMA の設定・確定へ
-            </Link>
-          </p>
+          </Notice>
         )}
 
         <Card className="space-y-2 p-3">
           {/* AI 草案は候補で、採用と確定は担当者が行うこと（§0.4）は閉じずに見せる */}
-          <p className="flex items-start gap-1.5 text-[12px] text-ink">
+          <p className="flex items-start gap-1.5 text-small text-ink">
             <Bot className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
             AI 草案は候補です。「本文に採用」を押すまで本文には入らず、確定も担当者が行います。
           </p>
@@ -183,7 +191,11 @@ export default async function CsrdDraftPage({
         </Card>
 
         {overview.sections.length === 0 ? (
-          <EmptyState title="要求事項のある節がありません" />
+          <EmptyState
+            kind="not-applicable"
+            title="要求事項のある節がありません"
+            description="マスターに要求事項がある節（ESRS 2・E1・E3・E5・S1・G1 など）だけを並べます。"
+          />
         ) : (
           overview.sections.map((view) => (
             <CsrdDraftSectionCard

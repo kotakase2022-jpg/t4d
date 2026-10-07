@@ -1,14 +1,14 @@
 import { Download, FileSpreadsheet } from 'lucide-react';
-import { SectionTitle } from '@/components/shared/page-header';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { PageActions } from '@/components/shared/page-actions';
+import { Section } from '@/components/shared/section';
+import { PermissionDeniedState } from '@/components/shared/states';
 import { requireAssuranceContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
 import { getDb } from '@/lib/repositories';
 import { loadEngagementOr404 } from '@/lib/services/assurance';
 import { EngagementHeader } from '../engagement-header';
 
-export const metadata = { title: 'Export' };
+export const metadata = { title: '出力' };
 
 export default async function ExportsPage({
   params,
@@ -40,53 +40,57 @@ export default async function ExportsPage({
 
   return (
     <>
-      <EngagementHeader context={context} page="Export" />
+      <EngagementHeader
+        context={context}
+        page="出力"
+        actions={
+          allowed && (
+            <PageActions
+              primary={{
+                kind: 'link',
+                id: 'export-xlsx',
+                label: 'XLSX でダウンロード',
+                icon: <Download aria-hidden="true" />,
+                href: `/api/exports/engagement?engagementId=${engagementId}&format=xlsx`,
+                download: true,
+              }}
+              secondary={[
+                {
+                  kind: 'link',
+                  id: 'export-csv',
+                  label: 'CSV（サマリ）',
+                  icon: <Download aria-hidden="true" />,
+                  href: `/api/exports/engagement?engagementId=${engagementId}&format=csv`,
+                  download: true,
+                },
+              ]}
+            />
+          )
+        }
+      />
 
       <div className="space-y-3 p-4">
-        <Card>
-          <SectionTitle title="案件パッケージ Export" />
-          <div className="space-y-3 p-3">
-            <p className="text-[12px] text-ink-muted">
-              スコープ、Snapshot、サンプル、手続、Evidence 参照、依頼、指摘、Sign-off、変更履歴を 1
-              つのブックへまとめて出力します。Export の実行は監査ログへ記録されます。
-            </p>
-            <ul className="grid grid-cols-2 gap-1">
-              {sheets.map((sheet) => (
-                <li key={sheet} className="flex items-center gap-1.5 text-[12px] text-ink">
-                  <FileSpreadsheet
-                    className="size-3.5 shrink-0 text-brand-600"
-                    aria-hidden="true"
-                  />
-                  {sheet}
-                </li>
-              ))}
-            </ul>
-            {allowed ? (
-              <div className="flex gap-2">
-                <Button asChild size="sm">
-                  <a
-                    href={`/api/exports/engagement?engagementId=${engagementId}&format=xlsx`}
-                    download
-                  >
-                    <Download aria-hidden="true" />
-                    XLSX でダウンロード
-                  </a>
-                </Button>
-                <Button asChild size="sm" variant="outline">
-                  <a
-                    href={`/api/exports/engagement?engagementId=${engagementId}&format=csv`}
-                    download
-                  >
-                    <Download aria-hidden="true" />
-                    CSV（サマリ）
-                  </a>
-                </Button>
-              </div>
-            ) : (
-              <p className="text-[12px] text-ink-muted">Export を実行する権限がありません。</p>
-            )}
-          </div>
-        </Card>
+        {!allowed && (
+          // 権限が無い役割には、出力のリンクを出さずに「誰に頼むか」を示す（plan §1.18）
+          <PermissionDeniedState
+            permission="assurance.export.run"
+            description="案件パッケージの出力には、出力の権限が必要です。"
+          />
+        )}
+        <Section title="案件パッケージの出力" divider="none">
+          <p className="text-small text-ink-muted">
+            スコープ、Snapshot、サンプル、手続、Evidence 参照、依頼、指摘、Sign-off、変更履歴を 1
+            つのブックへまとめて出力します。出力の実行は監査ログへ記録されます。
+          </p>
+          <ul className="mt-2 grid grid-cols-2 gap-1">
+            {sheets.map((sheet) => (
+              <li key={sheet} className="flex items-center gap-1.5 text-small text-ink">
+                <FileSpreadsheet className="size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
+                {sheet}
+              </li>
+            ))}
+          </ul>
+        </Section>
       </div>
     </>
   );

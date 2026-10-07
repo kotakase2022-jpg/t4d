@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { dataPointId } from '@/lib/fixtures/dataset';
-import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
+import { DEMO_USERS, confirmInDialog, loginAs, openCollapsible } from './helpers';
 
 /**
  * 5 つの追加要望のうち、画面まで通す必要があるもの。
@@ -13,16 +13,18 @@ import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 test('① 指標マスターに、どの開示基準が求めている指標かが出る', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/organizations');
+  // 組織・拠点はタブ（?tab=）に分かれた（plan §2 S10）。基準ごとの充足状況は「基準別の充足」のタブ
+  await page.goto('/enterprise/organizations?tab=coverage');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  // 基準ごとの充足状況が先に見える
+  // 基準ごとの充足状況が見える
   await expect(page.getByText('開示基準からみた指標の充足状況')).toBeVisible();
   await expect(page.getByText('SSBJ が求める指標')).toBeVisible();
   await expect(page.getByText('CDP が求める指標')).toBeVisible();
   await expect(page.getByText('CSRD が求める指標')).toBeVisible();
 
-  // 指標マスターに出所の列がある
+  // 指標マスターに出所の列がある（25 件ずつのページ送りなので、コードで探す）
+  await page.goto('/enterprise/organizations?tab=metrics&q=scope3_cat11');
   await expect(page.getByRole('columnheader', { name: '求めている基準' })).toBeVisible();
 
   // SSBJ 第2号 第55項が求める Scope3 のカテゴリー別指標が入っている
@@ -31,6 +33,7 @@ test('① 指標マスターに、どの開示基準が求めている指標か�
   await expect(row.getByText('SSBJ')).toBeVisible();
 
   // SSBJ 第79項の移行リスク資産（気候関連の財務影響）も入っている
+  await page.goto('/enterprise/organizations?tab=metrics&q=transition_risk_assets');
   await expect(page.locator('tr', { hasText: 'transition_risk_assets' })).toHaveCount(1);
 });
 
@@ -120,6 +123,8 @@ test('③ マテリアリティ・分析条件の設定を、未完了から確�
   const confirm = page.getByRole('button', { name: 'この内容で確定する' });
   await expect(confirm).toBeEnabled();
   await confirm.click();
+  // 確定は取り消しの効かない区切りなので確認ダイアログを通す（範囲 1 行を見てから確定する。plan §1.16）
+  await confirmInDialog(page);
   // 遷移先まで正確に待つ。`/enterprise/disclosures/ssbj` だけの正規表現では、
   // いま居る `/ssbj/settings` にその場で一致してしまい待たずに次へ進む。
   // すると直後の goto が確定の POST を打ち切り、確定していないのに先へ進んでしまう。
@@ -168,7 +173,7 @@ test('④ 承認待ちの段階を承認すると、次の段階へ進み履歴�
 
   // 履歴に承認が残る
   await expect(page.locator('#t4d-main').getByText('承認').first()).toBeVisible();
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });
 
 test('⑤ 開示ドラフトを人工知能に書かせ、直して確定できる', async ({ page }) => {
@@ -210,5 +215,5 @@ test('⑤ 開示ドラフトを人工知能に書かせ、直して確定でき�
   await page.getByRole('button', { name: 'この内容で確定' }).first().click();
   await page.waitForLoadState('networkidle');
   await expect(page.locator('#t4d-main').getByText('確定済み').first()).toBeVisible();
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });

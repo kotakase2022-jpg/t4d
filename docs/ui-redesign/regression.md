@@ -1,0 +1,383 @@
+# UI 再設計の回帰チェック（Stage C。plan §5・§6.3-7・指示書 §31）
+
+- 対象: `feat/self-audit-2026-08-20`（未コミットの作業ツリー。Stage A・B1〜B6・C の変更を含む）／ 2026-10-07
+- 基準線: `docs/ui-redesign/inventory-features.md`（IF。画面 P01〜P78・機能 F001〜F144・出力 API E01〜E12、§6 の「再設計の前から届かない・壊れている」一覧）
+- 判定: **OK**（同じ置き場所・同じ操作で使える）／**Changed**（意図して置き場所・文言・確認の手順を変えた。下の表に新しい置き場所を書く）／**Missing**（消えた）／**Broken**（押せるが失敗する）／**Unreachable**（UI から届かない）
+- 層: L1＝常に見える、L2＝「その他 ▾」・行の「操作 ▾」・折りたたみ・作成パネル（`?new=1`）・確認ダイアログ、L3＝管理画面・詳細設定・Command Palette
+
+## 0. 結論
+
+| 対象                        | 件数 | OK  | Changed | Missing | Broken | Unreachable                   |
+| --------------------------- | ---- | --- | ------- | ------- | ------ | ----------------------------- |
+| 画面（P01〜P78＋新規 3）    | 81   | 39  | 42      | 0       | 0      | 0                             |
+| 機能（F001〜F135）          | 135  | 68  | 67      | 0       | 0      | 0                             |
+| 旧版の Action（F136〜F144） | 9    | —   | —       | 0       | 0      | 9（変更前から UI 無し。§4.3） |
+| 出力 API（E01〜E12）        | 12   | 6   | 6       | 0       | 0      | 0                             |
+
+- **Missing・Broken は 0**。削除した機能・Server Action・API ルート・権限検査・データ項目は無い（`tests/unit/server-action-reachability.test.ts`：UI から使われない Action は旧版 9 件の理由付き許可リストだけ。`DECISION_PENDING` は空）。
+- **変更前から UI が無かった F048（前年度評価の引継ぎ）・F121（案件チームの変更）に UI を付けた**（IF §6.1 の基準線より改善）。
+- **Unreachable は 0**（旧版 9 件を除く）。全 81 ルートが役割に応じてメニュー・Command Palette・画面内リンクのどれかから届く（`tests/e2e/reachability.spec.ts`：役割 × モードで「期待集合 ⊆ 訪問 ∪ パレット」、例外の表は空）。変更前に「URL でしか開けない」とされた画面（IF §6.3）はすべてパレットと画面内リンクから届く。
+- **Changed はすべて意図した移動**（L2 への格納・確認ダイアログの追加・作成パネル化・文言の §1.17 置換）。それぞれの新しい置き場所を通す E2E がある（§2・§3 の「根拠」列）。
+
+実行結果（2026-10-07 ローカル・単独実行）: E2E 全件 **372/372**（skip 0）、stateless **25/25**、本番スモーク（ローカルの next start）**32/32**、unit＋integration **2,488/2,488**、RLS **311/311**。詳細は `AI_HANDOFF.md` の Stage C の節。
+
+検査の全体:
+
+| 検査                                                             | 種類 | 内容                                                                                                                                      |
+| ---------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/unit/server-action-reachability.test.ts`                  | 静的 | `'use server'` の全 export が UI から参照される（旧版 9 件だけ理由付き許可）                                                              |
+| `tests/unit/route-reachability.test.ts`・`route-catalog.test.ts` | 静的 | 全 page.tsx が ROUTE_CATALOG に載り、メニュー・パレット・画面内リンクから辿れる                                                           |
+| `tests/e2e/reachability.spec.ts`                                 | E2E  | 企業 5 役割 × 従来／開示優先、監査法人 4 役割。メニューの項目が権限なしにならない・出力リンクが 403 にならない。例外の表は空              |
+| `tests/e2e/primary-action-audit.spec.ts`                         | E2E  | 全ルート（タブ・段・作成パネルの変種を含む）× 役割で primary ≤ 1・ダイアログの外に danger 無し。許容リストを廃止（例外なし）              |
+| `tests/unit/dangerous-ops.test.ts`                               | 静的 | §1.16 の 24 件が確認ダイアログ・元に戻すを通る（保留 0）                                                                                  |
+| `tests/unit/permission-gates.test.ts`                            | 静的 | R2〜R4 の画面ゲートを直した。R1 は見送り（pending として固定）                                                                            |
+| `tests/unit/action-error-surface.test.ts`                        | 静的 | 業務エラーを投げる Action はすべて `?error=` か結果を返す形（保留 0）                                                                     |
+| `tests/e2e/feature-coverage.ts`＋`feature-coverage.test.ts`      | 静的 | 機能 → E2E の対応。`NO_E2E_YET` は旧版 9 件を除いて 13 件（Stage C の前 24 件。§3 の各行に unit／integration の根拠を書いた）             |
+| skip ガード（`tests/support/skip-guard-reporter.ts`）            | E2E  | 基準（空）に無い skip があれば実行を失敗にする（L2 へ移した操作が黙って skip になるのを防ぐ）                                             |
+| `tests/e2e/zzzz-relocated-features.spec.ts`（Stage C で新設）    | E2E  | 置き場所を変えた・UI を付けた機能を新しい置き場所から実行（F042・F044・F048〜F053・F074・F082・F087・F104・F118・F121・E03）              |
+| `tests/e2e/aa-task-paths.spec.ts`（Stage C で新設）              | E2E  | 主要タスクのクリック数（C1・C2・C4・C5・C6・C8・C9・C10）が plan §0.2 の目標（2）以下。C8（作成担当のアクセス許諾）は変更前は届かなかった |
+
+## 1. 画面（ページルート）
+
+列: **届く経路** の「従来」＝従来メニュー、「開示」＝開示優先メニュー、「パレット」＝Command Palette の「画面」（ROUTE_CATALOG。権限で絞る）、「リンク」＝画面内リンク（主なもの）。どの画面も `reachability.spec.ts`（到達）・`primary-action-audit.spec.ts`（描画と primary の数）・`screen-audit.spec.ts`／`full-audit.spec.ts`（描画）が通る。下の「根拠」にはそれ以外の主な spec を書く。
+
+### 1.1 企業ワークスペース
+
+| ID  | ルート                                       | 画面名                         | 判定    | 届く経路（変更点）                                                                                                                                                                        | 根拠                                                         |
+| --- | -------------------------------------------- | ------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| P01 | /enterprise/dashboard                        | ホーム                         | Changed | 従来・開示・ロゴ。先頭に「自分が次に行う作業」（MyWork）と「はじめに」。開示の閲覧権限の無い役割は ESG経営タブが既定。KPI は §1.17 の語（検証エラー・根拠資料の不足・レビュー・承認待ち） | vertical-slices・disclosure-first-nav・zz-disclosure-project |
+| P02 | /enterprise/disclosures/ssbj                 | SSBJ 対応状況                  | OK      | 従来・開示・パレット                                                                                                                                                                      | ssbj-gap・new-features-audit                                 |
+| P03 | …/ssbj/requirements                          | SSBJ 要求事項の評価            | OK      | 従来・開示・パレット                                                                                                                                                                      | ssbj-gap                                                     |
+| P04 | …/ssbj/requirements/[itemId]                 | SSBJ 要求事項の詳細            | OK      | 一覧の要求事項名のリンク・対応状況・パレットのデータ検索（要求事項コード）                                                                                                                | ssbj-gap                                                     |
+| P05 | …/ssbj/requirements/top-priority             | （最優先のギャップへ）         | OK      | **改善**: 対応状況の優先ギャップの節の「最優先のギャップを開く」・パレットの「操作」と「画面」（変更前はデモ案内からだけ）                                                                | demo-tour・reachability                                      |
+| P06 | …/ssbj/plans                                 | SSBJ 対応計画                  | OK      | 従来・開示・パレット                                                                                                                                                                      | ssbj-gap・zzzz-relocated-features                            |
+| P07 | …/ssbj/collection                            | SSBJ データ収集                | OK      | 従来・開示・パレット                                                                                                                                                                      | new-features-audit                                           |
+| P08 | …/ssbj/draft                                 | SSBJ 開示ドラフト              | OK      | 従来・開示・パレット・データ収集の secondary・取込の「その他」                                                                                                                            | ssbj-settings-approval-draft・nav-structure                  |
+| P09 | …/ssbj/settings                              | SSBJ 設定                      | Changed | 対応状況・要求事項のリンク・パレット。段階 UI（基準と範囲 → マテリアリティ → 確定）                                                                                                       | ssbj-settings-approval-draft・crud-persistence               |
+| P10 | /enterprise/disclosures/cdp                  | CDP 開示対応                   | OK      | 従来・開示（その他の開示）・パレット                                                                                                                                                      | disclosure-check・vertical-slices                            |
+| P11 | …/cdp/[questionId]                           | CDP 質問（回答）               | Changed | 一覧の質問のリンク・パレットのデータ検索（質問コード）。操作は状態 × 権限で primary 1（§3.8）                                                                                             | vertical-slices・action-audit・zzzz-relocated-features       |
+| P12 | …/cdp/import                                 | 過去回答の取込                 | Changed | CDP の「その他」→「過去回答の取込」・パレット。段階 UI                                                                                                                                    | disclosure-import                                            |
+| P13 | /enterprise/disclosures/csrd                 | CSRD 対応状況                  | Changed | 従来・開示・パレット。ギャップ表は要求事項画面への絞り込みリンクに（同じデータの表を 2 つ置かない。T8）                                                                                   | csrd・csrd-screens・production-smoke                         |
+| P14 | …/csrd/requirements                          | CSRD 要求事項の評価            | OK      | 従来・開示・パレット                                                                                                                                                                      | csrd・zzz-csrd-chain                                         |
+| P15 | …/csrd/requirements/[itemId]                 | CSRD 要求事項の詳細            | OK      | 一覧・対応状況・パレットのデータ検索                                                                                                                                                      | csrd・zzz-csrd-chain                                         |
+| P16 | …/csrd/[questionId]                          | CSRD 開示項目（回答）          | Changed | 要求事項の詳細の「回答を編集（版・承認）」。操作は P11 と同じ                                                                                                                             | csrd                                                         |
+| P17 | …/csrd/plans                                 | CSRD 対応計画                  | OK      | 従来・開示・パレット                                                                                                                                                                      | csrd-screens                                                 |
+| P18 | …/csrd/collection                            | CSRD データ収集                | OK      | 従来・開示・パレット                                                                                                                                                                      | zzz-csrd-chain                                               |
+| P19 | …/csrd/draft                                 | CSRD 開示ドラフト              | OK      | 従来・開示・パレット                                                                                                                                                                      | zzz-csrd-chain                                               |
+| P20 | …/csrd/settings                              | CSRD 設定                      | Changed | 対応状況の工程①・パレットの「画面」と「設定の項目」（① 報告範囲・② 評価方法・③ DMA）。段階 UI（`?step=`）                                                                                 | csrd・zzzz-relocated-features                                |
+| P21 | …/csrd/settings/matters/[topic]              | CSRD 事項の評価（IRO）         | Changed | 設定 ③ の事項の表。IRO の追加は作成パネル、編集・削除は行の「操作」                                                                                                                       | csrd-screens・zzzz-relocated-features                        |
+| P22 | /enterprise/disclosures/{msci,ftse}          | 評価機関（未実装の案内）       | OK      | 従来・開示（その他の開示）。DB の表名を外し「今後対応の一覧へ」                                                                                                                           | full-audit                                                   |
+| P23 | /enterprise/narratives                       | 定性情報                       | OK      | 従来（SSBJ・CSRD）・開示（情報・根拠）・パレット                                                                                                                                          | zz-disclosure-project                                        |
+| P24 | /enterprise/narratives/new                   | 定性情報の登録                 | OK      | 一覧の primary「新しく登録」・「その他」→「資料から候補を作成」・パレットの「操作」                                                                                                       | zz-disclosure-project                                        |
+| P25 | /enterprise/narratives/[narrativeId]         | 定性情報の編集                 | OK      | 一覧の題名のリンク・パレットのデータ検索                                                                                                                                                  | zz-disclosure-project                                        |
+| P26 | /enterprise/disclosure-projects              | 開示プロジェクト一覧           | OK      | **改善**: 開示（閲覧権限のある役割）・従来でもパレット・規制対応度。拠点担当の開示優先メニューでは行のリンク先を SSBJ へ（一覧は権限なしのため）                                          | zz-disclosure-project・reachability                          |
+| P27 | /enterprise/disclosure-projects/new          | プロジェクトの作成             | OK      | 一覧の primary「プロジェクトを作成」・パレットの「操作」                                                                                                                                  | zzzz-relocated-features                                      |
+| P28 | /enterprise/disclosure-projects/[projectId]  | プロジェクト（6 タブ）         | Changed | 一覧・ヘッダー。タブのキー・URL は不変、要対応の件数を併記（NavTabs）                                                                                                                     | zz-disclosure-project                                        |
+| P29 | …/blocks/[blockId]                           | 原稿編集                       | Changed | 原稿タブ・レビュー・ホーム・ワークフロー                                                                                                                                                  | zz-disclosure-project・editor-draft-restore                  |
+| P30 | …/blocks/[blockId]/recheck                   | 引用先の再確認                 | Changed | 原稿・通知。引用ごとのカードを表＋展開行に                                                                                                                                                | zz-disclosure-project                                        |
+| P31 | /enterprise/data                             | 非財務データ                   | Changed | 従来・開示・パレット・ホーム。DataTable（列・保存ビュー・表示件数）、担当拠点の既定の絞り込み（D2）                                                                                       | table-controls・saved-views・action-audit                    |
+| P32 | /enterprise/data/[dataPointId]               | データの詳細                   | Changed | 一覧の**指標名のリンク**（行の「詳細」ボタンは廃止。同じ行き先を 2 つ置かない）                                                                                                           | vertical-slices・business-flow-audit                         |
+| P33 | /enterprise/imports                          | データ取込                     | OK      | 従来・開示・パレット                                                                                                                                                                      | hetero-import・vertical-slices                               |
+| P34 | /enterprise/imports/[jobId]                  | 取込の確認                     | Changed | 一覧のファイル名のリンク。h1 は「{ファイル名} の取込確認」                                                                                                                                | vertical-slices・zz-bulk-50-import                           |
+| P35 | /enterprise/imports/standard                 | 数値を登録（標準CSV）          | OK      | **改善**: 従来でも取込の入口「数値を登録（CSV・手入力）」・パレットの「操作」。開示優先メニューは取込の権限で出し分け（R5 同種を解消）                                                    | zz-disclosure-project・reachability                          |
+| P36 | /enterprise/evidence                         | 資料・証跡（Evidence）         | Changed | 従来・開示・パレット。登録欄は作成パネル（`?new=1`）                                                                                                                                      | mentions-evidence・action-audit                              |
+| P37 | /enterprise/evidence/[fileId]                | 資料の詳細                     | Changed | 一覧の「画面内で開く」・原稿の参照。タブ名「資料の詳細」                                                                                                                                  | mentions-evidence・disclosure-first-nav                      |
+| P38 | /enterprise/ghg                              | GHG 算定サマリー               | OK      | 従来・開示・パレット                                                                                                                                                                      | ghg-suppliers                                                |
+| P39 | /enterprise/ghg/suppliers                    | Scope3データ取込 > Cat.1       | Changed | 従来・開示・パレット・GHG の primary「サプライヤーデータ取込」                                                                                                                            | ghg-suppliers・zz-murata-demo                                |
+| P40 | /enterprise/esg                              | ESG経営                        | OK      | **改善**: 開示・従来でもパレット・ホームの ESG経営タブ                                                                                                                                    | esg-data-project-pages（unit）・reachability                 |
+| P41 | /enterprise/esg/[kpiKey]                     | ESG経営 KPI の詳細             | OK      | ESG経営の KPI のタイル                                                                                                                                                                    | reachability                                                 |
+| P42 | /enterprise/esg/targets                      | ESG経営の目標                  | Changed | ESG経営・パレットの「操作」（目標を登録する）。登録は作成パネル                                                                                                                           | zzzz-relocated-features                                      |
+| P43 | /enterprise/workflows                        | ワークフロー                   | Changed | 従来・開示・パレット。動詞の節（直す・確認する・承認する・資料依頼・タスク）                                                                                                              | action-audit・alerts-center                                  |
+| P44 | /enterprise/alerts                           | アラート                       | OK      | 従来・開示・パレット                                                                                                                                                                      | alerts-center                                                |
+| P45 | /enterprise/reports                          | レポート                       | Changed | 従来・開示・パレット。カード → 表。出力の権限が無い役割には依頼先を出す（R3）                                                                                                             | reachability                                                 |
+| P46 | /enterprise/ai                               | AI Copilot                     | Changed | 従来・開示・パレット。AI の実行記録・接続状態は閉じた節（L2）                                                                                                                             | auth-copilot・insights・action-audit                         |
+| P47 | /enterprise/analysis                         | （現状診断へ）                 | OK      | redirect                                                                                                                                                                                  | full-audit                                                   |
+| P48 | /enterprise/analysis/diagnosis               | 現状診断                       | OK      | 従来・開示・パレット                                                                                                                                                                      | analysis                                                     |
+| P49 | /enterprise/analysis/regulations             | 規制対応度                     | OK      | 従来・開示・パレット（disclosure.read）                                                                                                                                                   | analysis                                                     |
+| P50 | /enterprise/analysis/trends                  | 自社経年比較                   | OK      | 従来・開示・パレット                                                                                                                                                                      | analysis-trends                                              |
+| P51 | /enterprise/analysis/benchmark               | 他社比較                       | OK      | 従来・開示・パレット                                                                                                                                                                      | analysis                                                     |
+| P52 | /enterprise/analysis/financial-impact        | 財務影響分析                   | OK      | 従来・開示・パレット                                                                                                                                                                      | analysis-financial-impact                                    |
+| P53 | /enterprise/organizations                    | 組織・拠点                     | Changed | 従来・開示・パレットの「画面」と「設定の項目」。タブ（`?tab=units｜periods｜campaigns｜metrics｜coverage`）                                                                               | master-data・metric-master・reporting-period                 |
+| P54 | /enterprise/settings                         | 設定                           | Changed | 従来・開示（管理者）・パレット。タブ（members・invitations・grants・security・features）。入口は従来どおり企業管理者のみ（R1・Q6 は見送り。権限の挙動は不変）                             | grant-lifecycle・auth-copilot・zzzz-relocated-features       |
+| P55 | /enterprise/roadmap                          | 今後対応                       | OK      | **改善**: パレット・AI Copilot・未実装の案内（変更前はリンクだけ）                                                                                                                        | reachability                                                 |
+| N1  | /enterprise/organizations/metrics/new        | 指標を追加（新規）             | Changed | 指標マスターのタブの primary「指標を追加」・パレットの「操作」（19 項目のモーダルを専用ページへ）                                                                                         | metric-master・crud-persistence                              |
+| N2  | /enterprise/organizations/metrics/[metricId] | 指標を編集（新規）             | Changed | 指標マスターの行の「編集」                                                                                                                                                                | metric-master・new-features-audit                            |
+| N3  | /enterprise/organizations/campaigns/new      | 収集キャンペーンを作成（新規） | Changed | キャンペーンのタブの primary・パレットの「操作」（115 チェックのモーダルを 2 段のページへ）                                                                                               | master-data・reporting-period                                |
+
+### 1.2 監査法人・共通・認証
+
+| ID      | ルート                               | 画面名               | 判定    | 届く経路（変更点）                                                                                                 | 根拠                                                    |
+| ------- | ------------------------------------ | -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| P56     | /assurance/dashboard                 | 案件ホーム           | Changed | メニュー・ロゴ。要対応 → 自分の作業 → KPI（絞り込み付きの行き先）→ 案件の表                                        | vertical-slices・engagement-management                  |
+| P57     | /assurance/engagements               | 保証契約             | Changed | メニュー・パレット。起票は作成パネル                                                                               | engagement-management                                   |
+| P58     | /assurance/engagements/[id]/overview | 案件の概要           | Changed | **改善**: メニュー（案件を選ぶと「計画 > 概要」。変更前はメニューに無い）・案件ホーム・ヘッダー                    | vertical-slices・zzzz-relocated-features                |
+| P59–P69 | …/[id]/{scope … exports}             | 案件のサブ画面 11    | Changed | メニュー（計画・実施・結論・記録の 4 群。案件を選んでいるときだけ）・パレット（案件を選んでいるとき）。h1 は画面名 | vertical-slices・pbc-and-audit-trail・engagement-export |
+| P70     | /assurance/settings                  | 設定（法人メンバー） | OK      | メニュー（firm.manage）・パレット                                                                                  | reachability                                            |
+| P71     | /notifications                       | 通知                 | Changed | ヘッダーのベル・パレット。表・未読の絞り込み・ページ送り                                                           | notifications                                           |
+| P72     | /profile                             | プロフィール         | Changed | ユーザーメニュー・パレット。権限キーを「できること」の一覧に                                                       | reachability                                            |
+| P73     | /workspace                           | ワークスペース選択   | OK      | ユーザーメニュー・`/`                                                                                              | helpers（全 spec）                                      |
+| P74     | /login                               | ログイン             | OK      | 未認証時。`?error=` を先頭に表示（Stage C で業務エラーを包んだ）                                                   | 全 spec                                                 |
+| P75     | /mfa                                 | 多要素認証           | OK      | Supabase Mode のログイン後                                                                                         | e2e-supabase/auth-security                              |
+| P76     | /reset                               | パスワード再設定     | OK      | 再設定リンク                                                                                                       | e2e-supabase/auth-security                              |
+| P77     | /invite/[invitationId]               | 招待の受諾           | OK      | 招待リンク。無効なら「招待した管理者に再発行を依頼してください」                                                   | auth-copilot                                            |
+| P78     | /                                    | （/workspace へ）    | OK      | redirect                                                                                                           | —                                                       |
+
+## 2. 出力・ダウンロード（API ルート）
+
+API ルートの挙動（権限の 403 JSON を含む）は変えていない。変えたのは画面のリンクの置き場所と、**権限の無い役割にリンクを出さない**こと（R3）。
+
+| ID  | 機能                                 | 判定    | 今の置き場所                                                                                                        | 根拠                                            |
+| --- | ------------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| E01 | 非財務データ台帳の出力               | Changed | 非財務データの「その他 ▾」→「CSV 出力」「XLSX 出力」（L2。export.run のときだけ）                                   | vertical-slices・robustness-audit・reachability |
+| E02 | SSBJ／CDP／CSRD の出力               | Changed | CDP の「その他」→「XLSX で出力」、SSBJ 開示ドラフトの primary「Word で書き出す」、レポートの表（すべて export.run） | disclosure-export・robustness-audit             |
+| E03 | SSBJ 要求事項一覧（絞り込みどおり）  | Changed | SSBJ 要求事項の「その他」→「CSV を書き出す（絞り込みを反映）」                                                      | zzzz-relocated-features                         |
+| E04 | 承認済みスナップショットの対外用出力 | OK      | プロジェクトの出力タブ                                                                                              | zz-disclosure-project・disclosure-export        |
+| E05 | 案件の調書一式                       | Changed | 案件の出力の見出し（primary XLSX・secondary CSV）                                                                   | engagement-export                               |
+| E06 | 標準取込テンプレート                 | OK      | 取込・標準 CSV の画面                                                                                               | authz-api-audit                                 |
+| E07 | サプライヤー CSV テンプレート        | Changed | サプライヤーデータ取込の「その他」（import.run のときだけ）                                                         | ghg-suppliers                                   |
+| E08 | デモ用サンプルファイル               | Changed | サプライヤーデータ取込の「その他」（ZIP 2 種）                                                                      | ghg-suppliers・zz-murata-demo                   |
+| E09 | 資料の取得（signed-url）             | OK      | データの詳細・資料の詳細・PBC・調書の「開く」                                                                       | robustness-audit・tenant-isolation-audit        |
+| E10 | 画面内プレビュー                     | OK      | 資料の詳細                                                                                                          | mentions-evidence・authz-api-audit              |
+| E11 | Demo の実体配信                      | OK      | signed-url の行き先                                                                                                 | robustness-audit                                |
+| E12 | 取込ジョブの進捗                     | OK      | 取込の確認（ポーリング）                                                                                            | robustness-audit                                |
+
+## 3. 機能（Server Action）
+
+「根拠」は E2E（`tests/e2e/*.spec.ts`）。E2E が無いもの（`NO_E2E_YET`）は unit／integration を書いた。
+
+### 3.1 認証・共通
+
+| ID   | 機能                    | 判定    | 今の置き場所（層）                                                                         | 根拠                                  |
+| ---- | ----------------------- | ------- | ------------------------------------------------------------------------------------------ | ------------------------------------- |
+| F001 | デモ利用者でログイン    | OK      | /login（L1）。誤りは画面の先頭に（Stage C で包んだ）                                       | helpers.loginAs（全 spec）            |
+| F002 | メールでログイン        | OK      | /login（L1）                                                                               | e2e-supabase                          |
+| F003 | ログアウト              | OK      | ユーザーメニュー                                                                           | interaction-audit                     |
+| F004 | ワークスペース切替      | OK      | /workspace・ヘッダー                                                                       | helpers・screen-audit                 |
+| F005 | 招待を受諾して参加      | OK      | /invite/[id]「参加する」                                                                   | auth-copilot                          |
+| F006 | 役割切替（デモ）        | Changed | ヘッダー。**監査法人・共通の画面にも**出す（N-18）                                         | disclosure-first-nav・vertical-slices |
+| F007 | 報告期間の切替          | OK      | ヘッダー                                                                                   | reporting-period・interaction-audit   |
+| F008 | 通知を既読にする        | Changed | /notifications の表の「既読にする」（即時反映）                                            | notifications                         |
+| F009 | 通知をすべて既読        | OK      | /notifications の見出し                                                                    | notifications                         |
+| F010 | コメント（@メンション） | Changed | データの詳細・回答の「コメント」（送信は secondary「コメントする」、送信中の行を即時表示） | crud-persistence・mentions-evidence   |
+
+### 3.2 データ取込
+
+| ID   | 機能                   | 判定    | 今の置き場所（層）                                                           | 根拠                                       |
+| ---- | ---------------------- | ------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
+| F011 | ファイル取込           | OK      | /imports の primary「取込を開始」（L1）                                      | hetero-import・business-flow-audit         |
+| F012 | 貼り付け取込           | OK      | /imports の閉じた節「貼り付け」（L2。変更前から折りたたみ）                  | data-entry-aggregation                     |
+| F013 | 取込プレビューの行確定 | OK      | /imports/[jobId] の primary「選択した行を確定」                              | vertical-slices・zz-bulk-50-import         |
+| F014 | 標準 CSV の検証        | OK      | /imports/standard（段階 UI）「検証する」                                     | zz-disclosure-project                      |
+| F015 | 標準 CSV の登録確定    | OK      | 同「登録を確定」                                                             | zz-disclosure-project                      |
+| F016 | 前年度から複製         | Changed | 非財務データの「その他」→「前年度から複製…」→ 確認ダイアログ（区分 2）（L2） | data-entry-aggregation・flash-and-clearing |
+
+### 3.3 非財務データ
+
+| ID   | 機能                                         | 判定    | 今の置き場所（層）                                                                                                                                               | 根拠                                             |
+| ---- | -------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| F017 | 状態遷移（提出・レビュー開始・差戻し・承認） | Changed | データの詳細の見出し: 状態 × 権限で primary 1（提出／レビュー開始／承認）。差戻しは「差戻し…」→ 理由必須の確認ダイアログ                                         | vertical-slices・business-flow-audit             |
+| F018 | 承認ルートの段階承認                         | Changed | 承認フロー節の「「段階」を承認」（primary）・「差し戻す…」（理由必須のダイアログ）                                                                               | vertical-slices・new-features-audit              |
+| F019 | 一括操作                                     | Changed | 一覧で行を選んだときだけ下端のバー（一括提出・レビューへ・差戻し・一括承認）。承認は data.approve のときだけ（R4）。差戻しは**理由必須**（各行のコメントに残る） | action-audit・integration enterprise-slice       |
+| F020 | 値の修正（履歴付き）                         | Changed | 「値の編集」節（入力中・差戻しは開いて描く。承認済みは「その他」→「承認済みの値を修正」で開く）。単位は指標の単位から選ぶ（D5）                                  | action-audit・crud-persistence・edge-cases-audit |
+| F021 | 根拠資料の紐付け                             | OK      | 「根拠資料」節の「紐付ける」                                                                                                                                     | action-audit・evidence-link                      |
+| F022 | AI に原因を説明させる                        | Changed | 見出しの「その他」（L2）                                                                                                                                         | ai-use-cases・production-smoke                   |
+| F023 | AI に資料候補を探させる                      | Changed | 見出しの「その他」（L2。文言 Evidence → 資料）                                                                                                                   | ai-use-cases                                     |
+
+### 3.4 資料・証跡
+
+| ID   | 機能         | 判定    | 今の置き場所（層）                                                            | 根拠                                                                   |
+| ---- | ------------ | ------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| F024 | 資料の登録   | Changed | 見出しの primary「資料を登録」→ 作成パネル（`?new=1`。n キー）→「登録」（L2） | action-audit・mentions-evidence                                        |
+| F025 | 抜粋の手入力 | Changed | 資料の詳細の「手動抜粋」節（抽出できない資料は開いて描く）「抜粋を追加」      | NO_E2E_YET → integration self-audit-3-actions・unit b1-data-imports-ui |
+
+### 3.5 GHG・Scope 3
+
+| ID   | 機能                     | 判定    | 今の置き場所（層）                                                                 | 根拠                          |
+| ---- | ------------------------ | ------- | ---------------------------------------------------------------------------------- | ----------------------------- |
+| F026 | サプライヤーデータの解析 | OK      | /ghg/suppliers の段階 ①「解析する」                                                | ghg-suppliers・zz-murata-demo |
+| F027 | サプライヤーデータの確定 | OK      | 段階 ③「チェックした行を確定する」                                                 | ghg-suppliers・zz-murata-demo |
+| F028 | 取込済み算定版のリセット | Changed | 「その他」→「デモを初期状態に戻す…」→ 確認ダイアログ（区分 1。必須チェック）（L3） | zz-murata-demo                |
+| F029 | 排出原単位の変更         | Changed | 原単位の紐付けの行「原単位を変更…」→ 変更前後を並べた確認ダイアログ（区分 2）      | ghg-suppliers・zz-murata-demo |
+
+### 3.6 SSBJ
+
+| ID   | 機能                        | 判定    | 今の置き場所（層）                                                                                    | 根拠                                             |
+| ---- | --------------------------- | ------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| F030 | 分析条件・連結範囲の保存    | OK      | SSBJ 設定 ①                                                                                           | new-features-audit                               |
+| F031 | 有価証券報告書の範囲を反映  | OK      | SSBJ 設定 ①                                                                                           | new-features-audit                               |
+| F032 | 設定の確定                  | Changed | SSBJ 設定 ③「この内容で確定」→ 確認ダイアログ（区分 1）                                               | ssbj-settings-approval-draft                     |
+| F033 | マテリアリティの追加        | OK      | SSBJ 設定 ②「マテリアリティを追加」                                                                   | crud-persistence・six-features                   |
+| F034 | マテリアリティの編集        | OK      | 行の「編集」→「変更を保存」                                                                           | crud-persistence                                 |
+| F035 | マテリアリティの削除        | Changed | 行の「{名前} を削除」→ 確認ダイアログ「削除する」（行内の確認から部品へ）                             | crud-persistence                                 |
+| F036 | リスク・機会の保存          | OK      | 行の「リスク・機会を保存」                                                                            | crud-persistence                                 |
+| F037 | 重要度の評価                | OK      | 行の「評価を保存」（評価理由は必須）                                                                  | crud-persistence・six-features                   |
+| F038 | 要求事項の適用判定          | OK      | 要求事項の詳細「判定を保存」                                                                          | ssbj-gap                                         |
+| F039 | AI ギャップ分析（1 件）     | OK      | 要求事項の詳細の secondary                                                                            | ssbj-gap                                         |
+| F040 | AI ギャップ分析（まとめて） | Changed | 要求事項の評価の「その他」→「未分析をまとめて分析（最大 20 件）」（L2）                               | ssbj-gap                                         |
+| F041 | 担当者の最終判定            | OK      | 要求事項の詳細の primary「最終判定として確定する」                                                    | ssbj-gap                                         |
+| F042 | 対応計画の作成              | Changed | 要求事項の詳細「対応計画に追加」→ 作成パネル（期限・担当の既定 D3・D4）                               | zzzz-relocated-features                          |
+| F043 | 対応計画の更新              | OK      | /ssbj/plans の行「更新」                                                                              | ssbj-gap                                         |
+| F044 | データ収集項目の作成        | Changed | /ssbj/plans の primary「データ収集項目を作成」→ 作成パネル（指標の候補 D6・期限 D3）                  | zzzz-relocated-features                          |
+| F045 | AI に草案を作らせる         | OK      | /ssbj/draft の節ごとの secondary「人工知能に草案を作らせる」                                          | ssbj-settings-approval-draft・new-features-audit |
+| F046 | ドラフト本文の保存          | OK      | 節の「本文を保存」                                                                                    | ssbj-settings-approval-draft                     |
+| F047 | ドラフトの確定              | OK      | 節の secondary「この内容で確定」                                                                      | ssbj-settings-approval-draft                     |
+| F048 | 前年度評価の引継ぎ          | Changed | **UI 新設**: 要求事項の評価の「その他」→「前年度の評価を引き継ぐ…」→ 確認（区分 2）→ 結果の通知（L2） | zzzz-relocated-features                          |
+
+### 3.7 CSRD
+
+| ID   | 機能                   | 判定    | 今の置き場所（層）                                                                     | 根拠                                                                                                 |
+| ---- | ---------------------- | ------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| F049 | 報告範囲の保存         | Changed | CSRD 設定 ①（`?step=boundary`）「報告範囲を保存」                                      | zzzz-relocated-features                                                                              |
+| F050 | DMA 評価方法の保存     | Changed | CSRD 設定 ②（`?step=method`）「評価方法を保存」                                        | zzzz-relocated-features                                                                              |
+| F051 | DMA の確定             | Changed | CSRD 設定 ③「DMA を確定する」→ 確認ダイアログ（区分 1）                                | csrd・zzz-csrd-chain                                                                                 |
+| F052 | IRO の追加・更新       | Changed | 事項の評価: secondary「IRO を追加」→ 作成パネル、編集は行の「操作」→「編集」           | zzzz-relocated-features                                                                              |
+| F053 | IRO の削除             | Changed | 行の「操作」→「削除…」→ 確認ダイアログ（論理削除・DMA の確定の取消を本文に）           | zzzz-relocated-features                                                                              |
+| F054 | 事項の重要性判断       | OK      | 事項の評価の primary「判断を保存」                                                     | csrd-screens・zzz-csrd-chain                                                                         |
+| F055 | 担当者の入力として確定 | OK      | 要求事項の詳細（候補が無いとき primary）                                               | NO_E2E_YET → integration csrd-requirements-actions・unit csrd-overview-settings-requirements-pages   |
+| F056 | AI ギャップ分析        | OK      | 要求事項の詳細の secondary                                                             | zzz-csrd-chain                                                                                       |
+| F057 | 候補を採用             | OK      | 要求事項の詳細の primary「候補を採用」                                                 | zzz-csrd-chain                                                                                       |
+| F058 | 候補を修正して確定     | OK      | 「修正して確定…」の折りたたみ                                                          | NO_E2E_YET → integration csrd-requirements-actions・unit 同上                                        |
+| F059 | 対応計画の作成         | Changed | 要求事項の詳細「対応計画に追加」→ 作成パネル（業務エラーは `?new=1` で欄を開いて戻す） | zzz-csrd-chain                                                                                       |
+| F060 | 対応計画の更新         | OK      | /csrd/plans の行「更新」                                                               | NO_E2E_YET → integration csrd-plans-collection-draft-actions・unit csrd-plans-collection-draft-pages |
+| F061 | 収集項目の作成         | Changed | /csrd/collection の primary「収集項目を作成」→ 作成パネル                              | zzz-csrd-chain                                                                                       |
+| F062 | AI 草案を作成          | OK      | /csrd/draft の節の secondary                                                           | zzz-csrd-chain・csrd-screens                                                                         |
+| F063 | 草案を本文に採用       | Changed | 節の「本文に採用」→ 確認ダイアログ（置き換わる旨。区分 2）                             | zzz-csrd-chain                                                                                       |
+| F064 | 本文の保存             | OK      | 節の「本文を保存」                                                                     | zzz-csrd-chain・csrd-screens                                                                         |
+| F065 | 保存済み本文で確定     | OK      | 節の「保存済みの本文で確定」                                                           | zzz-csrd-chain                                                                                       |
+
+### 3.8 CDP・開示回答（question-view は CDP／CSRD 共用）
+
+| ID   | 機能                             | 判定    | 今の置き場所（層）                                                                                                                                        | 根拠                                     |
+| ---- | -------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| F066 | 適用判定を実行                   | OK      | CDP の見出しの secondary「適用判定を実行」                                                                                                                | disclosure-check                         |
+| F067 | 質問マッピング（AI）             | Changed | CDP の「その他」→「質問マッピングを実行（AI）」（L2）                                                                                                     | ai-use-cases                             |
+| F068 | 整合チェック（AI）               | Changed | CDP の「その他」→「整合チェックを実行（AI）」・CSRD 対応状況の secondary                                                                                  | disclosure-check・csrd                   |
+| F069 | 過去回答ファイルの解析           | OK      | /cdp/import の段階 ①「解析する」                                                                                                                          | disclosure-import                        |
+| F070 | 過去回答の取込確定               | OK      | 段階 ③「選択した n 件を取り込む」                                                                                                                         | disclosure-import                        |
+| F071 | AI ドラフトを生成                | Changed | 回答の「その他」→「ドラフトを生成（AI）」（L2）                                                                                                           | vertical-slices・action-audit・csrd      |
+| F072 | AI 下書きを不採用                | Changed | 回答の「その他」→「この下書きを不採用にする…」→ 確認ダイアログ（文言 Reject → 不採用）                                                                    | action-audit                             |
+| F073 | 回答の保存（下書き）             | OK      | 回答の primary「保存（下書き）」                                                                                                                          | vertical-slices・business-flow-audit     |
+| F074 | 回答のレビュー依頼・差戻し・承認 | Changed | 下書き: secondary「レビュー依頼」、作成と承認の兼務者の承認は「その他」。レビュー中: primary「承認」・「差戻し…」（理由必須。理由は回答のコメントに残る） | vertical-slices・zzzz-relocated-features |
+
+### 3.9 定性情報
+
+| ID   | 機能                     | 判定    | 今の置き場所（層）                                                                               | 根拠                                                                        |
+| ---- | ------------------------ | ------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| F075 | 新規登録（手入力）       | OK      | 一覧の primary「新しく登録」→ /narratives/new「登録する」                                        | zz-disclosure-project                                                       |
+| F076 | 版として保存             | OK      | 編集画面「版として保存」（競合時は「差分を確認したうえで保存」）                                 | zz-disclosure-project                                                       |
+| F077 | 内容を確認済みにする     | OK      | 編集画面                                                                                         | zz-disclosure-project                                                       |
+| F078 | 根拠資料の断片を読み込む | OK      | 編集画面の資料の選択                                                                             | zz-disclosure-project                                                       |
+| F079 | 資料の箇所を引用         | OK      | 「この箇所を引用」                                                                               | zz-disclosure-project                                                       |
+| F080 | 前年から引継ぎ           | Changed | 一覧の行の「操作」→「前年から引継ぎ（{期間} へ）」（L2）                                         | NO_E2E_YET → unit esg-data-project-pages                                    |
+| F081 | 資料から候補を作成       | Changed | 一覧の「その他」→「資料から候補を作成」→ /narratives/new の「資料から」→「候補（下書き）を作成」 | NO_E2E_YET → integration narrative（サービス）・unit esg-data-project-pages |
+
+### 3.10 開示プロジェクト・原稿
+
+| ID   | 機能                             | 判定    | 今の置き場所（層）                                                                                 | 根拠                                                                |
+| ---- | -------------------------------- | ------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| F082 | プロジェクトの作成（3 段階）     | OK      | 一覧の primary「プロジェクトを作成」→ 段階 UI（StepNav）「次へ」→「保存して準備を始める」          | zzzz-relocated-features                                             |
+| F083 | プロジェクト設定の変更           | OK      | 設定タブ「変更を保存」（影響があるときは「影響を確認して保存」に置き換わる）                       | NO_E2E_YET → integration disclosure-project・self-audit-3-integrity |
+| F084 | 基準ごとの適用条件と準備区分     | OK      | 設定タブ                                                                                           | NO_E2E_YET → integration disclosure-project                         |
+| F085 | 適用判断の確定                   | OK      | 設定タブ「適用判断を確定」                                                                         | NO_E2E_YET → integration self-audit-3-actions                       |
+| F086 | 基準の新しい版を追加             | Changed | 設定タブの「詳細設定」（閉じた節。L3）「新しい版をこのプロジェクトに追加」                         | NO_E2E_YET → integration disclosure-project                         |
+| F087 | 節の追加                         | Changed | 原稿タブの primary「節を追加」→ 作成パネル（`?new=1`。素の details を置換）                        | zzzz-relocated-features                                             |
+| F088 | 本文の自動保存                   | OK      | 原稿編集                                                                                           | editor-draft-restore                                                |
+| F089 | 版として保存                     | OK      | 原稿編集の secondary「版として保存」                                                               | zz-disclosure-project                                               |
+| F090 | レビュー依頼                     | OK      | 原稿編集の primary「レビュー依頼」                                                                 | zz-disclosure-project・disclosure-first-nav                         |
+| F091 | AI 下書き候補の生成              | OK      | 右ペインの AI（候補であることを外に表示）                                                          | zz-disclosure-project                                               |
+| F092 | 段落を採用                       | OK      | 右ペイン                                                                                           | zz-disclosure-project・editor-draft-restore                         |
+| F093 | 候補の確認を終える／破棄         | OK      | 右ペイン                                                                                           | zz-disclosure-project                                               |
+| F094 | レビューコメント                 | OK      | 右ペインの secondary「コメントする」                                                               | zz-disclosure-project                                               |
+| F095 | コメントを解決済みにする         | OK      | 右ペイン「解決済みにする」                                                                         | NO_E2E_YET → unit self-audit-2-ui                                   |
+| F096 | 差し戻す                         | Changed | レビューのパネル「差し戻す…」→ 理由必須の確認                                                      | zz-disclosure-project・new-features-audit                           |
+| F097 | 依頼を取り下げる                 | Changed | 「依頼を取り下げる…」→ 確認ダイアログ                                                              | NO_E2E_YET → unit self-audit-3-ui                                   |
+| F098 | レビューを完了する               | OK      | 指名レビュアーの primary                                                                           | zz-disclosure-project                                               |
+| F099 | 最終承認（社内承認）             | Changed | 最終承認者の primary「最終承認する（社内承認）」→ 確認ダイアログ（区分 1）                         | zz-disclosure-project                                               |
+| F100 | 引用先の再確認の判断             | Changed | /recheck の表＋展開行、行ごとの 3 択（secondary）                                                  | zz-disclosure-project                                               |
+| F101 | レビュー用草稿のスナップショット | OK      | 出力タブの secondary「レビュー用草稿を作成」                                                       | NO_E2E_YET → integration report-snapshot-export                     |
+| F102 | レポートを確定                   | Changed | 出力タブの primary「レポートを確定する」→ 確認ダイアログ（区分 1。範囲 1 行）                      | zz-disclosure-project                                               |
+| F103 | 開示デモを初期状態に戻す         | Changed | ホームの「その他」→ 確認ダイアログ（必須チェック）。パレットの「操作」からも同じダイアログへ（L3） | zz-disclosure-project・editor-draft-restore                         |
+
+### 3.11 ESG経営・AI・マスター・設定・PBC
+
+| ID   | 機能                         | 判定    | 今の置き場所（層）                                                                                                                                            | 根拠                                                          |
+| ---- | ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| F104 | KPI 目標の登録・改訂         | Changed | /esg/targets の primary「目標を登録」→ 作成パネル（必須の節が先頭。基準年は直近の締めた年度を候補として示す）。ESG経営の目標未登録の KPI に行内「目標を登録」 | zzzz-relocated-features                                       |
+| F105 | Copilot に質問               | OK      | /ai「質問する」                                                                                                                                               | auth-copilot・insights                                        |
+| F106 | インサイトを発見             | OK      | /ai「インサイトを発見」                                                                                                                                       | insights                                                      |
+| F107 | 指標の追加                   | Changed | 指標マスターのタブ（`?tab=metrics`）の primary「指標を追加」→ 専用ページ N1（モーダルから移した。入力を失わない）                                             | metric-master・crud-persistence・master-data                  |
+| F108 | 指標の編集                   | Changed | 指標マスターの行の「編集」（アイコンだけのボタンを文字付きに）→ 専用ページ N2                                                                                 | metric-master・crud-persistence                               |
+| F109 | 組織・拠点の追加             | Changed | 組織・拠点のタブの primary「組織を追加」→ 作成パネル（国・通貨・TZ を親から継承 D11）                                                                         | master-data                                                   |
+| F110 | 組織・拠点の編集             | Changed | 行の「編集」→ 編集パネル（`?edit=`）                                                                                                                          | master-data                                                   |
+| F111 | 報告年度の追加               | Changed | 報告年度のタブの primary「報告年度を追加」（**org.manage のときだけ**＝R2）→ 小さなダイアログ（最新＋1 年の既定 D12。入力を失わない）                         | reporting-period                                              |
+| F112 | 収集キャンペーンの作成       | Changed | キャンペーンのタブの primary「キャンペーンを作成」→ 2 段の専用ページ N3                                                                                       | master-data・reporting-period                                 |
+| F113 | 開示優先モードの切替         | Changed | 設定の「機能設定」タブの保存 → 確認ダイアログ（区分 1。組織の全員のメニューとホームが変わる）                                                                 | disclosure-first-nav・zz-disclosure-project                   |
+| F114 | 招待リンクの発行             | Changed | 設定の「招待」タブ（見出しの「メンバーを招待」）→ 作成パネル「招待リンクを発行」。リンクはコピーのボタン                                                      | auth-copilot                                                  |
+| F115 | 招待の失効                   | Changed | 「招待」タブの行「失効…」→ 確認ダイアログ（逆操作が無いので区分 1）                                                                                           | auth-copilot                                                  |
+| F116 | パスワード再設定リンクの発行 | Changed | 設定の「セキュリティ」タブ                                                                                                                                    | e2e-supabase/auth-security                                    |
+| F117 | 監査法人へのアクセス許諾     | Changed | 設定の「アクセス許諾」タブ「アクセス許諾を追加」→ 作成パネル「許諾する」。企業管理者のみ（変更前と同じ。R1 は見送り）                                         | grant-lifecycle・zzzz-relocated-features                      |
+| F118 | 許諾の取消・再付与           | Changed | 行の「取消…」→ 確認ダイアログ → 結果の通知の「元に戻す」（区分 3）・行の「再付与」                                                                            | action-audit・tenant-isolation-audit・zzzz-relocated-features |
+| F119 | PBC への回答                 | Changed | ワークフローの「資料依頼」節の行「回答を書く」（折りたたみ）→ secondary「回答を提出」                                                                         | action-audit                                                  |
+
+### 3.12 監査法人
+
+| ID   | 機能                               | 判定    | 今の置き場所（層）                                                                                                             | 根拠                                 |
+| ---- | ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| F120 | 案件の起票                         | Changed | 保証契約の primary「保証契約を起票」→ 作成パネル「起票」（期間の既定＝収集中の期間 D1）。パレットの「操作」                    | engagement-management                |
+| F121 | 案件チームの変更                   | Changed | **UI 新設**: 案件の概要の「案件情報」→「チームを変更」→ 作成パネル（加える／外す。自分は外せない理由を表示）                   | zzzz-relocated-features              |
+| F122 | Snapshot を固定                    | Changed | Data Room の「Snapshot を固定」→ 確認ダイアログ（区分 1。範囲＝共有データの件数）                                              | vertical-slices                      |
+| F123 | Snapshot 後変更の影響評価          | OK      | Data Room の行「記録」                                                                                                         | action-audit                         |
+| F124 | AI で差分を要約                    | OK      | Data Room「AI で差分を要約」（候補の表示を外に）                                                                               | action-audit                         |
+| F125 | サンプルを抽出                     | Changed | サンプリングの primary「新しいサンプルを抽出」→ 作成パネル「サンプルを抽出」。方法は登録簿のラベル                             | vertical-slices                      |
+| F126 | 手続結果の記録                     | OK      | 保証手続・調書の「記録」                                                                                                       | vertical-slices                      |
+| F127 | 調書の更新・作成完了・レビュー完了 | Changed | 「保存」「作成完了として記録」「レビュー完了として記録」（3 つとも残し、強調だけを状態に合わせる。自己レビューは押せない理由） | vertical-slices                      |
+| F128 | 資料を AI に要約させる             | OK      | 調書の「AI に要約させる」（候補の表示を外に）                                                                                  | ai-use-cases                         |
+| F129 | PBC（資料依頼）の送付              | Changed | PBC の primary「資料依頼を作成」→ 作成パネル「送付」（期限の既定＝案件の期限 D3）                                              | pbc-and-audit-trail・vertical-slices |
+| F130 | PBC 回答の受理・差戻し             | Changed | 行の secondary「受理」・「差戻し…」→ 理由必須の確認（区分 2）                                                                  | action-audit・pbc-and-audit-trail    |
+| F131 | 指摘・例外の起票                   | Changed | 指摘の primary「指摘を起票」→ 作成パネル「起票」                                                                               | vertical-slices                      |
+| F132 | 指摘の解消                         | OK      | 行の secondary「解消として記録」                                                                                               | vertical-slices                      |
+| F133 | レビュー Note の追加               | Changed | primary「レビューNote を追加」→ 作成パネル「追加」                                                                             | action-audit                         |
+| F134 | レビュー Note のクリア             | OK      | 行の「クリア」                                                                                                                 | action-audit                         |
+| F135 | Sign-off                           | Changed | 段階ごとの「{段階} として Sign-off」→ 確認ダイアログ（区分 1。本人・案件・段階を範囲に）                                       | vertical-slices                      |
+
+## 4. 変更前から届かなかったもの（IF §6）の今
+
+### 4.1 Server Action の未接続（IF §6.1）
+
+| 対象                              | 変更前                   | 今                                                                                                                           |
+| --------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| F048 carryOverSsbjAction          | UI 無し                  | SSBJ 要求事項の「その他」（区分 2 の確認・結果の通知）。`DECISION_PENDING` から外した                                        |
+| F121 assignEngagementMemberAction | UI 無し                  | 案件の概要の「チームを変更」。`DECISION_PENDING` から外した                                                                  |
+| F136〜F144（旧版 9 件）           | 互換のため残す           | 変えていない（理由付き許可リスト `LEGACY_ALLOWLIST`。フォーム版 F084・F085・F090・F096・F097・F100・F087・F024・F025 が UI） |
+| getSelectedPeriodId               | `'use server'` の export | `src/lib/auth/selected-period.ts` へ移した（Action ではない）                                                                |
+
+### 4.2 役割と権限の不一致（IF §6.2）
+
+| #   | 今                                                                                                                                                                                                  | 検査                                                                              |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| R1  | **見送り（2026-10-07 統括）**: 権限の挙動を変えないため設定の入口は企業管理者のまま。作成担当を許諾の節に入れるかは発注者の判断（plan Q6）。タスク・パレット・ROUTE_CATALOG も管理者だけに揃えた    | permission-gates（pending として固定）・aa-task-paths C8・zzzz-relocated-features |
+| R2  | **解消**: 「報告年度を追加」は org.manage のときだけ（タスク動詞も同じ）                                                                                                                            | permission-gates・reporting-period                                                |
+| R3  | **解消**: 出力リンクは export.run（テンプレートは import.run）のときだけ。無い役割には依頼先                                                                                                        | permission-gates・reachability（403 の検査、例外なし）                            |
+| R4  | **解消**: 一括承認は data.approve のときだけ                                                                                                                                                        | permission-gates・b1-data-imports-ui                                              |
+| R5  | **解消**: サプライヤー担当は資料の画面で登録だけを出す。開示優先メニューの「数値を登録（標準CSV）」は取込の権限で出し分け、「開示プロジェクト」の行は閲覧権限の無い役割では開ける最初の子（SSBJ）へ | reachability（KNOWN_MENU_DENIED は空）、nav-config                                |
+| R6  | 変えていない（SSBJ・CDP の閲覧ゲート。発注者確認 Q3）                                                                                                                                               | —                                                                                 |
+
+### 4.3 メニュー・パレットから届かない画面（IF §6.3）
+
+すべて解消（§1 の「改善」）。ROUTE_CATALOG に全 81 ルートを載せ、固定の行き先を持つ画面はすべてパレットの「画面」から、詳細画面は一覧・データ検索から開ける（`route-catalog.test.ts`・`reachability.spec.ts`）。
+
+## 5. Changed の分類（意図した変更の一覧）
+
+| 種類                              | 機能・画面                                                                                                                                                                   | 理由（plan）                          |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 見出しの「その他」へ（L2）        | F016・F022・F023・F040・F048・F067・F068・F071・F072・F081・F103・E01・E02（CDP）・E03・E07・E08・F028                                                                       | §1.5・§1.6（primary 1・secondary ≤2） |
+| 行の「操作」へ（L2）              | F052（編集）・F053・F080                                                                                                                                                     | §1.7                                  |
+| 作成パネル（`?new=1`）へ          | F024・F042・F044・F052・F059・F061・F087・F104・F109・F114・F117・F120・F121・F125・F129・F131・F133                                                                         | §1.13-4（一覧の上に常設しない）       |
+| 専用ページへ（モーダルから）      | F107・F108・F112（N1〜N3）                                                                                                                                                   | §1.13-4・§4 B6                        |
+| 確認ダイアログを追加（区分 1〜3） | F016・F017（差戻し）・F018（差戻し）・F019・F028・F029・F032・F035・F051・F053・F063・F072・F074（差戻し）・F096・F097・F099・F102・F103・F113・F115・F118・F122・F130・F135 | §1.16（差戻しは理由必須）             |
+| 段階 UI・タブへ                   | P09・P12・P20（F049〜F051）・P53（`?tab=`）・P54（`?tab=`）・N3                                                                                                              | §1.11・S10・S11・S17                  |
+| 状態 × 権限で primary を 1 つ     | F017・F018・F020・F074・F127                                                                                                                                                 | §1.15                                 |
+| 文言（§1.17 の対応表）            | ホームの KPI・取込の確認の h1・Version → 版・Reject → 不採用・Evidence → 資料／根拠資料・監査法人の画面名                                                                    | §1.17                                 |
+| 権限の不一致の解消                | R1〜R5（§4.2）                                                                                                                                                               | IF §6.2                               |
+
+文言の置換で E2E の期待値を変えたものは、plan §5.3 の 3 種類（開いてから確かめる・§1.17 の 1 対 1 置換・監査法人ツリーの形）だけ。期待値を緩めたもの、誠実さの注記（デモデータ・架空・Mock・AI は候補・未発効・試算）の検査を消したものは無い。

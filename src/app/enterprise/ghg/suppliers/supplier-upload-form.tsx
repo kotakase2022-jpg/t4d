@@ -3,7 +3,10 @@
 import * as React from 'react';
 import { AlertTriangle, CheckCircle2, FileUp, Link2, Upload } from 'lucide-react';
 import { FileDropZone } from '@/components/shared/file-drop-zone';
+import { StepNav, type StepItem } from '@/components/shared/step-nav';
 import { Badge } from '@/components/ui/badge';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { normalizeUnit } from '@/lib/domain/supplier-units';
@@ -25,6 +28,9 @@ import {
  * 排出量原単位（排出係数）を自動解決する。数値・単位・原単位はプレビュー上で
  * 手修正でき（2026-09-15 指示①-2）、確定時はサーバー側でマスターと再照合・
  * 再正規化するため、hidden の改ざんや画面と食い違う編集では通らない。
+ *
+ * 段階（plan §2 S5・StepNav）: ① ファイルを選ぶ → ② 解析結果を確認 → ③ 確定。主操作は段階ごとに 1 つ
+ * （解析前は「解析する」、解析後は「チェックした行を確定する」。解析し直しは副操作になる）。
  */
 
 const DATA_TYPE_LABELS: Record<string, string> = {
@@ -34,7 +40,7 @@ const DATA_TYPE_LABELS: Record<string, string> = {
 };
 
 function DataTypeBadge({ dataType }: { dataType: SupplierPreviewRow['dataType'] }) {
-  if (!dataType) return <span className="text-[11px] text-ink-muted">—</span>;
+  if (!dataType) return <span className="text-caption text-ink-muted">—</span>;
   return (
     <Badge
       tone={dataType === 'emissions' ? 'brand' : dataType === 'physical' ? 'neutral' : 'outline'}
@@ -62,7 +68,7 @@ function candidateOptionLabel(candidate: FactorCandidate): string {
 function ConfidenceCell({ row }: { row: SupplierPreviewRow }) {
   const shown = row.displayConfidence ?? row.rawConfidence;
   if (shown === null || shown === undefined) {
-    return <span className="text-[11px] text-ink-muted">—</span>;
+    return <span className="text-caption text-ink-muted">—</span>;
   }
   const pct = Math.round(shown * 100);
   const hint =
@@ -72,7 +78,7 @@ function ConfidenceCell({ row }: { row: SupplierPreviewRow }) {
   return (
     <span
       title={hint}
-      className={`font-medium tabular-nums ${pct >= 90 ? 'text-success' : pct >= 80 ? 'text-ink' : 'text-[#8a5d00]'}`}
+      className={`font-medium tabular-nums ${pct >= 90 ? 'text-success' : pct >= 80 ? 'text-ink' : 'text-warning-ink'}`}
     >
       {pct}%
     </span>
@@ -148,13 +154,11 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
             <input type="hidden" name={`supplierCode:${rowKey}`} value={row.supplierCode} />
             <input type="hidden" name={`item:${rowKey}`} value={row.item} />
             <input type="hidden" name={`dataType:${rowKey}`} value={row.dataType ?? ''} />
-            <input
-              type="checkbox"
+            <NativeCheckbox
               name={`include:${rowKey}`}
               defaultChecked={!row.needsFactorChoice || row.recommendedFactorCode !== null}
               disabled={row.needsFactorChoice && selectedCode === ''}
               aria-label={`${row.supplierName ?? row.supplierCode} ${row.item} を取り込む${row.needsFactorChoice && selectedCode === '' ? '（先に原単位を選択してください）' : ''}`}
-              className="size-3.5 accent-brand-600"
             />
           </>
         ) : (
@@ -163,7 +167,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
       </TD>
       <TD className="font-medium text-ink">
         {row.supplierName ?? row.supplierCode}
-        <span className="ml-1 font-mono text-[11px] text-ink-muted">{row.supplierCode}</span>
+        <span className="ml-1 font-mono text-caption text-ink-muted">{row.supplierCode}</span>
       </TD>
       <TD>{row.item}</TD>
       <TD>
@@ -185,7 +189,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
                 ? `元の表記: ${row.amountRaw}`
                 : undefined
             }
-            className="tnum h-6 w-24 rounded-t4d border border-line bg-surface px-1 text-right text-[12px]"
+            className="tnum h-6 w-24 rounded-t4d border border-line bg-surface px-1 text-right text-small"
           />
         ) : row.amount !== null ? (
           formatNumber(row.amount)
@@ -193,7 +197,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
           row.amountRaw
         )}
       </TD>
-      <TD className="text-[11px]">
+      <TD className="text-caption">
         {importable ? (
           <span className="flex flex-col gap-0.5">
             <input
@@ -202,7 +206,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
               onChange={(event) => onUnitChange(rowKey, event.target.value)}
               aria-label={`${row.supplierName ?? row.supplierCode} ${row.item} の単位`}
               title="表記ゆらぎ（g・円 等）は確定時に正規化・換算されます"
-              className={`h-6 w-14 rounded-t4d border bg-surface px-1 text-[11px] ${unitWarning ? 'border-danger' : 'border-line'}`}
+              className={`h-6 w-14 rounded-t4d border bg-surface px-1 text-caption ${unitWarning ? 'border-danger' : 'border-line'}`}
             />
             {unitWarning && <span className="text-danger">{unitWarning}</span>}
           </span>
@@ -210,7 +214,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
           (row.unit ?? '—')
         )}
       </TD>
-      <TD className="text-[11px]">
+      <TD className="text-caption">
         {row.dataType === 'emissions' ? (
           <span className="text-ink-muted">不要（報告値）</span>
         ) : importable && row.factorCandidates.length > 0 ? (
@@ -220,14 +224,15 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
             <span className="flex items-center gap-1">
               {/* text-warning は明度が高く読めないため、警告文字色は既存慣例の #8a5d00 */}
               {row.needsFactorChoice && (
-                <Link2 className="size-3 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+                <Link2 className="size-3 shrink-0 text-warning-ink" aria-hidden="true" />
               )}
-              <select
+              <NativeSelect
+                size="xs"
                 name={`factorCode:${rowKey}`}
                 value={selectedCode}
                 onChange={(event) => onFactorChange(rowKey, event.target.value)}
                 aria-label={`${row.supplierName ?? row.supplierCode} ${row.item} の排出量原単位`}
-                className="h-6 max-w-[280px] rounded-t4d border border-line bg-surface px-1 text-[11px]"
+                className="w-auto max-w-[280px] px-1 text-caption"
               >
                 {(row.needsFactorChoice || selectedCode === '') && (
                   <option value="">原単位を選択…</option>
@@ -237,7 +242,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
                     {candidateOptionLabel(candidate)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </span>
             {activeFactor && (
               <span className="text-ink-muted">
@@ -267,11 +272,11 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
       </TD>
       <TD>
         {row.skippedReason ? (
-          <span className="text-[11px] text-ink-muted">{row.skippedReason}</span>
+          <span className="text-caption text-ink-muted">{row.skippedReason}</span>
         ) : row.errors.length > 0 ? (
           <ul className="space-y-0.5">
             {row.errors.map((message) => (
-              <li key={message} className="flex items-start gap-1 text-[11px] text-danger">
+              <li key={message} className="flex items-start gap-1 text-caption text-danger">
                 <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
                 {message}
               </li>
@@ -390,8 +395,15 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
     };
   }, [previews]);
 
+  const steps: StepItem[] = [
+    { key: 'file', label: 'ファイルを選ぶ', state: previews ? 'done' : 'current' },
+    { key: 'review', label: '解析結果を確認', state: previews ? 'current' : 'todo' },
+    { key: 'confirm', label: '確定', state: 'todo' },
+  ];
+
   return (
     <div className="space-y-3">
+      <StepNav ariaLabel="サプライヤーデータ取込の段階" steps={steps} />
       <form ref={formRef} action={formAction} className="space-y-3">
         <input type="hidden" name="reportingPeriodId" value={reportingPeriodId} />
         <FileDropZone
@@ -405,10 +417,10 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
           className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-t4d-lg border-2 border-dashed border-line bg-surface-muted px-4 py-8 text-center transition-colors hover:border-brand-400 hover:bg-brand-50"
         >
           <FileUp className="size-6 text-brand-600" aria-hidden="true" />
-          <span className="text-[13px] font-medium text-ink">
+          <span className="text-body font-medium text-ink">
             クリックしてファイルを選択（複数可）／ ここへドロップ
           </span>
-          <span className="text-[11px] text-ink-muted">
+          <span className="text-caption text-ink-muted">
             排出量（t-CO2e）・物理量（kWh・m3・L・kg・個・m2）・金額（千円）の素データを自動仕訳します
             ／ 多言語ヘッダー・前置き行対応 ／ .csv / .tsv / .xlsx ／ 各 5MB まで
           </span>
@@ -428,7 +440,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
         </FileDropZone>
 
         {selectedNames.length > 0 && (
-          <p role="status" aria-live="polite" className="text-[12px] text-ink-muted">
+          <p role="status" aria-live="polite" className="text-small text-ink-muted">
             受け付けたファイル（{selectedNames.length} 件）:{' '}
             <span className="text-ink">
               {selectedNames.length <= 3
@@ -441,26 +453,33 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
         {state && !state.ok && (
           <p
             role="alert"
-            className="rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
+            className="rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-small text-ink"
           >
             {state.message}
           </p>
         )}
 
         <div className="flex items-center gap-2">
-          <SubmitButton size="sm" icon={<Upload aria-hidden="true" />} pendingLabel="解析中…">
+          {/* 解析後の主操作は確定。解析し直しは副操作にする（同時に 2 つの主操作を出さない） */}
+          <SubmitButton
+            variant={previews ? 'secondary' : 'primary'}
+            size="sm"
+            icon={<Upload aria-hidden="true" />}
+            pendingLabel="解析中…"
+          >
             解析する
           </SubmitButton>
-          <span className="text-[11px] text-ink-muted">
-            解析が終わるとプレビュー画面へ移ります。
-            テンプレートに記入したファイルもここへドロップしてください。
+          <span className="text-caption text-ink-muted">
+            {previews
+              ? '別のファイルを選んで押すと、解析し直します（今のプレビューと手修正は消えます）。'
+              : '解析が終わると、この下に解析結果が並びます。テンプレート（「その他」から取得）に記入したファイルもここへドロップしてください。'}
           </span>
         </div>
       </form>
 
       {previews && summary && (
         <div className="space-y-3 border-t border-line pt-3">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-t4d border border-line bg-surface-muted px-3 py-2 text-[12px]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-t4d border border-line bg-surface-muted px-3 py-2 text-small">
             <span>
               解析結果: <span className="font-medium text-ink">{summary.fileCount} ファイル</span>
               ・明細 <span className="font-medium text-ink">{summary.detailCount} 行</span>
@@ -494,7 +513,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                 key={`g${generation}-${fileIndex}-${preview.fileName}`}
                 className="space-y-2"
               >
-                <p className="text-[12px] text-ink">
+                <p className="text-small text-ink">
                   {/* ファイル名クリックで投入した元ファイルを再ダウンロード（2026-09-15 指示①-1）。
                       実体はこのブラウザが保持する File。無ければただの名前として出す */}
                   {analyzedFiles.has(preview.fileName) ? (
@@ -520,7 +539,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                     {preview.fileErrors.map((message) => (
                       <li
                         key={message}
-                        className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
+                        className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-small text-ink"
                       >
                         <AlertTriangle
                           className="mt-0.5 size-3.5 shrink-0 text-danger"
@@ -535,7 +554,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                 {preview.fileNotes.length > 0 && (
                   <ul className="space-y-0.5">
                     {preview.fileNotes.map((message) => (
-                      <li key={message} className="text-[11px] text-ink-muted">
+                      <li key={message} className="text-caption text-ink-muted">
                         ℹ {message}
                       </li>
                     ))}
@@ -603,7 +622,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
             {confirmState && !confirmState.ok && (
               <p
                 role="alert"
-                className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
+                className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-small text-ink"
               >
                 <AlertTriangle
                   className="mt-0.5 size-3.5 shrink-0 text-danger"
@@ -615,6 +634,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
 
             <div className="flex items-center gap-2">
               <SubmitButton
+                variant="primary"
                 size="sm"
                 icon={<CheckCircle2 aria-hidden="true" />}
                 pendingLabel="確定中…"
@@ -622,7 +642,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
               >
                 チェックした行を確定する
               </SubmitButton>
-              <span className="text-[11px] text-ink-muted">
+              <span className="text-caption text-ink-muted">
                 確定すると Scope3 Cat.1 の算定根拠へ新しい版を追記します（過去の版は残ります）。
                 推薦候補（★）は初期選択済みです。数値・単位・係数を変更するとその場で再計算されます。
               </span>

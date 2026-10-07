@@ -6,13 +6,18 @@ import { DEMO_USERS, loginAs } from './helpers';
  *
  * 企業と監査法人の唯一の接続点は engagements と client_access_grants だけ
  * （CLAUDE.md §0.2）。付与する導線が無いと、新しい保証契約でデータを共有できない。
+ * 許諾は設定の「アクセス許諾」タブ。追加の欄は一覧の上に常設しない（plan S17 CreatePanel）。
  */
 test.describe.configure({ mode: 'serial' });
 
 test('企業が許諾を新規付与でき、一覧に「有効」で現れる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=grants');
 
+  await page
+    .locator('[data-page-actions]')
+    .getByRole('link', { name: 'アクセス許諾を追加' })
+    .click();
   const form = page.locator('form', { hasText: '許諾する' });
   await expect(form, '許諾を新規付与するフォームが無い').toBeVisible();
 
@@ -38,12 +43,12 @@ test('付与した指標は監査法人の Data Room に現れる', async ({ pag
   await expect(page.locator('#t4d-main')).toBeVisible();
   // 許諾しただけでは共有されない（企業が Data Room へ出す操作が別にある）ため、
   // ここでは「許諾済みの指標が保証対象として扱われている」ことだけを確認する
-  await expect(page.locator('#t4d-main')).not.toContainText('データを取得できませんでした');
+  await expect(page.locator('#t4d-main')).not.toContainText('処理を完了できませんでした');
 });
 
 test('種別と対象の組み合わせが不正な付与はサーバー側で拒否される', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=grants&new=1');
 
   const form = page.locator('form', { hasText: '許諾する' });
   // 種別は「報告期間」なのに、対象に指標を選ぶ

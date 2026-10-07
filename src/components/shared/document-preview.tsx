@@ -58,7 +58,7 @@ function renderLine(text: string, highlight: string[]) {
   return (
     <>
       {text.slice(0, at)}
-      <mark className="rounded-sm bg-brand-100 px-0.5 text-brand-900">{hit}</mark>
+      <mark className="rounded-t4d-sm bg-brand-100 px-0.5 text-brand-900">{hit}</mark>
       {text.slice(at + hit.length)}
     </>
   );
@@ -77,15 +77,15 @@ export function DocumentPreview({
   return (
     <div className="bg-surface-muted p-4">
       {/* 用紙 */}
-      <div className="mx-auto max-w-[760px] rounded-t4d border border-line bg-white shadow-sm">
+      <div className="mx-auto max-w-[760px] rounded-t4d border border-line bg-white shadow-raised">
         {/* 用紙のヘッダー（原本の版面を模したもの） */}
         <div className="flex items-center justify-between border-b border-line px-6 pt-5 pb-2">
-          <div className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+          <div className="flex items-center gap-1.5 text-caption text-ink-muted">
             <FileText className="size-3.5" aria-hidden="true" />
             <span className="truncate">{title}</span>
           </div>
           {page != null && (
-            <span className="shrink-0 text-[11px] text-ink-muted">
+            <span className="shrink-0 text-caption text-ink-muted">
               {totalPages && totalPages > 1 ? `${page} / ${totalPages} ページ` : `${page} ページ`}
             </span>
           )}
@@ -102,14 +102,14 @@ export function DocumentPreview({
                 return (
                   <h3
                     key={i}
-                    className="mb-3 border-b-2 border-ink pb-1.5 text-center text-[15px] font-semibold tracking-wide text-ink"
+                    className="mb-3 border-b-2 border-ink pb-1.5 text-center text-title font-semibold tracking-wide text-ink"
                   >
                     {content}
                   </h3>
                 );
               case 'meta':
                 return (
-                  <p key={i} className="text-[12px] leading-6 text-ink">
+                  <p key={i} className="text-small leading-6 text-ink">
                     {content}
                   </p>
                 );
@@ -117,7 +117,7 @@ export function DocumentPreview({
                 return (
                   <p
                     key={i}
-                    className="mt-3 border-b border-ink/40 pb-1 font-mono text-[11.5px] font-semibold whitespace-pre text-ink"
+                    className="mt-3 border-b border-ink/40 pb-1 font-mono text-caption font-semibold whitespace-pre text-ink"
                   >
                     {content}
                   </p>
@@ -126,14 +126,14 @@ export function DocumentPreview({
                 return (
                   <p
                     key={i}
-                    className="mt-1 border-t border-line pt-1 text-right font-mono text-[12px] font-semibold whitespace-pre text-ink"
+                    className="mt-1 border-t border-line pt-1 text-right font-mono text-small font-semibold whitespace-pre text-ink"
                   >
                     {content}
                   </p>
                 );
               case 'note':
                 return (
-                  <p key={i} className="mt-3 text-[11px] leading-5 text-ink-muted">
+                  <p key={i} className="mt-3 text-caption leading-5 text-ink-muted">
                     {content}
                   </p>
                 );
@@ -141,7 +141,7 @@ export function DocumentPreview({
                 return (
                   <p
                     key={i}
-                    className="font-mono text-[11.5px] leading-6 whitespace-pre text-ink odd:bg-surface-muted/40"
+                    className="font-mono text-caption leading-6 whitespace-pre text-ink odd:bg-surface-muted/40"
                   >
                     {content}
                   </p>
@@ -151,7 +151,7 @@ export function DocumentPreview({
         </div>
 
         {/* 用紙のフッター */}
-        <div className="flex items-center justify-between border-t border-line px-6 py-2 text-[10px] text-ink-muted">
+        <div className="flex items-center justify-between border-t border-line px-6 py-2 text-caption text-ink-muted">
           <span>架空のサンプル資料（実在の企業・取引とは関係ありません）</span>
           {linked && (
             <span className="text-brand-900">この紙面が Evidence として参照されています</span>

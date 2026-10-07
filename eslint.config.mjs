@@ -103,7 +103,14 @@ export default tseslint.config(
       'jsx-a11y/label-has-associated-control': [
         'error',
         {
-          controlComponents: ['Input', 'Textarea', 'SelectTrigger', 'Checkbox'],
+          controlComponents: [
+            'Input',
+            'Textarea',
+            'SelectTrigger',
+            'Checkbox',
+            'NativeSelect',
+            'NativeCheckbox',
+          ],
           depth: 5,
         },
       ],
@@ -124,10 +131,117 @@ export default tseslint.config(
   },
   {
     // Node スクリプト / テストでは console を許容
-    files: ['scripts/**/*.ts', 'tests/**/*.{ts,tsx}', '*.config.ts'],
+    files: ['scripts/**/*.{ts,mjs}', 'tests/**/*.{ts,tsx}', '*.config.ts'],
     rules: {
       'no-console': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+  {
+    /**
+     * デザイントークンと共通部品の再発防止（docs/ui-redesign/plan.md §3.4-3・§5.4 Consistency）。
+     * Stage C で件数を 0 にした項目だけをエラーにする（数え方は scripts/ui-metrics-core.ts と同じ。
+     * 0 にできていない項目は tests/unit/ui-ratchet.test.ts の段階的上限で増やさない）。
+     * 部品の定義そのもの（src/components/ui の各部品・EmptyState）は除く。
+     */
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      'src/components/ui/button.tsx',
+      'src/components/ui/submit-button.tsx',
+      'src/components/ui/icon-button.tsx',
+      'src/components/ui/collapsible.tsx',
+      'src/components/ui/more-info.tsx',
+      'src/components/ui/form-section.tsx',
+      'src/components/ui/native-select.tsx',
+      'src/components/ui/native-checkbox.tsx',
+      'src/components/shared/states.tsx',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/(^|[\\s:!])text-\\[\\d+(\\.\\d+)?px\\]/]',
+          message:
+            '文字サイズは globals.css のトークン（text-caption・text-small・text-body・text-title など）を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/(^|[\\s:!])text-\\[\\d+(\\.\\d+)?px\\]/]',
+          message:
+            '文字サイズは globals.css のトークン（text-caption・text-small・text-body・text-title など）を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'Literal[value=/[a-z-]+-\\[#[0-9a-fA-F]{3,8}\\]/]',
+          message:
+            '色は globals.css のトークン（brand-*・ink・warning-ink など）を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/[a-z-]+-\\[#[0-9a-fA-F]{3,8}\\]/]',
+          message:
+            '色は globals.css のトークン（brand-*・ink・warning-ink など）を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'Literal[value=/(^|[\\s:!])-?z-(\\d+|\\[\\d+\\])($|\\s)/]',
+          message:
+            '重なりの順は役割のトークン（z-(--z-sticky)・z-(--z-modal)・z-(--z-popover) など）を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/(^|[\\s:!])-?z-(\\d+|\\[\\d+\\])($|\\s)/]',
+          message:
+            '重なりの順は役割のトークン（z-(--z-sticky)・z-(--z-modal)・z-(--z-popover) など）を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'Literal[value=/(^|[\\s:!])shadow-(sm|md|lg|xl|2xl|\\[)/]',
+          message: '影は shadow-raised・shadow-overlay を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/(^|[\\s:!])shadow-(sm|md|lg|xl|2xl|\\[)/]',
+          message: '影は shadow-raised・shadow-overlay を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'Literal[value=/(^|[\\s:!])rounded-(sm|md|lg|xl)($|\\s)/]',
+          message:
+            '角丸は rounded-t4d-sm・rounded-t4d・rounded-t4d-lg を使ってください（plan §3.3）。',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/(^|[\\s:!])rounded-(sm|md|lg|xl)($|\\s)/]',
+          message:
+            '角丸は rounded-t4d-sm・rounded-t4d・rounded-t4d-lg を使ってください（plan §3.3）。',
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name=/^(Button|SubmitButton)$/] > JSXAttribute[name.name='variant'][value.value='outline']",
+          message: 'variant="outline" は廃止しました。secondary を使ってください（plan §3.1）。',
+        },
+        {
+          selector: "JSXOpeningElement[name.name='details']",
+          message:
+            '素の <details> ではなく Collapsible・MoreInfo・FormSection・Section collapsible を使ってください（plan §3.1）。',
+        },
+        {
+          selector: "JSXOpeningElement[name.name='select']",
+          message: '素の <select> ではなく NativeSelect を使ってください（plan §1.13-6）。',
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='input'] > JSXAttribute[name.name='type'][value.value='checkbox']",
+          message: '素の checkbox ではなく NativeCheckbox を使ってください（plan §1.13-6）。',
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='type'][value.value='submit']",
+          message: '送信ボタンは SubmitButton を使ってください（送信中の表示。plan §1.13-5）。',
+        },
+        {
+          selector: "CallExpression[callee.name='buttonVariants']",
+          message: 'buttonVariants を直接使わず、Button（asChild）を使ってください（plan §3.1）。',
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='EmptyState']:not(:has(JSXAttribute[name.name='kind']))",
+          message:
+            'EmptyState には kind（no-data・filtered・not-applicable・done）を付けてください（plan §1.18）。',
+        },
+      ],
     },
   },
   prettier,

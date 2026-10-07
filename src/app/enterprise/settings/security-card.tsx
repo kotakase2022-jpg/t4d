@@ -4,7 +4,9 @@ import * as React from 'react';
 import { KeyRound, ShieldCheck, ShieldOff } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Input } from '@/components/ui/input';
+import { MoreInfo } from '@/components/ui/more-info';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 
 /**
@@ -40,7 +42,7 @@ export function MfaEnrollCard({ supabaseMode }: { supabaseMode: boolean }) {
 
   if (!supabaseMode) {
     return (
-      <p className="px-3 pb-3 text-[12px] text-ink-muted">
+      <p className="text-small text-ink-muted">
         Demo Mode はパスワードレス（ボタンログイン）のため、パスワード再設定と MFA は
         <strong> Supabase Mode でのみ有効</strong>です。ローカル Supabase
         スタックで両機能の実動作を検証済みです（tests/e2e-supabase）。
@@ -98,35 +100,34 @@ export function MfaEnrollCard({ supabaseMode }: { supabaseMode: boolean }) {
   const verified = factors.filter((f) => f.status === 'verified');
 
   return (
-    <div className="space-y-2 px-3 pb-3">
+    <div className="space-y-2">
       {!loaded ? (
-        <p className="text-[12px] text-ink-muted">確認中…</p>
+        <p className="text-small text-ink-muted">確認中…</p>
       ) : verified.length > 0 ? (
         <div className="flex items-center gap-2">
           <Badge tone="success">
             <ShieldCheck className="size-3" aria-hidden="true" />
             MFA 有効
           </Badge>
-          <Button size="xs" variant="outline" onClick={() => void unenroll(verified[0]!.id)}>
+          <Button size="xs" variant="secondary" onClick={() => void unenroll(verified[0]!.id)}>
             <ShieldOff aria-hidden="true" />
             解除する
           </Button>
         </div>
       ) : enrolling ? (
         <form onSubmit={verifyEnroll} className="space-y-1.5">
-          <p className="text-[12px] text-ink">
+          <p className="text-small text-ink">
             Authenticator アプリ（Google Authenticator 等）へ以下のシークレットを登録し、 表示された
             6 桁コードを入力してください。
           </p>
-          <code className="block break-all rounded bg-surface-muted px-2 py-1 font-mono text-[12px]">
+          <code className="block break-all rounded bg-surface-muted px-2 py-1 font-mono text-small">
             {enrolling.secret}
           </code>
-          <details className="text-[11px] text-ink-muted">
-            <summary>otpauth URI（対応アプリ用）</summary>
+          <MoreInfo label="otpauth URI（対応アプリ用）">
             <code className="break-all">{enrolling.uri}</code>
-          </details>
+          </MoreInfo>
           <div className="flex items-end gap-2">
-            <label className="text-[12px] text-ink-muted">
+            <label className="text-small text-ink-muted">
               6 桁コード
               <Input
                 name="code"
@@ -137,18 +138,22 @@ export function MfaEnrollCard({ supabaseMode }: { supabaseMode: boolean }) {
                 className="mt-0.5 w-32 tracking-widest"
               />
             </label>
-            <Button type="submit" size="sm">
+            <SubmitButton variant="primary" size="sm">
               有効化する
-            </Button>
+            </SubmitButton>
           </div>
         </form>
       ) : (
-        <Button size="sm" variant="outline" onClick={() => void startEnroll()}>
+        <Button size="sm" variant="secondary" onClick={() => void startEnroll()}>
           <KeyRound aria-hidden="true" />
           MFA（Authenticator）を登録する
         </Button>
       )}
-      {message && <p className="text-[12px] text-brand-900">{message}</p>}
+      {message && (
+        <p role="status" className="text-small text-brand-900">
+          {message}
+        </p>
+      )}
     </div>
   );
 }

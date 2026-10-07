@@ -1,12 +1,14 @@
+import Link from 'next/link';
 import { ScopeInclusionBadge } from '@/components/shared/badges';
-import { SectionTitle } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { SemanticBadge } from '@/components/shared/status-badge';
+import { Button } from '@/components/ui/button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { requireAssuranceContext } from '@/lib/auth/session';
 import { getDb } from '@/lib/repositories';
 import { loadEngagementOr404 } from '@/lib/services/assurance';
+import { GRANT_SUBJECT_LABEL, RISK_TAG_LABEL } from '../../../_components/labels';
 import { EngagementHeader } from '../engagement-header';
 
 export const metadata = { title: 'スコープ' };
@@ -43,29 +45,37 @@ export default async function ScopePage({ params }: { params: Promise<{ engageme
   const orderedUnits = [...new Set(scopes.map((s) => s.unitId))];
   const orderedMetrics = [...new Set(scopes.map((s) => s.metricId))];
   const scopeByKey = new Map(scopes.map((s) => [`${s.unitId}|${s.metricId}`, s]));
+  const activeGrants = grants.filter((g) => !g.revokedAt).length;
 
   return (
     <>
       <EngagementHeader context={context} page="スコープ" />
 
       <div className="space-y-3 p-4">
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title="Scope Matrix（組織 × 指標 × 期間）"
-            action={
-              <span className="text-[11px] text-ink-muted">
-                Client Grant がない組織・指標は保証対象外として表示されます
-              </span>
-            }
-          />
+        <Section
+          title="対象範囲の一覧（組織 × 指標 × 期間）"
+          summary="クライアントのアクセス許諾が無い組織・指標は、保証対象外として表示されます"
+        >
           {scopes.length === 0 ? (
-            <EmptyState title="スコープが設定されていません" />
+            <EmptyState
+              kind="no-data"
+              size="compact"
+              title="スコープが設定されていません"
+              description="クライアントが共有したデータは Data Room で確認できます。共有の範囲は下のアクセス許諾で決まります。"
+              action={
+                <Button variant="secondary" size="xs" asChild>
+                  <Link href={`/assurance/engagements/${engagementId}/data-room`}>
+                    Data Room を開く
+                  </Link>
+                </Button>
+              }
+            />
           ) : (
-            <div className="t4d-scroll-x">
+            <div className="t4d-scroll-x rounded-t4d border border-line">
               <Table>
                 <THead>
                   <TR>
-                    <TH>組織 \ 指標</TH>
+                    <TH className="sticky left-0 z-(--z-sticky) bg-surface">組織 \ 指標</TH>
                     {orderedMetrics.map((metricId) => (
                       <TH key={metricId}>{metricById.get(metricId)?.name ?? '（許諾外）'}</TH>
                     ))}
@@ -74,12 +84,10 @@ export default async function ScopePage({ params }: { params: Promise<{ engageme
                 <TBody>
                   {orderedUnits.map((unitId) => (
                     <TR key={unitId}>
-                      <TD className="whitespace-nowrap font-medium">
+                      <TD className="sticky left-0 z-(--z-sticky-col) whitespace-nowrap bg-surface font-medium">
                         {unitById.get(unitId)?.name ?? '（許諾外の組織）'}
                         {!grantedUnitIds.has(unitId) && (
-                          <Badge tone="neutral" className="ml-1">
-                            Grant なし
-                          </Badge>
+                          <SemanticBadge semantic="excluded" label="許諾なし" className="ml-1" />
                         )}
                       </TD>
                       {orderedMetrics.map((metricId) => {
@@ -89,12 +97,12 @@ export default async function ScopePage({ params }: { params: Promise<{ engageme
                           <TD key={metricId}>
                             <div className="flex flex-col gap-0.5">
                               <ScopeInclusionBadge inclusion={scope.inclusion} />
-                              <span className="text-[10px] text-ink-muted">
-                                リスク: {scope.riskTag}
+                              <span className="text-caption text-ink-muted">
+                                リスク: {RISK_TAG_LABEL[scope.riskTag] ?? scope.riskTag}
                                 {scope.materialityFlag && ' / 重要'}
                               </span>
                               {!grantedMetricIds.has(metricId) && (
-                                <span className="text-[10px] text-danger">Grant なし</span>
+                                <span className="text-caption text-danger">許諾なし</span>
                               )}
                             </div>
                           </TD>
@@ -106,43 +114,56 @@ export default async function ScopePage({ params }: { params: Promise<{ engageme
               </Table>
             </div>
           )}
-        </Card>
+        </Section>
 
-        <Card className="overflow-hidden">
-          <SectionTitle title={`クライアントからのアクセス許諾（${grants.length}）`} />
-          <Table>
-            <THead>
-              <TR>
-                <TH>種別</TH>
-                <TH>対象</TH>
-                <TH>Evidence 共有</TH>
-                <TH>状態</TH>
-                <TH>備考</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {grants.map((grant) => (
-                <TR key={grant.id}>
-                  <TD>{grant.subjectType}</TD>
-                  <TD className="font-medium">
-                    {metricById.get(grant.subjectId)?.name ??
-                      unitById.get(grant.subjectId)?.name ??
-                      grant.subjectId.slice(0, 8)}
-                  </TD>
-                  <TD>{grant.includesEvidence ? <Badge tone="brand">あり</Badge> : '—'}</TD>
-                  <TD>
-                    {grant.revokedAt ? (
-                      <Badge tone="danger">取消済み</Badge>
-                    ) : (
-                      <Badge tone="success">有効</Badge>
-                    )}
-                  </TD>
-                  <TD className="text-[11px] text-ink-muted">{grant.note ?? '—'}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </Card>
+        <Section
+          title={`クライアントからのアクセス許諾（${grants.length}）`}
+          summary={`有効 ${activeGrants} 件 ／ 取消済み ${grants.length - activeGrants} 件`}
+        >
+          {grants.length === 0 ? (
+            <EmptyState
+              kind="not-applicable"
+              size="compact"
+              title="アクセス許諾はまだありません"
+              description="アクセス許諾はクライアント企業が設定します（監査法人からは付与・変更できません）。必要な範囲は資料依頼（PBC）で依頼してください。"
+            />
+          ) : (
+            <div className="t4d-scroll-x rounded-t4d border border-line">
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>種別</TH>
+                    <TH>対象</TH>
+                    <TH>資料の共有</TH>
+                    <TH>状態</TH>
+                    <TH>備考</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {grants.map((grant) => (
+                    <TR key={grant.id}>
+                      <TD>{GRANT_SUBJECT_LABEL[grant.subjectType] ?? '対象'}</TD>
+                      <TD className="font-medium">
+                        {metricById.get(grant.subjectId)?.name ??
+                          unitById.get(grant.subjectId)?.name ??
+                          grant.subjectId.slice(0, 8)}
+                      </TD>
+                      <TD>{grant.includesEvidence ? 'あり' : '—'}</TD>
+                      <TD>
+                        {grant.revokedAt ? (
+                          <SemanticBadge semantic="excluded" label="取消済み" />
+                        ) : (
+                          <SemanticBadge semantic="done" label="有効" />
+                        )}
+                      </TD>
+                      <TD className="text-caption text-ink-muted">{grant.note ?? '—'}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </div>
+          )}
+        </Section>
       </div>
     </>
   );

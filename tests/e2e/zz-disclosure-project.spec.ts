@@ -7,10 +7,12 @@ import {
   DEMO_USERS,
   carriesDemoState,
   carryDemoState,
+  confirmInDialog,
   focusRingClipIssues,
   loginAs,
   openCollapsible,
   peakCarriedCookieHeader,
+  hasDisclosureDemoReset,
   resetDisclosureDemo,
   setDisclosureFirst,
   switchDemoRole,
@@ -173,9 +175,8 @@ test.afterAll(async ({ browser }) => {
   try {
     await loginAs(author, DEMO_USERS.sustainability);
     await author.goto('/enterprise/dashboard');
-    const resetVisible = await author
-      .getByRole('button', { name: '開示デモを初期状態に戻す' })
-      .isVisible();
+    // リセットはホームの「その他」の中（開いてから確かめる。plan §5.3）
+    const resetVisible = await hasDisclosureDemoReset(author);
     if (resetVisible) await resetDisclosureDemo(author);
   } finally {
     await author.close();
@@ -288,9 +289,9 @@ test('CSV 登録（訂正行）→ 数値確認（旧版と変更理由・二重
   // 数値確認: 台帳に新しい版が追加され、旧版と変更理由が残る（A04）
   await page.goto(`/enterprise/data/${WATER_EU_FY2026}`);
   await expect(page.getByRole('heading', { name: '水使用量 — 欧州販売子会社' })).toBeVisible();
-  // Version 履歴は既定で閉じた折りたたみ（見出しは常に見える。docs/disclosure-first.md §10.4 B6）。
+  // 版の履歴（plan §1.17: Version → 版）は既定で閉じた折りたたみ（見出しは常に見える。docs/disclosure-first.md §10.4 B6）。
   // 閉じた中の行は getByRole で見つからないため、開いてから同じ内容を確かめる
-  await expect(page.getByRole('heading', { name: /^Version 履歴（\d+）$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^版の履歴（\d+）$/ })).toBeVisible();
   await openCollapsible(page, /^版の一覧/);
   const history = page.locator('table').filter({ hasText: '変更理由' }).last();
   const current = history.getByRole('row').filter({ hasText: '現在' });
@@ -475,9 +476,12 @@ test('レビュー: 差戻し → 修正・再提出 → レビュー完了 → 
   await pane.getByRole('button', { name: 'コメントする' }).click();
   await expect(pane.getByText(INTERNAL_COMMENT)).toBeVisible();
 
-  await page.getByLabel('差戻しの対象の段落（必須）').selectOption(metricParagraphId);
-  await page.getByLabel('差戻しの理由（必須）').fill(RETURN_REASON);
-  await page.getByRole('button', { name: '差し戻す' }).click();
+  // 差戻しは「差し戻す…」のダイアログで、対象の段落と理由（どちらも必須）を入れてから送る（plan §1.15・§5.3 開いてから）
+  await page.getByRole('button', { name: '差し戻す…' }).click();
+  const returnDialog = page.getByRole('dialog', { name: 'この版を差し戻しますか' });
+  await returnDialog.getByLabel('差戻しの対象の段落（必須）').selectOption(metricParagraphId);
+  await returnDialog.getByLabel('差戻しの理由（必須）').fill(RETURN_REASON);
+  await returnDialog.getByRole('button', { name: '差し戻す', exact: true }).click();
   await page.waitForURL(/flash=reviewReturned/);
   await expect(page.getByText('差し戻しました（理由と対象の段落を記録しました）。')).toBeVisible();
 
@@ -517,9 +521,13 @@ test('レビュー: 差戻し → 修正・再提出 → レビュー完了 → 
   await expect(page.getByRole('button', { name: '最終承認する（社内承認）' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'レビューを完了する' })).toHaveCount(0);
 
-  // 最終承認者が承認する（版 3 を固定）
+  // 最終承認者が承認する（版 3 を固定）。取り消せない操作なので、範囲を確認するダイアログを通す（plan §1.16）
   await switchDemoRole(page, DEMO_USERS.approver);
   await page.getByRole('button', { name: '最終承認する（社内承認）' }).click();
+  await expect(page.getByRole('dialog').locator('[data-confirm-scope]')).toContainText(
+    '版 3 を社内承認済みとして固定します',
+  );
+  await confirmInDialog(page);
   await page.waitForURL(/flash=reviewApproved/);
   await expect(page.getByText(/最終承認しました（社内承認の記録/)).toBeVisible();
   const history = page.getByText(/これまでのレビュー（\d+ 件）/);
@@ -528,6 +536,7 @@ test('レビュー: 差戻し → 修正・再提出 → レビュー完了 → 
 
   await gotoBlock(page, ESRS);
   await page.getByRole('button', { name: '最終承認する（社内承認）' }).click();
+  await confirmInDialog(page);
   await page.waitForURL(/flash=reviewApproved/);
 });
 
@@ -537,7 +546,13 @@ test('レポートを確定し、承認済みスナップショットから対�
   await page.goto(`${PROJECT_PATH}?tab=outputs`);
   const confirm = page.getByRole('button', { name: 'レポートを確定する' });
   await expect(confirm).toBeEnabled();
+  await expect(confirm).not.toHaveAttribute('aria-disabled', 'true');
   await confirm.click();
+  // 取り消せない確定は、固定する範囲を確認するダイアログを通す（plan §1.16 区分 1）
+  await expect(page.getByRole('dialog').locator('[data-confirm-scope]')).toContainText(
+    '承認済みの版を不変のスナップショットとして固定します',
+  );
+  await confirmInDialog(page);
   await page.waitForURL(/snapshotCreated=\d+&kind=approved/);
   await expect(
     page.getByRole('status').filter({ hasText: /スナップショット No\.\d+ を作成しました/ }),
@@ -580,8 +595,13 @@ test('レポートを確定し、承認済みスナップショットから対�
   approvedExternalContentHash = fetched.hash;
   expect(approvedExternalContentHash).not.toBe('');
 
-  // 出力の記録（形式・区分・ファイルのハッシュ）が残る
+  // 出力の記録（形式・区分・ファイルのハッシュ）が残る。区分は既定で隠れた列（「列」から出す。plan S1）
   await page.reload();
+  await page.getByRole('button', { name: '列表示の切替' }).click();
+  await page.getByRole('menuitemcheckbox', { name: '区分' }).click();
+  await page.waitForURL(/cols=/);
+  // 列のメニューは続けて切り替えられるよう開いたまま。閉じてから表を読む
+  await page.keyboard.press('Escape');
   await expect(
     page.getByRole('row').filter({ hasText: '対外用（社内コメント・非公開資料名を除く）' }).first(),
   ).toBeVisible();

@@ -1,9 +1,16 @@
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, CircleDashed, Info, Target, XCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleDashed,
+  Info,
+  Plus,
+  Target,
+  XCircle,
+} from 'lucide-react';
 import { CategoryGrid } from '@/components/charts/category-grid';
 import { FractionBar } from '@/components/charts/fraction-bar';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible } from '@/components/ui/collapsible';
 import { KPI_DIRECTION_LABELS, KPI_TARGET_TYPE_LABELS } from '@/lib/domain/disclosure-status';
 import { formatNumber, formatPercent } from '@/lib/format/datetime';
@@ -17,7 +24,8 @@ import {
 } from '@/lib/services/kpi';
 
 /**
- * ESG 経営の KPI カード（Server Component）。
+ * ESG 経営の KPI のタイル（Server Component）。KPI の数値の帯（MetricTile）と同じ目印 data-metric-tile を付ける
+ * （ホームの KpiCard と同じ名前の別部品にしない。plan §2 S24）。実績・目標・目標差・進捗率・前年差を並べる。
  * 状態は色だけで示さない（バッジはラベルとアイコンを併記する）。
  * 率・差を出さない理由（比較条件の確認が必要・分母 0 など）は、そのまま文で示す。
  *
@@ -101,7 +109,9 @@ function ProgressView({ progress, card }: { progress: ProgressResult; card: KpiC
     const unusual = progress.rate < 0 || progress.rate > 100;
     return (
       <div className="space-y-1">
-        <p className="tnum text-[14px] font-semibold text-ink">{formatPercent(progress.rate, 1)}</p>
+        <p className="tnum text-title-sm font-semibold text-ink">
+          {formatPercent(progress.rate, 1)}
+        </p>
         {fraction && (
           <FractionBar
             label={fraction.label}
@@ -111,14 +121,14 @@ function ProgressView({ progress, card }: { progress: ProgressResult; card: KpiC
             format={formatNumber}
           />
         )}
-        {unusual && <p className="text-[11px] text-ink-muted">{progress.explanation}</p>}
+        {unusual && <p className="text-caption text-ink-muted">{progress.explanation}</p>}
       </div>
     );
   }
   return (
     <div className="space-y-0.5">
       {progress.code === 'not_comparable' && <NeedsCheckBadge />}
-      <p className="text-[11px] text-ink-muted">{progress.reason}</p>
+      <p className="text-caption text-ink-muted">{progress.reason}</p>
     </div>
   );
 }
@@ -129,7 +139,7 @@ function YoyView({ yoy, unit }: { yoy: YoyResult; unit: string }) {
       <div>
         <p className="tnum text-ink">
           {signed(yoy.diff)} {unit}
-          <span className="ml-1 text-[11px] text-ink-muted">
+          <span className="ml-1 text-caption text-ink-muted">
             （{yoy.previousPeriod.code} 比
             {yoy.diffRate === null
               ? '・前年値が 0 のため率は出しません'
@@ -139,7 +149,7 @@ function YoyView({ yoy, unit }: { yoy: YoyResult; unit: string }) {
         </p>
         {/* 遡及修正の中身は注記・内訳へ。あること自体は差の読み方に関わるので見せる */}
         {yoy.notes.length > 0 && (
-          <p className="text-[11px] text-ink-muted">遡及修正 {yoy.notes.length} 件あり</p>
+          <p className="text-caption text-ink-muted">遡及修正 {yoy.notes.length} 件あり</p>
         )}
       </div>
     );
@@ -150,7 +160,7 @@ function YoyView({ yoy, unit }: { yoy: YoyResult; unit: string }) {
       <div className="space-y-0.5">
         <NeedsCheckBadge />
         {first && (
-          <p className="text-[11px] text-ink-muted">
+          <p className="text-caption text-ink-muted">
             {first}
             {rest.length > 0 && `（ほか ${rest.length} 件）`}
           </p>
@@ -158,7 +168,7 @@ function YoyView({ yoy, unit }: { yoy: YoyResult; unit: string }) {
       </div>
     );
   }
-  return <p className="text-[11px] text-ink-muted">{yoy.reason}</p>;
+  return <p className="text-caption text-ink-muted">{yoy.reason}</p>;
 }
 
 function ActualView({ card }: { card: KpiCardView }) {
@@ -168,9 +178,9 @@ function ActualView({ card }: { card: KpiCardView }) {
     <div>
       {card.actualValue !== null && card.confirmed ? (
         <p className="text-ink">
-          <span className="tnum text-[16px] font-semibold">{formatNumber(card.actualValue)}</span>{' '}
+          <span className="tnum text-title-lg font-semibold">{formatNumber(card.actualValue)}</span>{' '}
           {unit}
-          <span className="ml-1 text-[11px] text-ink-muted">
+          <span className="ml-1 text-caption text-ink-muted">
             （{card.confirmed.period.code}・確定／範囲「{card.confirmed.boundary ?? '—'}」）
           </span>
         </p>
@@ -184,7 +194,7 @@ function ActualView({ card }: { card: KpiCardView }) {
         !current.complete &&
         current.approvedValue !== null &&
         current.period.id !== card.confirmed?.period.id && (
-          <p className="text-[11px] text-ink-muted">
+          <p className="text-caption text-ink-muted">
             {current.period.code} は集計中: 承認済み分のみ {formatNumber(current.approvedValue)}{' '}
             {unit}（実績・進捗率・前年差には使いません）
           </p>
@@ -199,7 +209,7 @@ function SubRows({ card }: { card: KpiCardView }) {
     const registered = card.subRows.filter((r) => r.state?.hasData);
     return (
       <div className="space-y-1">
-        <p className="text-[11px] font-medium text-ink">
+        <p className="text-caption font-medium text-ink">
           カテゴリ別（{card.selectedPeriod.code}）: 登録あり {registered.length}/
           {card.subRows.length}
         </p>
@@ -219,12 +229,14 @@ function SubRows({ card }: { card: KpiCardView }) {
             };
           })}
         />
-        <p className="text-[11px] text-ink-muted">カテゴリの値を足して Scope3 合計とはしません。</p>
+        <p className="text-caption text-ink-muted">
+          カテゴリの値を足して Scope3 合計とはしません。
+        </p>
       </div>
     );
   }
   return (
-    <ul className="space-y-0.5 text-[11px]">
+    <ul className="space-y-0.5 text-caption">
       {card.subRows.map((row) => (
         <li key={row.code} className="text-ink">
           {row.label}（{card.selectedPeriod.code}）: <span className="tnum">{row.display}</span>
@@ -261,7 +273,7 @@ function CardNotes({ card }: { card: KpiCardView }) {
   return (
     <Collapsible variant="plain" summary={notesSummary(card, notes.length)}>
       <div className="space-y-2">
-        <ul className="space-y-0.5 text-[11px] text-ink-muted">
+        <ul className="space-y-0.5 text-caption text-ink-muted">
           {notes.map((note, index) => (
             <li key={`${index}-${note}`} className="flex items-start gap-1">
               <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
@@ -275,15 +287,31 @@ function CardNotes({ card }: { card: KpiCardView }) {
   );
 }
 
-export function KpiCard({ card, detailHref }: { card: KpiCardView; detailHref?: string }) {
+export function EsgKpiTile({
+  card,
+  detailHref,
+  registerTargetHref,
+}: {
+  card: KpiCardView;
+  detailHref?: string;
+  /** 目標が未登録のとき、その場で登録へ進むリンク（指標の管理の権限があるときだけ渡す） */
+  registerTargetHref?: string;
+}) {
   const unit = card.metric?.unit ?? '';
   return (
-    <Card className="flex flex-col">
-      <CardHeader className="flex-wrap">
-        <CardTitle>{card.spec.label}</CardTitle>
+    <section
+      id={`kpi-${card.spec.key}`}
+      aria-labelledby={`kpi-${card.spec.key}-title`}
+      data-metric-tile=""
+      className="flex scroll-mt-4 flex-col rounded-t4d-lg border border-line bg-surface"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
+        <h2 id={`kpi-${card.spec.key}-title`} className="text-body font-semibold text-ink">
+          {card.spec.label}
+        </h2>
         <DataStateBadge state={card.dataState} />
-      </CardHeader>
-      <CardContent className="flex-1 space-y-2 text-[12px]">
+      </div>
+      <div className="flex-1 space-y-2 px-3 py-2.5 text-small">
         <dl className="grid grid-cols-[8em_1fr] gap-x-2 gap-y-1.5">
           <dt className="text-ink-muted">実績</dt>
           <dd>
@@ -297,14 +325,25 @@ export function KpiCard({ card, detailHref }: { card: KpiCardView; detailHref?: 
                   <Target className="mt-0.5 size-3 shrink-0 text-brand-600" aria-hidden="true" />
                   {targetText(card.target, unit)}
                 </p>
-                <p className="text-[11px] text-ink-muted">
+                <p className="text-caption text-ink-muted">
                   版 {card.target.target.versionNo}
                   {card.target.ownerName ? `・責任者 ${card.target.ownerName}` : ''}
                   {card.otherTargetCount > 0 ? `・ほか ${card.otherTargetCount} 件の目標` : ''}
                 </p>
               </div>
             ) : (
-              <p className="text-ink-muted">目標は登録されていません</p>
+              <p className="flex flex-wrap items-center gap-x-2 text-ink-muted">
+                目標は登録されていません
+                {registerTargetHref && (
+                  <Link
+                    href={registerTargetHref}
+                    className="inline-flex items-center gap-0.5 text-brand-700 hover:underline"
+                  >
+                    <Plus className="size-3" aria-hidden="true" />
+                    目標を登録
+                  </Link>
+                )}
+              </p>
             )}
           </dd>
           <dt className="text-ink-muted">目標差</dt>
@@ -312,12 +351,12 @@ export function KpiCard({ card, detailHref }: { card: KpiCardView; detailHref?: 
             {card.targetGap.status === 'ok' ? (
               <p className="tnum text-ink">
                 {signed(card.targetGap.gap)} {unit}
-                <span className="ml-1 text-[11px] text-ink-muted">
+                <span className="ml-1 text-caption text-ink-muted">
                   （実績 − 目標値。{card.targetGap.text}）
                 </span>
               </p>
             ) : (
-              <p className="text-[11px] text-ink-muted">{card.targetGap.reason}</p>
+              <p className="text-caption text-ink-muted">{card.targetGap.reason}</p>
             )}
           </dd>
           <dt className="text-ink-muted">進捗率</dt>
@@ -330,17 +369,14 @@ export function KpiCard({ card, detailHref }: { card: KpiCardView; detailHref?: 
           </dd>
         </dl>
         <CardNotes card={card} />
-      </CardContent>
+      </div>
       {detailHref && (
         <div className="border-t border-line px-3 py-2 text-right">
-          <Link
-            href={detailHref}
-            className="text-[12px] font-medium text-brand-700 hover:underline"
-          >
+          <Link href={detailHref} className="text-small font-medium text-brand-700 hover:underline">
             {card.spec.label} の詳細（推移・内訳・根拠）
           </Link>
         </div>
       )}
-    </Card>
+    </section>
   );
 }

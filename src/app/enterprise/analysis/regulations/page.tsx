@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { StatusBreakdown } from '@/components/charts/status-breakdown';
+import { AttentionStrip } from '@/components/shared/attention-strip';
 import { PageHeader } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
 import { MoreInfo } from '@/components/ui/more-info';
@@ -36,7 +37,17 @@ export const metadata = { title: '規制対応度' };
  * 状況の内訳は行ごとの積み上げ帯＋凡例（StatusBreakdown。% を出さない。セルに表を入れない）。
  * 画面の説明と「数え方」の注記は閉じる。算定しない理由・未発効・暫定・収録状況（架空サンプル・公開草案）は閉じない。
  * AI 判定の扱い（人が未確認の判定を含むか）は全文を閉じても要点の 1 行を見せる。
+ *
+ * plan §2.26 E47: 人がまだ判定していない要求事項のある基準を先頭の注意の帯に出し（件数＋直す画面へ）、
+ * 「直す画面」の列は基準のすぐ右に置く（何をどこで直すかを最初に読める）。表の行の並び（基準の順）は変えない。
  */
+
+/** 評価対象のうち、人がまだ判定していない件数（AI 判定のみ・判定なし） */
+function pendingHumanJudgment(row: RegulationRow): number {
+  if (!row.breakdown) return 0;
+  const total = Object.values(row.breakdown.counts).reduce((sum, n) => sum + n, 0);
+  return Math.max(0, total - row.breakdown.humanConfirmed);
+}
 
 /** 対応状況のアイコン（要求事項の画面のバッジと同じ形。色だけで区別しない） */
 const COVERAGE_ICON: Record<SsbjCoverageStatus, LucideIcon> = {
@@ -74,18 +85,20 @@ function InScopeCell({ row }: { row: RegulationRow }) {
         {row.inScope.count} / {row.inScope.denominator} 件
       </span>
       {row.inScope.provisional ? (
-        <span className="block text-[11px] text-ink">
+        <span className="block text-caption text-ink">
           うち暫定（DMA 確定前） {row.inScope.provisional} 件
         </span>
       ) : null}
-      <span className="block text-[11px] text-ink-muted">分母: {row.inScope.denominatorLabel}</span>
+      <span className="block text-caption text-ink-muted">
+        分母: {row.inScope.denominatorLabel}
+      </span>
     </>
   );
 }
 
 function BreakdownCell({ row }: { row: RegulationRow }) {
   if (!row.breakdown) {
-    return <span className="text-[11px] text-ink-muted">{row.breakdownNote ?? '—'}</span>;
+    return <span className="text-caption text-ink-muted">{row.breakdownNote ?? '—'}</span>;
   }
   const { counts, humanConfirmed, aiOnly } = row.breakdown;
   return (
@@ -99,7 +112,7 @@ function BreakdownCell({ row }: { row: RegulationRow }) {
           icon: COVERAGE_ICON[status],
         }))}
       />
-      <p className="flex flex-wrap gap-x-3 text-[11px] text-ink-muted">
+      <p className="flex flex-wrap gap-x-3 text-caption text-ink-muted">
         <span className="inline-flex items-center gap-1">
           <UserCheck className="size-3" aria-hidden="true" />
           人が確認済み <span className="tnum font-semibold text-ink">{humanConfirmed}</span> 件
@@ -115,7 +128,7 @@ function BreakdownCell({ row }: { row: RegulationRow }) {
 
 function ResponsesCell({ row }: { row: RegulationRow }) {
   if (!row.responses) {
-    return <span className="text-[11px] text-ink-muted">{row.responsesNote ?? '—'}</span>;
+    return <span className="text-caption text-ink-muted">{row.responsesNote ?? '—'}</span>;
   }
   return (
     <span className="tnum font-semibold">
@@ -139,7 +152,7 @@ function NotesCell({ row }: { row: RegulationRow }) {
         <p className="font-semibold text-ink">{row.notCalculatedReason}</p>
       )}
       {visible.length > 0 && (
-        <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-ink-muted">
+        <ul className="list-disc space-y-0.5 pl-4 text-caption text-ink-muted">
           {visible.map((note) => (
             <li key={note}>{note}</li>
           ))}
@@ -178,7 +191,7 @@ export default async function RegulationsPage() {
           <p>年度は画面上部のヘッダーで切り替えます。</p>
         </>
       }
-      breadcrumbs={[{ label: '企業ワークスペース' }, { label: '分析' }, { label: '規制対応度' }]}
+      autoBreadcrumbs
     />
   );
   if (!can(ctx, 'enterprise.disclosure.read')) {
@@ -198,15 +211,26 @@ export default async function RegulationsPage() {
     <>
       {header}
       <div className="space-y-3 p-4">
+        <AttentionStrip
+          label="人がまだ判定していない要求事項"
+          items={coverage.rows.map((row) => ({
+            key: row.key,
+            label: row.name,
+            count: pendingHumanJudgment(row),
+            href: row.links[0]?.href ?? '/enterprise/analysis/regulations',
+            semantic: 'pending' as const,
+          }))}
+        />
         <div className="t4d-scroll-x rounded-t4d-lg border border-line bg-surface">
           <Table className="min-w-[1180px]">
-            <caption className="px-3 py-2 text-left text-[13px] font-semibold text-ink">
+            <caption className="px-3 py-2 text-left text-body font-semibold text-ink">
               各規制への対応度（{coverage.period.label}）
             </caption>
             <THead>
               <TR>
                 {/* 1 列目（基準）は横スクロールしても見えるよう固定する */}
-                <TH className="sticky left-0 z-[1] bg-surface">基準</TH>
+                <TH className="sticky left-0 z-(--z-sticky-col) bg-surface">基準</TH>
+                <TH>直す画面</TH>
                 <TH>位置付け</TH>
                 <TH>重要性の考え方</TH>
                 <TH>収録状況</TH>
@@ -214,7 +238,6 @@ export default async function RegulationsPage() {
                 <TH>状況の内訳（評価対象のうち）</TH>
                 <TH>回答</TH>
                 <TH>算定しない理由・注記</TH>
-                <TH>直す画面</TH>
               </TR>
             </THead>
             <TBody>
@@ -222,44 +245,16 @@ export default async function RegulationsPage() {
                 <TR key={row.key} className="align-top">
                   <th
                     scope="row"
-                    className="sticky left-0 z-[1] bg-surface px-2 py-2 text-left align-top text-[12px]"
+                    className="sticky left-0 z-(--z-sticky-col) bg-surface px-2 py-2 text-left align-top text-small"
                   >
                     <span className="font-semibold text-ink">{row.name}</span>
                     {row.versionLabel && (
-                      <span className="block text-[11px] font-normal text-ink-muted">
+                      <span className="block text-caption font-normal text-ink-muted">
                         {row.versionLabel}
                       </span>
                     )}
                   </th>
-                  <TD className="py-2 align-top text-[12px]">
-                    <PositioningBadge kind={row.positioning.kind} label={row.positioning.label} />
-                  </TD>
-                  <TD className="py-2 align-top text-[12px]">{row.materialityLabel}</TD>
-                  <TD className="py-2 align-top text-[12px]">
-                    {row.coverage.label}
-                    {row.coverage.itemCount !== null && (
-                      <span className="block tnum">{row.coverage.itemCount} 件</span>
-                    )}
-                    {/* 収録状況の注記（架空サンプル・公開草案など）は誠実さの注記なので閉じない */}
-                    {row.coverage.note && (
-                      <span className="block max-w-[220px] text-[11px] text-ink-muted">
-                        {row.coverage.note}
-                      </span>
-                    )}
-                  </TD>
-                  <TD className="py-2 align-top text-[12px]">
-                    <InScopeCell row={row} />
-                  </TD>
-                  <TD className="w-[320px] max-w-[320px] py-2 align-top text-[12px]">
-                    <BreakdownCell row={row} />
-                  </TD>
-                  <TD className="py-2 align-top text-[12px]">
-                    <ResponsesCell row={row} />
-                  </TD>
-                  <TD className="max-w-[260px] py-2 align-top text-[12px]">
-                    <NotesCell row={row} />
-                  </TD>
-                  <TD className="py-2 align-top text-[12px]">
+                  <TD className="min-w-[160px] py-2 align-top text-small">
                     <ul className="space-y-0.5">
                       {row.links.map((link) => (
                         <li key={link.href}>
@@ -273,6 +268,34 @@ export default async function RegulationsPage() {
                         </li>
                       ))}
                     </ul>
+                  </TD>
+                  <TD className="py-2 align-top text-small">
+                    <PositioningBadge kind={row.positioning.kind} label={row.positioning.label} />
+                  </TD>
+                  <TD className="py-2 align-top text-small">{row.materialityLabel}</TD>
+                  <TD className="py-2 align-top text-small">
+                    {row.coverage.label}
+                    {row.coverage.itemCount !== null && (
+                      <span className="block tnum">{row.coverage.itemCount} 件</span>
+                    )}
+                    {/* 収録状況の注記（架空サンプル・公開草案など）は誠実さの注記なので閉じない */}
+                    {row.coverage.note && (
+                      <span className="block max-w-[220px] text-caption text-ink-muted">
+                        {row.coverage.note}
+                      </span>
+                    )}
+                  </TD>
+                  <TD className="py-2 align-top text-small">
+                    <InScopeCell row={row} />
+                  </TD>
+                  <TD className="w-[320px] max-w-[320px] py-2 align-top text-small">
+                    <BreakdownCell row={row} />
+                  </TD>
+                  <TD className="py-2 align-top text-small">
+                    <ResponsesCell row={row} />
+                  </TD>
+                  <TD className="max-w-[260px] py-2 align-top text-small">
+                    <NotesCell row={row} />
                   </TD>
                 </TR>
               ))}

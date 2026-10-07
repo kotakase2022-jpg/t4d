@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { CSRD_IDS } from '@/lib/fixtures/csrd';
-import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible, openMoreMenu } from './helpers';
 
 /**
  * CSRD ワークスペース（機能追加要望 ②・2026-10-01 の再構成 docs/disclosure-first.md §9）。
@@ -10,6 +10,8 @@ import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
  *
  * 2026-10-01: 対応状況に工程・DMA 要約などを足したため、行数はギャップ分析表（名前付き）に絞る。
  * 要求事項コードのリンク先は要求事項の詳細になり、回答画面へは「回答を編集（版・承認）」から進む。
+ * 2026-10-07（UI 再設計 plan T8・E24）: ギャップ分析表は同じ母集団の要求事項の一覧へ寄せた（データの揃い具合・
+ * 当年値・回答状況は一覧の列）。対応状況からは件数付きのリンクで一覧を開く。設定は段階の UI（?step=）。
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -17,7 +19,9 @@ test.describe.configure({ mode: 'serial' });
 /** 回答画面（既存の共有ビュー）の URL。要求事項の詳細（/csrd/requirements/{id}）と区別する */
 const ANSWER_URL = /\/enterprise\/disclosures\/csrd\/[0-9a-f-]{36}$/;
 
-test('サイドバーから CSRD を開き、ギャップ分析が表示される', async ({ page }) => {
+test('サイドバーから CSRD を開き、ギャップ分析（要求事項の一覧のデータ・回答の列）が表示される', async ({
+  page,
+}) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/disclosures/cdp');
   await expect(page.locator('#t4d-main')).toBeVisible();
@@ -28,14 +32,8 @@ test('サイドバーから CSRD を開き、ギャップ分析が表示され�
 
   await expect(page.getByRole('heading', { name: /CSRD 開示対応/ })).toBeVisible();
   await expect(page.getByText('初年度対応')).toBeVisible();
-
-  // ギャップ分析: データありとデータなしの両方の状態が見える
-  const gapTable = page.getByRole('table', { name: 'ESRS 要求事項とデータの対応' });
-  await expect(gapTable.getByText('データあり').first()).toBeVisible();
-  await expect(gapTable.getByText('承認済みデータなし').first()).toBeVisible();
-  await expect(gapTable.locator('tbody tr')).toHaveCount(12);
-  // 対応状況の表はギャップ分析表 1 つだけ（§9.4）
-  await expect(page.locator('#t4d-main table')).toHaveCount(1);
+  // 対応状況には表を置かない（同じ母集団の表を 2 つ置かない。ギャップ分析表は要求事項の一覧へ寄せた。plan T8）
+  await expect(page.locator('#t4d-main table')).toHaveCount(0);
 
   // 文字量を減らす（§10.4）: SSBJ との違いは短い 1 行で見せ、全文は閉じる（開いてから確かめる）
   const main = page.locator('#t4d-main');
@@ -57,14 +55,27 @@ test('サイドバーから CSRD を開き、ギャップ分析が表示され�
       .getByRole('list', { name: '適用の内訳' })
       .getByRole('link', { name: '対象外（重要でない）' }),
   ).toHaveAttribute('href', '/enterprise/disclosures/csrd/requirements?applicability=not_material');
+
+  // ギャップ分析: 対応状況のリンクから、データ・回答の列を出した要求事項の一覧を開く。
+  // データありとデータなしの両方の状態が見える（12 行）
+  await main.getByRole('link', { name: '要求事項の評価の一覧' }).click();
+  await page.waitForURL(/\/enterprise\/disclosures\/csrd\/requirements\?cols=/);
+  const gapTable = page.getByRole('table', { name: 'CSRD 要求事項の評価' });
+  await expect(gapTable.getByText('データあり').first()).toBeVisible();
+  await expect(gapTable.getByText('承認済みデータなし').first()).toBeVisible();
+  await expect(gapTable.locator('tbody tr')).toHaveCount(12);
 });
 
 test('ESRS 項目の要求事項の詳細から回答画面を開き、AI ドラフトを生成できる（共有ビュー）', async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.sustainability);
-  await page.goto('/enterprise/disclosures/csrd');
-  await page.getByRole('link', { name: 'ESRS-E1-5' }).click();
+  // 要求事項のコードは要求事項の一覧（ギャップ分析を寄せた表）から詳細へ
+  await page.goto('/enterprise/disclosures/csrd/requirements');
+  await page
+    .getByRole('table', { name: 'CSRD 要求事項の評価' })
+    .getByRole('link', { name: /^ESRS-E1-5\s/ })
+    .click();
 
   // 要求事項の詳細: 適用の根拠（インパクト・財務の両面）が出る
   await page.waitForURL(/\/enterprise\/disclosures\/csrd\/requirements\/[0-9a-f-]{36}$/);
@@ -78,7 +89,8 @@ test('ESRS 項目の要求事項の詳細から回答画面を開き、AI ドラ
   // パンくずが CSRD になっている（CDP ではない）
   await expect(page.getByRole('link', { name: 'CSRD', exact: true }).first()).toBeVisible();
 
-  await page.getByRole('button', { name: 'ドラフトを生成' }).click();
+  // AI ドラフトの生成は回答の見出しの「その他」（plan S6）
+  await (await openMoreMenu(page)).getByRole('menuitem', { name: 'ドラフトを生成' }).click();
   await page.waitForLoadState('networkidle');
   await expect(page.getByText(/Mock|AI 生成/).first()).toBeVisible();
 
@@ -119,8 +131,20 @@ test('CSRD 設定: インパクト重要性と財務的重要性の 2 観点・�
   await expect(law).toBeHidden();
   await openCollapsible(main, /^考え方の詳細/);
   await expect(law).toBeVisible();
+  // 段階の UI（?step=）: 既定は未完了の最初の手順（③ 10 事項の判断と DMA の確定）
+  await expect(main.getByRole('img', { name: /ダブル・マテリアリティ・マトリクス/ })).toBeVisible();
+  // 10 事項。G1 は人の判断が未評価のため、DMA はまだ確定できない
+  const dma = main.getByRole('table', { name: 'サステナビリティ事項のダブル・マテリアリティ評価' });
+  await expect(dma.locator('tbody tr')).toHaveCount(10);
+  await expect(main.getByRole('button', { name: 'DMA を確定する' })).toBeDisabled();
+
+  // 閾値と算定式は手順②。手順の帯から開いて確かめる
+  await main
+    .getByRole('navigation', { name: 'CSRD 設定の手順' })
+    .getByRole('link', { name: /② 評価方法・閾値/ })
+    .click();
+  await page.waitForURL(/[?&]step=method/);
   // 算定式は閉じる。ESRS が数値の閾値を定めていないことは summary に見せる
-  // （同じ句はマトリクスの凡例にもあるため、summary に絞って確かめる）
   await expect(
     main.locator('summary').filter({ hasText: /ESRS は数値の閾値を定めていません/ }),
   ).toBeVisible();
@@ -128,13 +152,8 @@ test('CSRD 設定: インパクト重要性と財務的重要性の 2 観点・�
   await expect(formula).toBeHidden();
   await openCollapsible(main, /^算定式と閾値の決め方/);
   await expect(formula).toBeVisible();
-  await expect(main.getByRole('img', { name: /ダブル・マテリアリティ・マトリクス/ })).toBeVisible();
   await expect(main.getByLabel('インパクトの閾値（インパクト重要性）')).toHaveValue('3.0');
   await expect(main.getByLabel('財務の閾値（財務的重要性）')).toHaveValue('3.0');
-  // 10 事項。G1 は人の判断が未評価のため、DMA はまだ確定できない
-  const dma = main.getByRole('table', { name: 'サステナビリティ事項のダブル・マテリアリティ評価' });
-  await expect(dma.locator('tbody tr')).toHaveCount(10);
-  await expect(main.getByRole('button', { name: 'DMA を確定する' })).toBeDisabled();
 
   // 存在しないテーマは 404
   const res = await page.goto('/enterprise/disclosures/csrd/settings/matters/X9');

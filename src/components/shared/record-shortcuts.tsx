@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 
 /**
  * 連続レビュー用のキーボードショートカット（指示書 5.4）。
@@ -11,6 +12,9 @@ import * as React from 'react';
  *   e     … Evidence セクションへ移動（`[data-t4d-shortcut="evidence"]`）
  *   c     … コメント入力へフォーカス（`[data-t4d-shortcut="comment"]`）
  *   s     … 下書き保存（`[data-t4d-shortcut="save"]`）
+ *   x     … フォーカス中の行の選択を切り替える（`[data-t4d-record] [data-t4d-select]`。一括操作）
+ *   n     … その画面の新規作成（`[data-t4d-shortcut="new"]`。開くだけで保存はしない）
+ *   g → h/d/w/i/s/c … ホーム・非財務データ・ワークフロー・取込・SSBJ・CSRD へ移動（plan §1.11）
  *
  * 設計上の約束:
  *  - **対象が無い画面では何もしない。** 押しても副作用が起きないことを保証する。
@@ -75,10 +79,53 @@ function focusFirst(selectors: string[]): void {
   }
 }
 
-export function RecordShortcuts() {
+/** g の後に押すキー → 行き先（企業ワークスペース） */
+export const GO_SHORTCUTS: Record<string, string> = {
+  h: '/enterprise/dashboard',
+  d: '/enterprise/data',
+  w: '/enterprise/workflows',
+  i: '/enterprise/imports',
+  s: '/enterprise/disclosures/ssbj',
+  c: '/enterprise/disclosures/csrd',
+};
+
+/** g を押してから次のキーを待つ時間 */
+const GO_PREFIX_TIMEOUT_MS = 1500;
+
+/** フォーカス中の行の選択チェックを切り替える */
+function toggleFocusedRecordSelection(): boolean {
+  const record = document.activeElement?.closest('[data-t4d-record]');
+  const checkbox = record?.querySelector<HTMLInputElement>(
+    'input[type="checkbox"][data-t4d-select]',
+  );
+  if (!checkbox || checkbox.disabled) return false;
+  checkbox.click();
+  return true;
+}
+
+export function RecordShortcuts({ homeHref = '/enterprise/dashboard' }: { homeHref?: string }) {
+  const router = useRouter();
   React.useEffect(() => {
+    let goPrefixAt = 0;
     function onKeyDown(event: KeyboardEvent) {
       if (shouldIgnore(event)) return;
+
+      // g → キー（移動）。監査法人ではホームだけ（他の行き先は企業の画面のため）
+      if (goPrefixAt > 0 && Date.now() - goPrefixAt < GO_PREFIX_TIMEOUT_MS) {
+        goPrefixAt = 0;
+        const isEnterprise = homeHref.startsWith('/enterprise');
+        const target =
+          event.key === 'h' ? homeHref : isEnterprise ? GO_SHORTCUTS[event.key] : undefined;
+        if (target) {
+          event.preventDefault();
+          router.push(target);
+        }
+        return;
+      }
+      if (event.key === 'g') {
+        goPrefixAt = Date.now();
+        return;
+      }
 
       switch (event.key) {
         case 'j':
@@ -107,6 +154,17 @@ export function RecordShortcuts() {
           save.click();
           break;
         }
+        case 'x':
+          if (toggleFocusedRecordSelection()) event.preventDefault();
+          break;
+        case 'n': {
+          // 新規作成は「開く」だけ（作成フォーム・専用ページへ移る）。保存・確定には割り当てない
+          const create = document.querySelector<HTMLElement>('[data-t4d-shortcut="new"]');
+          if (!create) return;
+          event.preventDefault();
+          create.click();
+          break;
+        }
         default:
           break;
       }
@@ -114,7 +172,7 @@ export function RecordShortcuts() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [homeHref, router]);
 
   return null;
 }

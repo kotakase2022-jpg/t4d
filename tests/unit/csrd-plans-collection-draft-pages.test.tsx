@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setAiProviderForTesting } from '@/lib/ai';
 import { MockAIProvider } from '@/lib/ai/mock-provider';
@@ -16,7 +17,8 @@ import type { AuthorizationContext, RoleKey } from '@/types/domain';
  * CSRD 対応計画・データ収集・開示ドラフトの画面（docs/disclosure-first.md §9.4）。
  * Server Component のページをそのまま呼び、Fixture の DB で描画する（Action は呼ばない）。
  *  - CSRD の計画・収集項目だけを出し、SSBJ の計画は出さない。対象外になった要求事項の計画を示す
- *  - 値は承認済みだけ。収集項目の初期値は URL の値を照合してから使う
+ *  - 値は承認済みだけ。収集項目の初期値は URL の値を照合してから使う。作成の枠は ?new=1 で開く（CreatePanel）
+ *  - 主操作は画面に 1 つまで（次の工程へのリンク・節ごとの操作は secondary。plan §1.6）
  *  - 節ごとに AI 草案（候補）と本文を分け、押せない操作は理由を文で示す。権限に応じて操作を出さない
  *  - 状態のバッジはラベルとアイコン（読み上げない）を併記する
  *  - 文字量（§10.4）: 説明・補助の一覧は既定で閉じ、AI は候補・権限なし・作れない理由・表・フォームは閉じない
@@ -32,6 +34,13 @@ vi.mock('@/app/enterprise/disclosures/csrd/plans/actions', () => ({
 }));
 vi.mock('@/app/enterprise/disclosures/csrd/collection/actions', () => ({
   createCsrdCollectionItemAction: vi.fn(),
+}));
+// 一覧の表（絞り込み・列 ▾・表示件数）とパンくずはクライアントのフックを使う。notFound などはそのまま使う
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  usePathname: () => '/enterprise/disclosures/csrd',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/app/enterprise/disclosures/csrd/draft/actions', () => ({
   generateCsrdDraftAction: vi.fn(),
@@ -127,6 +136,13 @@ function expectOutsideDetails(element: Element): void {
   expect(element.closest('details')).toBeNull();
 }
 
+/** 見えている主操作（data-variant="primary"）の名前。ダイアログの外だけを数える（plan §1.6） */
+function primaryLabels(): string[] {
+  return [...document.querySelectorAll('[data-variant="primary"]')]
+    .filter((el) => el.closest('[role="dialog"]') === null)
+    .map((el) => el.textContent?.trim() ?? '');
+}
+
 async function decideG1AndConfirmDma(): Promise<void> {
   await decideCsrdDmaMatter(db, manager(), {
     reportingPeriodId: PERIOD_IDS.fy2026,
@@ -171,6 +187,35 @@ describe('CSRD 対応計画', () => {
     expect(table.textContent).toContain('暫定（DMA 確定前）');
     expect(table.textContent).not.toContain('対象外の要求事項');
     expectIconsHidden(table);
+    // 次の工程（データ収集）へのリンクは主操作にしない（plan §1.6）
+    expect(primaryLabels()).toEqual([]);
+    expect(screen.getByRole('link', { name: 'CSRD データ収集' }).dataset.variant).toBe('secondary');
+  });
+
+  it('既定の列は 7 つまで。ギャップの観点・対応区分は「列 ▾」（URL の cols）で出す。対応状況で絞り込める', async () => {
+    const first = await renderPlans();
+    const headers = within(screen.getByRole('table', { name: 'CSRD 対応計画の一覧' }))
+      .getAllByRole('columnheader')
+      .map((th) => th.textContent?.trim());
+    expect(headers).toEqual([
+      '対応内容',
+      '関連する要求事項',
+      '適用',
+      '担当部署・担当者',
+      '期限',
+      '優先度',
+      '対応状況',
+    ]);
+    first.unmount();
+    const second = await renderPlans({ cols: 'requirement,gapKind,actionType,status' });
+    const table = screen.getByRole('table', { name: 'CSRD 対応計画の一覧' });
+    expect(table.textContent).toContain('ギャップの観点');
+    expect(table.textContent).toContain('対応区分');
+    second.unmount();
+    await renderPlans({ status: 'not_started' });
+    const rows = bodyRows(screen.getByRole('table', { name: 'CSRD 対応計画の一覧' }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain('ESRS-S1-9');
   });
 
   it('編集できる人は担当者・対応状況を更新できる（計画ごとに名前の付いた選択肢）', async () => {
@@ -194,10 +239,13 @@ describe('CSRD 対応計画', () => {
       stakeholderNote: '',
     });
     await renderPlans();
-    const row = document.getElementById(`csrd-plan-${CSRD_IDS.plans.e1Target}`)!;
+    // 更新の後に戻る行の目印（#csrd-plan-{id}）から行を引く
+    const row = document.getElementById(`csrd-plan-${CSRD_IDS.plans.e1Target}`)!.closest('tr')!;
     expect(row.textContent).toContain('対象外の要求事項');
     expect(row.textContent).toContain('対象外（重要でない）');
-    const other = document.getElementById(`csrd-plan-${CSRD_IDS.plans.s1FemaleManagers}`)!;
+    const other = document
+      .getElementById(`csrd-plan-${CSRD_IDS.plans.s1FemaleManagers}`)!
+      .closest('tr')!;
     expect(other.textContent).not.toContain('対象外の要求事項');
   });
 
@@ -285,7 +333,7 @@ describe('CSRD データ収集', () => {
   });
 
   it('作成できる計画は指標未結び付け・未完了・評価対象のものだけ。計画の無い要求事項は計画へ誘導する', async () => {
-    await renderCollection();
+    await renderCollection({ new: '1' });
     const select = screen.getByRole('combobox', { name: '対象の対応計画' }) as HTMLSelectElement;
     // S1-9 の計画は指標を結び付け済みなので出さない
     expect([...select.options].map((o) => o.value)).toEqual([CSRD_IDS.plans.e1Target]);
@@ -313,14 +361,16 @@ describe('CSRD データ収集', () => {
       dueDate: null,
       priority: 'high',
     });
-    const first = await renderCollection();
+    const first = await renderCollection({ new: '1' });
     const table = screen.getByRole('table', {
       name: '評価対象の要求事項 × 指標 × 拠点の当期の状況',
     });
     const row = bodyRows(table).find((r) => r.textContent!.includes('scope2_location'))!;
     const href = within(row).getByRole('link', { name: '収集項目を作成' }).getAttribute('href')!;
+    // 行の「収集項目を作成」は、計画・指標を引き継いで作成の枠（new=1）を開く
+    expect(href.endsWith('#csrd-collection-create')).toBe(true);
     const query = Object.fromEntries(new URLSearchParams(href.split('?')[1]!.split('#')[0]));
-    expect(query).toEqual({ plan: plan.id, metric: 'scope2_location' });
+    expect(query).toEqual({ plan: plan.id, metric: 'scope2_location', new: '1' });
     // データの観点の計画を先頭に並べる
     const select = screen.getByRole('combobox', { name: '対象の対応計画' }) as HTMLSelectElement;
     expect(select.options[0]!.value).toBe(plan.id);
@@ -348,7 +398,7 @@ describe('CSRD データ収集', () => {
   });
 
   it('URL の初期値は照合してから使う（知らない指標・計画・拠点は使わない）', async () => {
-    await renderCollection({ metric: 'not_a_metric', plan: 'forged', unit: 'forged' });
+    await renderCollection({ metric: 'not_a_metric', plan: 'forged', unit: 'forged', new: '1' });
     expect(
       (screen.getByRole('combobox', { name: 'データ項目コード' }) as HTMLInputElement).value,
     ).toBe('');
@@ -369,7 +419,9 @@ describe('CSRD データ収集', () => {
 
   it('指標の管理権限が無い役割には作成フォームを出さない', async () => {
     useShell(reviewer());
-    await renderCollection();
+    // 枠を開く URL でも出さない（権限の検査はサーバーにもある）
+    await renderCollection({ new: '1' });
+    expect(primaryLabels()).toEqual([]);
     expect(screen.queryByRole('combobox', { name: '対象の対応計画' })).toBeNull();
     expect(
       screen.getByText(/収集項目の作成には、開示の編集権限と指標の管理権限の両方が必要です/),
@@ -380,13 +432,32 @@ describe('CSRD データ収集', () => {
     );
   });
 
+  it('主操作は「収集項目を作成」1 つ（作成の枠を開く）。次の工程（開示ドラフト）へのリンクは secondary', async () => {
+    const closed = await renderCollection();
+    // 既定では作成の枠を開かない（一覧の上に作成フォームを常設しない）
+    expect(screen.queryByRole('combobox', { name: '対象の対応計画' })).toBeNull();
+    expect(primaryLabels()).toEqual(['収集項目を作成']);
+    const header = document.querySelector('[data-page-actions]') as HTMLElement;
+    expect(within(header).getByRole('link', { name: '収集項目を作成' }).getAttribute('href')).toBe(
+      '/enterprise/disclosures/csrd/collection?new=1#csrd-collection-create',
+    );
+    expect(screen.getByRole('link', { name: 'CSRD 開示ドラフト' }).dataset.variant).toBe(
+      'secondary',
+    );
+    closed.unmount();
+    // 枠を開いている間は、枠の中の確定ボタンが主操作（開く操作は出さない）
+    await renderCollection({ new: '1' });
+    expect(primaryLabels()).toEqual(['収集項目を作成']);
+    expect(screen.getByRole('button', { name: '収集項目を作成' }).dataset.variant).toBe('primary');
+  });
+
   it('文字量を減らす（§10.4）: 状況の件数はリンク付きの内訳（分母付き）、既存の指標・割当の扱いは閉じる。両方の表とフォームは閉じない', async () => {
     const collection = await loadCsrdDataCollection(
       db,
       manager(),
       fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!,
     );
-    await renderCollection();
+    await renderCollection({ new: '1' });
     const total = collection.requirementRows.length;
     const approved = collection.requirementRows.filter((r) => r.state === 'approved').length;
     const counts = screen.getByRole('list', { name: '当期の状況の件数' });
@@ -532,6 +603,41 @@ describe('CSRD 開示ドラフト', () => {
     // 作り直しは AI 草案だけを置き換える
     expect(within(e1).getByRole('button', { name: 'AI 草案を作り直す（デモ生成）' })).toBeTruthy();
     expect(e1.textContent).toContain('作り直しても本文は変わりません');
+  });
+
+  it('画面の主操作は置かない（節ごとの操作は secondary。plan E30）', async () => {
+    await renderDraft();
+    expect(primaryLabels()).toEqual([]);
+    const e1 = screen.getByRole('region', { name: 'E1 気候変動' });
+    expect(
+      within(e1).getByRole('button', { name: 'AI 草案を作成（デモ生成）' }).dataset.variant,
+    ).toBe('secondary');
+  });
+
+  it('本文がある節で AI 草案を本文に採用するときは、置き換わる内容を示して確かめる（plan §1.16 区分 2）', async () => {
+    const period = fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!;
+    // ESRS 2 は人が書いた本文がある。AI 草案を作ると、採用は本文の置き換えになる
+    const generated = await generateCsrdDraft(db, manager(), period, 'ESRS2');
+    await renderDraft();
+    const esrs2 = screen.getByRole('region', { name: 'ESRS 2 全般開示' });
+    const adopt = within(esrs2).getByRole('button', { name: '本文に採用' });
+    // 押しただけでは送らない（確認ダイアログを開くボタン）
+    expect(adopt.closest('form')).toBeNull();
+    await userEvent.setup().click(adopt);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('[data-confirm-scope]')?.textContent).toContain(
+      'ESRS 2 全般開示: いまの本文',
+    );
+    expect(dialog.textContent).toContain('いまの本文は AI 草案で置き換わります');
+    expect(dialog.textContent).toContain('採用しても確定はされません');
+    const confirm = within(dialog).getByRole('button', { name: '置き換えて採用する' });
+    const form = confirm.closest('form')!;
+    expect((form.querySelector('input[name="draftId"]') as HTMLInputElement).value).toBe(
+      generated.id,
+    );
+    expect((form.querySelector('input[name="baseUpdatedAt"]') as HTMLInputElement).value).toBe(
+      generated.updatedAt,
+    );
   });
 
   it('AI の実行権限が無い役割には生成を出さず、閲覧のみの役割には編集・採用・確定を出さない', async () => {

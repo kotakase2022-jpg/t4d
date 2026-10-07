@@ -34,13 +34,21 @@ export interface DemoRoleChoice {
   current: boolean;
 }
 
-/** 実演の順（作成 → レビュー → 最終承認 → 管理 → 拠点）に並べるための順位 */
+/**
+ * 実演の順に並べるための順位。企業は 作成 → レビュー → 最終承認 → 管理 → 拠点、
+ * 監査法人は 契約責任者 → マネージャー → 担当者 → 法人管理者（plan §1.4 N-18。監査法人でも役割を
+ * 切り替えて Sign-off の 3 段階を実演できるように）。組織をまたいで切り替えることは無い（検査は従来どおり）
+ */
 const DEMO_ROLE_ORDER: ReadonlyArray<[RoleKey, string]> = [
   ['sustainability_manager', '作成担当'],
   ['reviewer', 'レビュアー'],
   ['approver', '最終承認者'],
   ['enterprise_admin', '管理者'],
   ['site_contributor', '拠点担当'],
+  ['engagement_partner', '契約責任者'],
+  ['assurance_manager', 'マネージャー'],
+  ['assurance_staff', '担当者'],
+  ['assurance_admin', '法人管理者'],
 ];
 
 /**

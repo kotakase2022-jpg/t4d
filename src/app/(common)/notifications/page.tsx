@@ -1,100 +1,120 @@
-import Link from 'next/link';
 import { BellOff } from 'lucide-react';
+import { FlashMessage } from '@/components/shared/flash';
+import { SegmentedFilter } from '@/components/shared/nav-tabs';
 import { PageHeader } from '@/components/shared/page-header';
+import { Pagination } from '@/components/shared/pagination';
 import { EmptyState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
 import { requireSession } from '@/lib/auth/session';
 import { formatJst } from '@/lib/format/datetime';
-import { Button } from '@/components/ui/button';
 import { getDb } from '@/lib/repositories';
+import { parsePage } from '@/lib/table/columns';
 import { markAllNotificationsReadAction, markNotificationReadAction } from './actions';
+import { NotificationList, type NotificationRow } from './notification-list';
 
 export const metadata = { title: '通知' };
 
 const CATEGORY_LABEL: Record<string, string> = {
   task: 'タスク',
   alert: 'アラート',
-  pbc: 'PBC',
+  pbc: '資料依頼',
   review: 'レビュー',
   system: 'システム',
 };
 
-export default async function NotificationsPage() {
+/** 1 ページの件数（通知は新しい順。古いものはページ送りで辿る） */
+const PAGE_SIZE = 25;
+const BASE = '/notifications';
+
+export default async function NotificationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
   const session = await requireSession();
   const ctx = session.context;
   const db = await getDb();
 
+  const unreadOnly = params.filter === 'unread';
+  const page = parsePage(params.page);
+  const mine = { organizationId: ctx.workspace.organizationId, userId: ctx.userId };
+  const [total, unreadTotal] = await Promise.all([
+    db.count('notifications', { where: mine }),
+    db.count('notifications', { where: { ...mine, readAt: { isNull: true } } }),
+  ]);
   const notifications = await db.select('notifications', {
-    where: { organizationId: ctx.workspace.organizationId, userId: ctx.userId },
+    where: unreadOnly ? { ...mine, readAt: { isNull: true } } : mine,
     orderBy: { column: 'createdAt', dir: 'desc' },
-    limit: 50,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
   });
+  const shownTotal = unreadOnly ? unreadTotal : total;
 
-  const unreadCount = notifications.filter((n) => !n.readAt).length;
+  // 日時の整形（formatJst）と区分のラベルはサーバーで済ませ、既読の即時反映だけをクライアントに置く
+  const rows: NotificationRow[] = notifications.map((n) => ({
+    id: n.id,
+    categoryLabel: CATEGORY_LABEL[n.category] ?? 'その他',
+    title: n.title,
+    body: n.body || null,
+    href: n.href || null,
+    createdAtText: formatJst(n.createdAt),
+    read: Boolean(n.readAt),
+  }));
 
   return (
     <>
       <PageHeader
         title="通知"
         description={`${ctx.workspace.organizationName} / ${ctx.displayName} 宛`}
-        breadcrumbs={[{ label: 'ホーム', href: '/workspace' }, { label: '通知' }]}
+        autoBreadcrumbs
       />
-      <div className="p-4">
-        {unreadCount > 0 && (
-          <form action={markAllNotificationsReadAction} className="mb-2 flex justify-end">
-            <Button type="submit" size="sm" variant="outline">
-              すべて既読にする（{unreadCount}）
-            </Button>
-          </form>
+      <div className="space-y-2 p-4">
+        <FlashMessage searchParams={params} />
+        <SegmentedFilter
+          ariaLabel="通知の絞り込み"
+          current={unreadOnly ? 'unread' : 'all'}
+          items={[
+            { key: 'all', label: 'すべて', href: BASE, count: total },
+            {
+              key: 'unread',
+              label: '未読のみ',
+              href: `${BASE}?filter=unread`,
+              count: unreadTotal,
+            },
+          ]}
+        />
+        <NotificationList
+          rows={rows}
+          unreadTotal={unreadTotal}
+          markReadAction={markNotificationReadAction}
+          markAllReadAction={markAllNotificationsReadAction}
+          empty={
+            unreadOnly && total > 0 ? (
+              <EmptyState
+                kind="done"
+                size="compact"
+                title="未読の通知はありません"
+                description="すべての通知を確認済みです。"
+              />
+            ) : (
+              <EmptyState
+                kind="not-applicable"
+                title="通知はありません"
+                description="タスクの割当、資料依頼（PBC）、Snapshot 後の変更検知などがここに表示されます。"
+                icon={<BellOff className="size-5" aria-hidden="true" />}
+              />
+            )
+          }
+        />
+        {shownTotal > PAGE_SIZE && (
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={shownTotal}
+            basePath={BASE}
+            searchParams={params}
+          />
         )}
-        <Card>
-          {notifications.length === 0 ? (
-            <EmptyState
-              title="通知はありません"
-              description="タスクの割当、PBC 依頼、Snapshot 後の変更検知などがここに表示されます。"
-              icon={<BellOff className="size-5" aria-hidden="true" />}
-            />
-          ) : (
-            <ul className="divide-y divide-line">
-              {notifications.map((n) => (
-                <li key={n.id} className="px-3 py-2.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Badge tone={n.readAt ? 'neutral' : 'brand'}>
-                          {CATEGORY_LABEL[n.category] ?? n.category}
-                        </Badge>
-                        <span className="text-[13px] font-medium text-ink">{n.title}</span>
-                        {!n.readAt && <Badge tone="danger">未読</Badge>}
-                      </div>
-                      {/* 別のサーバーから持ち回した通知は本文を持たない（題名とリンクで用件が分かる） */}
-                      {n.body ? (
-                        <p className="mt-0.5 text-[12px] text-ink-muted">{n.body}</p>
-                      ) : null}
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-[11px] text-ink-muted">{formatJst(n.createdAt)}</div>
-                      {n.href && (
-                        <Link href={n.href} className="text-[12px] text-brand-700 hover:underline">
-                          対象を開く
-                        </Link>
-                      )}
-                      {!n.readAt && (
-                        <form action={markNotificationReadAction} className="mt-1">
-                          <input type="hidden" name="notificationId" value={n.id} />
-                          <Button type="submit" size="xs" variant="outline">
-                            既読にする
-                          </Button>
-                        </form>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
       </div>
     </>
   );

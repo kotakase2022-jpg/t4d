@@ -24,7 +24,10 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Input, Textarea } from '@/components/ui/input';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatJst } from '@/lib/format/datetime';
 import type { BlockEditorData } from '@/lib/services/disclosure-block';
@@ -67,11 +70,9 @@ function AiCheckbox({
   label: string;
 }) {
   return (
-    <label htmlFor={id} className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
-      <input
+    <label htmlFor={id} className="inline-flex items-center gap-1 text-caption text-ink-muted">
+      <NativeCheckbox
         id={id}
-        type="checkbox"
-        className="size-3.5 accent-brand-700"
         checked={checked}
         disabled={disabled}
         onChange={onChange}
@@ -93,7 +94,7 @@ function JumpLinks({
 }) {
   if (ids.length === 0) return null;
   return (
-    <span className="inline-flex flex-wrap items-center gap-1 text-[11px] text-ink-muted">
+    <span className="inline-flex flex-wrap items-center gap-1 text-caption text-ink-muted">
       引用箇所:
       {ids.map((id) => (
         <button
@@ -110,7 +111,7 @@ function JumpLinks({
 }
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="mb-1 mt-3 text-[12px] font-semibold text-ink first:mt-0">{children}</h3>;
+  return <h3 className="mb-1 mt-3 text-small font-semibold text-ink first:mt-0">{children}</h3>;
 }
 
 export function RightPane(props: RightPaneProps) {
@@ -129,13 +130,13 @@ export function RightPane(props: RightPaneProps) {
         <TabsTrigger value="comments">
           コメント
           {data.statusBar.unresolvedComments.count > 0 && (
-            <span className="ml-1 rounded bg-warning-soft px-1 text-[10px] text-[#8a5d00]">
+            <span className="ml-1 rounded bg-warning-soft px-1 text-caption text-warning-ink">
               未解決 {data.statusBar.unresolvedComments.count}
             </span>
           )}
         </TabsTrigger>
       </TabsList>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 text-[12px]">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 text-small">
         <TabsContent value="requirements">
           <RequirementsTab {...props} />
         </TabsContent>
@@ -170,7 +171,7 @@ function RequirementsTab({ data, selected, onToggleSelect, canSelectForAi }: Rig
       </p>
       {data.framework.isDraftStandard && (
         <p className="mb-2 flex items-start gap-1 rounded-t4d border border-warning/40 bg-warning-soft p-2 text-ink">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning-ink" aria-hidden="true" />
           草案の基準です。この節の承認は草案に基づく社内の準備であり、正式な基準への準拠を示すものではありません。
         </p>
       )}
@@ -271,7 +272,7 @@ function EvidenceTab({
                 </p>
                 <p className="mt-1 line-clamp-4 text-ink">{n.body}</p>
                 {n.missingFieldLabels.length > 0 && (
-                  <p className="mt-1 text-[#8a5d00]">
+                  <p className="mt-1 text-warning-ink">
                     未記入の項目: {n.missingFieldLabels.join('、')}
                   </p>
                 )}
@@ -284,7 +285,7 @@ function EvidenceTab({
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       onClick={() =>
                         onInsert(
                           { t: 'narrative', narrativeVersionId: n.versionId, quote: n.body },
@@ -356,7 +357,7 @@ function EvidenceTab({
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     onClick={() =>
                       onInsert({ t: 'cite', sourceAnchorId: a.id }, `出典印（${a.fileName}）`)
                     }
@@ -428,9 +429,9 @@ function MetricsTab({
                   {m.unitName}・{m.boundary}・{m.periodLabel}
                 </span>
               </div>
-              <p className="tnum mt-1 text-[13px] text-ink">
+              <p className="tnum mt-1 text-body text-ink">
                 {m.referenced?.display ?? '—'}
-                <span className="ml-1 text-[11px] text-ink-muted">
+                <span className="ml-1 text-caption text-ink-muted">
                   版 {m.referenced?.versionNo ?? '—'}
                 </span>
               </p>
@@ -493,7 +494,7 @@ function MetricsTab({
               */}
               <div className="min-w-0 basis-full">
                 <div className="break-words text-ink">{c.metricName}</div>
-                <div className="break-words text-[11px] text-ink-muted">
+                <div className="break-words text-caption text-ink-muted">
                   {c.unitName}・{c.boundary}・版 {c.versionNo}
                 </div>
               </div>
@@ -510,7 +511,7 @@ function MetricsTab({
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   onClick={() => onInsert(c.inline, `${c.metricName}（${c.display}）`)}
                   aria-label={`${c.metricName}（${c.unitName}）${c.display} を本文へ挿入`}
                 >
@@ -574,7 +575,7 @@ function PriorTab({ data, onJump, paragraphLabel }: RightPaneProps) {
             type="button"
             aria-pressed={view === key}
             onClick={() => setView(key)}
-            className={`px-2 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 ${
+            className={`px-2 py-1 text-small focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 ${
               view === key
                 ? 'bg-brand-100 font-medium text-brand-900'
                 : 'text-ink-muted hover:bg-brand-50'
@@ -589,7 +590,7 @@ function PriorTab({ data, onJump, paragraphLabel }: RightPaneProps) {
         <ol className="mt-2 space-y-2">
           {prior.paragraphDiff.map((d) => (
             <li key={`${d.kind}-${d.paragraphId}`} className="rounded-t4d border border-line p-2">
-              <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-ink-muted">
+              <div className="mb-0.5 flex items-center gap-1.5 text-caption text-ink-muted">
                 <span>{d.kind === 'removed' ? '前年の段落' : paragraphLabel(d.paragraphId)}</span>
                 <Badge
                   tone={
@@ -644,7 +645,7 @@ function PriorTab({ data, onJump, paragraphLabel }: RightPaneProps) {
           <p className="mb-1 text-ink-muted">
             単語の差分だけでは前提の変化（対象範囲・算定方法・基準の版）を見落とすため、別に示します。
           </p>
-          <table className="w-full border-collapse text-[12px]">
+          <table className="w-full border-collapse text-small">
             <thead>
               <tr className="border-b border-line text-left text-ink-muted">
                 <th scope="col" className="py-1 pr-2 font-medium">
@@ -664,7 +665,7 @@ function PriorTab({ data, onJump, paragraphLabel }: RightPaneProps) {
                   <th scope="row" className="py-1 pr-2 text-left font-normal text-ink">
                     {row.label}
                     {row.changed && (
-                      <span className="mt-0.5 flex items-center gap-0.5 text-[10px] text-[#8a5d00]">
+                      <span className="mt-0.5 flex items-center gap-0.5 text-caption text-warning-ink">
                         <AlertTriangle className="size-2.5" aria-hidden="true" />
                         変更あり
                       </span>
@@ -793,18 +794,18 @@ function CommentsTab({
                   <button
                     type="button"
                     onClick={() => onJump(c.paragraphId as string)}
-                    className="text-[11px] text-brand-700 underline-offset-2 hover:underline"
+                    className="text-caption text-brand-700 underline-offset-2 hover:underline"
                   >
                     {paragraphLabel(c.paragraphId)}
                   </button>
                 )}
-                <span className="text-[11px] text-ink-muted">
+                <span className="text-caption text-ink-muted">
                   版 {c.versionNo ?? '—'} ／ {c.authorName} ／ {formatJst(c.createdAt)}
                 </span>
               </div>
               <p className="mt-1 whitespace-pre-wrap text-ink">{c.body}</p>
               {c.resolved ? (
-                <p className="mt-1 text-[11px] text-ink-muted">
+                <p className="mt-1 text-caption text-ink-muted">
                   {c.resolvedByName} が {formatJst(c.resolvedAt)} に解決
                   {c.resolutionNote ? `: ${c.resolutionNote}` : ''}
                 </p>
@@ -824,7 +825,7 @@ function CommentsTab({
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       disabled={pending}
                       onClick={() => resolve(c.id)}
                     >
@@ -840,7 +841,7 @@ function CommentsTab({
 
       {canComment && (
         <form onSubmit={submit} className="mt-3 space-y-1.5 rounded-t4d border border-line p-2">
-          <h3 className="text-[12px] font-semibold text-ink">コメントを追加</h3>
+          <h3 className="text-small font-semibold text-ink">コメントを追加</h3>
           {!canPostOnVersion ? (
             <p className="text-ink-muted">
               版が無い節にはコメントできません。先に版として保存してください。
@@ -848,12 +849,13 @@ function CommentsTab({
           ) : (
             <>
               <div className="grid grid-cols-2 gap-1.5">
-                <label className="text-[11px] text-ink-muted">
+                <label className="text-caption text-ink-muted">
                   対象の段落
-                  <select
+                  <NativeSelect
+                    size="sm"
                     value={paragraphId}
                     onChange={(e) => setParagraphId(e.target.value)}
-                    className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+                    className="mt-0.5 text-small"
                   >
                     <option value="">節全体</option>
                     {paragraphOptions.map((p) => (
@@ -861,18 +863,19 @@ function CommentsTab({
                         {p.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </label>
-                <label className="text-[11px] text-ink-muted">
+                <label className="text-caption text-ink-muted">
                   区分
-                  <select
+                  <NativeSelect
+                    size="sm"
                     value={severity}
                     onChange={(e) => setSeverity(e.target.value === 'major' ? 'major' : 'info')}
-                    className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+                    className="mt-0.5 text-small"
                   >
                     <option value="info">参考</option>
                     <option value="major">要対応（解決するまで承認できません）</option>
-                  </select>
+                  </NativeSelect>
                 </label>
               </div>
               <label htmlFor="new-comment" className="sr-only">
@@ -886,12 +889,13 @@ function CommentsTab({
                 required
                 placeholder="指摘・確認事項を入力"
               />
-              <p className="text-[11px] text-ink-muted">
+              <p className="text-caption text-ink-muted">
                 コメントは、レビュー中は依頼された版、それ以外は現在の版に紐付きます。
               </p>
-              <Button type="submit" size="sm" disabled={pending || !body.trim()}>
+              {/* コメントは補助の操作（主操作はレビュー依頼・レビュー完了・最終承認）。secondary にする */}
+              <SubmitButton variant="secondary" size="sm" disabled={pending || !body.trim()}>
                 コメントする
-              </Button>
+              </SubmitButton>
             </>
           )}
         </form>

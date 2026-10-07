@@ -45,7 +45,7 @@ function Chip({
     </>
   );
   const className = cn(
-    'inline-flex items-center gap-1.5 rounded-t4d border px-2 py-1 text-[12px]',
+    'inline-flex items-center gap-1.5 rounded-t4d border px-2 py-1 text-small',
     active
       ? 'border-brand-500 bg-brand-100 text-brand-900'
       : 'border-line bg-surface text-ink-muted',

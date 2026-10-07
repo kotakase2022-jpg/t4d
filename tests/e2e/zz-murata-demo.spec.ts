@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { buildMurataFiles } from '../../scripts/murata-dataset';
-import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible, openMoreMenu } from './helpers';
 
 /**
  * 村田製作所向けデモ: リセット → 20 ファイル一括 UI 投入 → 候補選択 → 確定 → リセット。
@@ -18,6 +18,18 @@ test.describe.configure({ mode: 'serial' });
 
 const SCREENSHOT_DIR = path.join(__dirname, '..', '..', 'test-results', 'murata-demo');
 
+/**
+ * デモのリセットは見出しの「その他」→ 確認ダイアログ（plan §2 S5・§1.16 区分 1）。
+ * 範囲 1 行（削除範囲）と必須のチェックはダイアログの本文にある
+ */
+async function openSupplierDemoReset(page: Page) {
+  const menu = await openMoreMenu(page.locator('#t4d-main'));
+  await menu.getByRole('menuitem', { name: /^デモを初期状態に戻す/ }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 test('デモリセット: 削除範囲の確認つきで算定版を初期状態へ戻せる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/ghg/suppliers');
@@ -26,10 +38,12 @@ test('デモリセット: 削除範囲の確認つきで算定版を初期状態
   await expect(
     page.getByText('デモ環境｜サンプルデータ・表示スコアはシミュレーション'),
   ).toBeVisible();
-  await expect(page.getByRole('link', { name: /投入用 ZIP（20 ファイルのみ）/ })).toHaveAttribute(
-    'href',
-    '/demo/murata-scope3-cat1-upload.zip',
-  );
+  // データセットの ZIP は見出しの「その他」にある（デモの道具を業務の流れから外す。plan §2 S5）
+  const menu = await openMoreMenu(page.locator('#t4d-main'));
+  await expect(
+    menu.getByRole('menuitem', { name: /投入用 ZIP（20 ファイルのみ）/ }),
+  ).toHaveAttribute('href', '/demo/murata-scope3-cat1-upload.zip');
+  await page.keyboard.press('Escape');
   // 係数・為替が架空であることは閉じない（データセットの説明の本文だけを閉じる。§10.4）
   await expect(
     page.getByText(/為替レートはすべて架空の説明用で、実算定には使用できません/),
@@ -37,11 +51,12 @@ test('デモリセット: 削除範囲の確認つきで算定版を初期状態
 
   // 削除範囲の説明と確認チェックが必須。「上記の削除範囲」が指す 1 行は閉じず、
   // 触らないものの一覧は「リセットで変わらないもの」を開くと読める
-  await expect(page.getByText(/削除範囲: この組織 ×/)).toBeVisible();
-  const untouched = await openCollapsible(page, 'リセットで変わらないもの');
+  const dialog = await openSupplierDemoReset(page);
+  await expect(dialog.getByText(/削除範囲: この組織 ×/)).toBeVisible();
+  const untouched = await openCollapsible(dialog, 'リセットで変わらないもの');
   await expect(untouched.getByText(/Data Point 本体・承認履歴/)).toBeVisible();
-  await page.getByRole('checkbox', { name: '上記の削除範囲を確認しました' }).check();
-  await page.getByRole('button', { name: '取込済みの算定版をリセットする' }).click();
+  await dialog.getByRole('checkbox', { name: '上記の削除範囲を確認しました' }).check();
+  await dialog.getByRole('button', { name: '取込済みの算定版をリセットする' }).click();
   await page.waitForURL(/flash=supplierDemoReset/);
   await expect(page.getByText(/サプライヤーデモの算定版をリセットしました/)).toBeVisible();
 
@@ -159,8 +174,9 @@ test('リセット → 再投入で同じ結果が再現される（削除は積
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/ghg/suppliers');
 
-  await page.getByRole('checkbox', { name: '上記の削除範囲を確認しました' }).check();
-  await page.getByRole('button', { name: '取込済みの算定版をリセットする' }).click();
+  const dialog = await openSupplierDemoReset(page);
+  await dialog.getByRole('checkbox', { name: '上記の削除範囲を確認しました' }).check();
+  await dialog.getByRole('button', { name: '取込済みの算定版をリセットする' }).click();
   await page.waitForURL(/flash=supplierDemoReset/);
   await expect(page.getByText(/削除した版 1 件/)).toBeVisible();
   await expect(page.getByText('143.1').first()).toBeVisible();

@@ -1,4 +1,5 @@
 import { AppShell } from '@/components/shared/app-shell';
+import { listDemoRoleChoices } from '@/lib/auth/demo-role';
 import { loadAssuranceShell, toWorkspaceChoices } from '@/lib/services/shell';
 
 /**
@@ -13,12 +14,23 @@ import { loadAssuranceShell, toWorkspaceChoices } from '@/lib/services/shell';
  */
 export default async function AssuranceLayout({ children }: { children: React.ReactNode }) {
   const shell = await loadAssuranceShell();
+  // デモの役割切替（契約責任者・マネージャー・担当者・法人管理者。plan §1.4 N-18）。
+  // 候補と切替の検査（Demo Mode・同じ法人・@demo.local）は企業と同じ
+  const demoRoleChoices = await listDemoRoleChoices(shell.db, shell.ctx);
 
   return (
     <AppShell
       ctx={shell.ctx}
       workspaces={toWorkspaceChoices(shell.session)}
       engagements={shell.engagements.map((e) => ({ id: e.id, code: e.code, name: e.name }))}
+      demoRoleChoices={demoRoleChoices.map((choice) => ({
+        email: choice.email,
+        displayName: choice.displayName,
+        jobTitle: choice.jobTitle,
+        demoRole: choice.demoRole,
+        roleLabels: choice.roleLabels,
+        current: choice.current,
+      }))}
       unreadNotifications={shell.unreadNotifications}
     >
       {children}

@@ -1,5 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CSRD_REQUIREMENT_DATA_COLS } from '@/app/enterprise/disclosures/csrd/requirements/form-input';
 import { setAiProviderForTesting } from '@/lib/ai';
 import { MockAIProvider } from '@/lib/ai/mock-provider';
 import { CSRD_IDS } from '@/lib/fixtures/csrd';
@@ -14,10 +16,11 @@ import type { AuthorizationContext, RoleKey } from '@/types/domain';
 /**
  * CSRD 対応状況・設定（ダブル・マテリアリティ）・要求事項（一覧・詳細）の画面（docs/disclosure-first.md §9.4）。
  * Server Component のページをそのまま呼び、Fixture の DB で描画する（Action は呼ばない）。
- *  - 対応状況: 表は既存のギャップ分析表 1 つだけ（名前付き・12 行）。コードは要求事項の詳細へ
+ *  - 対応状況: 表を置かない（ギャップ分析表は同じ母集団の要求事項の一覧へ寄せた。plan T8）。件数は絞り込んだ一覧へ
  *  - 設定: インパクト重要性・財務的重要性の 2 観点、会社が決めた閾値、マトリクス、SSBJ との違い、人の確定
- *  - 要求事項: 行ごとに適用と、適用になった観点。暫定の併記。URL の絞り込み
- *  - 詳細: 適用の根拠、AI の候補（デモ生成）と人の確定、回答（版・承認）への導線
+ *    （段階の UI。?step= の手順だけを出し、既定は未完了の最初の手順。確定は確認ダイアログを通す）
+ *  - 要求事項: 行ごとに適用と、適用になった観点（列で出す）。暫定の併記。URL の絞り込み。データ・回答の列
+ *  - 詳細: 適用の根拠、AI の候補（デモ生成）と人の確定、回答（版・承認）への導線。主操作は状態で 1 つ
  *  - 権限: 閲覧だけの役割には操作を出さない。開示を読めない役割には権限なしと示す
  *  - 文字量（§10.4）: 説明・算定式・補助の一覧は既定で閉じ、誠実さの注記（架空・未発効・暫定・AI は候補）・
  *    分母付きの主要数値・表・図・フォームは閉じない。閉じた中身は DOM にあるため、details の内外で確かめる
@@ -47,6 +50,13 @@ vi.mock('@/app/enterprise/disclosures/csrd/requirements/actions', () => ({
 // 一覧のフィルターは URL を書き換える Client Component（App Router が要る）。ここでは件数だけ見せる
 vi.mock('@/components/shared/filter-bar', () => ({
   FilterBar: ({ total }: { total: number }) => <p data-testid="filter-bar">{total} 件</p>,
+}));
+// 一覧の表（列 ▾・並べ替え・表示件数）とパンくずはクライアントのフックを使う。notFound などはそのまま使う
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  usePathname: () => '/enterprise/disclosures/csrd',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 const { default: CsrdOverviewPage } = await import('@/app/enterprise/disclosures/csrd/page');
@@ -107,14 +117,24 @@ const renderOverview = async (query: Query = {}) =>
   render(await CsrdOverviewPage({ searchParams: sp(query) }));
 const renderSettings = async (query: Query = {}) =>
   render(await CsrdSettingsPage({ searchParams: sp(query) }));
-const renderMatter = async (topic: string) =>
-  render(await CsrdMatterPage({ params: Promise.resolve({ topic }), searchParams: sp() }));
+const renderMatter = async (topic: string, query: Query = {}) =>
+  render(await CsrdMatterPage({ params: Promise.resolve({ topic }), searchParams: sp(query) }));
 const renderRequirements = async (query: Query = {}) =>
   render(await CsrdRequirementsPage({ searchParams: sp(query) }));
-const renderDetail = async (itemId: string) =>
+const renderDetail = async (itemId: string, query: Query = {}) =>
   render(
-    await CsrdRequirementDetailPage({ params: Promise.resolve({ itemId }), searchParams: sp() }),
+    await CsrdRequirementDetailPage({
+      params: Promise.resolve({ itemId }),
+      searchParams: sp(query),
+    }),
   );
+
+/** 見えている主操作（data-variant="primary"）の名前。ダイアログの外だけを数える（plan §1.6） */
+function primaryLabels(): string[] {
+  return [...document.querySelectorAll('[data-variant="primary"]')]
+    .filter((el) => el.closest('[role="dialog"]') === null)
+    .map((el) => el.textContent?.trim() ?? '');
+}
 
 /** 行（見出しを除く） */
 function bodyRows(table: HTMLElement): HTMLElement[] {
@@ -195,18 +215,39 @@ describe('CSRD 対応状況', () => {
     expect(screen.getByText('ダブル・マテリアリティ')).toBeTruthy();
   });
 
-  it('表はギャップ分析表 1 つだけ（12 行）。コードは要求事項の詳細へ、適用を併記する', async () => {
-    await renderOverview();
-    expect(screen.getAllByRole('table')).toHaveLength(1);
-    const table = screen.getByRole('table', { name: 'ESRS 要求事項とデータの対応' });
-    expect(bodyRows(table)).toHaveLength(12);
-    expect(within(table).getByRole('link', { name: 'ESRS-E1-5' }).getAttribute('href')).toBe(
-      `/enterprise/disclosures/csrd/requirements/${item('ESRS-E1-5')}`,
+  it('表は置かず（ギャップ分析表は要求事項の一覧へ寄せた）、件数から絞り込んだ一覧へ進める', async () => {
+    const first = await renderOverview();
+    // 同じ母集団（12 項目）の表を 2 つ置かない（plan T8）
+    expect(screen.queryAllByRole('table')).toHaveLength(0);
+    const dataView = (filter: string) =>
+      `/enterprise/disclosures/csrd/requirements?${filter}&cols=${encodeURIComponent(CSRD_REQUIREMENT_DATA_COLS)}`;
+    expect(screen.getByRole('link', { name: /^データあり（承認済み）/ }).getAttribute('href')).toBe(
+      dataView('data=full'),
     );
+    expect(screen.getByRole('link', { name: /^回答済み/ }).getAttribute('href')).toBe(
+      dataView('answer=answered'),
+    );
+    expect(screen.getByRole('link', { name: /^必須項目の準備/ }).getAttribute('href')).toBe(
+      dataView('required=1'),
+    );
+    expect(screen.getByRole('link', { name: '要求事項の評価の一覧' }).getAttribute('href')).toBe(
+      `/enterprise/disclosures/csrd/requirements?cols=${encodeURIComponent(CSRD_REQUIREMENT_DATA_COLS)}`,
+    );
+    first.unmount();
+
+    // 寄せた先の一覧（データ・回答の列を出したもの）: 12 行。コードは要求事項の詳細へ、適用を併記する
+    await renderRequirements({ cols: CSRD_REQUIREMENT_DATA_COLS });
+    const table = screen.getByRole('table', { name: 'CSRD 要求事項の評価' });
+    expect(bodyRows(table)).toHaveLength(12);
+    expect(
+      within(table)
+        .getByRole('link', { name: /^ESRS-E1-5 / })
+        .getAttribute('href'),
+    ).toBe(`/enterprise/disclosures/csrd/requirements/${item('ESRS-E1-5')}`);
     expect(rowWith(table, 'ESRS-E3-4').textContent).toContain('適用（インパクト）');
     expect(rowWith(table, 'ESRS-E5-5').textContent).toContain('対象外（重要でない）');
     expect(rowWith(table, 'ESRS-G1-1').textContent).toContain('未判定');
-    // 既存の表示（データの揃い具合・回答の状況）は残す
+    // ギャップ分析表にあった表示（データの揃い具合・回答の状況）は列として残す
     expect(table.textContent).toContain('データあり');
     expect(table.textContent).toContain('承認済みデータなし');
     expect(table.textContent).toContain('未着手');
@@ -280,16 +321,86 @@ describe('CSRD 対応状況', () => {
     }
     expectOutsideDetails(screen.getByText(/評価対象（常に適用・重要）/));
 
-    // 表のコードの行き先の説明は「この画面について」（既定で閉じる）
-    const hint = screen.getByText(/ギャップ分析表のコードを選ぶと/);
+    // 件数のリンクの行き先の説明は「この画面について」（既定で閉じる）
+    const hint = screen.getByText(/件数を選ぶと、その条件で絞った一覧を開きます/);
     expect(inClosedDetails(hint)).toBe(true);
     expect(summaryOf(hint)).toBe('この画面について');
+  });
+
+  it('Attention（要対応）→ 工程の次の作業（主操作 1 つ）→ 件数の順。0 件の注意は出さない', async () => {
+    await renderOverview();
+    const attention = screen.getByRole('region', { name: '要対応' });
+    // Fixture: 確認待ち 3 件・未評価の事項 1 件（G1）。整合チェックはまだ実行していないので出さない
+    expect(attention.textContent).toContain('AI の候補を担当者が未確認3 件');
+    expect(attention.textContent).toContain('人の判断が未評価の事項1 件');
+    expect(attention.textContent).toContain('DMA 未確定のため暫定の適用10 件');
+    expect(attention.textContent).not.toContain('整合チェックの指摘');
+    expect(
+      within(attention)
+        .getByRole('link', { name: /AI の候補を担当者が未確認/ })
+        .getAttribute('href'),
+    ).toBe('/enterprise/disclosures/csrd/requirements?review=awaiting');
+    // DMA が未確定なので、主操作は工程①（設定）の次の作業。見えている primary は 1 つだけ
+    expect(primaryLabels()).toEqual(['事項を判断して DMA を確定する']);
+    expect(
+      screen.getByRole('link', { name: '事項を判断して DMA を確定する' }).getAttribute('href'),
+    ).toBe('/enterprise/disclosures/csrd/settings');
+    // 整合チェック（AI）は secondary。以前の画面下部の工程のボタンは「その他」に残す
+    expect(screen.getByRole('button', { name: '整合チェックを実行' }).dataset.variant).toBe(
+      'secondary',
+    );
+    expect(screen.getByRole('button', { name: 'その他' })).toBeTruthy();
+  });
+
+  it('閲覧だけの役割には主操作を置かない（工程の画面へのリンクは残す）', async () => {
+    useShell(approver());
+    await renderOverview();
+    expect(primaryLabels()).toEqual([]);
+    expect(screen.getByRole('link', { name: '要求事項の評価' }).getAttribute('href')).toBe(
+      '/enterprise/disclosures/csrd/requirements',
+    );
   });
 });
 
 describe('CSRD 設定（ダブル・マテリアリティ）', () => {
-  it('2 観点・SSBJ との違い・会社が決めた閾値・10 事項・マトリクス', async () => {
+  it('段階の UI: 既定は未完了の最初の手順（③）。手順の帯は現在の手順に aria-current="step"、未完了には残りを文字で', async () => {
     await renderSettings();
+    const steps = screen.getByRole('navigation', { name: 'CSRD 設定の手順' });
+    const links = within(steps).getAllByRole('link');
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      '/enterprise/disclosures/csrd/settings?step=boundary',
+      '/enterprise/disclosures/csrd/settings?step=method',
+      '/enterprise/disclosures/csrd/settings?step=dma',
+    ]);
+    expect(links.map((a) => a.getAttribute('aria-current'))).toEqual([null, null, 'step']);
+    // ①②は完了、③は G1 が未評価（残りを文字で示す）
+    expect(links[0]!.getAttribute('data-step-state')).toBe('done');
+    expect(links[2]!.textContent).toContain('未評価: G1 企業行動');
+    // 1 画面に 1 つの手順だけ（③の表を出し、①②のフォームは出さない）
+    expect(screen.queryByRole('button', { name: '報告範囲を保存' })).toBeNull();
+    expect(screen.queryByLabelText('インパクトの閾値（インパクト重要性）')).toBeNull();
+    expect(
+      screen.getByRole('table', { name: 'サステナビリティ事項のダブル・マテリアリティ評価' }),
+    ).toBeTruthy();
+    // 主操作は手順ごとに 1 つ
+    expect(primaryLabels()).toEqual(['DMA を確定する']);
+  });
+
+  it('手順ごとの主操作: ①報告範囲を保存／②評価方法を保存（どちらも 1 つだけ）', async () => {
+    const boundary = await renderSettings({ step: 'boundary' });
+    expect(screen.getByRole('combobox', { name: 'バリューチェーンの扱い' })).toBeTruthy();
+    expect(primaryLabels()).toEqual(['報告範囲を保存']);
+    expect(
+      screen.queryByRole('table', { name: 'サステナビリティ事項のダブル・マテリアリティ評価' }),
+    ).toBeNull();
+    boundary.unmount();
+    await renderSettings({ step: 'method' });
+    expect(primaryLabels()).toEqual(['評価方法を保存']);
+  });
+
+  it('2 観点・SSBJ との違い・会社が決めた閾値・10 事項・マトリクス', async () => {
+    // 閾値と評価方法は手順②
+    const method = await renderSettings({ step: 'method' });
     expect(screen.getByText('SSBJ: シングル・マテリアリティ')).toBeTruthy();
     expect(screen.getByText('CSRD: ダブル・マテリアリティ')).toBeTruthy();
     expect(document.body.textContent).toContain('ESRS は重要性の数値の閾値を定めていません');
@@ -299,6 +410,11 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
     expect((screen.getByLabelText('財務の閾値（財務的重要性）') as HTMLInputElement).value).toBe(
       '3.0',
     );
+    method.unmount();
+
+    // 10 事項とマトリクスは手順③（既定）
+    await renderSettings();
+    expect(screen.getByText('SSBJ: シングル・マテリアリティ')).toBeTruthy();
     const table = screen.getByRole('table', {
       name: 'サステナビリティ事項のダブル・マテリアリティ評価',
     });
@@ -316,7 +432,7 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
     expect(screen.getByRole('img', { name: /ダブル・マテリアリティ・マトリクス/ })).toBeTruthy();
   });
 
-  it('G1 が未評価の間は確定できず理由を示す。判断すると確定できる（人の操作）', async () => {
+  it('G1 が未評価の間は確定できず理由を示す。判断すると確定できる（人の操作・確認ダイアログを通す）', async () => {
     const { unmount } = await renderSettings();
     const button = screen.getByRole('button', { name: 'DMA を確定する' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
@@ -325,17 +441,33 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
 
     await decideG1FinancialOnly();
     await renderSettings();
-    expect(
-      (screen.getByRole('button', { name: 'DMA を確定する' }) as HTMLButtonElement).disabled,
-    ).toBe(false);
+    const ready = screen.getByRole('button', { name: 'DMA を確定する' }) as HTMLButtonElement;
+    expect(ready.disabled).toBe(false);
     expect(document.body.textContent).toContain('AI は DMA の判断・確定を行いません');
+    // 押すと確定の前に確認ダイアログ（範囲 1 行と結果を本文に。確定は人が押す。plan §1.16 区分 1）
+    await userEvent.setup().click(ready);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('[data-confirm-scope]')?.textContent).toContain(
+      'DMA（10 事項の人の判断・報告範囲・評価方法）を確定します',
+    );
+    expect(dialog.textContent).toContain('確定は取り消されます');
+    expect(within(dialog).getByRole('button', { name: '確定する' })).toBeTruthy();
+    const form = within(dialog).getByRole('button', { name: '確定する' }).closest('form')!;
+    expect((form.querySelector('input[name="reportingPeriodId"]') as HTMLInputElement).value).toBe(
+      PERIOD_IDS.fy2026,
+    );
   });
 
   it('閲覧だけの役割には保存・確定の操作を出さない。読めない役割には権限なし', async () => {
     useShell(approver());
-    const { unmount } = await renderSettings();
+    const dma = await renderSettings();
     expect(screen.queryByRole('button', { name: 'DMA を確定する' })).toBeNull();
+    dma.unmount();
+    const boundary = await renderSettings({ step: 'boundary' });
+    expect(screen.getByRole('combobox', { name: 'バリューチェーンの扱い' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '報告範囲を保存' })).toBeNull();
+    boundary.unmount();
+    const { unmount } = await renderSettings({ step: 'method' });
     expect(screen.queryByRole('button', { name: '評価方法を保存' })).toBeNull();
     expect(
       (screen.getByLabelText('インパクトの閾値（インパクト重要性）') as HTMLInputElement).disabled,
@@ -348,6 +480,22 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
   });
 
   it('文字量を減らす（§10.4）: SSBJ／CSRD の見出しは見せ、考え方の詳細・算定式・マトリクスの読み方は閉じる。未発効は summary に見せる', async () => {
+    // 手順②: 算定式は閉じる。「ESRS は数値の閾値を定めていない」ことは summary に見せる
+    const method = await renderSettings({ step: 'method' });
+    const formula = screen.getByText(/√\(発生可能性 × 財務影響の大きさ\)/);
+    expect(inClosedDetails(formula)).toBe(true);
+    expect(summaryOf(formula)).toContain('ESRS は数値の閾値を定めていません');
+    expectOutsideDetails(screen.getByLabelText('インパクトの閾値（インパクト重要性）'));
+    // DMA が未確定の間は、取り消す確定が無いので「確定が取り消される」とは書かない
+    expect(document.body.textContent).not.toContain('保存すると DMA の確定は取り消されます');
+    method.unmount();
+    const boundary = await renderSettings({ step: 'boundary' });
+    expect(document.body.textContent).not.toContain('保存すると DMA の確定は取り消されます');
+    // 確定は人だけが行うこと（AI は判断・確定しない）は、どの手順でも閉じずに見せる
+    expectOutsideDetails(screen.getByText(/AI は DMA の判断・確定を行いません/));
+    boundary.unmount();
+
+    // 手順③（既定）
     await renderSettings();
     for (const name of ['SSBJ: シングル・マテリアリティ', 'CSRD: ダブル・マテリアリティ']) {
       expectOutsideDetails(screen.getByRole('heading', { level: 2, name }));
@@ -358,10 +506,8 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
     expect(summaryOf(revised)).toContain(
       '改正 ESRS（2026-07-03 採択）は未発効・本サンプルに未反映',
     );
-    // 算定式は閉じる。「ESRS は数値の閾値を定めていない」ことは summary に見せる
-    const formula = screen.getByText(/√\(発生可能性 × 財務影響の大きさ\)/);
-    expect(inClosedDetails(formula)).toBe(true);
-    expect(summaryOf(formula)).toContain('ESRS は数値の閾値を定めていません');
+    // 閾値がデモ既定で、ESRS が数値の閾値を定めていないことは手順③でも閉じずに見せる
+    expectOutsideDetails(screen.getByText(/ESRS は数値の閾値を定めていません。変更は/));
     // マトリクスの読み方・事項ごとの一覧（表と同じ内容）は閉じる。要点の件数は summary に
     const reading = screen.getByText(/閾値の線より上ならインパクト重要性/);
     expect(inClosedDetails(reading)).toBe(true);
@@ -376,18 +522,22 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
       screen.getByRole('table', { name: 'サステナビリティ事項のダブル・マテリアリティ評価' }),
     );
     expectOutsideDetails(screen.getByRole('img', { name: /ダブル・マテリアリティ・マトリクス/ }));
-    expectOutsideDetails(screen.getByLabelText('インパクトの閾値（インパクト重要性）'));
-    // DMA が未確定の間は、取り消す確定が無いので「確定が取り消される」とは書かない
-    expect(document.body.textContent).not.toContain('保存すると DMA の確定は取り消されます');
   });
 
   it('DMA の確定後は、保存で確定が取り消されることを各フォームの横に見せる', async () => {
     await decideG1FinancialOnly();
     await confirmCsrdDma(db, manager(), PERIOD_IDS.fy2026);
-    await renderSettings();
+    // すべて完了したので既定は③。確定済みの表示があり、確定の操作は出さない
+    const dma = await renderSettings();
+    expect(screen.getByText('DMA 確定済み')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'DMA を確定する' })).toBeNull();
+    dma.unmount();
+    const boundary = await renderSettings({ step: 'boundary' });
     expectOutsideDetails(
       screen.getByText('保存すると DMA の確定は取り消されます（前提が変わるため）。'),
     );
+    boundary.unmount();
+    await renderSettings({ step: 'method' });
     expectOutsideDetails(
       screen.getByText('保存すると DMA の確定は取り消されます（人の判断は変わりません）。'),
     );
@@ -401,7 +551,8 @@ describe('CSRD サステナビリティ事項', () => {
   });
 
   it('IRO の一覧（入力・深刻度・スコア）・追加と編集・観点ごとの判断（提案を横に示す）', async () => {
-    await renderMatter('S1');
+    // IRO の追加は「IRO を追加」から開く枠（?new=1）
+    await renderMatter('S1', { new: '1' });
     expect(
       screen.getByRole('heading', {
         level: 1,
@@ -415,7 +566,16 @@ describe('CSRD サステナビリティ事項', () => {
       '潜在・負・人権 ／ 規模 4・範囲 3・回復困難性 3・可能性 3',
     );
     expect(impact.textContent).toContain('3.3');
-    expect(within(table).getAllByRole('button', { name: /^IRO「.+」を削除$/ })).toHaveLength(2);
+    // 削除は行の「操作 ▾」の中（開いてから確かめる）。行ごとに読み上げ名の付いた操作がある
+    const rowMenus = within(table).getAllByRole('button', { name: /^IRO「.+」 の操作$/ });
+    expect(rowMenus).toHaveLength(2);
+    await userEvent
+      .setup()
+      .click(within(impact).getByRole('button', { name: /^IRO「.+」 の操作$/ }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      '編集',
+      '削除…',
+    ]);
     // 編集フォームは表の外（IRO ごと）。保存済みの値を初期値にする
     expect(screen.getAllByText(/^(インパクト|リスク|機会)「.+」を編集$/)).toHaveLength(2);
     expect(
@@ -431,11 +591,43 @@ describe('CSRD サステナビリティ事項', () => {
       ['financialAssessment', true],
     ]);
     expect(screen.getByRole('button', { name: '判断を保存' })).toBeTruthy();
+    // 主操作は「判断を保存」1 つ（IRO の保存は secondary。plan S12）
+    expect(primaryLabels()).toEqual(['判断を保存']);
+  });
+
+  it('IRO の削除は確認ダイアログを通す（論理削除・DMA の確定を取り消すことを本文に）', async () => {
+    await renderMatter('S1');
+    const user = userEvent.setup();
+    const table = screen.getByRole('table', { name: 'S1 自社の労働力 の IRO' });
+    await user.click(
+      within(rowWith(table, '長時間労働')).getByRole('button', { name: /^IRO「.+」 の操作$/ }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: '削除…' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('[data-confirm-scope]')?.textContent).toContain(
+      'S1 自社の労働力 のインパクト「長時間労働',
+    );
+    expect(dialog.textContent).toContain('論理削除です（履歴は残り、算定からは外れます）。');
+    expect(dialog.textContent).toContain('DMA を確定していた場合は、確定を取り消します。');
+    const confirm = within(dialog).getByRole('button', { name: '削除する' });
+    // 取り消せない操作の確定はダイアログの中の danger だけ
+    expect(confirm.dataset.variant).toBe('danger');
+    const form = confirm.closest('form')!;
+    expect((form.querySelector('input[name="topic"]') as HTMLInputElement).value).toBe('S1');
+    expect((form.querySelector('input[name="iroId"]') as HTMLInputElement).value).not.toBe('');
+  });
+
+  it('行の「編集」は ?edit= でその IRO の編集欄を開いて描く', async () => {
+    const iro = fixture.csrdDmaIros.find((i) => i.description.startsWith('長時間労働'))!;
+    await renderMatter('S1', { edit: iro.id });
+    const editors = [...document.querySelectorAll<HTMLDetailsElement>('details[id^="iro-edit-"]')];
+    expect(editors).toHaveLength(2);
+    expect(editors.filter((d) => d.open).map((d) => d.id)).toEqual([`iro-edit-${iro.id}`]);
   });
 
   it('閲覧だけの役割には IRO と判断の操作を出さない', async () => {
     useShell(approver());
-    await renderMatter('S1');
+    await renderMatter('S1', { new: '1' });
     expect(screen.queryByRole('button', { name: '判断を保存' })).toBeNull();
     expect(screen.queryByText('IRO を追加する')).toBeNull();
     expect(screen.queryAllByText(/を編集$/)).toEqual([]);
@@ -461,8 +653,32 @@ describe('CSRD サステナビリティ事項', () => {
 });
 
 describe('CSRD 要求事項の評価', () => {
-  it('12 行。行ごとに適用と、適用になった観点。DMA 確定前は暫定と示す', async () => {
+  it('既定の列は 要求事項・適用・総合・優先度・担当者の確認。ほかの列は「列 ▾」（URL の cols）で出す', async () => {
     await renderRequirements();
+    const table = screen.getByRole('table', { name: 'CSRD 要求事項の評価' });
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map((th) => th.textContent?.trim());
+    expect(headers).toEqual(['要求事項', '適用', '総合', '優先度', '担当者の確認']);
+    expect(bodyRows(table)).toHaveLength(12);
+  });
+
+  it('データ・回答・必須でも絞り込める（ギャップ分析表と同じ数え方）', async () => {
+    const none = await renderRequirements({ data: 'none', cols: CSRD_REQUIREMENT_DATA_COLS });
+    const rows = bodyRows(screen.getByRole('table', { name: 'CSRD 要求事項の評価' }));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.textContent?.includes('承認済みデータなし'))).toBe(true);
+    none.unmount();
+    await renderRequirements({ required: '1', cols: CSRD_REQUIREMENT_DATA_COLS });
+    const required = bodyRows(screen.getByRole('table', { name: 'CSRD 要求事項の評価' }));
+    expect(required.length).toBeGreaterThan(0);
+    expect(required.length).toBeLessThan(12);
+    expect(required.every((r) => r.textContent?.includes('必須'))).toBe(true);
+  });
+
+  it('12 行。行ごとに適用と、適用になった観点。DMA 確定前は暫定と示す', async () => {
+    // 適用になった観点は「列 ▾」から出す列
+    await renderRequirements({ cols: 'applicability,perspectives,combined,priority,review' });
     const table = screen.getByRole('table', { name: 'CSRD 要求事項の評価' });
     expect(bodyRows(table)).toHaveLength(12);
     const e34 = rowWith(table, 'ESRS-E3-4');
@@ -530,7 +746,8 @@ describe('CSRD 要求事項の評価', () => {
 
 describe('CSRD 要求事項の詳細', () => {
   it('適用の根拠・AI 分析（デモ生成）・指標の当期データ・計画の追加・回答への導線', async () => {
-    await renderDetail(item('ESRS-E1-6'));
+    // 対応計画の追加は「対応計画を立てる」から開く枠（?new=1）
+    await renderDetail(item('ESRS-E1-6'), { new: '1' });
     expect(screen.getByRole('heading', { level: 1, name: /^ESRS-E1-6/ })).toBeTruthy();
     expect(document.body.textContent).toContain('E1 気候変動');
     expect(document.body.textContent).toContain('根拠: 製造拠点の排出は継続的に生じており');
@@ -552,10 +769,51 @@ describe('CSRD 要求事項の詳細', () => {
     expect(rowWith(data, 'scope2_location').textContent).toContain('全社（行なし）');
     expect(screen.getByRole('button', { name: '対応計画に追加' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '担当者の入力として確定' })).toBeTruthy();
+    // 候補が無く未確定: 主操作は「担当者の入力として確定」だけ（AI の実行・計画の追加は secondary）
+    expect(primaryLabels()).toEqual(['担当者の入力として確定']);
+    expect(
+      screen.getByRole('button', { name: 'AI ギャップ分析を実行（デモ生成）' }).dataset.variant,
+    ).toBe('secondary');
+  });
+
+  it('対応計画の追加は枠（CreatePanel）で開き、期限は提出期限・担当部署は評価の担当部署・担当者は本人が初期値', async () => {
+    const closed = await renderDetail(item('ESRS-E1-6'));
+    // 既定では枠を開かない（一覧の上に作成フォームを常設しない）
+    expect(screen.queryByRole('button', { name: '対応計画に追加' })).toBeNull();
+    const open = screen.getByRole('link', { name: '対応計画を立てる' });
+    expect(open.getAttribute('href')).toBe(
+      `/enterprise/disclosures/csrd/requirements/${item('ESRS-E1-6')}?new=1#csrd-plan-create`,
+    );
+    closed.unmount();
+
+    await renderDetail(item('ESRS-E1-6'), { new: '1' });
+    const form = screen.getByRole('button', { name: '対応計画に追加' }).closest('form')!;
+    const period = fixture.periods.find((p) => p.id === PERIOD_IDS.fy2026)!;
+    expect((form.querySelector('input[name="dueDate"]') as HTMLInputElement).value).toBe(
+      period.submissionDueDate ?? '',
+    );
+    expect((form.querySelector('input[name="department"]') as HTMLInputElement).value).toBe(
+      'サステナビリティ推進部',
+    );
+    expect((form.querySelector('select[name="assigneeUserId"]') as HTMLSelectElement).value).toBe(
+      userId('sustainability@demo.local'),
+    );
+    // 枠を開いている間は開く操作を出さない
+    expect(screen.queryByRole('link', { name: '対応計画を立てる' })).toBeNull();
+  });
+
+  it('担当者が確定済みでギャップが残る要求事項は、次の作業「対応計画を立てる」が主操作', async () => {
+    await renderDetail(item('ESRS2-GOV-1'));
+    expect(primaryLabels()).toEqual(['対応計画を立てる']);
+    expect(screen.queryByRole('button', { name: '候補を採用' })).toBeNull();
+    // 確定し直す・担当部署を変える入力は閉じた折りたたみから使える
+    const manual = screen.getByRole('button', { name: '担当者の入力として確定' });
+    expect(inClosedDetails(manual)).toBe(true);
+    expect(manual.dataset.variant).toBe('secondary');
   });
 
   it('AI の候補だけの要求事項は「候補を採用」「修正して確定」で人が確定する', async () => {
-    await renderDetail(item('ESRS2-SBM-3'));
+    await renderDetail(item('ESRS2-SBM-3'), { new: '1' });
     expect(screen.getByText('デモ生成（Mock）')).toBeTruthy();
     expect(screen.getAllByText('確認待ち').length).toBeGreaterThan(0);
     const adopt = screen.getByRole('button', { name: '候補を採用' });
@@ -584,10 +842,11 @@ describe('CSRD 要求事項の詳細', () => {
     expect(screen.getByRole('button', { name: '対応計画に追加' }).className).toContain(
       'border-line',
     );
+    expect(primaryLabels()).toEqual(['候補を採用']);
   });
 
   it('評価対象でない要求事項（対象外）は AI・計画・入力の操作を出さず、理由を示す', async () => {
-    await renderDetail(item('ESRS-E5-5'));
+    await renderDetail(item('ESRS-E5-5'), { new: '1' });
     expect(screen.getByText('評価対象ではありません')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /AI ギャップ分析/ })).toBeNull();
     expect(screen.queryByRole('button', { name: '対応計画に追加' })).toBeNull();
@@ -598,7 +857,7 @@ describe('CSRD 要求事項の詳細', () => {
 
   it('閲覧だけの役割には操作を出さない。CSRD 以外の要求事項は 404', async () => {
     useShell(approver());
-    const { unmount } = await renderDetail(item('ESRS2-SBM-3'));
+    const { unmount } = await renderDetail(item('ESRS2-SBM-3'), { new: '1' });
     expect(screen.queryByRole('button', { name: '候補を採用' })).toBeNull();
     expect(screen.queryByRole('button', { name: /AI ギャップ分析/ })).toBeNull();
     expect(screen.queryByRole('button', { name: '対応計画に追加' })).toBeNull();

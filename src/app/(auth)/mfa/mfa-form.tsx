@@ -3,8 +3,10 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { ShieldCheck } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Notice } from '@/components/shared/notice';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
+import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 
@@ -67,32 +69,47 @@ export function MfaChallengeForm() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-4 p-6">
       <Card className="p-5">
-        <h1 className="flex items-center gap-1.5 text-[16px] font-semibold text-ink">
+        <h1 className="flex items-center gap-1.5 text-title-lg font-semibold text-ink">
           <ShieldCheck className="size-4" aria-hidden="true" />2 段階認証（MFA）
         </h1>
-        {state === 'loading' && <p className="mt-2 text-[13px] text-ink-muted">確認中…</p>}
+        {state === 'loading' && (
+          <p role="status" className="mt-2 text-body text-ink-muted">
+            確認中…
+          </p>
+        )}
         {state === 'none' && (
-          <p className="mt-2 text-[13px] text-ink">
-            MFA が未登録、またはセッションがありません。ログインからやり直してください。
+          <p className="mt-2 text-body text-ink">
+            MFA が未登録、またはログインの有効期限が切れています。ログインからやり直してください。
           </p>
         )}
         {state === 'ready' && (
           <form onSubmit={onSubmit} className="mt-3 space-y-2">
-            <label className="block text-[12px] text-ink-muted">
-              Authenticator アプリの 6 桁コード
-              <Input
-                name="code"
-                inputMode="numeric"
-                pattern="[0-9]{6}"
-                maxLength={6}
-                required
-                className="mt-0.5 tracking-widest"
-              />
-            </label>
-            {error && <p className="text-[12px] text-danger">{error}</p>}
-            <Button type="submit" size="sm" className="w-full">
+            <Field
+              label="Authenticator アプリの 6 桁コード"
+              name="code"
+              required
+              hint="アプリに表示されている最新のコード"
+            >
+              {(p) => (
+                <Input
+                  {...p}
+                  name="code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  className="tracking-widest"
+                />
+              )}
+            </Field>
+            {error && (
+              <Notice tone="danger" role="alert">
+                {error}
+              </Notice>
+            )}
+            <SubmitButton variant="primary" size="sm" className="w-full">
               確認してログイン
-            </Button>
+            </SubmitButton>
           </form>
         )}
       </Card>

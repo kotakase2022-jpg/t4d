@@ -65,7 +65,7 @@ export function JobPoller({
 
   return (
     <div className="space-y-1.5" role="status" aria-live="polite">
-      <div className="flex items-center gap-2 text-[12px] text-ink-muted">
+      <div className="flex items-center gap-2 text-small text-ink-muted">
         {running && <Loader2 className="size-3.5 animate-spin text-brand-600" aria-hidden="true" />}
         <span>
           {running ? '解析中です。この画面のまま少しお待ちください。' : '解析が完了しました。'}
@@ -73,7 +73,7 @@ export function JobPoller({
         <span className="tnum ml-auto">{progress}%</span>
       </div>
       <Progress value={progress} label="取込ジョブの進捗" tone={running ? 'brand' : 'success'} />
-      {error && <p className="text-[11px] text-danger">進捗取得エラー: {error}（再試行します）</p>}
+      {error && <p className="text-caption text-danger">進捗取得エラー: {error}（再試行します）</p>}
     </div>
   );
 }

@@ -2,6 +2,8 @@ import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
+// 入力の誤り・重複は利用者に理由を見せる（本番で digest に化けさせない。withUserFacingError が ?error= に載せる）
+import { ValidationError } from '@/lib/errors/user-facing';
 import { randomUUID } from 'node:crypto';
 import { fid } from '@/lib/fixtures/ids';
 import { ASSURANCE_ROLES, ENTERPRISE_ROLES } from '@/types/domain';
@@ -82,10 +84,10 @@ export async function createInvitation(
   assertCan(ctx, 'enterprise.member.manage');
   const email = input.email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error('メールアドレスの形式が正しくありません。');
+    throw new ValidationError('メールアドレスの形式が正しくありません。');
   }
   if (input.roleKeys.length === 0) {
-    throw new Error('ロールを 1 つ以上選んでください。');
+    throw new ValidationError('ロールを 1 つ以上選んでください。');
   }
   // 画面のロール一覧は見た目の制限にすぎない。サーバー側で必ず確かめる。
   // 企業テナントへ監査法人ロールや platform_admin を混ぜられると、
@@ -94,7 +96,9 @@ export async function createInvitation(
     ctx.workspace.organizationType === 'assurance_firm' ? ASSURANCE_ROLES : ENTERPRISE_ROLES;
   const invalid = input.roleKeys.filter((role) => !allowedRoles.includes(role));
   if (invalid.length > 0) {
-    throw new Error(`このワークスペースでは指定できないロールです: ${invalid.join(', ')}`);
+    throw new ValidationError(
+      `このワークスペースでは指定できないロールです: ${invalid.join(', ')}`,
+    );
   }
   const organizationId = ctx.workspace.organizationId;
 
@@ -105,13 +109,13 @@ export async function createInvitation(
       where: { organizationId, userId: existingProfiles[0].id, status: 'active' },
       limit: 1,
     });
-    if (membership[0]) throw new Error('このメールアドレスは既にメンバーです。');
+    if (membership[0]) throw new ValidationError('このメールアドレスは既にメンバーです。');
   }
   const pending = await db.select('invitations', {
     where: { organizationId, email, status: 'pending' },
     limit: 1,
   });
-  if (pending[0]) throw new Error('このメールアドレスへの招待が既に有効です。');
+  if (pending[0]) throw new ValidationError('このメールアドレスへの招待が既に有効です。');
 
   const now = new Date();
   const invitation: Invitation = {
@@ -183,7 +187,7 @@ async function ensureAuthUser(email: string, password: string | undefined): Prom
   if (!url || !serviceKey) return null; // Demo Mode（パスワードレス）
 
   if (!password || password.length < MIN_PASSWORD_LENGTH) {
-    throw new Error(`パスワードは ${MIN_PASSWORD_LENGTH} 文字以上で設定してください。`);
+    throw new ValidationError(`パスワードは ${MIN_PASSWORD_LENGTH} 文字以上で設定してください。`);
   }
 
   const { createClient } = await import('@supabase/supabase-js');
@@ -200,7 +204,9 @@ async function ensureAuthUser(email: string, password: string | undefined): Prom
     email_confirm: true,
   });
   if (error || !data.user) {
-    throw new Error('アカウントを作成できませんでした。管理者へ再発行を依頼してください。');
+    throw new ValidationError(
+      'アカウントを作成できませんでした。管理者へ再発行を依頼してください。',
+    );
   }
   return data.user.id;
 }
@@ -219,10 +225,10 @@ export async function acceptInvitation(
   }
   if (invitation.expiresAt < new Date().toISOString()) {
     await db.update('invitations', invitation.id, { status: 'expired' });
-    throw new Error('この招待は期限切れです。管理者へ再発行を依頼してください。');
+    throw new ValidationError('この招待は期限切れです。管理者へ再発行を依頼してください。');
   }
   const displayName = input.displayName.trim();
-  if (!displayName) throw new Error('氏名を入力してください。');
+  if (!displayName) throw new ValidationError('氏名を入力してください。');
 
   const now = new Date().toISOString();
 

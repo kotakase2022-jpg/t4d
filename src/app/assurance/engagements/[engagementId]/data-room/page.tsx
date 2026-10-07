@@ -1,35 +1,56 @@
+import Link from 'next/link';
 import { Bot, Lock, Snowflake } from 'lucide-react';
 import { ReadOnlyBadge } from '@/components/shared/badges';
-import { SectionTitle } from '@/components/shared/page-header';
-import { EmptyState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/shared/confirm-dialog';
+import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
+import { FlashMessage } from '@/components/shared/flash';
+import { HonestyBadge } from '@/components/shared/honesty-badge';
+import { Notice } from '@/components/shared/notice';
+import { Section } from '@/components/shared/section';
+import { SemanticBadge, StatusBadge } from '@/components/shared/status-badge';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { requireAssuranceContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
-import { detectSnapshotChanges, loadDataRoom, loadEngagementOr404 } from '@/lib/services/assurance';
+import {
+  detectSnapshotChanges,
+  loadDataRoom,
+  loadEngagementOr404,
+  type DataRoomRow,
+} from '@/lib/services/assurance';
 import {
   assessSnapshotChangeAction,
   createSnapshotAction,
   summarizeChangesAction,
 } from '../../../actions';
+import {
+  ASSESSMENT_OPTIONS,
+  CHANGE_KIND_LABEL,
+  assessmentEntry,
+} from '../../../_components/labels';
 import { EngagementHeader } from '../engagement-header';
 
 export const metadata = { title: 'Data Room' };
 
+type SearchParams = Record<string, string | string[] | undefined>;
+
 export default async function DataRoomPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ engagementId: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const { engagementId } = await params;
+  const query = await searchParams;
   const ctx = await requireAssuranceContext();
   const db = await getDb();
   const context = await loadEngagementOr404(db, ctx, engagementId);
+  const basePath = `/assurance/engagements/${engagementId}/data-room`;
 
   const { rows, snapshot } = await loadDataRoom(db, ctx, engagementId);
   const changes = snapshot ? await detectSnapshotChanges(db, ctx, snapshot.id) : [];
@@ -49,6 +70,105 @@ export default async function DataRoomPage({
   const canSnapshot = can(ctx, 'assurance.snapshot.create');
   const canAssess = can(ctx, 'assurance.testing.write');
 
+  // 共有データの検索・絞り込み（URL が正。サーバーで絞る）
+  const search = typeof query.q === 'string' ? query.q.trim().toLowerCase() : '';
+  const changeFilter = typeof query.change === 'string' ? query.change : null;
+  const tableRows = rows
+    .filter((row) => (changeFilter === 'changed' ? row.changedSinceSnapshot : true))
+    .filter((row) => (changeFilter === 'unfixed' ? !row.snapshotIncluded : true))
+    .filter((row) =>
+      search === ''
+        ? true
+        : `${row.metric?.name ?? ''} ${row.unit?.name ?? ''}`.toLowerCase().includes(search),
+    );
+
+  const columns: DataTableColumn<DataRoomRow>[] = [
+    {
+      key: 'metric',
+      header: '指標',
+      importance: 'primary',
+      lockVisible: true,
+      pinned: 'left',
+      cell: (row) => <span className="font-medium">{row.metric?.name ?? '—'}</span>,
+    },
+    {
+      key: 'unit',
+      header: '組織',
+      importance: 'primary',
+      cell: (row) => row.unit?.name ?? '—',
+    },
+    {
+      key: 'value',
+      header: '現在値',
+      importance: 'primary',
+      align: 'right',
+      cell: (row) => (
+        <span className="tnum">
+          {formatNumber(row.currentValue)}
+          <span className="ml-1 text-caption text-ink-muted">{row.currentUnitOfMeasure}</span>
+        </span>
+      ),
+    },
+    {
+      key: 'clientStatus',
+      header: 'クライアントの承認',
+      importance: 'secondary',
+      cell: (row) => <StatusBadge domain="dataPoint" value={row.clientStatus as never} />,
+    },
+    {
+      key: 'snapshot',
+      header: 'Snapshot',
+      importance: 'primary',
+      cell: (row) =>
+        row.snapshotIncluded ? (
+          <SemanticBadge semantic="done" label="固定済み" />
+        ) : (
+          <SemanticBadge semantic="todo" label="未固定" />
+        ),
+    },
+    {
+      key: 'change',
+      header: '固定後の変更',
+      importance: 'primary',
+      cell: (row) =>
+        row.changedSinceSnapshot ? (
+          <SemanticBadge semantic="error" label="変更あり" />
+        ) : (
+          <span className="text-caption text-ink-muted">—</span>
+        ),
+    },
+    {
+      key: 'source',
+      header: '取得元',
+      importance: 'detail',
+      cell: () => <span className="text-caption">非財務データ</span>,
+    },
+    {
+      key: 'version',
+      header: '版',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{row.currentVersionNo ?? '—'}</span>,
+    },
+    {
+      key: 'evidence',
+      header: '資料',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{row.evidenceCount}</span>,
+    },
+    {
+      key: 'sharedAt',
+      header: '共有日時',
+      importance: 'detail',
+      cell: (row) => (
+        <span className="whitespace-nowrap text-caption text-ink-muted">
+          {formatJst(row.sharedAt)}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <>
       <EngagementHeader
@@ -56,136 +176,158 @@ export default async function DataRoomPage({
         page="Data Room"
         actions={
           canSnapshot && (
-            <form action={createSnapshotAction} className="flex items-center gap-1.5">
-              <input type="hidden" name="engagementId" value={engagementId} />
-              <Input
-                name="label"
-                placeholder="Snapshot ラベル"
-                aria-label="Snapshot ラベル"
-                className="w-44"
-              />
-              <Button type="submit" size="sm">
-                <Snowflake aria-hidden="true" />
-                Snapshot を固定
-              </Button>
-            </form>
+            // 固定は取り消せない（以後の変更は差分として検知される）。範囲を本文に出して確かめる（plan §1.16 区分 1）
+            <ConfirmDialog
+              tier="irreversible"
+              title="Snapshot を固定しますか"
+              scope={`${context.engagement.code} の Data Room に共有されている ${rows.length} 件の現在値を固定します。`}
+              consequences={[
+                '固定した値は変更できません（追記専用）。以後のクライアント側の変更は「固定後の変更」として検知されます。',
+                '固定した Snapshot から母集団が構成されます。',
+              ]}
+              extraFields={
+                <label className="block space-y-1">
+                  <span className="text-small font-medium text-ink">
+                    Snapshot ラベル
+                    <span className="ml-1 text-caption font-normal text-ink-muted">
+                      （任意。空欄なら自動で付けます）
+                    </span>
+                  </span>
+                  <Input name="label" aria-label="Snapshot ラベル" placeholder="例: 期末固定" />
+                </label>
+              }
+              confirmLabel="固定する"
+              action={createSnapshotAction}
+              fields={{ engagementId }}
+              trigger={{
+                label: 'Snapshot を固定',
+                variant: 'primary',
+                icon: <Snowflake aria-hidden="true" />,
+              }}
+            />
           )
         }
       />
 
       <div className="space-y-3 p-4">
-        <Card className="border-brand-200 bg-brand-50">
-          <p className="flex items-start gap-2 px-3 py-2 text-[12px] text-brand-900">
-            <Lock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <FlashMessage searchParams={query} />
+
+        {/* クライアント原本は Read-only（誠実さ・安全の注記。折りたたまない） */}
+        <Notice tone="info">
+          <span className="flex items-start gap-1.5">
+            <Lock className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>
               ここに表示されるクライアント原本は <strong>Read-only</strong>{' '}
               です。監査法人側から値を変更することはできません （アプリ層と DB の RLS
               の両方で禁止されています）。監査側の注記・調書・依頼・指摘は別データとして保存されます。
             </span>
-          </p>
-        </Card>
+          </span>
+        </Notice>
 
         {snapshot && (
-          <Card>
-            <SectionTitle
-              title={`Snapshot: ${snapshot.label}`}
-              action={
-                <span className="text-[11px] text-ink-muted">
-                  固定 {formatJst(snapshot.frozenAt)} ／ {snapshot.itemCount} 件 ／ hash{' '}
-                  {snapshot.hash.slice(0, 16)}
-                </span>
-              }
-            />
-          </Card>
+          <Section title={`Snapshot: ${snapshot.label}`}>
+            <p className="text-small text-ink-muted">
+              固定 {formatJst(snapshot.frozenAt)} ／ {snapshot.itemCount} 件 ／ hash{' '}
+              <span className="font-mono">{snapshot.hash.slice(0, 16)}</span>
+            </p>
+          </Section>
         )}
 
         {changes.length > 0 && (
-          <Card className="border-danger/40">
-            <SectionTitle
-              title={`Snapshot 固定後の変更（${changes.length}）`}
-              action={
-                can(ctx, 'assurance.ai.run') && (
-                  <form action={summarizeChangesAction}>
-                    <input type="hidden" name="engagementId" value={engagementId} />
-                    <Button type="submit" size="xs" variant="secondary">
-                      <Bot aria-hidden="true" />
-                      AI で差分を要約
-                    </Button>
-                  </form>
-                )
-              }
-            />
-            <Table>
-              <THead>
-                <TR>
-                  <TH>対象</TH>
-                  <TH>固定時点</TH>
-                  <TH>現在</TH>
-                  <TH>区分</TH>
-                  <TH>影響評価</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {changes.map((change) => {
-                  const row = rows.find(
-                    (r) => itemByDataPoint.get(r.dataPointId)?.id === change.snapshotItemId,
-                  );
-                  return (
-                    <TR key={change.id}>
-                      <TD>{row ? `${row.unit?.name ?? '—'} / ${row.metric?.name ?? '—'}` : '—'}</TD>
-                      <TD className="tnum text-[12px]">{change.beforeSummary}</TD>
-                      <TD className="tnum text-[12px] font-medium text-danger">
-                        {change.afterSummary}
-                      </TD>
-                      <TD>
-                        <Badge tone="warning">{change.changeKind}</Badge>
-                      </TD>
-                      <TD>
-                        {change.assessment ? (
-                          <Badge tone={change.assessment === 'no_impact' ? 'success' : 'warning'}>
-                            {change.assessment}
-                          </Badge>
-                        ) : canAssess ? (
-                          <form
-                            action={assessSnapshotChangeAction}
-                            className="flex items-center gap-1"
-                          >
-                            <input type="hidden" name="engagementId" value={engagementId} />
-                            <input
-                              type="hidden"
-                              name="snapshotItemId"
-                              value={change.snapshotItemId}
+          <Section
+            title={`Snapshot 固定後の変更（${changes.length}）`}
+            actions={
+              can(ctx, 'assurance.ai.run') && (
+                <form action={summarizeChangesAction}>
+                  <input type="hidden" name="engagementId" value={engagementId} />
+                  <SubmitButton
+                    size="xs"
+                    variant="secondary"
+                    icon={<Bot aria-hidden="true" />}
+                    pendingLabel="要約中…"
+                  >
+                    AI で差分を要約
+                  </SubmitButton>
+                </form>
+              )
+            }
+          >
+            <div className="t4d-scroll-x rounded-t4d border border-danger/40">
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>対象</TH>
+                    <TH>固定時点</TH>
+                    <TH>現在</TH>
+                    <TH>区分</TH>
+                    <TH>影響評価</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {changes.map((change) => {
+                    const row = rows.find(
+                      (r) => itemByDataPoint.get(r.dataPointId)?.id === change.snapshotItemId,
+                    );
+                    return (
+                      <TR key={change.id}>
+                        <TD>
+                          {row ? `${row.unit?.name ?? '—'} / ${row.metric?.name ?? '—'}` : '—'}
+                        </TD>
+                        <TD className="tnum text-small">{change.beforeSummary}</TD>
+                        <TD className="tnum text-small font-medium text-danger">
+                          {change.afterSummary}
+                        </TD>
+                        <TD>
+                          <SemanticBadge
+                            semantic="blocked"
+                            label={CHANGE_KIND_LABEL[change.changeKind] ?? '変更'}
+                          />
+                        </TD>
+                        <TD>
+                          {change.assessment ? (
+                            <SemanticBadge
+                              semantic={assessmentEntry(change.assessment).semantic}
+                              label={assessmentEntry(change.assessment).label}
                             />
-                            <select
-                              name="assessment"
-                              aria-label="影響評価"
-                              className="h-6 rounded-t4d border border-line bg-surface px-1 text-[11px]"
+                          ) : canAssess ? (
+                            <form
+                              action={assessSnapshotChangeAction}
+                              className="flex items-center gap-1"
                             >
-                              <option value="no_impact">影響なし</option>
-                              <option value="retest_required">再検証が必要</option>
-                              <option value="issue_raised">指摘として起票</option>
-                            </select>
-                            <Button type="submit" size="xs" variant="outline">
-                              記録
-                            </Button>
-                          </form>
-                        ) : (
-                          <Badge tone="danger">未評価</Badge>
-                        )}
-                      </TD>
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
+                              <input type="hidden" name="engagementId" value={engagementId} />
+                              <input
+                                type="hidden"
+                                name="snapshotItemId"
+                                value={change.snapshotItemId}
+                              />
+                              <NativeSelect name="assessment" aria-label="影響評価" size="xs">
+                                {ASSESSMENT_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </NativeSelect>
+                              <SubmitButton size="xs" variant="secondary">
+                                記録
+                              </SubmitButton>
+                            </form>
+                          ) : (
+                            <SemanticBadge semantic="pending" label="未評価" />
+                          )}
+                        </TD>
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </div>
 
             {latestAi && (
-              <div className="border-t border-line px-3 py-2">
-                <div className="mb-1 flex items-center gap-2">
-                  <Badge tone={latestAi.provider === 'mock' ? 'warning' : 'brand'}>
-                    {latestAi.provider === 'mock' ? 'Mock / AI未接続' : 'AI生成'}
-                  </Badge>
-                  <span className="text-[11px] text-ink-muted">
+              <div className="mt-2 space-y-1 rounded-t4d border border-line px-3 py-2">
+                {/* AI の要約は候補（人が影響を評価する）。生成元の表示を常に外に出す */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <HonestyBadge kind={latestAi.provider === 'mock' ? 'mock-ai' : 'ai-candidate'} />
+                  <span className="text-caption text-ink-muted">
                     確信度 {Math.round(latestAi.confidence * 100)}% ／{' '}
                     {formatJst(latestAi.createdAt)}
                   </span>
@@ -197,86 +339,62 @@ export default async function DataRoomPage({
                       possibleImpact: string;
                     }>) ?? []
                   ).map((c, i) => (
-                    <li key={i} className="text-[12px] text-ink">
+                    <li key={i} className="text-small text-ink">
                       ・{c.possibleImpact}
                     </li>
                   ))}
                 </ul>
                 {latestAi.warnings.map((w, i) => (
-                  <p key={i} className="text-[11px] text-[#8a5d00]">
+                  <p key={i} className="text-caption text-warning-ink">
                     ⚠ {w}
                   </p>
                 ))}
               </div>
             )}
-          </Card>
+          </Section>
         )}
 
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`共有されているクライアントデータ（${rows.length}）`}
-            action={<ReadOnlyBadge />}
+        <Section
+          title={`共有されているクライアントデータ（${rows.length}）`}
+          actions={<ReadOnlyBadge />}
+        >
+          <DataTable<DataRoomRow>
+            id="assurance-data-room"
+            caption="共有されているクライアントデータ"
+            columns={columns}
+            rows={tableRows}
+            getRowId={(row) => row.dataPointId}
+            getRowLabel={(row) => `${row.metric?.name ?? '指標'} ${row.unit?.name ?? ''}`}
+            searchParams={query}
+            basePath={basePath}
+            search={{ placeholder: '指標名・組織名で検索' }}
+            filters={[
+              {
+                key: 'change',
+                label: '固定',
+                options: [
+                  { value: 'changed', label: '固定後の変更あり' },
+                  { value: 'unfixed', label: '未固定' },
+                ],
+              },
+            ]}
+            empty={{
+              noData: {
+                title: '共有されているデータがありません',
+                description:
+                  'クライアント側でアクセス許諾（Grant）が設定されると、ここに表示されます。許諾の範囲はスコープで確認できます。',
+                action: (
+                  <Link
+                    href={`/assurance/engagements/${engagementId}/scope`}
+                    className="text-small text-brand-700 hover:underline"
+                  >
+                    スコープと許諾を確認する
+                  </Link>
+                ),
+              },
+            }}
           />
-          {rows.length === 0 ? (
-            <EmptyState
-              title="共有されているデータがありません"
-              description="クライアント側でアクセス許諾（Grant）が設定されると、ここに表示されます。"
-            />
-          ) : (
-            <div className="t4d-scroll-x">
-              <Table className="t4d-sticky-head">
-                <THead>
-                  <TR>
-                    <TH>Source Type</TH>
-                    <TH>指標</TH>
-                    <TH>組織</TH>
-                    <TH align="right">現在値</TH>
-                    <TH>単位</TH>
-                    <TH align="right">Version</TH>
-                    <TH align="right">Evidence</TH>
-                    <TH>Client Approval</TH>
-                    <TH>Shared At</TH>
-                    <TH>Snapshot</TH>
-                    <TH>Change</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {rows.map((row) => (
-                    <TR key={row.dataPointId}>
-                      <TD className="text-[11px]">data_point</TD>
-                      <TD className="font-medium">{row.metric?.name ?? '—'}</TD>
-                      <TD>{row.unit?.name ?? '—'}</TD>
-                      <TD align="right">{formatNumber(row.currentValue)}</TD>
-                      <TD>{row.currentUnitOfMeasure}</TD>
-                      <TD align="right">{row.currentVersionNo ?? '—'}</TD>
-                      <TD align="right">{row.evidenceCount}</TD>
-                      <TD>
-                        <Badge tone="success">{row.clientStatus}</Badge>
-                      </TD>
-                      <TD className="whitespace-nowrap text-[11px] text-ink-muted">
-                        {formatJst(row.sharedAt)}
-                      </TD>
-                      <TD>
-                        {row.snapshotIncluded ? (
-                          <Badge tone="brand">固定済み</Badge>
-                        ) : (
-                          <Badge tone="neutral">未固定</Badge>
-                        )}
-                      </TD>
-                      <TD>
-                        {row.changedSinceSnapshot ? (
-                          <Badge tone="danger">変更あり</Badge>
-                        ) : (
-                          <span className="text-[11px] text-ink-muted">—</span>
-                        )}
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </div>
-          )}
-        </Card>
+        </Section>
       </div>
     </>
   );

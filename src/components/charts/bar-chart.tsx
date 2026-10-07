@@ -117,7 +117,7 @@ export function BarChart({
     series.length >= 2 ? (
       <ul
         aria-label={`${title}の凡例`}
-        className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink"
+        className="flex flex-wrap gap-x-3 gap-y-1 text-caption text-ink"
       >
         {series.map((s, index) => (
           <li key={`${s.label}-${index}`} className="flex items-center gap-1">

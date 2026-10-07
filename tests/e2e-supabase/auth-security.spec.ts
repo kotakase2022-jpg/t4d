@@ -59,7 +59,8 @@ test('パスワード再設定: 管理者がリンクを発行し、本人が新
   try {
     // 1) 管理者が設定画面から再設定リンクを発行
     await login(page, 'enterprise-admin@demo.local');
-    await page.goto('/enterprise/settings');
+    // パスワード再設定は設定の「セキュリティ」タブ（plan S17）
+    await page.goto('/enterprise/settings?tab=security');
     await expect(page.getByText('リンク発行方式（メール送信なし）')).toBeVisible();
     await page
       .locator('form', { has: page.getByRole('button', { name: '再設定リンクを発行' }) })
@@ -110,7 +111,7 @@ test('MFA: 登録 → 再ログインでコード必須 → AAL1 のままでは
 
   // 1) 設定画面で TOTP を登録（シークレット表示 → コード検証）
   await login(page, EMAIL);
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=security');
   await page.getByRole('button', { name: 'MFA（Authenticator）を登録する' }).click();
   const secretEl = page.locator('code.font-mono').first();
   await expect(secretEl).toBeVisible();
@@ -150,7 +151,7 @@ test('MFA: 登録 → 再ログインでコード必須 → AAL1 のままでは
   await expect(page.getByRole('heading', { name: 'ホーム' })).toBeVisible();
 
   // 6) 後始末: MFA を解除し、解除後は通常ログインに戻る
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=security');
   await page.getByRole('button', { name: '解除する' }).click();
   await expect(page.getByText('MFA を解除しました')).toBeVisible();
 });
@@ -168,7 +169,8 @@ test('招待: 管理者がリンクを発行し、本人が実 Supabase Auth の
 
   // 1) 管理者が招待を発行
   await login(page, 'enterprise-admin@demo.local');
-  await page.goto('/enterprise/settings');
+  // 招待は設定の「招待」タブ。発行の欄は ?new=1 で開く（plan S17 CreatePanel）
+  await page.goto('/enterprise/settings?tab=invitations&new=1');
   await page
     .locator('form', { has: page.getByRole('button', { name: '招待リンクを発行' }) })
     .locator('input[name="email"]')
@@ -202,14 +204,15 @@ test('招待: 管理者がリンクを発行し、本人が実 Supabase Auth の
 
   // 4) 管理者から見てメンバーに加わり、招待は受諾済みになる
   await login(page, 'enterprise-admin@demo.local');
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=members');
   await expect(page.locator('tr', { hasText: DISPLAY_NAME })).toBeVisible();
+  await page.goto('/enterprise/settings?tab=invitations');
   await expect(page.locator('tr', { hasText: EMAIL }).last()).toContainText('受諾済み');
 });
 
 test('再設定リンクは自組織メンバーにしか発行できない', async ({ page }) => {
   await login(page, 'enterprise-admin@demo.local');
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=security');
 
   // 監査法人のユーザー（別テナント）を指定しても発行されない
   await page

@@ -4,6 +4,9 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { FileUp, Upload } from 'lucide-react';
 import { FileDropZone } from '@/components/shared/file-drop-zone';
+import { ActionResult } from '@/components/shared/notice';
+import { Field } from '@/components/ui/field';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { uploadFilesAction, type UploadResult } from '../actions';
 import { savePreview } from './preview-store';
@@ -59,27 +62,33 @@ export function UploadForm({
   };
 
   return (
-    <form ref={formRef} action={formAction} className="space-y-3 p-3">
+    <form ref={formRef} action={formAction} className="space-y-3">
       <input type="hidden" name="reportingPeriodId" value={reportingPeriodId} />
 
-      <div className="flex items-end gap-3">
-        <label className="text-[12px] text-ink-muted">
-          対象組織・拠点
-          <select
-            name="unitId"
-            defaultValue={units[0]?.id ?? 'auto'}
-            className="mt-0.5 block h-7 w-[220px] rounded-t4d border border-line bg-surface px-2 text-[13px]"
-          >
-            <option value="auto">ファイル内容から自動判定</option>
-            {units.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="pb-1 text-[12px] text-ink-muted">
+      <div className="flex flex-wrap items-start gap-3">
+        <Field
+          label="対象組織・拠点"
+          id="import-unit"
+          name="unitId"
+          className="w-field-md"
+          // 既定は担当範囲の最初の拠点（担当が 1 拠点ならその拠点。plan D2）。行に拠点が書かれていない
+          // ときの割り当て先にもなるので、そのことを示す
+          hint="行に拠点が書かれていないときの割り当て先です"
+        >
+          {(p) => (
+            <NativeSelect {...p} name="unitId" defaultValue={units[0]?.id ?? 'auto'}>
+              <option value="auto">ファイル内容から自動判定</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </NativeSelect>
+          )}
+        </Field>
+        <p className="pt-5 text-small text-ink-muted">
           対象期間: <span className="text-ink">{reportingPeriodLabel}</span>
+          <span className="block text-caption">画面上部で選んでいる報告期間</span>
         </p>
       </div>
 
@@ -89,10 +98,10 @@ export function UploadForm({
         className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-t4d-lg border-2 border-dashed border-line bg-surface-muted px-4 py-8 text-center transition-colors hover:border-brand-400 hover:bg-brand-50"
       >
         <FileUp className="size-6 text-brand-600" aria-hidden="true" />
-        <span className="text-[13px] font-medium text-ink">
+        <span className="text-body font-medium text-ink">
           クリックしてファイルを選択（複数可）／ ここへドロップ
         </span>
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-caption text-ink-muted">
           ドロップするとそのまま解析が始まります ／ 対応形式: .csv / .tsv / .txt / .xlsx / .xlsm /
           .pdf / .docx ／ 1 ファイル 25MB まで ／ 一度に 50 ファイルまで
         </span>
@@ -114,10 +123,10 @@ export function UploadForm({
           aria-live="polite"
           className="rounded-t4d border border-line bg-surface-muted px-3 py-2"
         >
-          <p className="text-[12px] font-medium text-ink">
+          <p className="text-small font-medium text-ink">
             {selected.length} 件のファイルを受け付けました
           </p>
-          <ul className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-muted">
+          <ul className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-ink-muted">
             {selected.slice(0, 12).map((name) => (
               <li key={name}>{name}</li>
             ))}
@@ -126,20 +135,18 @@ export function UploadForm({
         </div>
       )}
 
-      {state && !state.ok && (
-        <p
-          role="alert"
-          className="rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
-        >
-          {state.message}
-        </p>
-      )}
+      {state && !state.ok && <ActionResult state={{ status: 'error', message: state.message }} />}
 
       <div className="flex items-center gap-2">
-        <SubmitButton size="sm" icon={<Upload aria-hidden="true" />} pendingLabel="解析中…">
+        <SubmitButton
+          variant="primary"
+          size="sm"
+          icon={<Upload aria-hidden="true" />}
+          pendingLabel="解析中…"
+        >
           取込を開始
         </SubmitButton>
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-caption text-ink-muted">
           解析が終わるとプレビュー画面へ移ります。
           テンプレートに記入したファイルもここへドロップしてください。
         </span>

@@ -1,6 +1,5 @@
 import { PageHeader } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
-import { Card } from '@/components/ui/card';
 import { can, permissionsFor } from '@/lib/authorization/can';
 import {
   DISCLOSURE_LANGUAGE_LABELS,
@@ -20,6 +19,12 @@ import { ProjectForm, type VersionOptionItem } from './project-form';
 
 export const metadata = { title: '開示プロジェクトの作成' };
 
+const BREADCRUMBS = [
+  { label: 'ホーム', href: '/enterprise/dashboard' },
+  { label: '開示プロジェクト', href: '/enterprise/disclosure-projects' },
+  { label: '新規作成' },
+];
+
 const FRAMEWORK_KEY_LABELS: Partial<Record<FrameworkKey, string>> = {
   ssbj: 'SSBJ 基準',
   esrs_40a: 'ESRS-40a（EU 域外企業向け）',
@@ -38,15 +43,11 @@ export default async function NewDisclosureProjectPage() {
   if (!can(ctx, 'enterprise.disclosure.write')) {
     return (
       <>
-        <PageHeader
-          title="開示プロジェクトの作成"
-          breadcrumbs={[
-            { label: '企業ワークスペース' },
-            { label: '開示プロジェクト', href: '/enterprise/disclosure-projects' },
-            { label: '新規作成' },
-          ]}
+        <PageHeader title="開示プロジェクトの作成" breadcrumbs={BREADCRUMBS} />
+        <PermissionDeniedState
+          description="開示プロジェクトを作成するには、開示の編集権限が必要です。"
+          permission="enterprise.disclosure.write"
         />
-        <PermissionDeniedState description="開示プロジェクトを作成するには、開示の編集権限が必要です。" />
       </>
     );
   }
@@ -78,14 +79,10 @@ export default async function NewDisclosureProjectPage() {
             段階で設定します。基準の版はプロジェクトごとに固定され、新しい版が出ても自動では切り替わりません。
           </p>
         }
-        breadcrumbs={[
-          { label: '企業ワークスペース' },
-          { label: '開示プロジェクト', href: '/enterprise/disclosure-projects' },
-          { label: '新規作成' },
-        ]}
+        breadcrumbs={BREADCRUMBS}
       />
       <div className="p-4">
-        <Card className="max-w-4xl p-4">
+        <div className="max-w-4xl rounded-t4d-lg border border-line bg-surface p-4">
           <ProjectForm
             mode="create"
             action={createProjectAction}
@@ -97,7 +94,8 @@ export default async function NewDisclosureProjectPage() {
               periodEnd: current.endDate,
               currency: 'JPY',
               ownerUserId: ctx.userId,
-              dueDate: '',
+              // 期限は報告期間の提出期限を既定にする（D3。期間を選び直すと追従する）
+              dueDate: current.submissionDueDate ?? '',
               purposes: [],
               languages: ['ja'],
               includedUnitIds: [],
@@ -111,6 +109,7 @@ export default async function NewDisclosureProjectPage() {
               startDate: p.startDate,
               endDate: p.endDate,
               rangeLabel: `${formatJstDate(p.startDate)}〜${formatJstDate(p.endDate)}`,
+              submissionDueDate: p.submissionDueDate,
             }))}
             members={members.map((m) => ({
               userId: m.userId,
@@ -133,7 +132,7 @@ export default async function NewDisclosureProjectPage() {
             }))}
             fieldLabels={{ ...PROJECT_FIELD_LABELS }}
           />
-        </Card>
+        </div>
       </div>
     </>
   );

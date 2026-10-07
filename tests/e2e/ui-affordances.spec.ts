@@ -103,5 +103,5 @@ test('マテリアリティの理由未入力が、入力欄のそばの指摘�
   await expect(row.getByRole('alert')).toContainText('評価理由を入力してください');
   expect(page.url()).not.toContain('error=');
   // 全画面のエラー境界には落ちていない
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });

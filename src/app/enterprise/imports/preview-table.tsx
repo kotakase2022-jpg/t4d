@@ -2,12 +2,16 @@
 
 import * as React from 'react';
 import { Check } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { SemanticBadge } from '@/components/shared/status-badge';
+import { Collapsible } from '@/components/ui/collapsible';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { visibleRowWarnings } from '@/lib/imports/hidden-warnings';
 import { confirmImportAction } from '../actions';
 import type { ImportPreviewRow } from './preview-types';
+import type { StatusSemantic } from '@/lib/ui/status/registry';
 
 /**
  * 取込プレビューの表。
@@ -19,17 +23,15 @@ import type { ImportPreviewRow } from './preview-types';
  * 確定するリクエストが別インスタンスへ届いても処理できる。
  */
 
-const ROW_STATUS_LABEL: Record<
-  string,
-  { label: string; tone: 'neutral' | 'brand' | 'success' | 'warning' | 'danger' }
-> = {
-  pending: { label: '未処理', tone: 'neutral' },
-  mapped: { label: 'マッピング済み', tone: 'success' },
-  needs_review: { label: '要確認', tone: 'warning' },
-  duplicate: { label: '重複', tone: 'warning' },
-  rejected: { label: '除外', tone: 'neutral' },
-  confirmed: { label: '確定済み', tone: 'brand' },
-  ignored: { label: '対象外', tone: 'neutral' },
+/** 行の状態（ラベル＋アイコン。意味は状態登録簿の semantic で揃える） */
+const ROW_STATUS_LABEL: Record<string, { label: string; semantic: StatusSemantic }> = {
+  pending: { label: '未処理', semantic: 'todo' },
+  mapped: { label: 'マッピング済み', semantic: 'done' },
+  needs_review: { label: '要確認', semantic: 'pending' },
+  duplicate: { label: '重複', semantic: 'blocked' },
+  rejected: { label: '除外', semantic: 'excluded' },
+  confirmed: { label: '確定済み', semantic: 'done' },
+  ignored: { label: '対象外', semantic: 'excluded' },
 };
 
 export interface PreviewOption {
@@ -93,28 +95,26 @@ export function ImportPreviewTable({
                       name={`sourceLocator:${row.id}`}
                       value={row.sourceLocator ?? ''}
                     />
-                    <input
-                      type="checkbox"
+                    <NativeCheckbox
                       name={`include:${row.id}`}
                       defaultChecked={row.status === 'mapped'}
                       aria-label={`行 ${row.rowIndex} を取り込む`}
-                      className="size-3.5 accent-[#0b57a4]"
                     />
                   </TD>
                   <TD className="max-w-[240px]">
-                    <div className="truncate text-[11px] text-ink-muted">
+                    <div className="truncate text-caption text-ink-muted">
                       {Object.entries(row.raw)
                         .map(([k, v]) => `${k}: ${v}`)
                         .join(' / ')}
                     </div>
-                    <div className="text-[11px] text-ink-muted">{row.sourceLocator}</div>
+                    <div className="text-caption text-ink-muted">{row.sourceLocator}</div>
                   </TD>
                   <TD>
-                    <select
+                    <NativeSelect
+                      size="xs"
                       name={`metricId:${row.id}`}
                       defaultValue={row.metricId ?? ''}
                       aria-label={`行 ${row.rowIndex} の指標`}
-                      className="h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px]"
                     >
                       <option value="">（未選択）</option>
                       {metrics.map((m) => (
@@ -122,14 +122,14 @@ export function ImportPreviewTable({
                           {m.name}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </TD>
                   <TD>
-                    <select
+                    <NativeSelect
+                      size="xs"
                       name={`unitId:${row.id}`}
                       defaultValue={row.unitId ?? ''}
                       aria-label={`行 ${row.rowIndex} の組織`}
-                      className="h-7 w-full rounded-t4d border border-line bg-surface px-1 text-[12px]"
                     >
                       <option value="">（未選択）</option>
                       {units.map((u) => (
@@ -137,7 +137,7 @@ export function ImportPreviewTable({
                           {u.name}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </TD>
                   <TD>
                     <input
@@ -145,7 +145,7 @@ export function ImportPreviewTable({
                       defaultValue={row.value ?? ''}
                       inputMode="decimal"
                       aria-label={`行 ${row.rowIndex} の値`}
-                      className="tnum h-7 w-full rounded-t4d border border-line px-1 text-right text-[12px]"
+                      className="tnum h-7 w-full rounded-t4d border border-line px-1 text-right text-small"
                     />
                   </TD>
                   <TD>
@@ -153,41 +153,48 @@ export function ImportPreviewTable({
                       name={`unitOfMeasure:${row.id}`}
                       defaultValue={row.unitOfMeasure ?? ''}
                       aria-label={`行 ${row.rowIndex} の単位`}
-                      className="h-7 w-full rounded-t4d border border-line px-1 text-[12px]"
+                      className="h-7 w-full rounded-t4d border border-line px-1 text-small"
                     />
                   </TD>
                   <TD>
                     {(() => {
                       // 表示値はデモ変換済みの displayConfidence（無い場合は実測）。
-                      // シミュレーション時も元スコアを title で追跡できるようにする
+                      // シミュレーション時も元スコアを読み上げで追跡できるようにする（title= はマウスでしか
+                      // 読めないため使わない。デモであることは画面の先頭の注記が常に示す）
                       const shown = row.displayConfidence ?? row.confidence;
                       return (
-                        <span
-                          title={
-                            row.confidenceSource === 'demo_simulated'
-                              ? `実測スコア ${Math.round(row.confidence * 100)}%（表示はデモ用シミュレーション）`
-                              : undefined
-                          }
-                          className={
-                            shown >= 0.7
-                              ? 'tnum text-success'
-                              : shown >= 0.4
-                                ? 'tnum text-[#8a5d00]'
-                                : 'tnum text-danger'
-                          }
-                        >
-                          {Math.round(shown * 100)}%
-                        </span>
+                        <>
+                          <span
+                            className={
+                              shown >= 0.7
+                                ? 'tnum text-success'
+                                : shown >= 0.4
+                                  ? 'tnum text-warning-ink'
+                                  : 'tnum text-danger'
+                            }
+                          >
+                            {Math.round(shown * 100)}%
+                          </span>
+                          {row.confidenceSource === 'demo_simulated' && (
+                            <span className="sr-only">
+                              （実測スコア {Math.round(row.confidence * 100)}
+                              %。表示はデモ用シミュレーション）
+                            </span>
+                          )}
+                        </>
                       );
                     })()}
                   </TD>
                   <TD>
-                    <Badge tone={status?.tone ?? 'neutral'}>{status?.label}</Badge>
+                    <SemanticBadge
+                      semantic={status?.semantic ?? 'todo'}
+                      label={status?.label ?? '未処理'}
+                    />
                     {warnings.length > 0 && (
                       <ul className="mt-0.5 space-y-0.5">
                         {warnings.map((w, i) => (
-                          <li key={i} className="text-[11px] text-[#8a5d00]">
-                            ⚠ {w}
+                          <li key={i} className="text-caption text-warning-ink">
+                            <span aria-hidden="true">⚠</span> {w}
                           </li>
                         ))}
                       </ul>
@@ -201,11 +208,12 @@ export function ImportPreviewTable({
       </div>
 
       {ignored.length > 0 && (
-        <details className="border-t border-line">
-          <summary className="cursor-pointer px-3 py-2 text-[12px] text-ink-muted">
-            指標マスターと関係が無いため、{ignored.length} 行を取り込み対象外にしました
-            <span className="ml-1 text-[11px]">（内容を確認する）</span>
-          </summary>
+        <Collapsible
+          variant="plain"
+          summary={`指標マスターと関係が無いため、${ignored.length} 行を取り込み対象外にしました（内容を確認する）`}
+          className="border-t border-line px-3"
+          bodyClassName="pl-0"
+        >
           {/* デモで畳んだ低確信行（status は needs_review のまま）も確定 POST に含め、
               確定時は従来どおり「選択されなかった行」として除外（rejected）へ倒す。
               hidden を出さないと確定後も要確認のまま残り続ける */}
@@ -233,31 +241,32 @@ export function ImportPreviewTable({
                 {ignored.map((row) => (
                   <TR key={row.id}>
                     <TD className="max-w-[520px]">
-                      <div className="truncate text-[11px] text-ink-muted">
+                      <div className="truncate text-caption text-ink-muted">
                         {Object.entries(row.raw)
                           .map(([k, v]) => `${k}: ${v}`)
                           .join(' / ')}
                       </div>
                     </TD>
-                    <TD className="text-[11px] text-ink-muted">{row.sourceLocator}</TD>
+                    <TD className="text-caption text-ink-muted">{row.sourceLocator}</TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
           </div>
-          <p className="px-3 py-2 text-[11px] text-ink-muted">
+          <p className="py-2 text-caption text-ink-muted">
             ここに取り込みたい行がある場合は、指標マスターへ該当の指標を登録してから取り込み直してください。
           </p>
-        </details>
+        </Collapsible>
       )}
 
       <div className="flex items-center justify-between gap-3 border-t border-line px-3 py-2">
-        <p className="text-[11px] text-ink-muted">
-          確定すると Data Point 台帳へ反映されます（既存データがある場合は新しい Version
-          が追加されます）。AI の推定は候補であり、確定は人が行います。
+        <p className="text-caption text-ink-muted">
+          確定すると非財務データの台帳へ反映されます（既存データがある場合は新しい版が追加されます）。AI
+          の推定は候補であり、確定は人が行います。
         </p>
         {/* 表示できる行が 1 件も無いとき（全行が対象外）に空確定させない */}
         <SubmitButton
+          variant="primary"
           size="sm"
           icon={<Check aria-hidden="true" />}
           pendingLabel="確定中…"

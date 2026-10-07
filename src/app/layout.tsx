@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <a
           href="#t4d-main"
-          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-100 focus:rounded-t4d focus:bg-brand-700 focus:px-3 focus:py-1.5 focus:text-white"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-(--z-skiplink) focus:rounded-t4d focus:bg-brand-700 focus:px-3 focus:py-1.5 focus:text-white"
         >
           本文へスキップ
         </a>

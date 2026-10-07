@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { ENGAGEMENT_IDS } from '@/lib/fixtures/dataset';
-import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
+import { DEMO_USERS, confirmInDialog, loginAs, openCollapsible, openMoreMenu } from './helpers';
 
 /**
  * Server Action の実動作監査。
@@ -71,7 +71,8 @@ test('Data Point の値編集が履歴に残る', async ({ page }) => {
   await page.goto('/enterprise/data?status=draft');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  const detail = page.getByRole('link', { name: '詳細' }).first();
+  // 行の指標名のリンクから詳細へ（同じ行から同じ行き先へのリンクを 2 つ置かない。plan §1.12-7）
+  const detail = page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first();
   test.skip((await detail.count()) === 0, '編集可能な Data Point が無い');
   await detail.click();
   await expect(page).toHaveURL(/\/enterprise\/data\/[0-9a-f-]+/);
@@ -95,7 +96,7 @@ test('Data Point の値編集が履歴に残る', async ({ page }) => {
 
 test('Evidence をアップロードして Data Point へ紐付けられる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
-  await page.goto('/enterprise/evidence');
+  await page.goto('/enterprise/evidence?new=1');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   const beforeRows = await page.locator('tbody tr').count();
@@ -110,7 +111,7 @@ test('Evidence をアップロードして Data Point へ紐付けられる', as
 
   // 紐付け（linkEvidenceAction）は Data Point 詳細から行う
   await page.goto('/enterprise/data');
-  await page.getByRole('link', { name: '詳細' }).first().click();
+  await page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first().click();
   await expect(page).toHaveURL(/\/enterprise\/data\/[0-9a-f-]+/);
 
   const linkForm = page.locator('form:has(select[name="fileVersionId"])');
@@ -133,32 +134,51 @@ test('AI 下書きを Reject できる', async ({ page }) => {
   await page.getByRole('link', { name: 'C6.1' }).first().click();
   await expect(page).toHaveURL(/\/enterprise\/disclosures\/cdp\/[0-9a-f-]+/);
 
-  await submitAndSettle(page, () => page.getByRole('button', { name: 'ドラフトを生成' }).click());
+  await submitAndSettle(page, async () => {
+    await (await openMoreMenu(page)).getByRole('menuitem', { name: 'ドラフトを生成' }).click();
+  });
   await expect(page.getByText('Mock / AI未接続').first()).toBeVisible({ timeout: 30_000 });
 
-  const reject = page.getByRole('button', { name: /この下書きを Reject/ });
+  const reject = (await openMoreMenu(page)).getByRole('menuitem', {
+    name: /この下書きを不採用にする/,
+  });
   await expect(reject).toBeVisible();
-  await submitAndSettle(page, () => reject.click());
+  await submitAndSettle(page, async () => {
+    await reject.click();
+    await confirmInDialog(page);
+  });
 
   // 押した当の画面に結果が出ること（revalidate 漏れの回帰検出）
-  await expect(page.getByText('Reject 済み')).toBeVisible();
-  await expect(page.getByRole('button', { name: /この下書きを Reject/ })).toHaveCount(0);
+  await expect(page.getByText('不採用', { exact: true })).toBeVisible();
+  const menuAfter = await openMoreMenu(page);
+  await expect(menuAfter.getByRole('menuitem', { name: /この下書きを不採用にする/ })).toHaveCount(
+    0,
+  );
+  await page.keyboard.press('Escape');
 
   // 採否は Provenance にも残る
   await page.goto('/enterprise/ai');
-  await expect(page.locator('tbody tr', { hasText: 'rejected' }).first()).toBeVisible();
+  // AI の実行記録は既定で閉じた節（plan §2.26 E06: L2）。状態は登録簿のラベル（rejected → 不採用。§1.17）
+  const runs = page.getByRole('region', { name: /^AI の実行記録/ });
+  await openCollapsible(runs, /^直近 \d+ 件/);
+  await expect(runs.locator('tbody tr', { hasText: '不採用' }).first()).toBeVisible();
 });
 
 test('許諾の取消と再付与が反映される', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  // 許諾は設定の「アクセス許諾」タブ（plan S17）
+  await page.goto('/enterprise/settings?tab=grants');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   const revoke = page.getByRole('button', { name: '取消' }).first();
   test.skip((await revoke.count()) === 0, '取消できる許諾が無い');
 
   const beforeRevoked = await page.getByRole('button', { name: '再付与' }).count();
-  await submitAndSettle(page, () => revoke.click());
+  // 取消は確認ダイアログ（範囲と戻し方）を通る（plan §1.16）
+  await submitAndSettle(page, async () => {
+    await revoke.click();
+    await confirmInDialog(page);
+  });
   await expect(page.getByRole('button', { name: '再付与' })).toHaveCount(beforeRevoked + 1);
 
   // 元に戻す（後続テストへ影響させない）
@@ -172,8 +192,10 @@ test('企業が PBC へ回答し、監査法人が受け入れられる', async 
   await page.goto('/enterprise/workflows');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  const respondForm = page.locator('form:has(textarea[name="body"])').first();
-  test.skip((await respondForm.count()) === 0, '回答可能な PBC が無い');
+  const compose = page.locator('summary').filter({ hasText: /^回答を(書く|書き直す)/ });
+  test.skip((await compose.count()) === 0, '回答可能な PBC が無い');
+  const respondDetails = await openCollapsible(page, /^回答を(書く|書き直す)/);
+  const respondForm = respondDetails.locator('form:has(textarea[name="body"])').first();
   await respondForm.locator('textarea[name="body"]').fill('監査テスト: 依頼資料を添付しました。');
   await submitAndSettle(page, () => respondForm.locator('button[type="submit"]').first().click());
 
@@ -191,7 +213,8 @@ test('企業が PBC へ回答し、監査法人が受け入れられる', async 
 
 test('レビュー Note を作成して解消できる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.assuranceManager);
-  await page.goto(`/assurance/engagements/${ENGAGEMENT}/review-notes`);
+  // 追加の欄は一覧の上に常設しない（plan S14 CreatePanel。?new=1 で開く）
+  await page.goto(`/assurance/engagements/${ENGAGEMENT}/review-notes?new=1`);
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   const createForm = page.locator('form:has(textarea[name="body"])').first();
@@ -213,10 +236,13 @@ test('Snapshot 後変更の要約と影響評価が動作する', async ({ page 
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/data?status=approved');
   await expect(page.locator('#t4d-main')).toBeVisible();
-  const detail = page.getByRole('link', { name: '詳細' }).first();
+  // 行の指標名のリンクから詳細へ（同じ行から同じ行き先へのリンクを 2 つ置かない。plan §1.12-7）
+  const detail = page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first();
   test.skip((await detail.count()) === 0, '承認済み Data Point が無い');
   await detail.click();
   await expect(page).toHaveURL(/\/enterprise\/data\/[0-9a-f-]+/);
+  await (await openMoreMenu(page)).getByRole('menuitem', { name: '承認済みの値を修正' }).click();
+  await expect(page).toHaveURL(/[?&]edit=1/);
 
   const valueInput = page.locator('input[name="value"]');
   test.skip((await valueInput.count()) === 0, '承認済みデータの編集フォームが出ない');

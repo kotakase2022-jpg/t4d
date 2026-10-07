@@ -228,6 +228,7 @@ describe('サプライヤーデータ取込の確定（3 種別）', () => {
   });
 
   it('enterprise.import.run の無いロール（supplier_contributor）では確定できない', async () => {
+    // 権限キーは画面の文に出さず（plan §1.17）、エラーの属性で確かめる
     await expect(
       confirmSupplierImport(db, supplierContributor(), PERIOD_IDS.fy2026, [
         {
@@ -239,7 +240,7 @@ describe('サプライヤーデータ取込の確定（3 種別）', () => {
           factorCode: 'EF-PUR-METAL',
         },
       ]),
-    ).rejects.toThrow(/enterprise\.import\.run/);
+    ).rejects.toMatchObject({ name: 'AuthorizationError', permission: 'enterprise.import.run' });
     expect(fixture.calculations).toHaveLength(1);
   });
 

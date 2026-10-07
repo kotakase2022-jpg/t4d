@@ -4,6 +4,7 @@ import {
   DEMO_USERS,
   carriesDemoState,
   carryDemoState,
+  confirmInDialog,
   loginAs,
   peakCarriedCookieHeader,
   resetCarriedDemoState,
@@ -147,17 +148,20 @@ test('DMA: G1 をインパクト=重要でない・財務=重要と根拠付き�
     FINANCIAL_RATIONALE,
   );
 
-  // 10 事項すべてが判断済みになったので、人が DMA を確定する
+  // 10 事項すべてが判断済みになったので、人が DMA を確定する（確認ダイアログで範囲を見てから確定）
   await page.goto(`${BASE}/settings`);
   await main(page).getByRole('button', { name: 'DMA を確定する' }).click();
+  await confirmInDialog(page);
   await page.waitForURL(/flash=csrdDmaConfirmed/);
   await expect(flash(page)).toContainText('ダブル・マテリアリティ評価（DMA）を確定しました');
   await expect(main(page).getByText('DMA 確定済み')).toBeVisible();
   await expect(main(page).getByRole('button', { name: 'DMA を確定する' })).toHaveCount(0);
-  // 確定の後は、各フォームの保存で確定が取り消されることを閉じずに見せる
+  // 確定の後は、各フォームの保存で確定が取り消されることを閉じずに見せる（フォームは手順①・②。開いてから確かめる）
+  await page.goto(`${BASE}/settings?step=boundary`);
   await expect(
     main(page).getByText('保存すると DMA の確定は取り消されます（前提が変わるため）。'),
   ).toBeVisible();
+  await page.goto(`${BASE}/settings?step=method`);
   await expect(
     main(page).getByText('保存すると DMA の確定は取り消されます（人の判断は変わりません）。'),
   ).toBeVisible();
@@ -198,6 +202,9 @@ test('E1-6: AI ギャップ分析（デモ生成）→ 候補を採用 → 対�
   await expect(flash(page)).toContainText('AI の候補を採用して確定しました');
   await expect(main(page).getByText('確認待ち', { exact: true })).toHaveCount(0);
 
+  // 確定の後の次の作業: 対応計画の追加は「対応計画を立てる」で開く枠（?new=1。開いてから入力する）
+  await main(page).getByRole('link', { name: '対応計画を立てる' }).click();
+  await page.waitForURL(/[?&]new=1/);
   const planForm = main(page)
     .locator('form')
     .filter({ has: page.getByRole('button', { name: '対応計画に追加' }) });

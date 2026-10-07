@@ -5,34 +5,43 @@ import {
   AlertTriangle,
   CalendarClock,
   Check,
-  FileText,
-  History,
+  FileSearch,
+  ListChecks,
+  PencilLine,
   Send,
   Sparkles,
   Undo2,
 } from 'lucide-react';
+import { auditEventLabel } from '@/app/assurance/_components/labels';
 import {
   AvailabilityBadge,
   DataPointStatusBadge,
-  EvidenceBadge,
   SeverityBadge,
-  ValidationBadge,
   ValueKindBadge,
 } from '@/components/shared/badges';
 import { CommentBox } from '@/components/shared/comment-box';
+import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { FlashMessage } from '@/components/shared/flash';
 import { MentionText } from '@/components/shared/mention-text';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { Notice } from '@/components/shared/notice';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { SemanticBadge, StatusBadge } from '@/components/shared/status-badge';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { CollapsibleSection } from '@/components/ui/collapsible';
+import { Collapsible } from '@/components/ui/collapsible';
+import { Field } from '@/components/ui/field';
+import { FormSection } from '@/components/ui/form-section';
 import { Input, Textarea } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
+import { requireEnterpriseContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
+import { AGGREGATION_METHOD_LABEL, METRIC_CATEGORY_LABEL } from '@/lib/domain/metrics';
 import { formatJst, formatJstDate, formatNumber } from '@/lib/format/datetime';
+import { getDb } from '@/lib/repositories';
 import {
   canDecideStep,
   loadApprovalProgress,
@@ -49,6 +58,14 @@ import {
 } from '@/lib/services/scope3-suppliers';
 import { loadEvidenceSuggestion } from '@/lib/services/ai-assist';
 import { loadAnomalyExplanation } from '@/lib/services/anomaly-explanation';
+import type { ActionSpec, MenuActionSpec } from '@/lib/ui/actions';
+import { canFor } from '@/lib/ui/home-profile';
+import {
+  dataPointStateActions,
+  type DataPointActionId,
+  type StateAction,
+} from '@/lib/ui/state-actions';
+import { statusLabel } from '@/lib/ui/status/registry';
 import {
   decideApprovalStepAction,
   explainAnomaliesAction,
@@ -57,9 +74,49 @@ import {
   transitionDataPointAction,
   updateDataPointAction,
 } from '../../actions';
+import {
+  EvidenceStatusBadge,
+  SOURCE_TYPE_LABEL,
+  ValidationStatusBadge,
+} from '../_components/data-badges';
 
-export const metadata = { title: 'Data Point 詳細' };
+/**
+ * タブの題名は「{指標} — {組織}」（plan S3）。題名の決定で画面を落とさない（権限外・見つからないときは既定の名前）
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ dataPointId: string }>;
+}): Promise<{ title: string }> {
+  const fallback = { title: '非財務データの詳細' };
+  try {
+    const { dataPointId } = await params;
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const dataPoint = await db.findById('dataPoints', dataPointId);
+    if (!dataPoint || dataPoint.organizationId !== ctx.workspace.organizationId) return fallback;
+    const [metric, unit] = await Promise.all([
+      db.findById('metrics', dataPoint.metricId),
+      db.findById('units', dataPoint.unitId),
+    ]);
+    return metric && unit ? { title: `${metric.name} — ${unit.name}` } : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
+/**
+ * 非財務データ（Data Point）の詳細（plan S3）。
+ *
+ * - 見出しの操作は「状態 × 権限」で決める（src/lib/ui/state-actions.ts の dataPointStateActions）。
+ *   primary は 1 つ: 未着手は値の編集の「保存」、入力中・差戻しは「提出」、提出済みは「レビュー開始」、
+ *   レビュー中は「承認」。承認の道筋がある組織では、見出しの一発承認を出さず、承認フロー節の
+ *   現段階の承認ボタンが primary になる（段階を飛ばした承認は必ず失敗するため）
+ * - 差戻しは理由必須の確認ダイアログ（plan §1.16 区分 2。ラベル「差戻し理由」は従来と同じ）
+ * - AI の補助（原因の説明・資料候補）と承認済みの値の修正は「その他」（L2）
+ * - 本文 L1: 値・検証・根拠資料・コメント。L2（閉じた節）: 値の編集（入力中・差戻しでは開く）・
+ *   算定内訳・承認フロー（経路が進行中なら開く）・開示マッピング・履歴（版・承認と修正・監査ログ）
+ */
 export default async function DataPointDetailPage({
   params,
   searchParams,
@@ -100,7 +157,7 @@ export default async function DataPointDetailPage({
   const fileNameOf = (fileVersionId: string): string => {
     const version = fileVersions.find((v) => v.id === fileVersionId);
     const file = version ? allFiles.find((f) => f.id === version.fileId) : null;
-    return file?.originalName ?? fileVersionId.slice(0, 8);
+    return file?.originalName ?? '（資料）';
   };
   const evidenceRunId = typeof query.evidence === 'string' ? query.evidence : null;
   const suggestion = evidenceRunId
@@ -164,6 +221,9 @@ export default async function DataPointDetailPage({
   );
   /** 承認の道筋が進行中（＝一発承認は使えない） */
   const routeActive = approvalProgress.totalCount > 0 && !approvalProgress.complete;
+  const inApproval = dataPoint.status === 'submitted' || dataPoint.status === 'in_review';
+  /** 自分が現段階を決められる（承認フロー節の承認ボタンが画面の primary） */
+  const stageDecidable = routeActive && canDecideCurrent && inApproval;
 
   const currentVersionNo =
     versions.find((v) => v.id === dataPoint.currentVersionId)?.versionNo ?? null;
@@ -230,12 +290,168 @@ export default async function DataPointDetailPage({
   const previous = previousDataPoints[0];
 
   const canWrite = can(ctx, 'enterprise.data.write');
-  const canWriteData = canWrite;
+  const canReview = can(ctx, 'enterprise.data.review');
+  const canApprove = can(ctx, 'enterprise.data.approve');
+  // 承認済みの値の変更はレビュー・承認の権限が要る（サービスの updateDataPointValue と同じ条件）。
+  // 押すと必ず断られる編集欄を出さない
+  const canEditValue = canWrite && (dataPoint.status !== 'approved' || canReview || canApprove);
   // メンション候補と、コメント著者名の解決（WF-P0-002）
   const mentionCandidates = await listMentionCandidates(db, ctx);
   const authorNameById = new Map(mentionCandidates.map((m) => [m.userId, m.displayName]));
-  const canReview = can(ctx, 'enterprise.data.review');
-  const canApprove = can(ctx, 'enterprise.data.approve');
+
+  // ---- 状態で変わる操作（plan §1.15） ------------------------------------------------
+  // 値が入っているか（値の無いことを「対象外」などで記録していれば、それも提出できる値）
+  const hasValue =
+    dataPoint.value !== null ||
+    dataPoint.textValue !== null ||
+    dataPoint.availabilityStatus !== 'value_present';
+  const statePlan = dataPointStateActions({
+    status: dataPoint.status,
+    can: canFor(ctx),
+    // サーバーの値は常に保存済み。未着手は保存して初めて入力中になる（関数の側で判定する）
+    valueSaved: true,
+    hasValue,
+  });
+  // 保存は値の編集の節のボタンそのものが primary（見出しに別のフォームを置かない）。
+  // 承認の道筋が進行中なら一発承認は使えないので出さない（段階の承認は承認フロー節）
+  const headerPrimary =
+    statePlan.primary &&
+    statePlan.primary.id !== 'save' &&
+    !(statePlan.primary.id === 'approve' && routeActive)
+      ? statePlan.primary
+      : null;
+  const valueSaveIsPrimary = statePlan.primary?.id === 'save';
+
+  const scopeLine = `${metric.name} — ${unit.name}（${period.code}）`;
+  const toSpec = (action: StateAction<DataPointActionId>): ActionSpec | null => {
+    switch (action.id) {
+      case 'submit':
+        return {
+          kind: 'submit',
+          id: action.id,
+          label: action.label,
+          icon: <Send aria-hidden="true" />,
+          action: transitionDataPointAction,
+          fields: { dataPointId: dataPoint.id, to: 'submitted' },
+          disabledReason: action.disabledReason,
+        };
+      case 'start-review':
+        return {
+          kind: 'submit',
+          id: action.id,
+          label: action.label,
+          action: transitionDataPointAction,
+          fields: { dataPointId: dataPoint.id, to: 'in_review' },
+        };
+      case 'approve':
+        return {
+          kind: 'submit',
+          id: action.id,
+          label: action.label,
+          icon: <Check aria-hidden="true" />,
+          action: transitionDataPointAction,
+          fields: { dataPointId: dataPoint.id, to: 'approved' },
+        };
+      case 'return':
+        return {
+          kind: 'confirm',
+          id: action.id,
+          label: action.label,
+          icon: <Undo2 aria-hidden="true" />,
+          action: transitionDataPointAction,
+          fields: { dataPointId: dataPoint.id, to: 'returned' },
+          confirm: {
+            tier: 'bulk',
+            title: 'このデータを差し戻しますか',
+            scope: scopeLine,
+            consequences: ['入力した担当者が値を直して再提出します。理由はコメントにも残ります。'],
+            reason: {
+              name: 'comment',
+              label: '差戻し理由',
+              required: true,
+              placeholder: '例: 検針票の対象期間を確認してください。',
+            },
+            confirmLabel: '差し戻す',
+          },
+        };
+      default:
+        return null;
+    }
+  };
+  const secondary: ActionSpec[] = [];
+  // 承認の権限を持つ人には、承認の道筋が進行中なら見出しから承認フローの節へ案内する（見出しに一発承認は
+  // 置かない。段階を飛ばせないため）。現段階を決められる人には、節の「「段階」を承認」が primary になる
+  if (canApprove && inApproval && routeActive) {
+    secondary.push({
+      kind: 'link',
+      id: 'approval-route',
+      label: `承認フローへ（${approvalProgress.approvedCount}/${approvalProgress.totalCount} 段階）`,
+      icon: <ListChecks aria-hidden="true" />,
+      href: '#承認フロー',
+    });
+  }
+  if (headerPrimary && stageDecidable) {
+    // 段階の承認が画面の primary。見出しの主操作（レビュー開始など）は secondary へ下げる
+    const spec = toSpec(headerPrimary);
+    if (spec) secondary.push(spec);
+  }
+  for (const action of statePlan.secondary) {
+    const spec = toSpec(action);
+    if (spec) secondary.push(spec);
+  }
+  const primary = headerPrimary && !stageDecidable ? toSpec(headerPrimary) : null;
+
+  const editOpen =
+    query.edit === '1' ||
+    dataPoint.status === 'not_started' ||
+    dataPoint.status === 'draft' ||
+    dataPoint.status === 'returned';
+  const more: MenuActionSpec[] = [
+    ...statePlan.more.flatMap((action): MenuActionSpec[] => {
+      if (action.id === 'ai-explain') {
+        return [
+          {
+            kind: 'submit',
+            id: action.id,
+            label: action.label,
+            icon: <Sparkles className="size-3.5" aria-hidden="true" />,
+            action: explainAnomaliesAction,
+            fields: { dataPointId: dataPoint.id },
+            group: 'advanced',
+            // 検証の指摘が無いデータには、説明させる対象が無い
+            hidden: validations.length === 0 || !canRunAi,
+          },
+        ];
+      }
+      if (action.id === 'ai-evidence') {
+        return [
+          {
+            kind: 'submit',
+            id: action.id,
+            label: action.label,
+            icon: <FileSearch className="size-3.5" aria-hidden="true" />,
+            action: suggestEvidenceAction,
+            fields: { dataPointId: dataPoint.id },
+            group: 'advanced',
+            hidden: !canRunAi,
+          },
+        ];
+      }
+      if (action.id === 'edit-approved') {
+        return [
+          {
+            kind: 'link',
+            id: action.id,
+            label: action.label,
+            icon: <PencilLine className="size-3.5" aria-hidden="true" />,
+            href: `/enterprise/data/${dataPoint.id}?edit=1#value-edit`,
+            hidden: !canEditValue,
+          },
+        ];
+      }
+      return [];
+    }),
+  ];
 
   return (
     <>
@@ -244,134 +460,49 @@ export default async function DataPointDetailPage({
         description={
           <span className="flex flex-wrap items-center gap-2">
             <DataPointStatusBadge status={dataPoint.status} needsRecheck={needsRecheck} />
-            <ValidationBadge errorCount={summary.errors} warningCount={summary.warnings} />
-            <EvidenceBadge count={evidenceLinks.length} required={metric.requiresEvidence} />
-            {dataPoint.changedAfterApproval && <Badge tone="warning">承認後に変更あり</Badge>}
+            <ValidationStatusBadge errorCount={summary.errors} warningCount={summary.warnings} />
+            <EvidenceStatusBadge
+              evidenceCount={evidenceLinks.length}
+              requiresEvidence={metric.requiresEvidence}
+            />
+            {dataPoint.changedAfterApproval && (
+              <SemanticBadge semantic="blocked" label="承認後に変更あり" />
+            )}
             <Badge tone={isOtherPeriod ? 'warning' : 'neutral'}>
               <CalendarClock className="size-3" aria-hidden="true" />
               対象期間 {period.code}
             </Badge>
           </span>
         }
-        breadcrumbs={[
-          { label: '企業ワークスペース' },
-          { label: '非財務データ', href: '/enterprise/data' },
-          { label: metric.name },
-        ]}
-        actions={
-          <>
-            {canWrite && (dataPoint.status === 'draft' || dataPoint.status === 'returned') && (
-              <form action={transitionDataPointAction}>
-                <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                <input type="hidden" name="to" value="submitted" />
-                <Button type="submit" size="sm" variant="outline">
-                  <Send aria-hidden="true" />
-                  提出
-                </Button>
-              </form>
-            )}
-            {canReview && dataPoint.status === 'submitted' && (
-              <form action={transitionDataPointAction}>
-                <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                <input type="hidden" name="to" value="in_review" />
-                <Button type="submit" size="sm" variant="outline">
-                  レビュー開始
-                </Button>
-              </form>
-            )}
-            {canReview &&
-              (dataPoint.status === 'submitted' || dataPoint.status === 'in_review') && (
-                <form action={transitionDataPointAction} className="flex items-center gap-1">
-                  <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                  <input type="hidden" name="to" value="returned" />
-                  <input
-                    type="text"
-                    name="comment"
-                    placeholder="差戻し理由"
-                    aria-label="差戻し理由"
-                    className="h-7 w-40 rounded-t4d border border-line px-2 text-[12px]"
-                  />
-                  <Button type="submit" size="sm" variant="outline">
-                    <Undo2 aria-hidden="true" />
-                    差戻し
-                  </Button>
-                </form>
-              )}
-            {/* 承認の道筋が定義されている組織では、この一発承認は使えない
-                （段階を飛ばすと「誰の承認で確定したのか」を示せない）。
-                押しても必ず失敗するボタンを置いたままにせず、下の承認フローへ誘導する */}
-            {canApprove &&
-              (dataPoint.status === 'submitted' || dataPoint.status === 'in_review') &&
-              (routeActive ? (
-                <Button size="sm" variant="outline" asChild>
-                  <Link href="#承認フロー">
-                    <Check aria-hidden="true" />
-                    承認フローへ（{approvalProgress.approvedCount}/{approvalProgress.totalCount}{' '}
-                    段階）
-                  </Link>
-                </Button>
-              ) : (
-                <form action={transitionDataPointAction}>
-                  <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                  <input type="hidden" name="to" value="approved" />
-                  <Button type="submit" size="sm">
-                    <Check aria-hidden="true" />
-                    承認
-                  </Button>
-                </form>
-              ))}
-          </>
-        }
+        breadcrumbsTail={[{ label: `${metric.name} — ${unit.name}` }]}
+        actions={<PageActions primary={primary ?? undefined} secondary={secondary} more={more} />}
       />
 
       <div className="space-y-2 px-4 pt-3">
         <FlashMessage searchParams={query} />
         {isOtherPeriod && (
-          <div
-            role="note"
-            className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-[#8a5d00]"
-          >
-            <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <span>
-              <span className="font-semibold">過年度のデータです。</span>
-              表示中の報告期間（{shell.currentPeriod.label}）とは異なる {period.label}{' '}
-              のデータを開いています。値・状態・検証結果は {period.label} のものです。
-            </span>
-          </div>
+          <Notice tone="warning" title="過年度のデータです。">
+            表示中の報告期間（{shell.currentPeriod.label}）とは異なる {period.label}{' '}
+            のデータを開いています。値・状態・検証結果は {period.label} のものです。
+          </Notice>
         )}
         {needsRecheck && (
-          <div
-            role="note"
-            className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-[#8a5d00]"
-          >
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <span>
-              <span className="font-semibold">承認済み・要再確認:</span> 承認後に証跡不足（Evidence
-              必須の指標に Evidence が紐付いていない）が見つかりました。
-              承認は取り消されていません。証跡を紐付けるか、必要なら承認をやり直してください。
-            </span>
-          </div>
+          <Notice tone="warning" title="承認済み・要再確認">
+            承認後に根拠資料の不足（根拠資料が必須の指標に資料が紐付いていない）が見つかりました。
+            承認は取り消されていません。資料を紐付けるか、必要なら承認をやり直してください。
+          </Notice>
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3 p-4">
-        {/* 左: 定義と値 */}
+      <div className="grid grid-cols-3 gap-x-4 gap-y-3 px-4 pb-4">
+        {/* 左: 値と編集 */}
         <div className="col-span-2 space-y-3">
-          <Card>
-            <SectionTitle title="指標定義と値" />
-            <div className="grid grid-cols-2 gap-x-6 px-3 pb-3 text-[13px]">
+          <Section title="値">
+            <div className="grid grid-cols-2 gap-x-6 text-body">
               <Row label="指標コード" value={metric.code} />
-              <Row label="カテゴリ" value={metric.category} />
-              <Row label="定義" value={metric.description} />
               <Row label="単位（定義）" value={metric.unit} />
-              <Row label="集計方法" value={metric.aggregationMethod} />
-              <Row label="Evidence 必須" value={metric.requiresEvidence ? 'はい' : 'いいえ'} />
+              <Row label="定義" value={metric.description} />
               <Row label="組織・拠点" value={`${unit.name}（${unit.code}）`} />
-              <Row
-                label="連結範囲"
-                value={`${dataPoint.boundary} / 持分 ${unit.ownershipPercent}%`}
-              />
-              <Row label="対象期間" value={`${period.label}`} />
               {/* 実績ゼロ・未入力・対象外などを区別して見せる（空欄を 0 と見せない。§7.1） */}
               <Row
                 label="現在値"
@@ -400,81 +531,135 @@ export default async function DataPointDetailPage({
               {dataPoint.absenceReason && (
                 <Row label="値が無い理由" value={dataPoint.absenceReason} />
               )}
-              <Row
-                label="前年実績"
-                value={
-                  !previous ? (
-                    '—（前年データなし）'
-                  ) : previous.availabilityStatus !== 'value_present' ? (
-                    <AvailabilityBadge
-                      status={previous.availabilityStatus}
-                      reason={previous.absenceReason}
-                    />
-                  ) : (
-                    `${formatNumber(previous.value)} ${previous.unitOfMeasure}`
-                  )
-                }
-              />
-              <Row label="算定方法" value={dataPoint.methodology ?? '—'} />
-              <Row label="最終更新" value={formatJst(dataPoint.updatedAt)} />
+              {/* 前年の値は入力の参考（plan D7）。承認済みかどうかを併記する（未承認の値を正と見せない） */}
+              <Row label="前年実績" value={<PreviousValue previous={previous} />} />
             </div>
-          </Card>
+            <Collapsible
+              variant="plain"
+              summary="指標と算定の詳細（カテゴリ・集計方法・連結範囲・算定方法・最終更新）"
+              className="mt-1"
+            >
+              <div className="grid grid-cols-2 gap-x-6 text-body">
+                <Row label="カテゴリ" value={METRIC_CATEGORY_LABEL[metric.category]} />
+                <Row label="集計方法" value={AGGREGATION_METHOD_LABEL[metric.aggregationMethod]} />
+                <Row label="根拠資料" value={metric.requiresEvidence ? '必須' : '任意'} />
+                <Row
+                  label="連結範囲"
+                  value={`${dataPoint.boundary} / 持分 ${unit.ownershipPercent}%`}
+                />
+                <Row label="対象期間" value={period.label} />
+                <Row label="算定方法" value={dataPoint.methodology ?? '—'} />
+                <Row label="最終更新" value={formatJst(dataPoint.updatedAt)} />
+              </div>
+            </Collapsible>
+          </Section>
 
-          {canWrite && (
-            <Card>
-              <SectionTitle title="値の編集（更新すると新しい Version が追加されます）" />
-              <form action={updateDataPointAction} className="grid grid-cols-4 gap-2 p-3">
+          {canEditValue && (
+            <Section
+              id="value-edit"
+              collapsible
+              title="値の編集"
+              summary="値を編集する（更新すると新しい版が追加されます）"
+              open={editOpen}
+            >
+              <form action={updateDataPointAction} className="space-y-2 pt-1">
                 <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                <label className="col-span-1 text-[12px] text-ink-muted">
-                  値
-                  <Input
-                    name="value"
-                    defaultValue={dataPoint.value ?? ''}
-                    inputMode="decimal"
-                    className="mt-0.5"
-                  />
-                </label>
-                <label className="col-span-1 text-[12px] text-ink-muted">
-                  単位
-                  <Input
-                    name="unitOfMeasure"
-                    defaultValue={dataPoint.unitOfMeasure}
-                    className="mt-0.5"
-                  />
-                </label>
-                <label className="col-span-2 text-[12px] text-ink-muted">
-                  変更理由（履歴に残ります）
-                  <Input
-                    name="changeReason"
-                    required
-                    placeholder="例: 検針票の再集計により修正"
-                    className="mt-0.5"
-                  />
-                </label>
-                <label className="col-span-4 text-[12px] text-ink-muted">
-                  算定方法
-                  <Textarea
-                    name="methodology"
-                    rows={2}
-                    defaultValue={dataPoint.methodology ?? ''}
-                    className="mt-0.5"
-                  />
-                </label>
-                <div className="col-span-4">
-                  <Button type="submit" size="sm" data-t4d-shortcut="save">
-                    保存
-                  </Button>
-                </div>
+                <FormSection title="値と変更理由" kind="required">
+                  <div className="grid grid-cols-4 gap-2">
+                    <Field
+                      label="値"
+                      name="value"
+                      id="dp-value"
+                      hint={<PreviousValue previous={previous} prefix="前年 " />}
+                    >
+                      {(p) => (
+                        <Input
+                          {...p}
+                          name="value"
+                          defaultValue={dataPoint.value ?? ''}
+                          inputMode="decimal"
+                        />
+                      )}
+                    </Field>
+                    <Field
+                      label="単位"
+                      name="unitOfMeasure"
+                      id="dp-unit"
+                      hint={
+                        dataPoint.unitOfMeasure !== metric.unit
+                          ? `指標の単位は ${metric.unit} です（値は換算しません）`
+                          : '指標の単位'
+                      }
+                    >
+                      {(p) => (
+                        // 指標の単位から選ぶ（自由入力で単位が食い違わないように。plan D5）。
+                        // いまの値の単位が違うときは、それも選べるように残す（値の換算はしないため、
+                        // 黙って単位だけ書き換えない）
+                        <NativeSelect
+                          {...p}
+                          name="unitOfMeasure"
+                          defaultValue={dataPoint.unitOfMeasure}
+                        >
+                          <option value={metric.unit}>{metric.unit}</option>
+                          {dataPoint.unitOfMeasure !== metric.unit && (
+                            <option value={dataPoint.unitOfMeasure}>
+                              {dataPoint.unitOfMeasure}（指標と異なる）
+                            </option>
+                          )}
+                        </NativeSelect>
+                      )}
+                    </Field>
+                    <Field
+                      label="変更理由（履歴に残ります）"
+                      name="changeReason"
+                      id="dp-change-reason"
+                      required
+                      className="col-span-2"
+                    >
+                      {(p) => (
+                        <Input
+                          {...p}
+                          name="changeReason"
+                          placeholder="例: 検針票の再集計により修正"
+                        />
+                      )}
+                    </Field>
+                  </div>
+                </FormSection>
+                <FormSection title="算定方法" kind="optional" open={Boolean(dataPoint.methodology)}>
+                  <Field label="算定方法" name="methodology" id="dp-methodology">
+                    {(p) => (
+                      <Textarea
+                        {...p}
+                        name="methodology"
+                        rows={2}
+                        defaultValue={dataPoint.methodology ?? ''}
+                      />
+                    )}
+                  </Field>
+                </FormSection>
+                <SubmitButton
+                  variant={valueSaveIsPrimary ? 'primary' : 'secondary'}
+                  size="sm"
+                  data-t4d-shortcut="save"
+                  pendingLabel="保存中…"
+                >
+                  保存
+                </SubmitButton>
               </form>
-            </Card>
+            </Section>
           )}
 
           {calculations.length > 0 && (
-            <Card>
-              <SectionTitle title="算定内訳（Calculation Breakdown）" />
+            <Section
+              id="calculation-breakdown"
+              collapsible
+              title="算定内訳"
+              summary={`算定の内訳（${calculations.length} 式）`}
+            >
               {calculations.map((calc) => (
-                <div key={calc.id} className="px-3 pb-3">
-                  <p className="mb-1 font-mono text-[12px] text-ink-muted">{calc.formula}</p>
+                <div key={calc.id} className="pb-2">
+                  <p className="mb-1 font-mono text-small text-ink-muted">{calc.formula}</p>
                   <Table>
                     <THead>
                       <TR>
@@ -494,10 +679,10 @@ export default async function DataPointDetailPage({
                             <TD>{inputRow.label}</TD>
                             <TD align="right">{formatNumber(inputRow.value)}</TD>
                             <TD>{inputRow.unit}</TD>
-                            <TD className="whitespace-nowrap text-[11px]">
+                            <TD className="whitespace-nowrap text-caption">
                               {dataClass ? CALCULATION_DATA_CLASS_LABELS[dataClass] : '—'}
                             </TD>
-                            <TD className="text-[11px] text-ink-muted">{inputRow.note}</TD>
+                            <TD className="text-caption text-ink-muted">{inputRow.note}</TD>
                           </TR>
                         );
                       })}
@@ -514,17 +699,325 @@ export default async function DataPointDetailPage({
                   </Table>
                 </div>
               ))}
-            </Card>
+            </Section>
           )}
 
-          {/* 履歴は既定で閉じる（見出しは常に見せる。docs/disclosure-first.md §10.4 B6） */}
-          <CollapsibleSection
+          {disclosureItems.length > 0 && (
+            <Section
+              id="disclosure-mapping"
+              collapsible
+              title="開示マッピング"
+              summary={`この指標を使う開示項目（${disclosureItems.length} 件）`}
+            >
+              <ul className="divide-y divide-line">
+                {disclosureItems.map((item) => (
+                  <li key={item.id} className="py-1.5">
+                    <Link
+                      href={disclosureItemHref(item.frameworkVersionId, item.id)}
+                      className="text-small text-brand-700 hover:underline"
+                    >
+                      {item.code}
+                    </Link>
+                    <div className="truncate text-caption text-ink-muted">{item.questionText}</div>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+        </div>
+
+        {/* 右: 検証・根拠資料・承認フロー・コメント */}
+        <div className="space-y-3">
+          <Section title={`検証（${validations.length}）`}>
+            {validations.length === 0 ? (
+              <p className="flex items-center gap-1 text-small text-ink-muted">
+                <Check className="size-3.5 text-success" aria-hidden="true" />
+                検証エラー・警告はありません
+              </p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {validations.map((v) => (
+                  <li key={v.id} className="flex items-start gap-2 py-1.5">
+                    <SeverityBadge severity={v.severity} />
+                    <span className="text-small text-ink">{v.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {explanation && (
+              <div className="mt-1.5 rounded-t4d bg-surface-muted px-2 py-1.5">
+                {/* AI は推定・候補。値は変えない（CLAUDE.md §0-4） */}
+                <p className="text-caption text-ink-muted">
+                  AI の推定（確信度 {Math.round(explanation.run.confidence * 100)}%）。
+                  指摘のみで、値は変更されません。
+                </p>
+                <ul className="mt-1 space-y-1.5">
+                  {explanation.findings.map((finding, index) => (
+                    <li key={index}>
+                      <p className="text-small text-ink">
+                        <span className="font-medium">考えられる原因:</span> {finding.likelyCause}
+                      </p>
+                      <p className="mt-0.5 text-small text-ink-muted">
+                        <span className="font-medium">次の一手:</span> {finding.suggestedAction}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </Section>
+
+          <section
+            aria-labelledby="dp-evidence-title"
+            data-t4d-shortcut="evidence"
+            tabIndex={-1}
+            className="scroll-mt-2 border-t border-line pt-2 outline-none"
+          >
+            <h2 id="dp-evidence-title" className="pb-1.5 text-body font-semibold text-ink">
+              根拠資料（{evidenceLinks.length}）
+            </h2>
+            {evidenceLinks.length === 0 ? (
+              <p className="text-small text-ink-muted">
+                {metric.requiresEvidence ? (
+                  <span className="inline-flex items-start gap-1 text-warning-ink">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    この指標は根拠資料が必須です。承認の前に紐付けてください。
+                  </span>
+                ) : (
+                  '根拠資料はまだ紐付いていません。'
+                )}
+              </p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {evidenceLinks.map((link) => {
+                  const version = fileVersions.find((v) => v.id === link.fileVersionId);
+                  const file = evidenceFiles.find((f) => f.id === version?.fileId);
+                  return (
+                    <li key={link.id} className="py-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-small font-medium text-ink">
+                          {file?.originalName ?? '（ファイル）'}
+                        </span>
+                        {version && (
+                          <a
+                            href={`/api/files/signed-url?fileVersionId=${version.id}`}
+                            className="shrink-0 text-caption text-brand-700 hover:underline"
+                          >
+                            開く
+                          </a>
+                        )}
+                      </div>
+                      <div className="text-caption text-ink-muted">
+                        {link.page ? `p.${link.page}` : ''} {link.cellRef ?? ''}{' '}
+                        {link.coveragePeriodStart
+                          ? `対象 ${formatJstDate(link.coveragePeriodStart)}〜${formatJstDate(link.coveragePeriodEnd)}`
+                          : ''}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {can(ctx, 'enterprise.evidence.write') && (
+              <form
+                action={linkEvidenceAction}
+                className="mt-1.5 space-y-1.5 border-t border-line pt-2"
+              >
+                <input type="hidden" name="dataPointId" value={dataPoint.id} />
+                <label className="block text-caption text-ink-muted" htmlFor="dp-evidence-file">
+                  登録済みの資料から紐付ける
+                </label>
+                <NativeSelect id="dp-evidence-file" name="fileVersionId" required size="xs">
+                  <option value="">選択してください</option>
+                  {allFiles.map((f) => (
+                    <option key={f.id} value={f.currentVersionId ?? ''}>
+                      {f.originalName}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <div className="flex gap-1.5">
+                  <Input
+                    name="page"
+                    placeholder="ページ"
+                    aria-label="ページ"
+                    inputMode="numeric"
+                    className="w-20"
+                  />
+                  <Input name="cellRef" placeholder="セル（例 Sheet1!C12）" aria-label="セル" />
+                </div>
+                <SubmitButton size="xs" variant="secondary" pendingLabel="紐付け中…">
+                  紐付ける
+                </SubmitButton>
+              </form>
+            )}
+            {suggestion && (
+              <div className="mt-1.5 rounded-t4d bg-surface-muted px-2 py-1.5">
+                {/* AI の候補。紐付けは人が確定する（CLAUDE.md §0-4） */}
+                <p className="text-caption text-ink-muted">
+                  AI の候補（確信度 {Math.round(suggestion.run.confidence * 100)}%）。
+                  紐付けは上のフォームで確定してください。
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {suggestion.candidates.map((candidate, index) => (
+                    <li key={index}>
+                      <p className="text-small text-ink">
+                        {fileNameOf(candidate.fileVersionId)}
+                        {candidate.page !== null ? ` / p.${candidate.page}` : ''}
+                      </p>
+                      <p className="text-caption text-ink-muted">{candidate.excerpt}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+
+          {/* 承認の道筋（最大 5 階層）。どこまで進んでいて、次が誰かを必ず出す */}
+          {approvalProgress.totalCount > 0 && (
+            // 承認経路がある組織では閉じない（自分の番か・次が誰かを閉じた中に隠さない。plan S3）
+            <Section
+              id="承認フロー"
+              title={`承認フロー（${approvalProgress.approvedCount} / ${approvalProgress.totalCount} 段階）`}
+              summary={
+                approvalProgress.round > 1
+                  ? `${approvalProgress.round} 巡目（差戻し後の再提出）`
+                  : undefined
+              }
+            >
+              <ol className="divide-y divide-line">
+                {approvalProgress.steps.map((step) => (
+                  <li key={step.id} className="flex items-start gap-2.5 py-2">
+                    <span
+                      className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-muted text-caption font-semibold text-ink-muted"
+                      aria-hidden="true"
+                    >
+                      {step.stageNo}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-1.5 text-small font-medium text-ink">
+                        {step.stageName}
+                        <StatusBadge domain="approvalStep" value={step.status} />
+                      </p>
+                      <p className="text-caption text-ink-muted">
+                        {step.department || '担当部署未設定'}
+                        {step.decidedAt && (
+                          <>
+                            {' ・ '}
+                            {authorNameById.get(step.decidedBy ?? '') ?? '—'}
+                            {' ・ '}
+                            {formatJst(step.decidedAt)}
+                          </>
+                        )}
+                      </p>
+                      {step.comment && (
+                        <p className="mt-0.5 text-caption text-ink">{step.comment}</p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              {approvalProgress.currentStep && (
+                <div className="border-t border-line pt-2">
+                  {canDecideCurrent ? (
+                    <div className="space-y-1.5">
+                      <form action={decideApprovalStepAction} className="space-y-1.5">
+                        <input type="hidden" name="dataPointId" value={dataPoint.id} />
+                        <input type="hidden" name="decision" value="approved" />
+                        <Field label="承認のコメント" name="comment" id="dp-stage-comment">
+                          {(p) => <Input {...p} name="comment" />}
+                        </Field>
+                        <SubmitButton
+                          variant={stageDecidable ? 'primary' : 'secondary'}
+                          size="sm"
+                          pendingLabel="承認中…"
+                        >
+                          「{approvalProgress.currentStep.stageName}」を承認
+                        </SubmitButton>
+                      </form>
+                      <ConfirmDialog
+                        tier="bulk"
+                        title={`「${approvalProgress.currentStep.stageName}」で差し戻しますか`}
+                        scope={scopeLine}
+                        consequences={[
+                          '承認の道筋は最初の段階からやり直しになります（再提出のあとに次の巡が始まります）。',
+                        ]}
+                        reason={{ name: 'comment', label: '差戻し理由', required: true }}
+                        confirmLabel="差し戻す"
+                        action={decideApprovalStepAction}
+                        fields={{ dataPointId: dataPoint.id, decision: 'returned' }}
+                        trigger={{
+                          label: '差し戻す…',
+                          variant: 'secondary',
+                          size: 'sm',
+                          icon: <Undo2 aria-hidden="true" />,
+                          actionId: 'stage-return',
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-caption text-ink-muted">
+                      次は「{approvalProgress.currentStep.stageName}」
+                      {approvalProgress.currentStep.department &&
+                        `（${approvalProgress.currentStep.department}）`}
+                      の承認待ちです。あなたはこの段階の承認者ではありません。
+                    </p>
+                  )}
+                </div>
+              )}
+            </Section>
+          )}
+
+          <Section title={`コメント（${comments.length}）`}>
+            {canWrite && (
+              <CommentBox
+                targetType="data_point"
+                targetId={dataPoint.id}
+                href={`/enterprise/data/${dataPoint.id}`}
+                members={mentionCandidates}
+              />
+            )}
+            {comments.length === 0 && approvals.length === 0 ? (
+              <p className="text-small text-ink-muted">コメント・承認の記録はまだありません。</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {approvals.map((a) => (
+                  <li key={a.id} className="py-1.5">
+                    <SemanticBadge
+                      semantic={a.decision === 'approved' ? 'done' : 'returned'}
+                      label={`${a.decision === 'approved' ? '承認' : '差戻し'}（${
+                        a.stage === 'final' ? '最終承認' : 'レビュー'
+                      }）`}
+                    />
+                    {a.comment && <p className="mt-0.5 text-small text-ink">{a.comment}</p>}
+                    <span className="text-caption text-ink-muted">{formatJst(a.decidedAt)}</span>
+                  </li>
+                ))}
+                {comments.map((c) => (
+                  <li key={c.id} className="py-1.5">
+                    <p className="text-small text-ink">
+                      <MentionText body={c.body} />
+                    </p>
+                    <span className="text-caption text-ink-muted">
+                      {authorNameById.get(c.authorUserId) ?? '—'} ・ {formatJst(c.createdAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        </div>
+
+        {/* 履歴（版・承認と修正・監査ログ）は本文の下に並べ、見出しを残して既定で閉じる（§10.4 B6）。
+            コメントより後ろに置く: 差戻し理由はコメントにも履歴にも出るため、見える方を先にする */}
+        <div className="col-span-3 grid grid-cols-3 gap-x-4 gap-y-3">
+          <Section
             id="version-history"
-            title={`Version 履歴（${versions.length}）`}
+            collapsible
+            title={`版の履歴（${versions.length}）`}
             summary={`版の一覧（${versions.length} 版${
               currentVersionNo !== null ? `・現在 v${currentVersionNo}` : ''
             }）`}
-            bodyClassName="px-0 pb-0"
           >
             <Table>
               <THead>
@@ -544,6 +1037,7 @@ export default async function DataPointDetailPage({
                       v{v.versionNo}
                       {v.id === dataPoint.currentVersionId && (
                         <Badge tone="brand" className="ml-1">
+                          <Check className="size-3" aria-hidden="true" />
                           現在
                         </Badge>
                       )}
@@ -559,397 +1053,91 @@ export default async function DataPointDetailPage({
                       )}
                     </TD>
                     <TD>{v.unitOfMeasure}</TD>
-                    <TD className="text-[11px]">{v.sourceReference ?? v.sourceType}</TD>
-                    <TD className="text-[11px] text-ink-muted">{v.changeReason ?? '—'}</TD>
-                    <TD className="whitespace-nowrap text-[11px] text-ink-muted">
+                    <TD className="text-caption">
+                      {v.sourceReference ?? SOURCE_TYPE_LABEL[v.sourceType]}
+                    </TD>
+                    <TD className="text-caption text-ink-muted">{v.changeReason ?? '—'}</TD>
+                    <TD className="whitespace-nowrap text-caption text-ink-muted">
                       {formatJst(v.createdAt)}
                     </TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
-          </CollapsibleSection>
-        </div>
+          </Section>
 
-        {/* 右: Validation / Evidence / 履歴 */}
-        <div className="space-y-3">
-          <Card>
-            <SectionTitle title={`Validation（${validations.length}）`} />
-            {validations.length === 0 ? (
-              <EmptyState title="検証エラー・警告はありません" />
-            ) : (
-              <>
-                <ul className="divide-y divide-line">
-                  {validations.map((v) => (
-                    <li key={v.id} className="flex items-start gap-2 px-3 py-2">
-                      <SeverityBadge severity={v.severity} />
-                      <span className="text-[12px] text-ink">{v.message}</span>
-                    </li>
-                  ))}
-                </ul>
-                {canRunAi && (
-                  <form action={explainAnomaliesAction} className="border-t border-line px-3 py-2">
-                    <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                    <Button type="submit" size="xs" variant="outline">
-                      <Sparkles aria-hidden="true" />
-                      AI に原因を説明させる
-                    </Button>
-                  </form>
-                )}
-                {explanation && (
-                  <div className="border-t border-line px-3 py-2">
-                    <p className="text-[11px] text-ink-muted">
-                      AI の推定（確信度 {Math.round(explanation.run.confidence * 100)}%）。
-                      指摘のみで、値は変更されません。
-                    </p>
-                    <ul className="mt-1 space-y-1.5">
-                      {explanation.findings.map((finding, index) => (
-                        <li key={index} className="rounded-t4d bg-surface-muted px-2 py-1.5">
-                          <p className="text-[12px] text-ink">
-                            <span className="font-medium">考えられる原因:</span>{' '}
-                            {finding.likelyCause}
-                          </p>
-                          <p className="mt-0.5 text-[12px] text-ink-muted">
-                            <span className="font-medium">次の一手:</span> {finding.suggestedAction}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </>
-            )}
-          </Card>
-
-          <Card data-t4d-shortcut="evidence" tabIndex={-1} className="scroll-mt-2 outline-none">
-            <SectionTitle title={`Evidence（${evidenceLinks.length}）`} />
-            {evidenceLinks.length === 0 ? (
-              <EmptyState
-                title="Evidence が紐付いていません"
-                description={
-                  metric.requiresEvidence
-                    ? 'この指標は Evidence 必須です。承認前に紐付けてください。'
-                    : undefined
-                }
-                icon={<FileText className="size-5" aria-hidden="true" />}
-              />
-            ) : (
-              <ul className="divide-y divide-line">
-                {evidenceLinks.map((link) => {
-                  const version = fileVersions.find((v) => v.id === link.fileVersionId);
-                  const file = evidenceFiles.find((f) => f.id === version?.fileId);
-                  return (
-                    <li key={link.id} className="px-3 py-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-[12px] font-medium text-ink">
-                          {file?.originalName ?? '（ファイル）'}
-                        </span>
-                        {version && (
-                          <a
-                            href={`/api/files/signed-url?fileVersionId=${version.id}`}
-                            className="shrink-0 text-[11px] text-brand-700 hover:underline"
-                          >
-                            開く
-                          </a>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-ink-muted">
-                        {link.page ? `p.${link.page}` : ''} {link.cellRef ?? ''}{' '}
-                        {link.coveragePeriodStart
-                          ? `対象 ${formatJstDate(link.coveragePeriodStart)}〜${formatJstDate(link.coveragePeriodEnd)}`
-                          : ''}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            {can(ctx, 'enterprise.evidence.write') && (
-              <form action={linkEvidenceAction} className="space-y-1.5 border-t border-line p-3">
-                <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                <label className="block text-[11px] text-ink-muted">
-                  既存ファイルから紐付け
-                  <select
-                    name="fileVersionId"
-                    required
-                    className="mt-0.5 h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[12px]"
-                  >
-                    <option value="">選択してください</option>
-                    {allFiles.map((f) => (
-                      <option key={f.id} value={f.currentVersionId ?? ''}>
-                        {f.originalName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="flex gap-1.5">
-                  <Input name="page" placeholder="ページ" inputMode="numeric" className="w-20" />
-                  <Input name="cellRef" placeholder="セル（例 Sheet1!C12）" />
-                </div>
-                <Button type="submit" size="xs" variant="outline">
-                  紐付ける
-                </Button>
-              </form>
-            )}
-            {canRunAi && (
-              <form action={suggestEvidenceAction} className="border-t border-line px-3 py-2">
-                <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                <Button type="submit" size="xs" variant="outline">
-                  <Sparkles aria-hidden="true" />
-                  AI に Evidence 候補を探させる
-                </Button>
-              </form>
-            )}
-            {suggestion && (
-              <div className="border-t border-line px-3 py-2">
-                <p className="text-[11px] text-ink-muted">
-                  AI の候補（確信度 {Math.round(suggestion.run.confidence * 100)}%）。
-                  紐付けは上のフォームで確定してください。
-                </p>
-                <ul className="mt-1 space-y-1">
-                  {suggestion.candidates.map((candidate, index) => (
-                    <li key={index} className="rounded-t4d bg-surface-muted px-2 py-1.5">
-                      <p className="text-[12px] text-ink">
-                        {fileNameOf(candidate.fileVersionId)}
-                        {candidate.page !== null ? ` / p.${candidate.page}` : ''}
-                      </p>
-                      <p className="text-[11px] text-ink-muted">{candidate.excerpt}</p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </Card>
-
-          {disclosureItems.length > 0 && (
-            <CollapsibleSection
-              id="disclosure-mapping"
-              title="開示マッピング"
-              summary={`この指標を使う開示項目（${disclosureItems.length} 件）`}
-              bodyClassName="px-0 pb-0"
-            >
-              <ul className="divide-y divide-line">
-                {disclosureItems.map((item) => (
-                  <li key={item.id} className="px-3 py-1.5">
-                    <Link
-                      href={disclosureItemHref(item.frameworkVersionId, item.id)}
-                      className="text-[12px] text-brand-700 hover:underline"
-                    >
-                      {item.code}
-                    </Link>
-                    <div className="truncate text-[11px] text-ink-muted">{item.questionText}</div>
-                  </li>
-                ))}
-              </ul>
-            </CollapsibleSection>
-          )}
-
-          {/* 承認の道筋（最大 5 階層）。どこまで進んでいて、次が誰かを必ず出す */}
-          {approvalProgress.totalCount > 0 && (
-            <Card id="承認フロー">
-              <SectionTitle
-                title={`承認フロー（${approvalProgress.approvedCount} / ${approvalProgress.totalCount} 段階）`}
-                action={
-                  approvalProgress.round > 1 ? (
-                    <span className="text-[11px] text-ink-muted">
-                      {approvalProgress.round} 巡目（差し戻し後の再提出）
-                    </span>
-                  ) : undefined
-                }
-              />
-              <ol className="divide-y divide-line">
-                {approvalProgress.steps.map((step) => (
-                  <li key={step.id} className="flex items-start gap-2.5 px-3 py-2">
-                    <span
-                      className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
-                        step.status === 'approved'
-                          ? 'bg-success text-white'
-                          : step.status === 'returned'
-                            ? 'bg-danger text-white'
-                            : step.status === 'pending'
-                              ? 'bg-brand-600 text-white'
-                              : 'bg-surface-muted text-ink-muted'
-                      }`}
-                      aria-hidden="true"
-                    >
-                      {step.stageNo}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="flex flex-wrap items-center gap-1.5 text-[12px] font-medium text-ink">
-                        {step.stageName}
-                        {step.status === 'approved' && <Badge tone="success">承認済み</Badge>}
-                        {step.status === 'returned' && <Badge tone="danger">差し戻し</Badge>}
-                        {step.status === 'pending' && <Badge tone="warning">承認待ち</Badge>}
-                        {step.status === 'waiting' && <Badge tone="neutral">未着手</Badge>}
-                      </p>
-                      <p className="text-[11px] text-ink-muted">
-                        {step.department || '担当部署未設定'}
-                        {step.decidedAt && (
-                          <>
-                            {' ・ '}
-                            {authorNameById.get(step.decidedBy ?? '') ?? '—'}
-                            {' ・ '}
-                            {formatJst(step.decidedAt)}
-                          </>
-                        )}
-                      </p>
-                      {step.comment && (
-                        <p className="mt-0.5 text-[11px] text-ink">{step.comment}</p>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ol>
-              {approvalProgress.currentStep && (
-                <div className="border-t border-line px-3 py-2">
-                  {canDecideCurrent ? (
-                    <form action={decideApprovalStepAction} className="space-y-1.5">
-                      <input type="hidden" name="dataPointId" value={dataPoint.id} />
-                      <label className="block text-[11px] text-ink-muted">
-                        コメント（差し戻すときは理由が必須）
-                        <input
-                          type="text"
-                          name="comment"
-                          className="mt-0.5 h-7 w-full rounded-t4d border border-line px-2 text-[12px]"
-                        />
-                      </label>
-                      <div className="flex items-center gap-1.5">
-                        <SubmitButton
-                          size="sm"
-                          name="decision"
-                          value="approved"
-                          pendingLabel="承認中…"
-                        >
-                          「{approvalProgress.currentStep.stageName}」を承認
-                        </SubmitButton>
-                        <SubmitButton
-                          size="sm"
-                          variant="outline"
-                          name="decision"
-                          value="returned"
-                          pendingLabel="差し戻し中…"
-                        >
-                          差し戻す
-                        </SubmitButton>
-                      </div>
-                    </form>
-                  ) : (
-                    <p className="text-[11px] text-ink-muted">
-                      次は「{approvalProgress.currentStep.stageName}」
-                      {approvalProgress.currentStep.department &&
-                        `（${approvalProgress.currentStep.department}）`}
-                      の承認待ちです。あなたはこの段階の承認者ではありません。
-                    </p>
-                  )}
-                </div>
-              )}
-            </Card>
-          )}
-
-          {/* いつ・誰が・承認／修正／差し戻し したか。
-              段階と版は別の表に分かれているので、ここで 1 本の流れに混ぜる */}
-          <Card id="承認履歴">
-            <SectionTitle
-              title={`承認・修正の履歴（${timeline.length}）`}
-              action={<span className="text-[11px] text-ink-muted">新しいものが上</span>}
-            />
+          {/* いつ・誰が・承認／修正／差し戻し したか。段階と版は別の表に分かれているので、ここで 1 本の流れに混ぜる */}
+          <Section
+            id="承認履歴"
+            collapsible
+            title={`承認・修正の履歴（${timeline.length}）`}
+            summary="いつ・誰が承認・修正・差し戻したか（新しいものが上）"
+          >
             {timeline.length === 0 ? (
-              <EmptyState title="履歴はありません" />
+              <p className="text-small text-ink-muted">承認・修正の記録はまだありません。</p>
             ) : (
               <ul className="divide-y divide-line">
                 {timeline.map((entry, index) => (
-                  <li key={`${entry.kind}-${entry.at}-${index}`} className="px-3 py-2">
+                  <li key={`${entry.kind}-${entry.at}-${index}`} className="py-1.5">
                     <p className="flex flex-wrap items-center gap-1.5">
-                      <Badge
-                        tone={
+                      <SemanticBadge
+                        semantic={
                           entry.kind === 'approved'
-                            ? 'success'
+                            ? 'done'
                             : entry.kind === 'returned'
-                              ? 'danger'
-                              : 'neutral'
+                              ? 'returned'
+                              : 'draft'
                         }
-                      >
-                        {entry.kind === 'approved'
-                          ? '承認'
-                          : entry.kind === 'returned'
-                            ? '差し戻し'
-                            : '修正'}
-                      </Badge>
+                        label={
+                          entry.kind === 'approved'
+                            ? '承認'
+                            : entry.kind === 'returned'
+                              ? '差戻し'
+                              : '修正'
+                        }
+                      />
                       {entry.stageLabel && (
-                        <span className="text-[11px] text-ink-muted">{entry.stageLabel}</span>
+                        <span className="text-caption text-ink-muted">{entry.stageLabel}</span>
                       )}
-                      <span className="text-[12px] font-medium text-ink">{entry.actorName}</span>
-                      <span className="text-[11px] text-ink-muted">{formatJst(entry.at)}</span>
+                      <span className="text-small font-medium text-ink">{entry.actorName}</span>
+                      <span className="text-caption text-ink-muted">{formatJst(entry.at)}</span>
                     </p>
-                    <p className="mt-0.5 text-[12px] text-ink">{entry.detail}</p>
+                    <p className="mt-0.5 text-small text-ink">{entry.detail}</p>
                   </li>
                 ))}
               </ul>
             )}
-          </Card>
+          </Section>
 
-          <Card>
-            <SectionTitle title="コメント・承認履歴" />
-            {canWriteData && (
-              <CommentBox
-                targetType="data_point"
-                targetId={dataPoint.id}
-                href={`/enterprise/data/${dataPoint.id}`}
-                members={mentionCandidates}
-              />
-            )}
-            {comments.length === 0 && approvals.length === 0 ? (
-              <EmptyState title="履歴はありません" />
-            ) : (
-              <ul className="divide-y divide-line">
-                {approvals.map((a) => (
-                  <li key={a.id} className="px-3 py-2">
-                    <Badge tone={a.decision === 'approved' ? 'success' : 'warning'}>
-                      {a.decision === 'approved' ? '承認' : '差戻し'}（{a.stage}）
-                    </Badge>
-                    {a.comment && <p className="mt-0.5 text-[12px] text-ink">{a.comment}</p>}
-                    <span className="text-[11px] text-ink-muted">{formatJst(a.decidedAt)}</span>
-                  </li>
-                ))}
-                {comments.map((c) => (
-                  <li key={c.id} className="px-3 py-2">
-                    <p className="text-[12px] text-ink">
-                      <MentionText body={c.body} />
-                    </p>
-                    <span className="text-[11px] text-ink-muted">
-                      {authorNameById.get(c.authorUserId) ?? '—'} ・ {formatJst(c.createdAt)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <CollapsibleSection
+          <Section
             id="audit-timeline"
-            title="Audit Timeline"
-            summary={`監査ログ（直近 ${auditEvents.length} 件）`}
+            collapsible
+            title="監査ログ"
+            summary={`この記録の操作（直近 ${auditEvents.length} 件）`}
             // 記録が無いことは空状態として見せる（空状態は閉じない）
             defaultOpen={auditEvents.length === 0}
-            bodyClassName="px-0 pb-0"
           >
             {auditEvents.length === 0 ? (
-              <EmptyState title="監査ログはありません" icon={<History className="size-5" />} />
+              <EmptyState
+                kind="not-applicable"
+                size="compact"
+                title="監査ログはありません"
+                description="値の変更・提出・承認を行うと、ここに記録されます。"
+              />
             ) : (
               <ul className="divide-y divide-line">
                 {auditEvents.map((e) => (
-                  <li key={e.id} className="px-3 py-1.5">
-                    <div className="text-[12px] text-ink">{e.eventType}</div>
+                  <li key={e.id} className="py-1.5">
+                    <div className="text-small text-ink">{auditEventLabel(e.eventType)}</div>
                     {e.afterSummary && (
-                      <div className="text-[11px] text-ink-muted">{e.afterSummary}</div>
+                      <div className="text-caption text-ink-muted">{e.afterSummary}</div>
                     )}
-                    <div className="text-[11px] text-ink-muted">{formatJst(e.createdAt)}</div>
+                    <div className="text-caption text-ink-muted">{formatJst(e.createdAt)}</div>
                   </li>
                 ))}
               </ul>
             )}
-          </CollapsibleSection>
+          </Section>
         </div>
       </div>
     </>
@@ -962,5 +1150,41 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
       <span className="shrink-0 text-ink-muted">{label}</span>
       <span className="text-right text-ink">{value}</span>
     </div>
+  );
+}
+
+/** 前年の値（入力の参考。承認済みかどうかを併記する） */
+function PreviousValue({
+  previous,
+  prefix = '',
+}: {
+  previous:
+    | {
+        value: number | null;
+        unitOfMeasure: string;
+        availabilityStatus: Parameters<typeof AvailabilityBadge>[0]['status'];
+        absenceReason: string | null;
+        status: Parameters<typeof statusLabel>[1];
+      }
+    | undefined;
+  prefix?: string;
+}) {
+  if (!previous) return <>{prefix}—（前年データなし）</>;
+  if (previous.availabilityStatus !== 'value_present') {
+    return (
+      <span className="inline-flex items-center gap-1">
+        {prefix}
+        <AvailabilityBadge status={previous.availabilityStatus} reason={previous.absenceReason} />
+      </span>
+    );
+  }
+  return (
+    <>
+      {prefix}
+      {formatNumber(previous.value)} {previous.unitOfMeasure}
+      <span className="ml-1 text-caption text-ink-muted">
+        （{statusLabel('dataPoint', previous.status)}）
+      </span>
+    </>
   );
 }

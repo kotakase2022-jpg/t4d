@@ -1,6 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
-import { DEMO_USERS, loginAs, switchDemoRole } from './helpers';
+import {
+  DEMO_USERS,
+  confirmInDialog,
+  loginAs,
+  resetDisclosureDemo,
+  switchDemoRole,
+} from './helpers';
 
 /**
  * 原稿の自動保存した本文が、画面を離れて戻ったときに別のサーバーへ届いても消えない
@@ -102,13 +108,15 @@ test('開示デモのリセットの後は、リセット前に入力した本�
   test.setTimeout(120_000);
   // リセットは開示優先モードのホームにある（管理者が有効にする）
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  // 設定の「機能設定」タブ。保存は確認ダイアログを通る（plan S17・§1.16）
+  await page.goto('/enterprise/settings?tab=features');
   await page.getByLabel('有効にする').check();
   await page
     .locator('form')
     .filter({ has: page.getByRole('group', { name: '開示優先モード' }) })
     .getByRole('button', { name: '保存' })
     .click();
+  await confirmInDialog(page);
   await page.waitForURL(/flash=disclosureFirstChanged&state=on/);
 
   // 発表者がリハーサルで入力し（版にはしない）、同じタブで開示デモをリセットする
@@ -117,9 +125,8 @@ test('開示デモのリセットの後は、リセット前に入力した本�
   await expect(editorBody(page)).toBeVisible();
   await typeNewParagraph(page, TYPED);
   await page.goto('/enterprise/dashboard');
-  await page.getByLabel('上記の範囲だけを初期状態へ戻すことを確認しました').check();
-  await page.getByRole('button', { name: '開示デモを初期状態に戻す' }).click();
-  await page.waitForURL(/flash=disclosureDemoReset/);
+  // リセットはホームの「その他」→ 確認ダイアログ（開いてから確かめる。plan §5.3）
+  await resetDisclosureDemo(page);
 
   // タブにはリハーサルの入力の控えが残っている（リセットはサーバーと Cookie だけを戻す）
   expect(await draftKeys(page)).not.toHaveLength(0);

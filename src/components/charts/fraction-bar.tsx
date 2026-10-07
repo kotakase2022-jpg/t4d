@@ -31,12 +31,12 @@ export function FractionBar({
   const width = fractionWidthPercent(numerator, denominator);
   return (
     <div className={cn('min-w-0 space-y-1', className)}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-[12px]">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-small">
         <span className="text-ink">{label}</span>
         <span className="flex items-baseline gap-1">
           <span className="tnum font-medium text-ink">{fraction}</span>
           {showPercent && percent !== null && (
-            <span className="tnum text-[11px] text-ink-muted">（{percent}%）</span>
+            <span className="tnum text-caption text-ink-muted">（{percent}%）</span>
           )}
         </span>
       </div>
@@ -49,7 +49,7 @@ export function FractionBar({
           <div className="h-full rounded-full bg-brand-700" style={{ width: `${width}%` }} />
         </div>
       ) : (
-        <p className="text-[11px] text-ink-muted">対象なし</p>
+        <p className="text-caption text-ink-muted">対象なし</p>
       )}
     </div>
   );

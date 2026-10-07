@@ -9,6 +9,7 @@ import {
   listMembers,
   revokeInvitation,
 } from '@/lib/services/identity';
+import { ValidationError } from '@/lib/errors/user-facing';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
 
 /**
@@ -98,6 +99,20 @@ describe('招待のライフサイクル', () => {
     await expect(
       createInvitation(db, ctx, { email: 'x@demo.local', roleKeys: [] }),
     ).rejects.toThrow(/ロール/);
+  });
+
+  it('入力の誤り・重複は ValidationError（本番でも理由が画面に届く。plan §4 B3）', async () => {
+    const ctx = admin();
+    for (const input of [
+      { email: 'not-an-email', roleKeys: ['viewer'] as RoleKey[] },
+      { email: 'x@demo.local', roleKeys: [] as RoleKey[] },
+      { email: 'y@demo.local', roleKeys: ['platform_admin'] as RoleKey[] },
+      { email: 'sustainability@demo.local', roleKeys: ['viewer'] as RoleKey[] },
+    ]) {
+      await expect(createInvitation(db, ctx, input), input.email).rejects.toBeInstanceOf(
+        ValidationError,
+      );
+    }
   });
 
   it('失効した招待は受諾できない', async () => {

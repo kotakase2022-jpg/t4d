@@ -62,7 +62,7 @@ export function StatusBreakdown({
           />
         ))}
       </div>
-      <ul aria-label={label} className="flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
+      <ul aria-label={label} className="flex flex-wrap gap-x-3 gap-y-1 text-small">
         {items.map((item, index) => {
           const Icon = item.icon;
           const percent = showPercent ? wholePercent(item.count, total) : null;
@@ -83,7 +83,7 @@ export function StatusBreakdown({
                   : countText(item.count, unit)}
               </span>
               {percent !== null && (
-                <span className="tnum text-[11px] text-ink-muted">（{percent}%）</span>
+                <span className="tnum text-caption text-ink-muted">（{percent}%）</span>
               )}
             </li>
           );

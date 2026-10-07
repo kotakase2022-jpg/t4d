@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/badge';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
 
 export interface UnitOption {
   id: string;
@@ -58,10 +59,10 @@ export function UnitScopeSelector({
         .filter((group) => group.members.length > 0)
         .map((group) => (
           <fieldset key={group.title} className="rounded-t4d border border-line px-2.5 py-2">
-            <legend className="flex items-center gap-2 px-1 text-[12px] font-medium text-ink">
+            <legend className="flex items-center gap-2 px-1 text-small font-medium text-ink">
               {group.title}
               {group.note && (
-                <span className="text-[11px] font-normal text-ink-muted">（{group.note}）</span>
+                <span className="text-caption font-normal text-ink-muted">（{group.note}）</span>
               )}
             </legend>
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
@@ -69,19 +70,17 @@ export function UnitScopeSelector({
               {[...group.members]
                 .sort((a, b) => Number(a.countryCode !== 'JP') - Number(b.countryCode !== 'JP'))
                 .map((unit) => (
-                  <label key={unit.id} className="flex items-center gap-1.5 text-[12px] text-ink">
-                    <input
-                      type="checkbox"
+                  <label key={unit.id} className="flex items-center gap-1.5 text-small text-ink">
+                    <NativeCheckbox
                       name="includedUnitIds"
                       value={unit.id}
                       defaultChecked={includedUnitIds.includes(unit.id)}
                       disabled={disabled}
-                      className="size-3.5 accent-[#0b57a4]"
                     />
                     {unit.name}
                     <Badge tone="neutral">{unit.countryCode === 'JP' ? '国内' : '海外'}</Badge>
                     {unit.consolidationMethod === 'equity' && (
-                      <span className="text-[11px] text-ink-muted">
+                      <span className="text-caption text-ink-muted">
                         持分 {unit.ownershipPercent}%
                       </span>
                     )}

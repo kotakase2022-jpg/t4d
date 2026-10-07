@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { ArrowRight, Ban, Check, CircleDashed } from 'lucide-react';
 import { BarChart } from '@/components/charts/bar-chart';
 import { LineChart } from '@/components/charts/line-chart';
-import { Card } from '@/components/ui/card';
 import { Collapsible } from '@/components/ui/collapsible';
 import {
   SCENARIOS,
@@ -44,7 +43,7 @@ function hrefWith(query: string): string {
 function ScenarioSwitch({ view }: { view: FinancialImpactReady }) {
   return (
     <nav aria-label="シナリオ" className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[12px] text-ink-muted">シナリオ:</span>
+      <span className="text-small text-ink-muted">シナリオ:</span>
       {SCENARIOS.map((scenario) => {
         const active = view.params.scenario === scenario;
         return (
@@ -53,7 +52,7 @@ function ScenarioSwitch({ view }: { view: FinancialImpactReady }) {
             href={hrefWith(serializeImpactParams({ ...view.params, scenario }, view.defaults))}
             aria-current={active ? 'true' : undefined}
             className={cn(
-              'inline-flex items-center gap-1 rounded-t4d border px-2 py-1 text-[12px]',
+              'inline-flex items-center gap-1 rounded-t4d border px-2 py-1 text-small',
               active
                 ? 'border-brand-700 bg-brand-50 font-semibold text-ink'
                 : 'border-line bg-surface text-ink hover:bg-brand-50',
@@ -73,14 +72,14 @@ function ScenarioDetail({ view }: { view: FinancialImpactReady }) {
   const scenario = view.params.scenario;
   const label = (driver: keyof typeof DRIVERS) => DRIVERS[driver].label;
   return (
-    <div className="space-y-0.5 text-[12px] text-ink">
+    <div className="space-y-0.5 text-small text-ink">
       <p>
         {SCENARIO_LABEL[scenario]}: {SCENARIO_MEANING[scenario]}。基準年度 {view.basePeriod.code}
         （確定値）・試算期間 {fiscalYearLabel(view.current.years[0] ?? 0)}〜
         {fiscalYearLabel(view.current.years.at(-1) ?? 0)}
       </p>
       {scenario === 'target' && (
-        <ul className="list-disc space-y-0.5 pl-5 text-[11px] text-ink-muted">
+        <ul className="list-disc space-y-0.5 pl-5 text-caption text-ink-muted">
           {view.targets
             .filter((t) => t.status !== 'no_target')
             .map((t) => (
@@ -101,7 +100,7 @@ function ScenarioDetail({ view }: { view: FinancialImpactReady }) {
         </ul>
       )}
       {scenario === 'custom' && (
-        <p className="text-[11px] text-ink-muted">
+        <p className="text-caption text-ink-muted">
           年率:{' '}
           {Object.entries(view.params.growthRates)
             .filter(([, rate]) => rate !== 0)
@@ -125,32 +124,32 @@ function SummaryTiles({ view }: { view: FinancialImpactReady }) {
   return (
     <section aria-label="試算の要約" className="grid gap-2 md:grid-cols-3">
       <div role="group" aria-labelledby="fi-tile-annual" className={tileClass}>
-        <h2 id="fi-tile-annual" className="text-[12px] font-semibold text-ink-muted">
+        <h2 id="fi-tile-annual" className="text-small font-semibold text-ink-muted">
           {fiscalYearLabel(referenceYear)} の年間影響
         </h2>
         <ImpactValue value={annual} size="lg" />
         <QuantifiedCount quantified={current.quantifiedCount} enabled={current.enabledCount} />
         {view.baseline && annual !== null && (
-          <p className="text-[11px] text-ink-muted">
+          <p className="text-caption text-ink-muted">
             営業利益（架空 {formatNumber(view.baseline.operatingProfit / 100_000_000)} 億円）比{' '}
             {signedPercent(annual / view.baseline.operatingProfit)}（参考）
           </p>
         )}
       </div>
       <div role="group" aria-labelledby="fi-tile-cumulative" className={tileClass}>
-        <h2 id="fi-tile-cumulative" className="text-[12px] font-semibold text-ink-muted">
+        <h2 id="fi-tile-cumulative" className="text-small font-semibold text-ink-muted">
           10 年累計（{firstYear}〜{lastYear}）
         </h2>
         <ImpactValue value={current.cumulative} size="lg" />
         <QuantifiedCount quantified={current.quantifiedCount} enabled={current.enabledCount} />
-        <p className="text-[11px] text-ink-muted">
+        <p className="text-caption text-ink-muted">
           {current.presentValue === null
             ? '割引率が未入力のため、現在価値は出しません'
             : `参考の現在価値（割引率 ${formatNumber(view.params.assumptions.discountRate)}%）${formatMillionYen(current.presentValue)} 百万円`}
         </p>
       </div>
       <div role="group" aria-labelledby="fi-tile-avoided" className={tileClass}>
-        <h2 id="fi-tile-avoided" className="text-[12px] font-semibold text-ink-muted">
+        <h2 id="fi-tile-avoided" className="text-small font-semibold text-ink-muted">
           回避コスト対削減費用（{SCENARIO_LABEL[compared]} − 現状維持）
         </h2>
         <ImpactValue value={comparison.avoided} size="lg" />
@@ -158,7 +157,7 @@ function SummaryTiles({ view }: { view: FinancialImpactReady }) {
           quantified={comparison.quantifiedCount}
           enabled={comparison.enabledCount}
         />
-        <p className="text-[11px] text-ink-muted">
+        <p className="text-caption text-ink-muted">
           {comparison.abatement === null
             ? '削減費用: 未定量（Scope1 の確定値か削減単価がありません）'
             : `削減費用（別枠・営業利益に足さない）${formatMillionYen(comparison.abatement).replace(/^\+/, '')} 百万円`}
@@ -174,10 +173,10 @@ function UnquantifiedList({ view }: { view: FinancialImpactReady }) {
   if (rows.length === 0) return null;
   return (
     <div className="rounded-t4d border border-line bg-surface px-3 py-2">
-      <p className="text-[12px] font-semibold text-ink">
+      <p className="text-small font-semibold text-ink">
         未定量・無効の経路（合計に含めていません。0 ではありません）
       </p>
-      <ul aria-label="未定量・無効の経路" className="mt-0.5 space-y-0.5 text-[12px] text-ink">
+      <ul aria-label="未定量・無効の経路" className="mt-0.5 space-y-0.5 text-small text-ink">
         {rows.map((p) => (
           <li key={p.pathway.id} className="flex items-start gap-1.5">
             {p.status === 'disabled' ? (
@@ -191,7 +190,7 @@ function UnquantifiedList({ view }: { view: FinancialImpactReady }) {
             <span>
               {p.pathway.id} {p.pathway.mechanism}: {p.reason}
               {p.pathway.id === 'P7' && (
-                <span className="block text-[11px] text-ink-muted">{view.injuryDataNote}</span>
+                <span className="block text-caption text-ink-muted">{view.injuryDataNote}</span>
               )}
             </span>
           </li>
@@ -232,8 +231,8 @@ function AnnualChart({ view }: { view: FinancialImpactReady }) {
   if (series.length === 0) {
     return (
       <div className="space-y-0.5">
-        <p className="text-[12px] font-semibold text-ink">{title}</p>
-        <p className="text-[12px] text-ink-muted">
+        <p className="text-small font-semibold text-ink">{title}</p>
+        <p className="text-small text-ink-muted">
           {quantified.length === 0
             ? '定量化できた経路がありません（0 ではありません）。仮定を入力すると試算します。'
             : `定量化できた経路（${quantified.map((p) => p.pathway.id).join('・')}）は、どの年も 0 です（基準年度から変わらない）。`}
@@ -334,8 +333,8 @@ const INSTITUTIONS: Array<{
 function InstitutionTable({ view }: { view: FinancialImpactReady }) {
   return (
     <div className="t4d-scroll-x">
-      <table className="w-full min-w-[720px] text-[12px]">
-        <caption className="pb-1 text-left text-[11px] text-ink-muted">
+      <table className="w-full min-w-[720px] text-small">
+        <caption className="pb-1 text-left text-caption text-ink-muted">
           制度の前提（2026-10-02
           時点で政府資料により確認した参考情報。価格水準は法定でないため、炭素価格は常に仮定）
         </caption>
@@ -343,19 +342,19 @@ function InstitutionTable({ view }: { view: FinancialImpactReady }) {
           <tr>
             <th
               scope="col"
-              className="border-b border-line px-2 py-1 text-left text-[11px] text-ink-muted"
+              className="border-b border-line px-2 py-1 text-left text-caption text-ink-muted"
             >
               事実
             </th>
             <th
               scope="col"
-              className="border-b border-line px-2 py-1 text-left text-[11px] text-ink-muted"
+              className="border-b border-line px-2 py-1 text-left text-caption text-ink-muted"
             >
               この試算での扱い
             </th>
             <th
               scope="col"
-              className="border-b border-line px-2 py-1 text-left text-[11px] text-ink-muted"
+              className="border-b border-line px-2 py-1 text-left text-caption text-ink-muted"
             >
               出典
             </th>
@@ -399,8 +398,8 @@ const TARGET_STATUS_TEXT: Record<FinancialImpactReady['targets'][number]['status
 function TargetList({ view }: { view: FinancialImpactReady }) {
   return (
     <div className="mt-3 space-y-1">
-      <h3 className="text-[12px] font-semibold text-ink">起点ごとの目標（目標達成シナリオ）</h3>
-      <ul aria-label="起点ごとの目標" className="space-y-0.5 text-[12px] text-ink">
+      <h3 className="text-small font-semibold text-ink">起点ごとの目標（目標達成シナリオ）</h3>
+      <ul aria-label="起点ごとの目標" className="space-y-0.5 text-small text-ink">
         {view.targets.map((t) => (
           <li key={t.driver}>
             <span className="font-medium">{DRIVERS[t.driver].label}</span>:{' '}
@@ -413,14 +412,14 @@ function TargetList({ view }: { view: FinancialImpactReady }) {
               </span>
             )}
             {t.reasons.length > 0 && (
-              <span className="block text-[11px] text-ink-muted">{t.reasons.join('')}</span>
+              <span className="block text-caption text-ink-muted">{t.reasons.join('')}</span>
             )}
           </li>
         ))}
       </ul>
       <Link
         href="/enterprise/esg"
-        className="inline-flex items-center gap-1 text-[11px] text-brand-700 hover:underline"
+        className="inline-flex items-center gap-1 text-caption text-brand-700 hover:underline"
       >
         ESG経営（目標と実績）
         <ArrowRight className="size-3" aria-hidden="true" />
@@ -491,7 +490,7 @@ export function ReadyView({ view }: { view: FinancialImpactReady }) {
       <SummaryTiles view={view} />
       <UnquantifiedList view={view} />
 
-      <Card className="space-y-4 p-3">
+      <div className="space-y-4 rounded-t4d-lg border border-line bg-surface p-3">
         <PathwayFlow
           pathways={current.pathways}
           origins={view.origins}
@@ -500,7 +499,7 @@ export function ReadyView({ view }: { view: FinancialImpactReady }) {
         />
         <AnnualChart view={view} />
         <CumulativeChart view={view} />
-      </Card>
+      </div>
 
       <Collapsible
         id="fi-assumptions"

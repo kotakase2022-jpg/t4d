@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { expect, test, type Page } from '@playwright/test';
+import { DEMO_USERS, loginAs, openMoreMenu } from './helpers';
 
 /**
  * CDP 整合チェックの画面実行導線（CDP-P0-006）。
@@ -8,12 +8,27 @@ import { DEMO_USERS, loginAs } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
+/**
+ * 見出しの「その他」にある項目の名前（plan §2 S18: AI の実行・取込・出力は「その他」へ移した）。
+ * 「その他」が無い役割（使える操作が 1 つも無い）は空。開いたメニューは閉じて返す
+ */
+async function moreMenuItems(page: Page): Promise<string[]> {
+  const trigger = page.locator('#t4d-main [data-more-menu]').filter({ hasText: 'その他' });
+  if ((await trigger.count()) === 0) return [];
+  const menu = await openMoreMenu(page.locator('#t4d-main'));
+  const items = await menu.getByRole('menuitem').allTextContents();
+  await page.keyboard.press('Escape');
+  return items;
+}
+
 test('CDP 画面から整合チェックを実行して指摘を表示できる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/disclosures/cdp');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  await page.getByRole('button', { name: '整合チェックを実行' }).click();
+  // 整合チェック（AI）は見出しの「その他」にある（開いてから押す）
+  const menu = await openMoreMenu(page.locator('#t4d-main'));
+  await menu.getByRole('menuitem', { name: '整合チェックを実行' }).click();
 
   // 結果は ?check=<aiRunId> へ遷移して表示される（再読込しても読み直せる）
   await page.waitForURL(/\/enterprise\/disclosures\/cdp\?check=/);
@@ -41,6 +56,8 @@ test('AI 実行権限が無いロールにはボタンが出ない', async ({ pa
   await page.goto('/enterprise/disclosures/cdp');
   await expect(page.locator('#t4d-main')).toBeVisible();
   await expect(page.getByRole('button', { name: '整合チェックを実行' })).toHaveCount(0);
+  // 「その他」の中にも出ない（置き場所を移しても、権限の無い役割には出さない）
+  expect((await moreMenuItems(page)).filter((t) => t.includes('整合チェックを実行'))).toEqual([]);
 });
 
 test('他組織の check ID を指定しても結果は表示されない', async ({ page }) => {
@@ -87,4 +104,5 @@ test('開示の書き込み権限が無いロールには適用判定ボタン�
   await page.goto('/enterprise/disclosures/cdp');
   await expect(page.locator('#t4d-main')).toBeVisible();
   await expect(page.getByRole('button', { name: '適用判定を実行' })).toHaveCount(0);
+  expect((await moreMenuItems(page)).filter((t) => t.includes('適用判定を実行'))).toEqual([]);
 });

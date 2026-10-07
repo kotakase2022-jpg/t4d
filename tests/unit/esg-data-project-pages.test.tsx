@@ -44,7 +44,6 @@ vi.mock('@/components/shared/table-controls', () => ({
   ColumnSelector: () => null,
   SortLink: ({ label }: { label: string }) => <span>{label}</span>,
 }));
-vi.mock('@/app/enterprise/data/bulk-actions', () => ({ BulkActionBar: () => null }));
 
 const { default: EsgPage } = await import('@/app/enterprise/esg/page');
 const { default: KpiDetailPage } = await import('@/app/enterprise/esg/[kpiKey]/page');
@@ -110,7 +109,8 @@ function summaryOf(element: Element): string {
 /** KPI カード（カードの見出し h2 から、そのカードの枠を探す） */
 function kpiCard(title: string): HTMLElement {
   const heading = screen.getByRole('heading', { level: 2, name: title });
-  const card = heading.closest<HTMLElement>('div.rounded-t4d-lg');
+  // KPI のタイルは数値の帯と同じ目印（data-metric-tile）を持つ（plan §2 S24。旧 div.rounded-t4d-lg）
+  const card = heading.closest<HTMLElement>('[data-metric-tile]');
   if (!card) throw new Error(`${title} のカードが無い`);
   return card;
 }

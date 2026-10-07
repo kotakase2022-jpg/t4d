@@ -37,10 +37,13 @@ test('PBC ボードの列の合計が依頼の総数と一致する', async ({ p
     '差戻し・再提出待ち',
     '受理・クローズ',
   ];
+  // 盤面は状態の絞り込み（SegmentedFilter）。各状態のリンクは「ラベル＋件数」
+  const board = page.getByRole('navigation', { name: '資料依頼の状態で絞り込む' });
   let sum = 0;
   for (const label of labels) {
-    const block = page.getByText(label, { exact: true }).first().locator('..');
-    const text = await block.innerText();
+    const item = board.getByRole('link', { name: new RegExp(`^${label}`) });
+    await expect(item, `盤面に「${label}」が無い`).toHaveCount(1);
+    const text = await item.innerText();
     sum += Number(text.replace(label, '').replace(/\D/g, '') || '0');
   }
   expect(sum, '盤面から消えている依頼がある').toBe(total);
@@ -50,6 +53,8 @@ test('資料依頼に対象を指定でき、一覧に表示される', async ({
   await loginAs(page, DEMO_USERS.assuranceManager);
   await openEngagement(page, 'requests');
 
+  // 作成欄は一覧の上に常設しない（plan S14 CreatePanel）。見出しの主操作で開く
+  await page.locator('[data-page-actions]').getByRole('link', { name: '資料依頼を作成' }).click();
   const form = page.locator('form', { hasText: '送付' });
   const target = form.locator('select[name="targetId"]');
   await expect(target, '対象を選ぶ入力が無い').toBeVisible();

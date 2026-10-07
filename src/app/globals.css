@@ -39,8 +39,42 @@
   --color-info: #0b57a4;
   --color-info-soft: #eaf3ff;
 
+  /*
+   * 意味の色（docs/ui-redesign/plan.md §3.3）。画面ごとの hex 直書きを減らす。
+   * warning-ink は警告の文字色（warning の黄は文字にすると背景との対比が足りないため、暗い同系色）
+   */
+  --color-warning-ink: #8a5d00;
+  --color-overlay: #0b1b34;
+  --color-scrollbar: #c6cfdb;
+  --color-scrollbar-hover: #a9b5c5;
+  --color-focus: #1468c4;
+  --color-selected: #f5f9ff;
+
+  --radius-t4d-sm: 4px;
   --radius-t4d: 6px;
   --radius-t4d-lg: 8px;
+
+  /* 影は 2 段だけ（浮かない面に影を付けない。§1.19） */
+  --shadow-raised: 0 1px 2px rgb(23 32 51 / 0.04);
+  --shadow-overlay: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  /*
+   * 文字サイズ（11〜22px の 9 段）。line-height は持たせない（--text-*--line-height を定義しない）:
+   * text-[12px] と同じ font-size だけの宣言にし、置き換えで行の高さを変えないため（plan §3.4）
+   */
+  --text-caption: 11px;
+  --text-small: 12px;
+  --text-body: 13px;
+  --text-title-sm: 14px;
+  --text-title: 15px;
+  --text-title-lg: 16px;
+  --text-figure-sm: 18px;
+  --text-figure: 20px;
+  --text-figure-lg: 22px;
+
+  /* 段組の境目（PC 専用。1280px 以上） */
+  --breakpoint-wide: 1366px;
+  --breakpoint-xwide: 1600px;
 
   /* Compact Density（指示書 5.3） */
   --spacing-topbar: 48px;
@@ -48,10 +82,37 @@
   --spacing-sidebar-collapsed: 64px;
   --spacing-row: 36px;
 
+  /* 入力欄・表の列の既定幅（DataTable の width: 'xs'〜'xl'） */
+  --spacing-field-sm: 200px;
+  --spacing-field-md: 280px;
+  --spacing-field-lg: 360px;
+  --spacing-col-xs: 88px;
+  --spacing-col-sm: 120px;
+  --spacing-col-md: 200px;
+  --spacing-col-lg: 320px;
+  --spacing-col-xl: 480px;
+
   --font-sans:
     'Inter', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui,
     sans-serif;
   --font-mono: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+}
+
+/*
+ * 重なりの順（z-index）。Tailwind v4 は z の theme 名前空間を持たないため :root の変数にし、
+ * `z-(--z-modal)` のように使う（画面ごとの z-50・z-[1] を役割の名前に寄せる。plan §3.3）
+ */
+:root {
+  --z-sticky-col: 1;
+  --z-sticky: 10;
+  --z-pane: 20;
+  --z-pane-overlay: 30;
+  --z-header: 35;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-popover: 60;
+  --z-progress: 70;
+  --z-skiplink: 100;
 }
 
 @layer base {
@@ -85,13 +146,13 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #c6cfdb;
+    background: var(--color-scrollbar);
     border-radius: 6px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #a9b5c5;
+    background: var(--color-scrollbar-hover);
     background-clip: content-box;
   }
   ::-webkit-scrollbar-track {
@@ -101,6 +162,25 @@
   table {
     border-collapse: separate;
     border-spacing: 0;
+  }
+
+  /*
+   * 表の見出しの固定（Table の stickyHeader。既定で付く）。:where で詳細度を 0 にし、
+   * th に付けた背景・位置のクラス（.t4d-sticky-head を含む）が常に勝つようにする
+   */
+  :where(table[data-sticky-header]) > thead th {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    background-color: var(--color-surface);
+  }
+
+  /*
+   * 画面が FlashMessage で業務エラーを出しているときは、AppShell の補いの通知（GlobalErrorNotice）を出さない。
+   * 描画の順に左右されないよう CSS で決める（同じ文が一瞬 2 つ並ぶのも防ぐ）
+   */
+  #t4d-main:has([data-flash-error]) [data-global-error] {
+    display: none;
   }
 
   /* 数値列は等幅で桁を揃える */
@@ -124,6 +204,25 @@
 
   .t4d-scroll-x {
     overflow-x: auto;
+  }
+
+  /*
+   * 一覧（DataTable）の表の箱。高さを画面までに抑え、長い一覧は箱の中で縦にスクロールさせる
+   * （overflow を持つ箱の中では、見出しの sticky は箱に対して効くため。data-table/scroll-region.tsx）
+   */
+  .t4d-table-scroll {
+    overflow: auto;
+    max-height: calc(100dvh - var(--spacing-topbar) - 1rem);
+  }
+}
+
+/* 画面遷移中の上端のプログレス（NavigationProgress） */
+@keyframes t4d-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
   }
 }
 

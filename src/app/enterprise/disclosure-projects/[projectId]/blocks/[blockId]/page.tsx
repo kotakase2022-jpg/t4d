@@ -39,7 +39,12 @@ export default async function BlockEditorPage({
   } catch (error) {
     if (error instanceof NotFoundError) notFound();
     if (error instanceof AuthorizationError) {
-      return <PermissionDeniedState description="開示の原稿を閲覧する権限がありません。" />;
+      return (
+        <PermissionDeniedState
+          description="開示の原稿を閲覧する権限がありません。"
+          permission="enterprise.disclosure.read"
+        />
+      );
     }
     throw error;
   }
@@ -87,7 +92,7 @@ export default async function BlockEditorPage({
       <PageHeader
         title={data.block.title}
         breadcrumbs={[
-          { label: '企業ワークスペース' },
+          { label: 'ホーム', href: '/enterprise/dashboard' },
           { label: '開示プロジェクト', href: '/enterprise/disclosure-projects' },
           { label: data.project.name, href: `${projectHref}?tab=manuscripts` },
           { label: data.block.title },
@@ -122,21 +127,24 @@ export default async function BlockEditorPage({
       <div className="space-y-1 px-4 pt-2">
         <FlashMessage searchParams={sp} />
         {ctx.demo && (
-          <p className="text-[11px] text-ink-muted">
+          <p className="text-caption text-ink-muted">
             デモデータ｜企業・資料・数値はすべて架空です。本文の版はこのブラウザの Cookie
             でサーバー間を持ち回します（別のブラウザや、Cookie
             の容量不足で古い操作が押し出された後は、版を参照できない場合があります）。自動保存した作業中の本文はサーバーをまたいで持ち回さないため、「版として保存」で版にしてください。
           </p>
         )}
         {data.framework.isDraftStandard && (
-          <p className="flex items-start gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1 text-[12px] text-ink">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          <p className="flex items-start gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1 text-small text-ink">
+            <AlertTriangle
+              className="mt-0.5 size-3.5 shrink-0 text-warning-ink"
+              aria-hidden="true"
+            />
             この節の基準は草案です（{data.framework.coverageLabel ?? '収録状況未確認'}
             ）。承認しても「草案に基づく準備」であり、正式な基準への準拠完了ではありません。
           </p>
         )}
         {data.block.translationOfTitle && (
-          <p className="flex items-center gap-1 text-[12px] text-ink-muted">
+          <p className="flex items-center gap-1 text-small text-ink-muted">
             <Languages className="size-3.5" aria-hidden="true" />
             翻訳元: {data.block.translationOfTitle}
             <Badge tone="neutral">

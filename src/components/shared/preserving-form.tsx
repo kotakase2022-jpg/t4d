@@ -130,7 +130,7 @@ export function PreservingForm({
         <p
           id={errorId}
           role="alert"
-          className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-2.5 py-1.5 text-[12px] text-ink"
+          className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-2.5 py-1.5 text-small text-ink"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" aria-hidden="true" />
           <span>{state.message}（入力は残っています）</span>

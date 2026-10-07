@@ -1,21 +1,18 @@
 import {
-  Check,
-  CircleDot,
   Equal,
   FileSpreadsheet,
   FlaskConical,
   PenLine,
   Plus,
   TriangleAlert,
-  XCircle,
   type LucideIcon,
 } from 'lucide-react';
 import { StatusBreakdown } from '@/components/charts/status-breakdown';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Collapsible } from '@/components/ui/collapsible';
 import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
@@ -35,7 +32,7 @@ import {
 import { importHistoryBreakdown } from '@/lib/imports/history-breakdown';
 import { listQuantitativeImportBatches } from '@/lib/services/quantitative-import';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import type { QuantitativeImportDiffKind, QuantitativeImportStatus } from '@/types/domain';
+import type { QuantitativeImportDiffKind } from '@/types/domain';
 import { StandardImport } from './standard-import';
 
 export const metadata = { title: '数値を登録' };
@@ -71,15 +68,6 @@ const BREAKDOWN_ICON: Record<QuantitativeImportDiffKind, LucideIcon> = {
   changed: PenLine,
   unchanged: Equal,
   error: TriangleAlert,
-};
-
-const BATCH_STATUS_META: Record<
-  QuantitativeImportStatus,
-  { tone: 'outline' | 'success' | 'neutral'; Icon: typeof Check }
-> = {
-  validated: { tone: 'outline', Icon: CircleDot },
-  committed: { tone: 'success', Icon: Check },
-  rejected: { tone: 'neutral', Icon: XCircle },
 };
 
 export default async function StandardImportPage() {
@@ -122,31 +110,39 @@ export default async function StandardImportPage() {
           { label: '数値を登録' },
         ]}
         actions={
-          <>
-            <Button variant="outline" size="sm" asChild>
-              <a href="/templates/standard-metrics.csv" download="standard-metrics.csv">
-                <FileSpreadsheet aria-hidden="true" />
-                標準 CSV のテンプレート
-              </a>
-            </Button>
-            {/* 単位違い・重複・未提出・曖昧な数値などを含む確認用（架空）。デモで検証の理由表示を見せる */}
-            <Button variant="ghost" size="sm" asChild>
-              <a
-                href="/templates/standard-metrics-sample-with-errors.csv"
-                download="standard-metrics-sample-with-errors.csv"
-              >
-                <FileSpreadsheet aria-hidden="true" />
-                確認用サンプル（エラーを含む・架空）
-              </a>
-            </Button>
-          </>
+          <PageActions
+            secondary={[
+              {
+                kind: 'link',
+                id: 'template',
+                label: '標準 CSV のテンプレート',
+                icon: <FileSpreadsheet aria-hidden="true" />,
+                href: '/templates/standard-metrics.csv',
+                download: true,
+                hidden: !allowed,
+              },
+            ]}
+            more={[
+              {
+                // 単位違い・重複・未提出・曖昧な数値などを含む確認用（架空）。デモで検証の理由表示を見せる
+                kind: 'link',
+                id: 'sample-with-errors',
+                label: '確認用サンプル（エラーを含む・架空）',
+                icon: <FileSpreadsheet className="size-3.5" aria-hidden="true" />,
+                href: '/templates/standard-metrics-sample-with-errors.csv',
+                download: true,
+                group: 'export',
+                hidden: !allowed,
+              },
+            ]}
+          />
         }
       />
 
       <div className="space-y-3 p-4">
         {/* 架空である旨は常に見せる。保存のしくみ（技術的な説明）だけを既定で閉じる（§10.4 B6） */}
         {demo && (
-          <div className="rounded-t4d border border-brand-200 bg-brand-50 px-3 py-1.5 text-[11px] text-brand-900">
+          <div className="rounded-t4d border border-brand-200 bg-brand-50 px-3 py-1.5 text-caption text-brand-900">
             <p className="flex items-start gap-1.5">
               <FlaskConical
                 className="mt-0.5 size-3.5 shrink-0 text-brand-600"
@@ -163,9 +159,12 @@ export default async function StandardImportPage() {
         )}
 
         {!allowed ? (
-          <Card>
-            <PermissionDeniedState description="数値の登録には、取込とデータ入力の権限が必要です。必要な場合は管理者へ依頼してください。" />
-          </Card>
+          <PermissionDeniedState
+            permission={
+              can(ctx, 'enterprise.import.run') ? 'enterprise.data.write' : 'enterprise.import.run'
+            }
+            description="数値の登録には、取込とデータ入力の権限が必要です。"
+          />
         ) : (
           <>
             <Collapsible
@@ -184,10 +183,10 @@ export default async function StandardImportPage() {
                   <TBody>
                     {STANDARD_COLUMNS.map((column) => (
                       <TR key={column}>
-                        <TD className="font-mono text-[12px]">{column}</TD>
+                        <TD className="font-mono text-small">{column}</TD>
                         <TD>{STANDARD_FIELD_LABELS[column]}</TD>
                         <TD className="whitespace-nowrap">{COLUMN_NOTES[column].required}</TD>
-                        <TD className="text-[12px] text-ink-muted">{COLUMN_NOTES[column].note}</TD>
+                        <TD className="text-small text-ink-muted">{COLUMN_NOTES[column].note}</TD>
                       </TR>
                     ))}
                   </TBody>
@@ -214,10 +213,11 @@ export default async function StandardImportPage() {
         )}
 
         {allowed && (
-          <Card className="overflow-hidden">
-            <SectionTitle title={`取込の履歴（直近 ${history.length} 件）`} />
+          <Section title={`取込の履歴（直近 ${history.length} 件）`}>
             {history.length === 0 ? (
               <EmptyState
+                kind="not-applicable"
+                size="compact"
                 title="まだ取込はありません"
                 description={
                   demo
@@ -226,11 +226,11 @@ export default async function StandardImportPage() {
                 }
               />
             ) : (
-              <div className="space-y-2 px-3 pb-3">
+              <div className="space-y-2">
                 {/* 確定した取込の行を区分ごとに合計した帯（重ならない区分だけ）。検証のみの取込は
                     台帳に書いていないため数えない。取込ごとの数は既定で閉じた表に置く（§10.4 B6） */}
                 {breakdown.committedBatches === 0 ? (
-                  <p className="text-[12px] text-ink-muted">
+                  <p className="text-small text-ink-muted">
                     確定した取込はまだありません（検証のみ・未確定の {breakdown.otherBatches}{' '}
                     件は行数を合計しません）。
                   </p>
@@ -244,7 +244,7 @@ export default async function StandardImportPage() {
                         icon: BREAKDOWN_ICON[item.key],
                       }))}
                     />
-                    <p className="text-[11px] text-ink-muted">
+                    <p className="text-caption text-ink-muted">
                       確定した取込の {breakdown.totalRows} 行の内訳です。エラーの{' '}
                       {breakdown.excludedRows} 行は登録せずに除外しました。
                       {breakdown.otherBatches > 0 &&
@@ -273,27 +273,21 @@ export default async function StandardImportPage() {
                       </THead>
                       <TBody>
                         {history.map((item) => {
-                          const meta = BATCH_STATUS_META[item.status];
                           return (
                             <TR key={item.id}>
-                              <TD className="max-w-[260px] truncate" title={item.fileName}>
-                                {item.fileName}
-                              </TD>
+                              <TD className="max-w-[260px] break-all">{item.fileName}</TD>
                               <TD>
-                                <Badge tone={meta.tone}>
-                                  <meta.Icon className="size-3" aria-hidden="true" />
-                                  {item.statusLabel}
-                                </Badge>
+                                <StatusBadge domain="quantitativeImport" value={item.status} />
                               </TD>
                               <TD align="right">{item.counts.new}</TD>
                               <TD align="right">{item.counts.changed}</TD>
                               <TD align="right">{item.counts.unchanged}</TD>
                               <TD align="right">{item.counts.error}</TD>
                               <TD align="right">{item.excludedCount}</TD>
-                              <TD className="whitespace-nowrap text-[11px] text-ink-muted">
+                              <TD className="whitespace-nowrap text-caption text-ink-muted">
                                 {formatJst(item.createdAt)}
                               </TD>
-                              <TD className="whitespace-nowrap text-[11px] text-ink-muted">
+                              <TD className="whitespace-nowrap text-caption text-ink-muted">
                                 {item.committedAt ? formatJst(item.committedAt) : '—'}
                               </TD>
                             </TR>
@@ -305,7 +299,7 @@ export default async function StandardImportPage() {
                 </Collapsible>
               </div>
             )}
-          </Card>
+          </Section>
         )}
       </div>
     </>

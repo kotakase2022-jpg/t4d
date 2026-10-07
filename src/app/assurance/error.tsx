@@ -1,6 +1,6 @@
 'use client';
 
-import { ErrorState } from '@/components/shared/states';
+import { RouteError } from '@/components/shared/route-error';
 
 export default function AssuranceError({
   error,
@@ -11,15 +11,7 @@ export default function AssuranceError({
 }) {
   return (
     <div className="p-6">
-      <ErrorState
-        title="案件データを取得できませんでした"
-        description={
-          process.env.NODE_ENV === 'production'
-            ? `識別子: ${error.digest ?? '(なし)'}`
-            : error.message
-        }
-        onRetry={reset}
-      />
+      <RouteError error={error} reset={reset} homeHref="/assurance/dashboard" />
     </div>
   );
 }

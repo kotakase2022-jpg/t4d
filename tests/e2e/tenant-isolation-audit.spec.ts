@@ -147,7 +147,8 @@ test('B: 他法人の Issue を Server Action で解消できない', async ({ p
 test('C: 他社の許諾を Server Action で取り消せない', async ({ page }) => {
   // 被害者（青海テクノロジー）の許諾 ID を取得
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  // 許諾は設定の「アクセス許諾」タブ（plan S17 NavTabs）
+  await page.goto('/enterprise/settings?tab=grants');
   await expect(page.locator('#t4d-main')).toBeVisible();
   const grantId = await page.evaluate(() => {
     const input = document.querySelector('input[name="grantId"]') as HTMLInputElement | null;
@@ -158,7 +159,7 @@ test('C: 他社の許諾を Server Action で取り消せない', async ({ page 
 
   // 攻撃者（蒼天マテリアル）が他社の grantId を指定して取消を試みる
   await loginAs(page, DEMO_USERS.otherEnterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=grants');
   await postServerAction(page, '/enterprise/settings', {
     grantId: grantId as string,
     revoke: 'true',
@@ -166,7 +167,7 @@ test('C: 他社の許諾を Server Action で取り消せない', async ({ page 
 
   // 被害者側で取り消されていないこと
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=grants');
   await expect(page.locator('#t4d-main')).toBeVisible();
   expect(await page.getByRole('button', { name: '再付与' }).count()).toBe(revokedBefore);
 });

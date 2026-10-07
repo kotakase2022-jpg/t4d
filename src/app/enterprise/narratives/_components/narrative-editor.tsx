@@ -19,7 +19,11 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { FormSection } from '@/components/ui/form-section';
 import { Input, Textarea } from '@/components/ui/input';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
+import { NativeSelect } from '@/components/ui/native-select';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { cn } from '@/lib/utils';
 import {
   confirmNarrativeAction,
@@ -45,6 +49,8 @@ import type {
  * - 保存は編集開始時の版を基準にし、他の人が先に保存していれば比較を見せて止める（409 相当）。
  * - 原稿から引用されている場合は、影響する原稿を確認してから保存する。原稿の本文は書き換わらない。
  * - 保存中・保存済み・保存失敗を表示し、失敗しても入力は残す（A35）。
+ * - 主操作は「登録する」「版として保存」の 1 つ。競合したときは「差分を確認したうえで…保存」を主操作にし、
+ *   通常の保存は副操作へ下げる（主操作を 2 つ並べない。plan §2.26 E44）。
  */
 
 export interface NarrativeEditorProps {
@@ -102,7 +108,7 @@ function FieldBox({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="flex items-center gap-1 text-[12px] font-medium text-ink">
+      <label htmlFor={id} className="flex items-center gap-1 text-small font-medium text-ink">
         {field.label}
         {missing && (
           <Badge tone="warning">
@@ -246,8 +252,8 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0 space-y-3 rounded-t4d-lg border border-line bg-surface p-3">
         {props.isCandidate && (
-          <p className="flex items-center gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-[12px] text-ink">
-            <AlertTriangle className="size-3.5 text-[#8a5d00]" aria-hidden="true" />
+          <p className="flex items-center gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-small text-ink">
+            <AlertTriangle className="size-3.5 text-warning-ink" aria-hidden="true" />
             資料の抜粋を並べただけの候補です（AI
             は使っていません）。テンプレート項目は人が記入し、内容を確かめてから保存・確認してください。
           </p>
@@ -256,24 +262,24 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
         {isCreate && (
           <div className="grid gap-2 md:grid-cols-2">
             <div>
-              <label htmlFor="nv-theme" className="block text-[12px] font-medium text-ink">
+              <label htmlFor="nv-theme" className="block text-small font-medium text-ink">
                 情報の種別（必須）
               </label>
-              <select
+              <NativeSelect
                 id="nv-theme"
                 value={theme}
                 onChange={(e) => setTheme(e.target.value)}
-                className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+                className="mt-0.5"
               >
                 {props.themes.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
             <div>
-              <label htmlFor="nv-title" className="block text-[12px] font-medium text-ink">
+              <label htmlFor="nv-title" className="block text-small font-medium text-ink">
                 題名（必須）
               </label>
               <Input
@@ -285,13 +291,13 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
                 className="mt-0.5"
               />
               {fieldErrors.title && (
-                <p id="nv-title-err" className="text-[11px] text-danger">
+                <p id="nv-title-err" className="text-caption text-danger">
                   {fieldErrors.title}
                 </p>
               )}
             </div>
             <div>
-              <label htmlFor="nv-dept" className="block text-[12px] font-medium text-ink">
+              <label htmlFor="nv-dept" className="block text-small font-medium text-ink">
                 担当部署
               </label>
               <Input
@@ -302,7 +308,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
               />
             </div>
             <div>
-              <label htmlFor="nv-tags" className="block text-[12px] font-medium text-ink">
+              <label htmlFor="nv-tags" className="block text-small font-medium text-ink">
                 タグ（読点・カンマ区切り）
               </label>
               <Input
@@ -317,25 +323,25 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
 
         <div className="grid gap-2 md:grid-cols-[160px_minmax(0,1fr)]">
           <div>
-            <label htmlFor="nv-period" className="block text-[12px] font-medium text-ink">
+            <label htmlFor="nv-period" className="block text-small font-medium text-ink">
               年度
             </label>
-            <select
+            <NativeSelect
               id="nv-period"
               value={periodId}
               disabled={disabled}
               onChange={(e) => setPeriodId(e.target.value)}
-              className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+              className="mt-0.5"
             >
               {props.periods.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.code}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
           <div>
-            <label htmlFor="nv-scope" className="block text-[12px] font-medium text-ink">
+            <label htmlFor="nv-scope" className="block text-small font-medium text-ink">
               対象範囲
             </label>
             <Input
@@ -350,16 +356,16 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
         </div>
 
         <section aria-labelledby="nv-template" className="space-y-2">
-          <h2 id="nv-template" className="text-[13px] font-semibold text-ink">
+          <h2 id="nv-template" className="text-body font-semibold text-ink">
             テンプレート項目
             {missing.length > 0 && (
-              <span className="ml-2 text-[11px] font-normal text-[#8a5d00]">
+              <span className="ml-2 text-caption font-normal text-warning-ink">
                 未記入 {missing.length} 項目（空欄のまま保存でき、不足情報として表示されます）
               </span>
             )}
           </h2>
           {theme === 'financial_impact' && (
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-caption text-ink-muted">
               影響額が未確定なら「影響額」は空欄のままにし、「影響額を示さない理由」に書いてください。
               {props.noAmountNote}
             </p>
@@ -378,12 +384,12 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
             ))}
           </div>
           {detailFields.length > 0 && (
-            <details className="rounded-t4d border border-line px-2 py-1.5">
-              <summary className="cursor-pointer text-[12px] font-medium text-brand-800">
-                詳細項目（{detailFields.filter((f) => (fields[f.key] ?? '').trim()).length}/
-                {detailFields.length} 記入）
-              </summary>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <FormSection
+              kind="optional"
+              title={`詳細項目（${detailFields.filter((f) => (fields[f.key] ?? '').trim()).length}/${detailFields.length} 記入）`}
+              open={detailFields.some((f) => (fields[f.key] ?? '').trim() !== '') || undefined}
+            >
+              <div className="grid gap-2 md:grid-cols-2">
                 {detailFields.map((field) => (
                   <FieldBox
                     key={field.key}
@@ -396,12 +402,12 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
                   />
                 ))}
               </div>
-            </details>
+            </FormSection>
           )}
         </section>
 
         <div>
-          <label htmlFor="nv-body" className="block text-[13px] font-semibold text-ink">
+          <label htmlFor="nv-body" className="block text-body font-semibold text-ink">
             本文
           </label>
           <Textarea
@@ -415,7 +421,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
             className="mt-0.5"
           />
           {fieldErrors.body && (
-            <p id="nv-body-err" className="text-[11px] text-danger">
+            <p id="nv-body-err" className="text-caption text-danger">
               {fieldErrors.body}
             </p>
           )}
@@ -424,13 +430,13 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
         <section aria-labelledby="nv-anchors" className="space-y-1">
           <h2
             id="nv-anchors"
-            className="flex items-center gap-1.5 text-[13px] font-semibold text-ink"
+            className="flex items-center gap-1.5 text-body font-semibold text-ink"
           >
             <BookOpen className="size-4" aria-hidden="true" />
             根拠（引用位置 {anchors.length} 件）
           </h2>
           {anchors.length === 0 ? (
-            <p className="text-[12px] text-ink-muted">
+            <p className="text-small text-ink-muted">
               根拠がありません。右の「資料の該当箇所」から引用する箇所を選んでください。
             </p>
           ) : (
@@ -438,12 +444,12 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
               {anchors.map((a) => (
                 <li
                   key={a.id}
-                  className="flex items-start gap-2 rounded-t4d border border-line px-2 py-1 text-[12px]"
+                  className="flex items-start gap-2 rounded-t4d border border-line px-2 py-1 text-small"
                 >
                   <Quote className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
                     <p className="text-ink">「{a.quoteText}」</p>
-                    <p className="text-[11px] text-ink-muted">
+                    <p className="text-caption text-ink-muted">
                       {a.fileId ? (
                         <Link href={`/enterprise/evidence/${a.fileId}`} className="underline">
                           {a.fileName}
@@ -473,11 +479,12 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
                   {!disabled && (
                     <Button
                       variant="ghost"
-                      size="icon"
+                      size="xs"
                       aria-label={`根拠から外す: ${a.fileName} ${a.locationLabel}`}
                       onClick={() => setAnchors((prev) => prev.filter((x) => x.id !== a.id))}
                     >
                       <X aria-hidden="true" />
+                      外す
                     </Button>
                   )}
                 </li>
@@ -485,7 +492,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
             </ul>
           )}
           {anchors.length > 0 && !hasCurrentFact && (
-            <p className="flex items-center gap-1 text-[11px] text-[#8a5d00]">
+            <p className="flex items-center gap-1 text-caption text-warning-ink">
               <AlertTriangle className="size-3" aria-hidden="true" />
               当年度の根拠として登録された資料からの引用がありません（過年度の記載・文体の参考だけでは当年度の事実の根拠になりません）。
             </p>
@@ -494,16 +501,16 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
 
         {!isCreate && (
           <section aria-labelledby="nv-usage" className="space-y-1">
-            <h2 id="nv-usage" className="text-[13px] font-semibold text-ink">
+            <h2 id="nv-usage" className="text-body font-semibold text-ink">
               利用先の原稿（{props.usage.length} 節）
             </h2>
             {props.usage.length === 0 ? (
-              <p className="text-[12px] text-ink-muted">
+              <p className="text-small text-ink-muted">
                 この定性情報を引用している原稿はありません。
               </p>
             ) : (
               <>
-                <ul className="space-y-0.5 text-[12px]">
+                <ul className="space-y-0.5 text-small">
                   {props.usage.map((u) => (
                     <li key={u.blockId} className="flex flex-wrap items-center gap-1">
                       <Link
@@ -516,25 +523,22 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
                         <FileText className="size-3" aria-hidden="true" />
                         {u.blockStatusLabel}
                       </Badge>
-                      <span className="text-[11px] text-ink-muted">
+                      <span className="text-caption text-ink-muted">
                         {u.projectName}／引用中の版 {u.citedVersionNo ?? '—'}
                         {u.citesCurrent ? '' : '（最新ではない）'}
                       </span>
                     </li>
                   ))}
                 </ul>
-                <p className="text-[11px] text-ink-muted">
+                <p className="text-caption text-ink-muted">
                   原稿は採用した時点の本文を持っています。ここで保存しても原稿の本文・承認は書き換わらず、原稿側に「再確認が必要」と表示されます。
                 </p>
                 {props.canWrite && (
-                  <label className="flex items-center gap-1.5 text-[12px] text-ink">
-                    <input
-                      type="checkbox"
-                      checked={acknowledged}
-                      onChange={(e) => setAcknowledged(e.target.checked)}
-                    />
-                    影響する原稿を確認しました
-                  </label>
+                  <NativeCheckbox
+                    checked={acknowledged}
+                    onChange={(e) => setAcknowledged(e.target.checked)}
+                    label="影響する原稿を確認しました"
+                  />
                 )}
               </>
             )}
@@ -543,7 +547,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
 
         {!isCreate && props.canWrite && (
           <div>
-            <label htmlFor="nv-reason" className="block text-[12px] font-medium text-ink">
+            <label htmlFor="nv-reason" className="block text-small font-medium text-ink">
               変更の理由（版として残ります）
             </label>
             <Input
@@ -555,7 +559,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
               className="mt-0.5"
             />
             {fieldErrors.changeReason && (
-              <p id="nv-reason-err" className="text-[11px] text-danger">
+              <p id="nv-reason-err" className="text-caption text-danger">
                 {fieldErrors.changeReason}
               </p>
             )}
@@ -567,7 +571,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
           tabIndex={-1}
           role={saveState.kind === 'failed' || saveState.kind === 'conflict' ? 'alert' : 'status'}
           aria-live="polite"
-          className="text-[12px]"
+          className="text-small"
         >
           {saveState.kind === 'saving' && (
             <span className="flex items-center gap-1 text-ink-muted">
@@ -594,7 +598,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
           )}
           {saveState.kind === 'needs_confirmation' && (
             <span className="flex items-center gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1 text-ink">
-              <AlertTriangle className="size-3.5 text-[#8a5d00]" aria-hidden="true" />
+              <AlertTriangle className="size-3.5 text-warning-ink" aria-hidden="true" />
               この定性情報は {saveState.usage.length}{' '}
               節の原稿から引用されています。「影響する原稿を確認しました」にチェックしてから保存してください。
             </span>
@@ -612,6 +616,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
         {props.canWrite && (
           <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
             <Button
+              variant={saveState.kind === 'conflict' ? 'secondary' : 'primary'}
               onClick={() => void submit()}
               disabled={saveState.kind === 'saving'}
               aria-busy={saveState.kind === 'saving'}
@@ -623,20 +628,23 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
               )}
               {isCreate ? '登録する' : '版として保存'}
             </Button>
-            {dirty && <span className="text-[11px] text-ink-muted">未保存の変更があります</span>}
+            {dirty && (
+              <span id="nv-dirty" className="text-caption text-ink-muted">
+                未保存の変更があります（確認済みにする前に保存してください）
+              </span>
+            )}
             {!isCreate && props.narrativeId && baseVersionId && (
               <form action={confirmNarrativeAction} className="ml-auto">
                 <input type="hidden" name="narrativeId" value={props.narrativeId} />
                 <input type="hidden" name="versionId" value={baseVersionId} />
-                <Button
-                  type="submit"
-                  variant="outline"
+                <SubmitButton
+                  variant="secondary"
                   disabled={dirty || props.currentConfirmed}
-                  title={dirty ? '未保存の変更を保存してから確認してください' : undefined}
+                  aria-describedby={dirty ? 'nv-dirty' : undefined}
+                  icon={<ShieldCheck aria-hidden="true" />}
                 >
-                  <ShieldCheck aria-hidden="true" />
                   {props.currentConfirmed ? '確認済み' : '内容を確認済みにする（人の確認）'}
-                </Button>
+                </SubmitButton>
               </form>
             )}
           </div>
@@ -667,9 +675,9 @@ function ConflictView({
   return (
     <section
       aria-labelledby="nv-conflict"
-      className="space-y-2 rounded-t4d border border-danger/40 bg-danger-soft/40 p-3 text-[12px]"
+      className="space-y-2 rounded-t4d border border-danger/40 bg-danger-soft/40 p-3 text-small"
     >
-      <h2 id="nv-conflict" className="flex items-center gap-1 text-[13px] font-semibold text-ink">
+      <h2 id="nv-conflict" className="flex items-center gap-1 text-body font-semibold text-ink">
         <AlertTriangle className="size-4 text-danger" aria-hidden="true" />
         他の人が先に保存しました（競合）。あなたの内容はまだ保存していません。
       </h2>
@@ -678,9 +686,9 @@ function ConflictView({
         {conflict.latestCreatedAt ?? '—'}）
       </p>
       {conflict.fieldDiffs.length > 0 && (
-        <table className="w-full text-[12px]">
+        <table className="w-full text-small">
           <thead>
-            <tr className="text-left text-[11px] text-ink-muted">
+            <tr className="text-left text-caption text-ink-muted">
               <th scope="col" className="py-0.5 pr-2">
                 項目
               </th>
@@ -706,7 +714,7 @@ function ConflictView({
         </table>
       )}
       <div>
-        <p className="text-[11px] text-ink-muted">本文の差分（最新の版 → あなたの入力）</p>
+        <p className="text-caption text-ink-muted">本文の差分（最新の版 → あなたの入力）</p>
         <p className="whitespace-pre-wrap rounded-t4d bg-surface p-2 leading-6">
           {conflict.bodyDiff.map((s, i) =>
             s.op === 'equal' ? (
@@ -726,10 +734,10 @@ function ConflictView({
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={onReload}>
+        <Button variant="secondary" size="sm" onClick={onReload}>
           最新の版を開き直す（あなたの入力は破棄）
         </Button>
-        <Button size="sm" onClick={onOverride}>
+        <Button variant="primary" size="sm" onClick={onOverride}>
           差分を確認したうえで、あなたの内容を次の版として保存
         </Button>
       </div>
@@ -813,16 +821,16 @@ function DocumentPane({
     >
       <h2
         id="doc-pane-title"
-        className="flex items-center gap-1.5 text-[13px] font-semibold text-ink"
+        className="flex items-center gap-1.5 text-body font-semibold text-ink"
       >
         <FileText className="size-4" aria-hidden="true" />
         資料の該当箇所
       </h2>
       {documents.length === 0 ? (
-        <p className="text-[12px] text-ink-muted">
+        <p className="text-small text-ink-muted">
           引用できる資料がありません。
           <Link
-            href="/enterprise/evidence?purpose=qualitative"
+            href="/enterprise/evidence?purpose=qualitative&new=1#evidence-create"
             className="ml-1 text-brand-800 underline"
           >
             定性情報の資料を登録
@@ -830,14 +838,14 @@ function DocumentPane({
         </p>
       ) : (
         <>
-          <label htmlFor="doc-select" className="block text-[12px] text-ink">
+          <label htmlFor="doc-select" className="block text-small text-ink">
             資料
           </label>
-          <select
+          <NativeSelect
             id="doc-select"
             value={fileId ?? ''}
             onChange={(e) => setFileId(e.target.value || null)}
-            className="block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[12px]"
+            className="text-small"
           >
             {documents.map((d) => (
               <option key={d.fileId} value={d.fileId}>
@@ -845,9 +853,9 @@ function DocumentPane({
                 {d.periodCode ? `・${d.periodCode}` : ''}）
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {current && (
-            <p className="flex flex-wrap gap-1 text-[11px] text-ink-muted">
+            <p className="flex flex-wrap gap-1 text-caption text-ink-muted">
               <Badge tone={current.usagePurposeLabel === '当年度の根拠' ? 'success' : 'warning'}>
                 <Tag className="size-3" aria-hidden="true" />
                 {current.usagePurposeLabel}
@@ -861,7 +869,7 @@ function DocumentPane({
               </Link>
             </p>
           )}
-          <div aria-live="polite" className="text-[12px]">
+          <div aria-live="polite" className="text-small">
             {loading && (
               <span className="flex items-center gap-1 text-ink-muted">
                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
@@ -876,11 +884,11 @@ function DocumentPane({
               <li
                 key={f.id}
                 className={cn(
-                  'rounded-t4d border px-2 py-1.5 text-[12px]',
+                  'rounded-t4d border px-2 py-1.5 text-small',
                   selected === f.id ? 'border-brand-300 bg-brand-50' : 'border-line',
                 )}
               >
-                <p className="flex items-center gap-1 text-[11px] font-medium text-ink-muted">
+                <p className="flex items-center gap-1 text-caption font-medium text-ink-muted">
                   {f.locationLabel}
                   {f.manual && (
                     <Badge tone="neutral">
@@ -893,7 +901,7 @@ function DocumentPane({
                 {canCite &&
                   (selected === f.id ? (
                     <div className="mt-1 space-y-1">
-                      <label htmlFor={`quote-${f.id}`} className="block text-[11px] text-ink">
+                      <label htmlFor={`quote-${f.id}`} className="block text-caption text-ink">
                         引用する文言（必須・この箇所の文言から選ぶ）
                       </label>
                       <Textarea
@@ -904,6 +912,7 @@ function DocumentPane({
                       />
                       <div className="flex gap-1">
                         <Button
+                          variant="secondary"
                           size="xs"
                           onClick={() => void cite(f.id)}
                           disabled={citing || !quote.trim()}
@@ -924,7 +933,7 @@ function DocumentPane({
                   ) : (
                     <Button
                       size="xs"
-                      variant="outline"
+                      variant="secondary"
                       className="mt-1"
                       onClick={() => {
                         setSelected(f.id);
@@ -937,7 +946,7 @@ function DocumentPane({
               </li>
             ))}
             {fragments !== null && fragments.length === 0 && !loading && !error && (
-              <li className="text-[12px] text-ink-muted">
+              <li className="text-small text-ink-muted">
                 抽出できた箇所がありません。資料の画面で手動抜粋を登録してください。
               </li>
             )}

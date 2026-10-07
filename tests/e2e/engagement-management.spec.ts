@@ -4,6 +4,7 @@ import { DEMO_USERS, loginAs } from './helpers';
 /**
  * 保証契約の起票。
  * 案件を作れないと、監査法人は契約を受注してもシステム上で仕事を始められない。
+ * 起票の欄は一覧の上に常設しない（plan S14 CreatePanel）。見出しの主操作「保証契約を起票」で開く。
  */
 test.describe.configure({ mode: 'serial' });
 
@@ -11,6 +12,7 @@ test('監査法人が新しい案件を起票でき、起票者がチームに�
   await loginAs(page, DEMO_USERS.assuranceManager);
   await page.goto('/assurance/engagements');
 
+  await page.locator('[data-page-actions]').getByRole('link', { name: '保証契約を起票' }).click();
   const form = page.locator('form', { hasText: '起票' });
   await expect(form, '案件を起票するフォームが無い').toBeVisible();
 
@@ -32,6 +34,7 @@ test('案件コードが重複すると理由付きで拒否される', async ({
   await page.goto('/assurance/engagements');
 
   const existing = await page.locator('tbody tr td').first().innerText();
+  await page.locator('[data-page-actions]').getByRole('link', { name: '保証契約を起票' }).click();
   const form = page.locator('form', { hasText: '起票' });
   await form.locator('input[name="code"]').fill(existing.trim());
   await form.locator('input[name="name"]').fill('重複コードの案件');
@@ -43,5 +46,10 @@ test('案件コードが重複すると理由付きで拒否される', async ({
 test('案件管理の権限が無いロールには起票フォームが出ない', async ({ page }) => {
   await loginAs(page, DEMO_USERS.assuranceStaff);
   await page.goto('/assurance/engagements');
+  await expect(page.locator('form', { hasText: '起票' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '保証契約を起票' })).toHaveCount(0);
+  // 欄を開く URL を直接開いても、権限が無ければ欄は出ない
+  await page.goto('/assurance/engagements?new=1');
+  await expect(page.locator('#t4d-main')).toBeVisible();
   await expect(page.locator('form', { hasText: '起票' })).toHaveCount(0);
 });

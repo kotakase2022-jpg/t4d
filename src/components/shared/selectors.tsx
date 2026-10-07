@@ -45,20 +45,20 @@ export function WorkspaceSelector({
 
   if (choices.length <= 1) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] font-medium text-ink">
+      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-body font-medium text-ink">
         <Building2 className="size-3.5 text-ink-muted" aria-hidden="true" />
         {current.organizationName}
-        <span className="text-[11px] text-ink-muted">（{typeLabel}）</span>
+        <span className="text-caption text-ink-muted">（{typeLabel}）</span>
       </span>
     );
   }
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t4d px-2 py-1 text-[13px] font-medium text-ink hover:bg-brand-50">
+      <DropdownMenuTrigger className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t4d px-2 py-1 text-body font-medium text-ink hover:bg-brand-50">
         <Building2 className="size-3.5 text-ink-muted" aria-hidden="true" />
         {current.organizationName}
-        <span className="text-[11px] text-ink-muted">（{typeLabel}）</span>
+        <span className="text-caption text-ink-muted">（{typeLabel}）</span>
         <ChevronDown className="size-3.5 text-ink-muted" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -78,7 +78,7 @@ export function WorkspaceSelector({
             }}
           >
             {choice.organizationName}
-            <span className="ml-auto text-[11px] text-ink-muted">
+            <span className="ml-auto text-caption text-ink-muted">
               {choice.organizationType === 'enterprise' ? '企業' : '監査法人'}
             </span>
           </DropdownMenuItem>
@@ -210,7 +210,7 @@ export function UserMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="inline-flex items-center gap-1.5 rounded-t4d px-2 py-1 text-[13px] text-ink hover:bg-brand-50"
+        className="inline-flex items-center gap-1.5 rounded-t4d px-2 py-1 text-body text-ink hover:bg-brand-50"
         aria-label={`ユーザーメニュー: ${displayName}`}
       >
         <User className="size-3.5 text-ink-muted" aria-hidden="true" />
@@ -219,7 +219,7 @@ export function UserMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[240px]">
         <DropdownMenuLabel>ログイン中</DropdownMenuLabel>
-        <div className="px-2 pb-1.5 text-[12px] text-ink-muted">
+        <div className="px-2 pb-1.5 text-small text-ink-muted">
           <div className="truncate text-ink">{displayName}</div>
           <div className="truncate">{email}</div>
           <div className="mt-1 truncate">{roleKeys.map(roleLabel).join(' / ')}</div>

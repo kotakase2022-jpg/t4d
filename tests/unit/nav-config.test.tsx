@@ -9,9 +9,11 @@ import {
   hiddenNavHrefsFor,
   isNavAncestorOfCurrent,
   isNavSubtreeActive,
+  missingNavPermissions,
   navBranchOf,
   navTreeFor,
   resolveNavCurrent,
+  visibleNavTree,
   type NavItem,
 } from '@/components/shared/nav-config';
 import { NAV_BRANCH_STORAGE_KEY, rememberNavBranch } from '@/components/shared/nav-branch';
@@ -399,6 +401,64 @@ describe('権限の無い項目を出さない（hiddenNavHrefsFor）', () => {
       }
     },
   );
+
+  it('開示優先: 「数値を登録（標準CSV）」は取込の権限がある役割だけに出す（画面のゲートと同じ。開くと権限なしの項目を出さない）', () => {
+    for (const role of ['reviewer', 'approver', 'viewer', 'supplier_contributor'] as const) {
+      expect(
+        new Set(hiddenFor(ENTERPRISE_NAV_DISCLOSURE_FIRST, role)).has(
+          '/enterprise/imports/standard',
+        ),
+        role,
+      ).toBe(true);
+    }
+    for (const role of [
+      'enterprise_admin',
+      'sustainability_manager',
+      'site_contributor',
+    ] as const) {
+      expect(
+        new Set(hiddenFor(ENTERPRISE_NAV_DISCLOSURE_FIRST, role)).has(
+          '/enterprise/imports/standard',
+        ),
+        role,
+      ).toBe(false);
+    }
+  });
+
+  it('開示優先: 開示の閲覧権限が無い役割には「開示プロジェクト」の行を開ける最初の子（SSBJ）へのリンクにする（配下は残す）', () => {
+    const missing = (role: Parameters<typeof permissionsFor>[0][number]) => {
+      const permissions = new Set(permissionsFor([role]));
+      return missingNavPermissions(ENTERPRISE_NAV_DISCLOSURE_FIRST, (p) => permissions.has(p));
+    };
+    const site = visibleNavTree(
+      ENTERPRISE_NAV_DISCLOSURE_FIRST,
+      hiddenFor(ENTERPRISE_NAV_DISCLOSURE_FIRST, 'site_contributor'),
+      missing('site_contributor'),
+    );
+    const projects = site.find((item) => item.label === '開示プロジェクト');
+    expect(projects?.href).toBe('/enterprise/disclosures/ssbj');
+    expect(projects?.linkFallback).toBe(true);
+    expect(projects?.children?.map((c) => c.label)).toEqual([
+      'SSBJ',
+      'その他の開示',
+      'レポート出力',
+    ]);
+    // パレットの「画面」には、開けない入口（開示プロジェクトの一覧）を出さない。子は経路付きで出す
+    const entries = navCommandEntries(site).map((e) => [e.label, e.href]);
+    expect(entries).not.toContainEqual(['開示プロジェクト', '/enterprise/disclosures/ssbj']);
+    expect(entries.map(([, href]) => href)).not.toContain('/enterprise/disclosure-projects');
+    expect(entries).toContainEqual(['開示プロジェクト / SSBJ', '/enterprise/disclosures/ssbj']);
+
+    // 閲覧権限のある役割は従来どおり一覧へのリンク
+    const admin = visibleNavTree(
+      ENTERPRISE_NAV_DISCLOSURE_FIRST,
+      hiddenFor(ENTERPRISE_NAV_DISCLOSURE_FIRST, 'enterprise_admin'),
+      missing('enterprise_admin'),
+    );
+    const adminProjects = admin.find((item) => item.label === '開示プロジェクト');
+    expect(adminProjects?.href).toBe('/enterprise/disclosure-projects');
+    expect(adminProjects?.linkFallback).toBeUndefined();
+  });
 
   it('開示の閲覧権限を持つ役割（閲覧者）には、定性情報・CSRD を出す', () => {
     const hidden = new Set(hiddenFor(ENTERPRISE_NAV, 'viewer'));

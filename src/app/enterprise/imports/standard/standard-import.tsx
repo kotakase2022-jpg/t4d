@@ -15,9 +15,13 @@ import {
   XCircle,
 } from 'lucide-react';
 import { FileDropZone } from '@/components/shared/file-drop-zone';
+import { StepNav } from '@/components/shared/step-nav';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
+import { NativeSelect } from '@/components/ui/native-select';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { AVAILABILITY_STATUS_LABELS, VALUE_KIND_LABELS } from '@/lib/domain/disclosure-status';
 import { cn } from '@/lib/utils';
@@ -89,42 +93,17 @@ function newKey(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-const selectClass =
-  'mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px] text-ink focus-visible:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100';
-
+/** 登録の 5 段（共通の StepNav。番号・チェックと語で状態を示す。plan S25） */
 function StepIndicator({ current, done }: { current: number; done: boolean }) {
   return (
-    <ol aria-label="登録の手順" className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {STEPS.map((label, index) => {
-        const complete = done || index < current;
-        const active = !done && index === current;
-        return (
-          <li
-            key={label}
-            aria-current={active ? 'step' : undefined}
-            className={cn(
-              'flex items-center gap-1 text-[12px]',
-              active ? 'font-semibold text-brand-800' : complete ? 'text-ink' : 'text-ink-muted',
-            )}
-          >
-            <span
-              className={cn(
-                'flex size-5 items-center justify-center rounded-full border text-[11px]',
-                complete
-                  ? 'border-success/40 bg-success-soft text-success'
-                  : active
-                    ? 'border-brand-300 bg-brand-100 text-brand-900'
-                    : 'border-line bg-surface text-ink-muted',
-              )}
-            >
-              {complete ? <Check className="size-3" aria-hidden="true" /> : index + 1}
-            </span>
-            {label}
-            {complete && <span className="sr-only">（完了）</span>}
-          </li>
-        );
-      })}
-    </ol>
+    <StepNav
+      ariaLabel="登録の手順"
+      steps={STEPS.map((label, index) => ({
+        key: label,
+        label,
+        state: done || index < current ? 'done' : index === current ? 'current' : 'todo',
+      }))}
+    />
   );
 }
 
@@ -143,7 +122,7 @@ function Alert({
       role={role}
       aria-live={role === 'status' ? 'polite' : undefined}
       className={cn(
-        'flex items-start gap-1.5 rounded-t4d border px-3 py-2 text-[12px] text-ink',
+        'flex items-start gap-1.5 rounded-t4d border px-3 py-2 text-small text-ink',
         tone === 'success' && 'border-success/40 bg-success-soft',
         tone === 'warning' && 'border-warning/40 bg-warning-soft',
         tone === 'danger' && 'border-danger/40 bg-danger-soft',
@@ -153,7 +132,7 @@ function Alert({
         className={cn(
           'mt-0.5 size-3.5 shrink-0',
           tone === 'success' && 'text-success',
-          tone === 'warning' && 'text-[#8a5d00]',
+          tone === 'warning' && 'text-warning-ink',
           tone === 'danger' && 'text-danger',
         )}
         aria-hidden="true"
@@ -396,7 +375,7 @@ export function StandardImport({
         <StepIndicator current={currentStep} done={committed} />
 
         <section aria-labelledby="standard-source-title" className="space-y-2">
-          <h3 id="standard-source-title" className="text-[13px] font-semibold text-ink">
+          <h3 id="standard-source-title" className="text-body font-semibold text-ink">
             1. ファイル選択
           </h3>
           <div role="group" aria-label="登録のしかた" className="flex flex-wrap gap-1">
@@ -409,7 +388,7 @@ export function StandardImport({
             ).map(([key, label, Icon]) => (
               <Button
                 key={key}
-                variant={sourceKind === key ? 'secondary' : 'outline'}
+                variant={sourceKind === key ? 'quiet' : 'secondary'}
                 size="sm"
                 aria-pressed={sourceKind === key}
                 onClick={() => {
@@ -431,10 +410,10 @@ export function StandardImport({
             }}
           >
             <div className="grid gap-2 md:grid-cols-2">
-              <label className="text-[12px] text-ink-muted">
+              <label className="text-small text-ink-muted">
                 報告期間（画面の対象期間）
-                <select
-                  className={selectClass}
+                <NativeSelect
+                  className="mt-0.5"
                   value={periodId}
                   onChange={(event) => {
                     setPeriodId(event.target.value);
@@ -448,13 +427,13 @@ export function StandardImport({
                         : `${p.label}（${p.startDate}〜${p.endDate}）`}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
               {sourceKind !== 'manual' && (
-                <label className="text-[12px] text-ink-muted">
+                <label className="text-small text-ink-muted">
                   数値の書式
-                  <select
-                    className={selectClass}
+                  <NativeSelect
+                    className="mt-0.5"
                     value={notation}
                     onChange={(event) => {
                       setNotation(event.target.value);
@@ -466,7 +445,7 @@ export function StandardImport({
                         {n.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </label>
               )}
             </div>
@@ -478,10 +457,10 @@ export function StandardImport({
                   className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-t4d-lg border-2 border-dashed border-line bg-surface-muted px-4 py-6 text-center transition-colors focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100 hover:border-brand-400 hover:bg-brand-50"
                 >
                   <FileUp className="size-5 text-brand-600" aria-hidden="true" />
-                  <span className="text-[13px] font-medium text-ink">
+                  <span className="text-body font-medium text-ink">
                     クリックして CSV を選択 ／ ここへドロップ
                   </span>
-                  <span className="text-[11px] text-ink-muted">
+                  <span className="text-caption text-ink-muted">
                     .csv / .tsv / .txt（UTF-8・BOM 付き UTF-8・Shift_JIS）／ {limitsLabel}
                   </span>
                   <input
@@ -497,7 +476,7 @@ export function StandardImport({
                   />
                 </FileDropZone>
                 {file && (
-                  <p role="status" aria-live="polite" className="text-[12px] text-ink">
+                  <p role="status" aria-live="polite" className="text-small text-ink">
                     選択中: <span className="font-medium">{file.name}</span>
                     <span className="ml-1 text-ink-muted">
                       （{Math.max(1, Math.round(file.size / 1024))} KB）
@@ -508,7 +487,7 @@ export function StandardImport({
             )}
 
             {sourceKind === 'text' && (
-              <label className="block text-[12px] text-ink-muted">
+              <label className="block text-small text-ink-muted">
                 表計算ソフトからコピーした範囲（見出し行を含む。タブ区切り・カンマ区切りのどちらでも可）
                 <Textarea
                   className="mt-0.5 font-mono"
@@ -538,7 +517,7 @@ export function StandardImport({
               <Alert tone="danger">
                 <p>{validateFeedback.message}</p>
                 {validateFeedback.kind === 'failure' && (
-                  <Button variant="outline" size="xs" onClick={runValidate} disabled={validating}>
+                  <Button variant="secondary" size="xs" onClick={runValidate} disabled={validating}>
                     <RotateCcw aria-hidden="true" />
                     再試行
                   </Button>
@@ -547,11 +526,10 @@ export function StandardImport({
             )}
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="submit"
+              <SubmitButton
                 size="sm"
                 // 検証の後は「登録を確定」が主要な操作。再検証は副次の操作として目立たせない（主要 CTA は 1 つ。§4.2）
-                variant={preview && !committed ? 'outline' : undefined}
+                variant={preview && !committed ? 'secondary' : 'primary'}
                 disabled={validating || committing}
                 aria-busy={validating}
               >
@@ -565,8 +543,8 @@ export function StandardImport({
                   : preview
                     ? 'もう一度検証する'
                     : '検証する（まだ登録しません）'}
-              </Button>
-              <span className="text-[11px] text-ink-muted">
+              </SubmitButton>
+              <span className="text-caption text-ink-muted">
                 検証では台帳を変えません。差分を確認してから「登録を確定」を押します。
               </span>
             </div>
@@ -586,15 +564,15 @@ export function StandardImport({
           <DiffTable preview={preview} />
 
           <section aria-labelledby="standard-commit-title" className="space-y-2">
-            <h3 id="standard-commit-title" className="text-[13px] font-semibold text-ink">
+            <h3 id="standard-commit-title" className="text-body font-semibold text-ink">
               5. 登録確定
             </h3>
 
             {!committed && (
               <>
                 <fieldset className="space-y-1.5">
-                  <legend className="text-[12px] text-ink-muted">確定の方法</legend>
-                  <label className="flex items-start gap-2 text-[13px] text-ink">
+                  <legend className="text-small text-ink-muted">確定の方法</legend>
+                  <label className="flex items-start gap-2 text-body text-ink">
                     <input
                       type="radio"
                       name="standard-commit-mode"
@@ -604,12 +582,12 @@ export function StandardImport({
                     />
                     <span>
                       すべての行を確定（既定）
-                      <span className="block text-[11px] text-ink-muted">
+                      <span className="block text-caption text-ink-muted">
                         エラーが 1 行でもあれば確定しません。
                       </span>
                     </span>
                   </label>
-                  <label className="flex items-start gap-2 text-[13px] text-ink">
+                  <label className="flex items-start gap-2 text-body text-ink">
                     <input
                       type="radio"
                       name="standard-commit-mode"
@@ -620,7 +598,7 @@ export function StandardImport({
                     />
                     <span>
                       正常行のみ登録（エラーの {preview.counts.error} 行を除外）
-                      <span className="block text-[11px] text-ink-muted">
+                      <span className="block text-caption text-ink-muted">
                         除外した行は登録されず、未登録のまま残ります（完了扱いにしません）。
                       </span>
                     </span>
@@ -629,10 +607,10 @@ export function StandardImport({
 
                 {mode === 'valid_only' && errorRows.length > 0 && (
                   <div className="space-y-1 rounded-t4d border border-line bg-surface-muted px-3 py-2">
-                    <p className="text-[12px] font-medium text-ink">
+                    <p className="text-small font-medium text-ink">
                       除外する行（{errorRows.length} 行）
                     </p>
-                    <ul className="max-h-40 space-y-0.5 overflow-auto text-[12px] text-ink">
+                    <ul className="max-h-40 space-y-0.5 overflow-auto text-small text-ink">
                       {errorRows.map((row) => (
                         <li key={row.rowNo}>
                           {row.rowNo} 行目: {row.errors[0]}
@@ -640,9 +618,8 @@ export function StandardImport({
                         </li>
                       ))}
                     </ul>
-                    <label className="flex items-center gap-2 text-[12px] text-ink">
-                      <input
-                        type="checkbox"
+                    <label className="flex items-center gap-2 text-small text-ink">
+                      <NativeCheckbox
                         checked={confirmExcluded}
                         onChange={(event) => setConfirmExcluded(event.target.checked)}
                       />
@@ -652,7 +629,7 @@ export function StandardImport({
                 )}
 
                 {preview.counts.changed > 0 && (
-                  <label className="block text-[12px] text-ink-muted">
+                  <label className="block text-small text-ink-muted">
                     変更理由（必須・新しい版に残ります。旧版は消えません）
                     <Textarea
                       className="mt-0.5"
@@ -667,16 +644,16 @@ export function StandardImport({
                   </label>
                 )}
 
-                <p className="text-[11px] text-ink-muted">
+                <p className="text-caption text-ink-muted">
                   取込で承認はしません。登録した値は「入力中」になり、承認済みの値を変えた場合は下書きへ戻して「承認後に変更」を記録します。
                 </p>
 
                 {blockers.length > 0 && (
-                  <ul id="standard-commit-blockers" className="space-y-0.5 text-[12px] text-ink">
+                  <ul id="standard-commit-blockers" className="space-y-0.5 text-small text-ink">
                     {blockers.map((blocker) => (
                       <li key={blocker} className="flex items-start gap-1">
                         <AlertTriangle
-                          className="mt-0.5 size-3 shrink-0 text-[#8a5d00]"
+                          className="mt-0.5 size-3 shrink-0 text-warning-ink"
                           aria-hidden="true"
                         />
                         {blocker}
@@ -686,6 +663,7 @@ export function StandardImport({
                 )}
 
                 <Button
+                  variant="primary"
                   size="sm"
                   onClick={runCommit}
                   disabled={blockers.length > 0 || committing || validating}
@@ -735,10 +713,10 @@ function ManualFields({
     manual.availabilityStatus === 'not_calculated';
   return (
     <div className="grid gap-2 md:grid-cols-3">
-      <label className="text-[12px] text-ink-muted md:col-span-2">
+      <label className="text-small text-ink-muted md:col-span-2">
         指標（必須）
-        <select
-          className={selectClass}
+        <NativeSelect
+          className="mt-0.5"
           value={manual.metricCode}
           required
           onChange={(event) => onChange('metricCode', event.target.value)}
@@ -749,12 +727,12 @@ function ManualFields({
               {m.code} — {m.name}（{m.unit}）
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         組織（必須）
-        <select
-          className={selectClass}
+        <NativeSelect
+          className="mt-0.5"
           value={manual.entityCode}
           required
           onChange={(event) => onChange('entityCode', event.target.value)}
@@ -765,12 +743,12 @@ function ManualFields({
               {u.code} — {u.name}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         値の有無
-        <select
-          className={selectClass}
+        <NativeSelect
+          className="mt-0.5"
           value={manual.availabilityStatus}
           onChange={(event) =>
             onChange('availabilityStatus', event.target.value as AvailabilityStatus)
@@ -781,9 +759,9 @@ function ManualFields({
               {AVAILABILITY_STATUS_LABELS[status]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         値{manual.availabilityStatus === 'value_present' ? '（必須）' : '（値なし）'}
         <Input
           className="mt-0.5 text-right tnum"
@@ -794,7 +772,7 @@ function ManualFields({
           placeholder="例: 1190.9"
         />
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         単位
         <Input
           className="mt-0.5"
@@ -802,10 +780,10 @@ function ManualFields({
           onChange={(event) => onChange('unit', event.target.value)}
         />
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         値の区分
-        <select
-          className={selectClass}
+        <NativeSelect
+          className="mt-0.5"
           value={manual.valueKind}
           onChange={(event) => onChange('valueKind', event.target.value as ValueKind)}
         >
@@ -814,21 +792,21 @@ function ManualFields({
               {VALUE_KIND_LABELS[kind]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         集計範囲
-        <select
-          className={selectClass}
+        <NativeSelect
+          className="mt-0.5"
           value={manual.boundaryCode}
           onChange={(event) => onChange('boundaryCode', event.target.value)}
         >
           <option value="">既定（組織の連結区分から）</option>
           <option value="連結">連結</option>
           <option value="単体">単体</option>
-        </select>
+        </NativeSelect>
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         値が無い理由{needsReason ? '（必須）' : ''}
         <Input
           className="mt-0.5"
@@ -839,7 +817,7 @@ function ManualFields({
           onChange={(event) => onChange('absenceReason', event.target.value)}
         />
       </label>
-      <label className="text-[12px] text-ink-muted">
+      <label className="text-small text-ink-muted">
         算定方法
         <Input
           className="mt-0.5"
@@ -847,7 +825,7 @@ function ManualFields({
           onChange={(event) => onChange('methodologyCode', event.target.value)}
         />
       </label>
-      <label className="text-[12px] text-ink-muted md:col-span-3">
+      <label className="text-small text-ink-muted md:col-span-3">
         出所（資料名・シート・セルなど）
         <Input
           className="mt-0.5"
@@ -897,7 +875,7 @@ function CommitFeedbackView({
           登録した値は「入力中」です。提出・承認は非財務データの画面から行います。
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="xs" asChild>
+          <Button variant="secondary" size="xs" asChild>
             <Link href="/enterprise/data">非財務データで確認する</Link>
           </Button>
           <Button variant="ghost" size="xs" onClick={onStartOver}>
@@ -927,8 +905,8 @@ function CommitFeedbackView({
               {feedback.conflicts.map((c) => (
                 <TR key={c.rowNo}>
                   <TD className="tnum">{c.rowNo}</TD>
-                  <TD className="font-mono text-[12px]">{c.label}</TD>
-                  <TD className="text-[12px]">{c.reason}</TD>
+                  <TD className="font-mono text-small">{c.label}</TD>
+                  <TD className="text-small">{c.reason}</TD>
                   <TD align="right">{c.previewDisplay}</TD>
                   <TD align="right">{c.currentDisplay}</TD>
                 </TR>
@@ -936,7 +914,7 @@ function CommitFeedbackView({
             </TBody>
           </Table>
         </div>
-        <Button variant="outline" size="xs" onClick={onRevalidate} disabled={busy}>
+        <Button variant="secondary" size="xs" onClick={onRevalidate} disabled={busy}>
           <RotateCcw aria-hidden="true" />
           最新の値で検証し直す
         </Button>
@@ -948,13 +926,13 @@ function CommitFeedbackView({
     <Alert tone="danger">
       <p>{feedback.message}</p>
       {feedback.kind === 'expired' && (
-        <Button variant="outline" size="xs" onClick={onRevalidate} disabled={busy}>
+        <Button variant="secondary" size="xs" onClick={onRevalidate} disabled={busy}>
           <RotateCcw aria-hidden="true" />
           もう一度検証する
         </Button>
       )}
       {(feedback.kind === 'partial' || feedback.kind === 'failure') && (
-        <Button variant="outline" size="xs" onClick={onRetryCommit} disabled={busy}>
+        <Button variant="secondary" size="xs" onClick={onRetryCommit} disabled={busy}>
           <RotateCcw aria-hidden="true" />
           {feedback.kind === 'partial' ? '続きから確定する' : '再試行'}
         </Button>

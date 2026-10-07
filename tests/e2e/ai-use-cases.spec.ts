@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openMoreMenu } from './helpers';
 
 /**
  * 「利用できる AI 機能」に並んでいるのに、アプリ内から実行できない機能があった。
@@ -15,10 +15,12 @@ test('検証で指摘のある Data Point で、AI に原因を説明させら�
   const href = (await link.getAttribute('href'))!;
 
   await page.goto(href);
-  const button = page.getByRole('button', { name: 'AI に原因を説明させる' });
-  await expect(button, 'AI 実行の導線が無い').toBeVisible();
-
   const valueBefore = await page.locator('input[name="value"]').inputValue();
+
+  const button = (await openMoreMenu(page)).getByRole('menuitem', {
+    name: 'AI に原因を説明させる',
+  });
+  await expect(button, 'AI 実行の導線が無い').toBeVisible();
 
   await button.click();
   await page.waitForURL(/explain=/);
@@ -43,7 +45,9 @@ test('CDP で質問マッピングを実行すると候補が表示される（�
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
   await page.goto('/enterprise/disclosures/cdp');
 
-  const button = page.getByRole('button', { name: '質問マッピングを実行' });
+  const button = (await openMoreMenu(page)).getByRole('menuitem', {
+    name: '質問マッピングを実行',
+  });
   await expect(button, 'AI 実行の導線が無い').toBeVisible();
 
   await button.click();
@@ -53,22 +57,25 @@ test('CDP で質問マッピングを実行すると候補が表示される（�
   await expect(page.getByText('候補です。実際の紐付けは質問ごとに確定してください')).toBeVisible();
 });
 
-test('Data Point で AI に Evidence 候補を探させられる（紐付けは確定しない）', async ({ page }) => {
+test('Data Point で AI に資料候補を探させられる（紐付けは確定しない）', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
   await page.goto('/enterprise/data');
   const href = (await page.locator('a[href^="/enterprise/data/"]').first().getAttribute('href'))!;
   await page.goto(href);
 
-  const button = page.getByRole('button', { name: 'AI に Evidence 候補を探させる' });
+  // 見出しの語は plan §1.17（Evidence → 根拠資料）。AI の補助は「その他」（L2）
+  const linkedBefore = await page.getByRole('heading', { name: /^根拠資料（/ }).innerText();
+  const button = (await openMoreMenu(page)).getByRole('menuitem', {
+    name: 'AI に資料候補を探させる',
+  });
   await expect(button, 'AI 実行の導線が無い').toBeVisible();
 
-  const linkedBefore = await page.getByRole('heading', { name: /^Evidence（/ }).innerText();
   await button.click();
   await page.waitForURL(/evidence=/);
 
   await expect(page.getByText(/AI の候補（確信度/)).toBeVisible();
   // 候補を出しただけで、紐付け件数は変わらない
-  await expect(page.getByRole('heading', { name: /^Evidence（/ })).toHaveText(linkedBefore);
+  await expect(page.getByRole('heading', { name: /^根拠資料（/ })).toHaveText(linkedBefore);
 });
 
 test('監査法人が Evidence を AI に要約させられる（結論は出さない）', async ({ page }) => {

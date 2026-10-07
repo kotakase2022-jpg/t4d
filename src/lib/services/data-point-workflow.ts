@@ -320,6 +320,9 @@ export async function bulkTransition(
   ctx: AuthorizationContext,
   dataPointIds: Uuid[],
   to: DataPointStatus,
+  // 一括の差戻しの理由。単票の差戻しと同じく各行のコメント・承認の記録に残す
+  // （画面は理由を必須にする。サービスでは単票と同じく任意のまま。plan Q7）
+  options: { comment?: string | null } = {},
 ): Promise<{ succeeded: number; failures: Array<{ id: Uuid; reason: string }> }> {
   let succeeded = 0;
   const failures: Array<{ id: Uuid; reason: string }> = [];
@@ -328,7 +331,12 @@ export async function bulkTransition(
   for (const id of dataPointIds) {
     try {
       // 件数分の再計算を避けるため、ここでは抑止して最後に 1 回だけ行う
-      last = await transitionDataPoint(db, ctx, { dataPointId: id, to, skipRevalidate: true });
+      last = await transitionDataPoint(db, ctx, {
+        dataPointId: id,
+        to,
+        comment: options.comment ?? null,
+        skipRevalidate: true,
+      });
       succeeded += 1;
     } catch (error) {
       failures.push({ id, reason: error instanceof Error ? error.message : '不明なエラー' });

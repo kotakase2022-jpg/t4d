@@ -1,3 +1,4 @@
+import { permissionRequiredMessage } from './permission-labels';
 import { ROLE_PERMISSIONS } from './roles';
 import type {
   AuthorizationContext,
@@ -10,9 +11,12 @@ import type {
 /** 認可違反。Route Handler / Server Action は 403 相当へ変換する。 */
 export class AuthorizationError extends Error {
   readonly code = 'FORBIDDEN';
-  constructor(message = 'この操作を行う権限がありません。') {
+  /** 不足した権限（ログ・調査用。画面の文には権限キーを出さない） */
+  readonly permission?: PermissionKey;
+  constructor(message = 'この操作を行う権限がありません。', permission?: PermissionKey) {
     super(message);
     this.name = 'AuthorizationError';
+    this.permission = permission;
   }
 }
 
@@ -44,7 +48,8 @@ export function canAny(ctx: AuthorizationContext, permissions: readonly Permissi
 
 export function assertCan(ctx: AuthorizationContext, permission: PermissionKey): void {
   if (!can(ctx, permission)) {
-    throw new AuthorizationError(`権限 ${permission} が必要です。`);
+    // 権限キーは画面に出さない（何が足りないか・誰に頼むかを業務の言葉で。plan §1.17）
+    throw new AuthorizationError(permissionRequiredMessage(permission), permission);
   }
 }
 

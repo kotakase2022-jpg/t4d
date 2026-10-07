@@ -374,7 +374,7 @@ describe('自社経年比較の画面', () => {
     expect(screen.getByText('数値の指標が登録されていません')).toBeTruthy();
     expect(
       screen.getByRole('link', { name: '組織・拠点（指標マスター）' }).getAttribute('href'),
-    ).toBe('/enterprise/organizations');
+    ).toBe('/enterprise/organizations?tab=metrics');
     expect(document.body.textContent).not.toContain('絞り込み解除');
   });
 });

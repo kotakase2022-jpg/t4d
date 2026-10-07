@@ -8,10 +8,11 @@ export default function NotFound() {
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-surface-muted">
       <BrandLogo href={null} height={32} />
       <EmptyState
+        kind="not-applicable"
         title="ページが見つかりません"
         description="URL が変更されたか、閲覧権限がない可能性があります。権限のない対象は存在を秘匿するため 404 を返します。"
         action={
-          <Button asChild variant="outline">
+          <Button asChild variant="secondary">
             <Link href="/workspace">ワークスペース選択へ戻る</Link>
           </Button>
         }

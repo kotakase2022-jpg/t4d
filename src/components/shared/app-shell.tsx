@@ -5,19 +5,34 @@ import { Button } from '@/components/ui/button';
 import { logoutAction, selectWorkspaceAction } from '@/lib/auth/actions';
 import { switchDemoRoleAction } from '@/lib/auth/demo-role-actions';
 import { selectPeriodAction } from '@/lib/auth/preferences';
-import { can } from '@/lib/authorization/can';
+import { searchPaletteAction } from '@/app/(common)/palette/actions';
+import { can, permissionsFor } from '@/lib/authorization/can';
 import { describeReferenceDate } from '@/lib/clock';
 import { formatJstDate } from '@/lib/format/datetime';
+import { canFor, homeProfileOf } from '@/lib/ui/home-profile';
+import { defaultProjectId } from '@/lib/ui/task-verbs';
 import type { AuthorizationContext, IsoDate } from '@/types/domain';
 import { BrandLogo } from './brand-logo';
 import { DemoDataBadge } from './badges';
 import { CommandPalette } from './command-palette';
 import { HeaderProjectContext, type HeaderProject } from './header-context';
 import { ReferenceDateBadge } from './header-badges';
+import { DetailBadge } from './detail-badge';
 import { DemoRoleSwitcher, type DemoRoleChoiceView } from './header-demo-role-switcher';
 import { HelpDialog } from './help-dialog';
 import { RecordShortcuts } from './record-shortcuts';
-import { hiddenNavHrefsFor, navTreeFor, type NavVariant } from './nav-config';
+import { GlobalErrorNotice } from './global-error-notice';
+import { NavigationProgress } from './navigation-progress';
+import {
+  defaultCollapsedGroups,
+  hiddenNavHrefsFor,
+  missingNavPermissions,
+  navTreeFor,
+  type NavVariant,
+} from './nav-config';
+import { PaletteTrigger } from './palette-trigger';
+import { RecentTracker } from './recent-tracker';
+import { ShellProvider, type ShellContextValue } from './viewer-context';
 import {
   EngagementSelector,
   ReportingPeriodSelector,
@@ -77,6 +92,15 @@ function hiddenNavHrefs(ctx: AuthorizationContext, variant: NavVariant): string[
   return hiddenNavHrefsFor(navTreeFor(variant, null), (permission) => can(ctx, permission));
 }
 
+/** 案件の画面のように ID を含む項目も隠せるよう、権限キーでも渡す（案件を選んだツリーで集める） */
+const NAV_PERMISSION_PROBE_ENGAGEMENT = '00000000-0000-0000-0000-000000000000';
+
+function hiddenNavPermissions(ctx: AuthorizationContext, variant: NavVariant) {
+  return missingNavPermissions(navTreeFor(variant, NAV_PERMISSION_PROBE_ENGAGEMENT), (permission) =>
+    can(ctx, permission),
+  );
+}
+
 function periodText(start: IsoDate, end: IsoDate): string {
   return `${formatJstDate(start)}〜${formatJstDate(end)}`;
 }
@@ -130,105 +154,130 @@ export function AppShell({
       : 'enterprise'
     : 'assurance';
   const hidden = hiddenNavHrefs(ctx, variant);
+  const userCan = canFor(ctx);
+  const homeHref = isEnterprise ? '/enterprise/dashboard' : '/assurance/dashboard';
+  // 「原稿を書く」の行き先の「現在のプロジェクト」（plan §1.3）。プロジェクトの画面ではパレットがパスで上書きする
+  const currentProjectId = defaultProjectId(projects, currentPeriodId);
+  // クライアントの部品（サイドバー・パレット・パンくず・保存ビュー）へ配る文脈（plan §1.9）
+  const shellValue: ShellContextValue = {
+    viewerKey: `${ctx.userId}:${ctx.workspace.organizationId}`,
+    variant,
+    workspace: isEnterprise ? 'enterprise' : 'assurance',
+    hiddenHrefs: hidden,
+    hiddenPermissions: hiddenNavPermissions(ctx, variant),
+    permissions: [...permissionsFor(ctx.workspace.roleKeys)],
+    profile: isEnterprise ? homeProfileOf(ctx) : undefined,
+    defaultCollapsedGroups: defaultCollapsedGroups(variant, userCan),
+    verbContext: {
+      unitScopeIds: ctx.workspace.unitScopeIds,
+      ...(isEnterprise && currentProjectId ? { currentProjectId } : {}),
+      demo: ctx.demo,
+      disclosureFirst,
+    },
+    homeHref,
+  };
   // 期限判定の基準日。デモでは「デモ基準日」を出す（実時計の Supabase Mode では null）
   const referenceLabel = ctx.demo ? describeReferenceDate().label : null;
   const currentPeriodCode = periods?.find((p) => p.id === currentPeriodId)?.code ?? null;
 
   return (
-    <div className="t4d-min-canvas flex h-screen flex-col overflow-hidden bg-surface-muted">
-      <header className="t4d-no-print flex h-[48px] shrink-0 items-center gap-3 border-b border-line bg-surface px-3">
-        <BrandLogo
-          href={isEnterprise ? '/enterprise/dashboard' : '/assurance/dashboard'}
-          priority
-        />
+    <ShellProvider value={shellValue}>
+      <div className="t4d-min-canvas flex h-screen flex-col overflow-hidden bg-surface-muted">
+        <NavigationProgress />
+        <header className="t4d-no-print flex h-topbar shrink-0 items-center gap-3 border-b border-line bg-surface px-3">
+          <BrandLogo href={homeHref} priority />
 
-        {/*
+          {/*
           中央の列は幅が足りないときに右の操作（役割切替・通知）へはみ出して重ならないよう、はみ出しを切る。
           並びは重要な順（企業 → 報告期間 → 開示プロジェクト → デモの表示）で、足りないときは末尾から見えなくなる
         */}
-        <div className="group/hdr flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
-          <WorkspaceSelector
-            current={{
-              organizationId: ctx.workspace.organizationId,
-              organizationName: ctx.workspace.organizationName,
-              organizationType: ctx.workspace.organizationType,
-            }}
-            choices={workspaces}
-            onSelectAction={selectWorkspaceAction}
-          />
-          {isEnterprise && periods && periods.length > 0 && currentPeriodId && (
-            <div className="flex shrink-0 items-center gap-1">
-              <ReportingPeriodSelector
-                periods={periods}
-                currentId={currentPeriodId}
-                onSelectAction={selectPeriodAction}
-              />
-              {currentPeriodRange && (
-                <span
-                  // 開示プロジェクトの画面では、プロジェクトの表示を優先する（広い画面でだけ期間の日付を並べる）
-                  className="tnum whitespace-nowrap text-[11px] text-ink-muted max-[1599px]:group-has-[[data-testid=header-project-context]]/hdr:hidden"
-                  data-testid="header-period-range"
-                >
-                  <span className="sr-only">報告期間の開始日と終了日: </span>
-                  {periodText(currentPeriodRange.startDate, currentPeriodRange.endDate)}
-                </span>
-              )}
-            </div>
-          )}
-          {isEnterprise && projects.length > 0 && (
-            <HeaderProjectContext
-              projects={projects.map((p) => toHeaderProject(p, periods))}
-              currentPeriodId={currentPeriodId ?? null}
-              currentPeriodCode={currentPeriodCode}
+          <div className="group/hdr flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+            <WorkspaceSelector
+              current={{
+                organizationId: ctx.workspace.organizationId,
+                organizationName: ctx.workspace.organizationName,
+                organizationType: ctx.workspace.organizationType,
+              }}
+              choices={workspaces}
+              onSelectAction={selectWorkspaceAction}
             />
-          )}
-          {!isEnterprise && engagements && <EngagementSelector engagements={engagements} />}
-          {ctx.demo && <DemoDataBadge />}
-          {ctx.demo && demoEditsEvicted && (
-            <Badge
-              tone="warning"
-              title="デモの操作の記録が容量を超えたため、古い操作から保持をやめました。別のサーバーで開くと、その操作は反映されていないことがあります。"
-            >
-              <AlertTriangle className="size-3" aria-hidden="true" />
-              古い操作の一部を保持できませんでした
-            </Badge>
-          )}
-          {referenceLabel && <ReferenceDateBadge label={referenceLabel} />}
+            {isEnterprise && periods && periods.length > 0 && currentPeriodId && (
+              <div className="flex shrink-0 items-center gap-1">
+                <ReportingPeriodSelector
+                  periods={periods}
+                  currentId={currentPeriodId}
+                  onSelectAction={selectPeriodAction}
+                />
+                {currentPeriodRange && (
+                  <span
+                    // 開示プロジェクトの画面では、プロジェクトの表示を優先する（広い画面でだけ期間の日付を並べる）
+                    className="tnum whitespace-nowrap text-caption text-ink-muted max-[1599px]:group-has-[[data-testid=header-project-context]]/hdr:hidden"
+                    data-testid="header-period-range"
+                  >
+                    <span className="sr-only">報告期間の開始日と終了日: </span>
+                    {periodText(currentPeriodRange.startDate, currentPeriodRange.endDate)}
+                  </span>
+                )}
+              </div>
+            )}
+            {isEnterprise && projects.length > 0 && (
+              <HeaderProjectContext
+                projects={projects.map((p) => toHeaderProject(p, periods))}
+                currentPeriodId={currentPeriodId ?? null}
+                currentPeriodCode={currentPeriodCode}
+              />
+            )}
+            {!isEnterprise && engagements && <EngagementSelector engagements={engagements} />}
+            {ctx.demo && <DemoDataBadge />}
+            {ctx.demo && demoEditsEvicted && (
+              <DetailBadge
+                tone="warning"
+                detail="デモの操作の記録が容量を超えたため、古い操作から保持をやめました。別のサーバーで開くと、その操作は反映されていないことがあります。"
+              >
+                <AlertTriangle className="size-3" aria-hidden="true" />
+                古い操作の一部を保持できませんでした
+              </DetailBadge>
+            )}
+            {referenceLabel && <ReferenceDateBadge label={referenceLabel} />}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1">
+            <PaletteTrigger />
+            {ctx.demo && demoRoleChoices.length > 1 && (
+              <DemoRoleSwitcher choices={demoRoleChoices} onSwitchAction={switchDemoRoleAction} />
+            )}
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/notifications" aria-label={`通知（未読 ${unreadNotifications} 件）`}>
+                <Bell aria-hidden="true" />
+                {unreadNotifications > 0 && (
+                  <Badge tone="danger" className="ml-0.5">
+                    {unreadNotifications}
+                  </Badge>
+                )}
+              </Link>
+            </Button>
+            <HelpDialog />
+            <UserMenu
+              displayName={ctx.displayName}
+              email={ctx.email}
+              roleKeys={ctx.workspace.roleKeys}
+              onLogoutAction={logoutAction}
+            />
+          </div>
+        </header>
+
+        <div className="flex min-h-0 flex-1">
+          <Sidebar variant={variant} hiddenHrefs={hidden} />
+          <main id="t4d-main" className="min-w-0 flex-1 overflow-y-auto">
+            <GlobalErrorNotice />
+            {children}
+          </main>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
-          {ctx.demo && demoRoleChoices.length > 1 && (
-            <DemoRoleSwitcher choices={demoRoleChoices} onSwitchAction={switchDemoRoleAction} />
-          )}
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/notifications" aria-label={`通知（未読 ${unreadNotifications} 件）`}>
-              <Bell aria-hidden="true" />
-              {unreadNotifications > 0 && (
-                <Badge tone="danger" className="ml-0.5">
-                  {unreadNotifications}
-                </Badge>
-              )}
-            </Link>
-          </Button>
-          <HelpDialog />
-          <UserMenu
-            displayName={ctx.displayName}
-            email={ctx.email}
-            roleKeys={ctx.workspace.roleKeys}
-            onLogoutAction={logoutAction}
-          />
-        </div>
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        <Sidebar variant={variant} hiddenHrefs={hidden} />
-        <main id="t4d-main" className="min-w-0 flex-1 overflow-y-auto">
-          {children}
-        </main>
+        <CommandPalette variant={variant} hiddenHrefs={hidden} searchAction={searchPaletteAction} />
+        <RecordShortcuts homeHref={homeHref} />
+        <RecentTracker />
       </div>
-
-      <CommandPalette variant={variant} hiddenHrefs={hidden} />
-      <RecordShortcuts />
-    </div>
+    </ShellProvider>
   );
 }

@@ -2,14 +2,15 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Download, Eye, FileText, Highlighter, Lock, PenLine, Tag } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { Notice } from '@/components/shared/notice';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
 import { DocumentPreview } from '@/components/shared/document-preview';
 import { ScanStatusBadge } from '@/components/shared/scan-status-badge';
+import { Section } from '@/components/shared/section';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { CollapsibleSection } from '@/components/ui/collapsible';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { fileTypeLabel } from '@/lib/domain/evidence-limits';
@@ -28,15 +29,17 @@ import { evidenceTitles } from '../titles';
 import { ManualExcerptForm } from './manual-excerpt-form';
 
 export async function generateMetadata() {
-  // 開示優先モードが OFF の組織は、メニュー・一覧と同じ従来の画面名（A39）
+  // 「資料の詳細」（plan §1.17）
   return { title: (await evidenceTitles()).viewer };
 }
 
 /**
- * Evidence Viewer（EVID-P0-002）。
+ * 資料の詳細（旧 Evidence Viewer。EVID-P0-002・plan S23）。
  *
  * PDF / 画像 / 表を**画面内に**表示し、該当箇所（ページ・セル）のハイライトと、
- * メタデータ・関連指標・Version を同じ画面で確認できるようにする。
+ * 引用できる箇所を同じ画面で確認できるようにする（L1）。手動抜粋・メタデータ・関連データ・
+ * 引用の利用先・版の履歴は見出しを残して閉じた節（L2）。テキストを抽出できなかった資料は、
+ * 手動抜粋の節を開いて描き、空状態から誘導する。
  *
  * - 実体は同一オリジンの /api/files/inline から取得（CSP・認可の観点）。
  * - Demo Mode の Fixture ファイルは実体を持たないため、抽出済み Fragment を表示する
@@ -62,16 +65,17 @@ export default async function EvidenceViewerPage({
     return (
       <>
         <PageHeader
-          title={disclosureFirst ? '資料・証跡の表示' : 'Evidence Viewer'}
+          title="資料の詳細"
           breadcrumbs={[
             { label: '企業ワークスペース' },
             { label: listLabel, href: '/enterprise/evidence' },
           ]}
         />
         <div className="p-4">
-          <Card>
-            <PermissionDeniedState description="資料の内容の閲覧には、資料の閲覧権限が必要です。" />
-          </Card>
+          <PermissionDeniedState
+            permission="enterprise.evidence.read"
+            description="資料の内容の閲覧には、資料の閲覧権限が必要です。"
+          />
         </div>
       </>
     );
@@ -152,6 +156,8 @@ export default async function EvidenceViewerPage({
   const canReadDisclosure = can(ctx, 'enterprise.disclosure.read');
   const manualCount = fragments.filter((f) => isManualExcerpt(f)).length;
   const extractedCount = fragments.length - manualCount;
+  const periodCode = shell.periods.find((p) => p.id === file.reportingPeriodId)?.code ?? '—';
+  const typeLabel = fileTypeLabel(file.mimeType, file.originalName);
 
   /** 列番号・行番号 → "C12" 形式。表ハイライトの照合に使う（データ行はヘッダーの次＝2 行目から） */
   const cellOf = (colIndex: number, rowIndex: number) =>
@@ -164,9 +170,9 @@ export default async function EvidenceViewerPage({
         description={
           <span className="flex flex-wrap items-center gap-2">
             {/* MIME 型（application/vnd.openxmlformats-… など）は出さず、形式の名前で示す */}
-            <Badge tone="neutral" title={file.mimeType}>
+            <Badge tone="neutral">
               <FileText className="size-3" aria-hidden="true" />
-              {fileTypeLabel(file.mimeType, file.originalName)}
+              {typeLabel}
             </Badge>
             <Badge
               tone={
@@ -195,12 +201,18 @@ export default async function EvidenceViewerPage({
           { label: file.originalName },
         ]}
         actions={
-          <Button variant="outline" size="sm" asChild>
-            <a href={`/api/files/signed-url?fileVersionId=${current.id}`}>
-              <Download aria-hidden="true" />
-              ダウンロード
-            </a>
-          </Button>
+          <PageActions
+            secondary={[
+              {
+                kind: 'link',
+                id: 'download',
+                label: 'ダウンロード',
+                icon: <Download aria-hidden="true" />,
+                href: `/api/files/signed-url?fileVersionId=${current.id}`,
+                external: true,
+              },
+            ]}
+          />
         }
       />
 
@@ -210,164 +222,197 @@ export default async function EvidenceViewerPage({
         </div>
       )}
 
-      <div className="grid grid-cols-[1fr_360px] gap-3 p-4">
-        {/* 左: ビューア本体 */}
+      <div className="grid grid-cols-[1fr_360px] gap-x-4 gap-y-3 px-4 pb-4 pt-3">
+        {/* 左: プレビュー・該当箇所・引用できる箇所（L1） */}
         <div className="min-w-0 space-y-3">
-          <Card className="overflow-hidden">
-            <SectionTitle title="プレビュー" />
-            {!stored ? (
-              <div>
-                <p className="border-b border-line bg-warning-soft px-3 py-1.5 text-[12px] text-[#8a5d00]">
-                  原本ファイルの実体はこの環境に保管されていません（Demo Mode の Fixture）。
-                  下は取込時に抽出した内容を紙面として再構成したものです。
-                </p>
-                {fragments.length === 0 ? (
-                  <EmptyState title="抽出テキストもありません" />
-                ) : (
-                  <>
-                    {/* 表示するページ: ?page=N が指定されていればそのページ */}
-                    {(() => {
-                      const shown =
-                        fragments.find((f) => f.page === (activePage ?? fragments[0]?.page)) ??
-                        fragments[0]!;
-                      const isLinked = links.some((l) => l.fragmentId === shown.id);
-                      // Evidence リンクが指すセル参照は紙面上でも強調する
-                      const marks = [...highlightCells];
-                      return (
-                        <DocumentPreview
-                          text={shown.text}
-                          title={`${file.originalName}（${shown.locator ?? ''}）`}
-                          page={shown.page}
-                          totalPages={fragments.length}
-                          highlight={marks}
-                          linked={isLinked}
-                        />
-                      );
-                    })()}
-                    {fragments.length > 1 && (
-                      <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-2">
-                        <span className="text-[11px] text-ink-muted">ページ:</span>
-                        {fragments.map((f) => (
-                          <Button
-                            key={f.id}
-                            size="xs"
-                            variant={
-                              (activePage ?? fragments[0]?.page) === f.page
-                                ? 'secondary'
-                                : 'outline'
-                            }
-                            asChild
-                          >
-                            <Link href={`?page=${f.page}`}>{f.page}</Link>
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            ) : isImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={inlineSrc}
-                alt={`${file.originalName} のプレビュー`}
-                className="max-h-[70vh] w-full object-contain p-2"
-              />
-            ) : isPdf ? (
-              <iframe
-                src={`${inlineSrc}#page=${activePage ?? 1}`}
-                title={`${file.originalName} のプレビュー`}
-                className="h-[70vh] w-full border-0"
-              />
-            ) : tableData ? (
-              <div className="t4d-scroll-x p-2">
-                <Table>
-                  <THead>
-                    <TR>
-                      {tableData.headers.map((h) => (
-                        <TH key={h}>{h}</TH>
-                      ))}
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {tableData.rows.map((row, ri) => (
-                      <TR key={ri}>
-                        {tableData.headers.map((h, ci) => (
-                          <TD
-                            key={h}
-                            className={
-                              highlightCells.has(cellOf(ci, ri))
-                                ? 'bg-brand-100 font-medium text-brand-900'
-                                : undefined
-                            }
-                          >
-                            {row[h]}
-                          </TD>
+          <Section title="プレビュー" divider="none">
+            <div className="rounded-t4d-lg border border-line bg-surface">
+              {!stored ? (
+                <div>
+                  {/* 実体が無いことは隠さない（誠実さの注記。閉じない） */}
+                  <Notice tone="warning" className="mb-0 rounded-none border-x-0 border-t-0">
+                    原本ファイルの実体はこの環境に保管されていません（Demo Mode の Fixture）。
+                    下は取込時に抽出した内容を紙面として再構成したものです。
+                  </Notice>
+                  {fragments.length === 0 ? (
+                    <EmptyState
+                      kind="not-applicable"
+                      size="compact"
+                      title="抽出テキストもありません"
+                      description="ダウンロードして確認してください。"
+                    />
+                  ) : (
+                    <>
+                      {/* 表示するページ: ?page=N が指定されていればそのページ */}
+                      {(() => {
+                        const shown =
+                          fragments.find((f) => f.page === (activePage ?? fragments[0]?.page)) ??
+                          fragments[0]!;
+                        const isLinked = links.some((l) => l.fragmentId === shown.id);
+                        // 資料への紐付けが指すセル参照は紙面上でも強調する
+                        const marks = [...highlightCells];
+                        return (
+                          <DocumentPreview
+                            text={shown.text}
+                            title={`${file.originalName}（${shown.locator ?? ''}）`}
+                            page={shown.page}
+                            totalPages={fragments.length}
+                            highlight={marks}
+                            linked={isLinked}
+                          />
+                        );
+                      })()}
+                      {fragments.length > 1 && (
+                        <nav
+                          aria-label="ページ"
+                          className="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-2"
+                        >
+                          <span className="text-caption text-ink-muted">ページ:</span>
+                          {fragments.map((f) => {
+                            const active = (activePage ?? fragments[0]?.page) === f.page;
+                            return (
+                              <Button
+                                key={f.id}
+                                size="xs"
+                                variant={active ? 'quiet' : 'secondary'}
+                                asChild
+                              >
+                                <Link
+                                  href={`?page=${f.page}`}
+                                  aria-current={active ? 'page' : undefined}
+                                >
+                                  {f.page}
+                                </Link>
+                              </Button>
+                            );
+                          })}
+                        </nav>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : isImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={inlineSrc}
+                  alt={`${file.originalName} のプレビュー`}
+                  className="max-h-[70vh] w-full object-contain p-2"
+                />
+              ) : isPdf ? (
+                <iframe
+                  src={`${inlineSrc}#page=${activePage ?? 1}`}
+                  title={`${file.originalName} のプレビュー`}
+                  className="h-[70vh] w-full border-0"
+                />
+              ) : tableData ? (
+                <div className="t4d-scroll-x p-2">
+                  <Table>
+                    <THead>
+                      <TR>
+                        {tableData.headers.map((h) => (
+                          <TH key={h}>{h}</TH>
                         ))}
                       </TR>
-                    ))}
-                  </TBody>
-                </Table>
-                {highlightCells.size > 0 && (
-                  <p className="flex items-center gap-1 px-1 py-1.5 text-[11px] text-ink-muted">
-                    <Highlighter className="size-3" aria-hidden="true" />
-                    ハイライト = 資料・証跡への紐付けで参照されているセル（
-                    {[...highlightCells].join(', ')}）
-                  </p>
-                )}
-              </div>
-            ) : textData ? (
-              <DocumentPreview
-                text={textData}
-                title={file.originalName}
-                page={1}
-                totalPages={1}
-                highlight={[...highlightCells]}
-                linked={links.length > 0}
-              />
-            ) : (
-              <EmptyState
-                title="この形式は画面内表示に対応していません"
-                description="ダウンロードして確認してください。"
-              />
-            )}
-          </Card>
+                    </THead>
+                    <TBody>
+                      {tableData.rows.map((row, ri) => (
+                        <TR key={ri}>
+                          {tableData.headers.map((h, ci) => (
+                            <TD
+                              key={h}
+                              className={
+                                highlightCells.has(cellOf(ci, ri))
+                                  ? 'bg-brand-100 font-medium text-brand-900'
+                                  : undefined
+                              }
+                            >
+                              {row[h]}
+                            </TD>
+                          ))}
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                  {highlightCells.size > 0 && (
+                    <p className="flex items-center gap-1 px-1 py-1.5 text-caption text-ink-muted">
+                      <Highlighter className="size-3" aria-hidden="true" />
+                      ハイライト = 資料・証跡への紐付けで参照されているセル（
+                      {[...highlightCells].join(', ')}）
+                    </p>
+                  )}
+                </div>
+              ) : textData ? (
+                <DocumentPreview
+                  text={textData}
+                  title={file.originalName}
+                  page={1}
+                  totalPages={1}
+                  highlight={[...highlightCells]}
+                  linked={links.length > 0}
+                />
+              ) : (
+                <EmptyState
+                  kind="no-data"
+                  size="compact"
+                  title="この形式は画面内表示に対応していません"
+                  description="ダウンロードして確認してください。"
+                  action={
+                    <a
+                      href={`/api/files/signed-url?fileVersionId=${current.id}`}
+                      className="inline-flex items-center gap-1 text-small font-medium text-brand-700 hover:underline"
+                    >
+                      <Download className="size-3.5" aria-hidden="true" />
+                      ダウンロード
+                    </a>
+                  }
+                />
+              )}
+            </div>
+          </Section>
 
           {isPdf && pdfPages.length > 0 && (
-            <Card>
-              <SectionTitle title="該当箇所（リンク済みページ）" />
-              <div className="flex flex-wrap gap-1.5 p-3">
+            <Section title="該当箇所（リンク済みページ）">
+              <div className="flex flex-wrap gap-1.5">
                 {pdfPages.map((p) => (
                   <Button
                     key={p}
                     size="xs"
-                    variant={activePage === p ? 'secondary' : 'outline'}
+                    variant={activePage === p ? 'quiet' : 'secondary'}
                     asChild
                   >
                     <Link href={`?page=${p}`}>p.{p} を表示</Link>
                   </Button>
                 ))}
               </div>
-            </Card>
+            </Section>
           )}
 
           {/* 抽出した内容は資料そのものの情報なので、開示優先モードの ON/OFF によらず示す */}
-          <Card id="extracted" className="scroll-mt-4">
-            <SectionTitle
-              title={`引用できる箇所（抽出 ${extractedCount} ／ 手動抜粋 ${manualCount}）`}
-            />
+          <Section
+            id="extracted"
+            title={`引用できる箇所（抽出 ${extractedCount} ／ 手動抜粋 ${manualCount}）`}
+            className="scroll-mt-4"
+          >
             {fragments.length === 0 ? (
-              <p className="px-3 pb-3 text-[12px] text-ink-muted">
+              <p className="text-small text-ink-muted">
                 テキストを抽出できた箇所がありません（抽出の成功としては扱っていません）。
-                {full && canWriteEvidence
-                  ? '引用に使う箇所は、下の「手動抜粋を登録」で文言を写して登録してください。'
-                  : ''}
+                {full && canWriteEvidence ? (
+                  <>
+                    引用に使う箇所は、
+                    <Link href="#manual-excerpt" className="text-brand-700 underline">
+                      手動抜粋を登録
+                    </Link>
+                    で文言を写して登録してください。
+                  </>
+                ) : (
+                  ''
+                )}
               </p>
             ) : (
               <ol className="max-h-[420px] divide-y divide-line overflow-y-auto">
                 {fragments.map((f) => (
-                  <li key={f.id} className="px-3 py-1.5 text-[12px]">
-                    <p className="flex items-center gap-1 text-[11px] font-medium text-ink-muted">
+                  <li key={f.id} className="py-1.5 text-small">
+                    <p className="flex items-center gap-1 text-caption font-medium text-ink-muted">
                       {f.locator ?? `p.${f.page}`}
                       {isManualExcerpt(f) && (
                         <Badge tone="neutral">
@@ -381,30 +426,39 @@ export default async function EvidenceViewerPage({
                 ))}
               </ol>
             )}
-          </Card>
+          </Section>
 
           {full && canWriteEvidence && (
-            <Card id="manual-excerpt" className="scroll-mt-4">
-              <SectionTitle title="手動抜粋を登録" />
+            <Section
+              id="manual-excerpt"
+              collapsible
+              title="手動抜粋を登録"
+              summary="抽出できないページの文言を手で写して登録する"
+              // 抽出できた箇所が無い資料は、引用に使うために手動抜粋が要る（開いて描く）
+              open={fragments.length === 0 ? true : undefined}
+              className="scroll-mt-4"
+            >
               <ManualExcerptForm fileId={file.id} />
-            </Card>
+            </Section>
           )}
         </div>
 
-        {/* 右: メタデータ・関連・Version */}
+        {/* 右: メタデータ・関連・版（L2。見出しは常に見せる） */}
         <div className="space-y-3">
-          <Card>
-            <SectionTitle title="メタデータ" />
-            <dl className="space-y-1 px-3 pb-3 text-[12px]">
+          <Section
+            id="evidence-metadata"
+            collapsible
+            title="メタデータ"
+            summary={`${file.documentType ?? '種別未設定'} ・ ${periodCode} ・ ${Math.round(current.sizeBytes / 1024)} KB`}
+          >
+            <dl className="space-y-1 text-small">
               <div className="flex justify-between gap-2">
                 <dt className="text-ink-muted">種別</dt>
                 <dd className="text-ink">{file.documentType ?? '—'}</dd>
               </div>
               <div className="flex justify-between gap-2">
                 <dt className="text-ink-muted">対象期間</dt>
-                <dd className="text-ink">
-                  {shell.periods.find((p) => p.id === file.reportingPeriodId)?.code ?? '—'}
-                </dd>
+                <dd className="text-ink">{periodCode}</dd>
               </div>
               {full && (
                 <>
@@ -427,13 +481,23 @@ export default async function EvidenceViewerPage({
                 </>
               )}
               <div className="flex justify-between gap-2">
+                <dt className="text-ink-muted">形式</dt>
+                <dd className="text-right text-ink">
+                  {typeLabel}
+                  <span className="block break-all text-caption text-ink-muted">
+                    {file.mimeType}
+                  </span>
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
                 <dt className="text-ink-muted">サイズ</dt>
                 <dd className="tnum text-ink">{Math.round(current.sizeBytes / 1024)} KB</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-ink-muted">SHA-256</dt>
-                <dd className="truncate font-mono text-[10px] text-ink" title={current.sha256}>
-                  {current.sha256.slice(0, 16)}…
+                {/* 改ざん検知の値（監査法人が照合する）。省略せず全桁を出す */}
+                <dt className="shrink-0 text-ink-muted">ファイルのハッシュ（SHA-256）</dt>
+                <dd className="min-w-0 break-all text-right font-mono text-caption text-ink">
+                  {current.sha256}
                 </dd>
               </div>
               <div className="flex justify-between gap-2">
@@ -447,16 +511,29 @@ export default async function EvidenceViewerPage({
                 </dd>
               </div>
             </dl>
-          </Card>
+          </Section>
 
-          <Card>
-            <SectionTitle title={`関連データ（${links.length}）`} />
+          <Section
+            id="evidence-links"
+            collapsible
+            title={`関連データ（${links.length}）`}
+            summary={
+              links.length === 0
+                ? 'まだ紐付けられていません'
+                : `この資料を根拠にしているデータ ${links.length} 件`
+            }
+          >
             {links.length === 0 ? (
-              <EmptyState title="まだ紐付けられていません" />
+              <EmptyState
+                kind="not-applicable"
+                size="compact"
+                title="まだ紐付けられていません"
+                description="データの詳細の「根拠資料」から、この資料を紐付けられます。"
+              />
             ) : (
               <ul className="divide-y divide-line">
                 {links.map((link) => (
-                  <li key={link.id} className="px-3 py-1.5 text-[12px]">
+                  <li key={link.id} className="py-1.5 text-small">
                     {link.targetType === 'data_point' ? (
                       <Link
                         href={`/enterprise/data/${link.targetId}`}
@@ -467,7 +544,7 @@ export default async function EvidenceViewerPage({
                     ) : (
                       <span className="text-ink">開示回答</span>
                     )}
-                    <div className="text-[11px] text-ink-muted">
+                    <div className="text-caption text-ink-muted">
                       {link.page !== null && (
                         <Link href={`?page=${link.page}`} className="underline">
                           p.{link.page}
@@ -480,22 +557,30 @@ export default async function EvidenceViewerPage({
                 ))}
               </ul>
             )}
-          </Card>
+          </Section>
 
           {full && canReadDisclosure && (
-            <Card>
-              <SectionTitle title={`引用の利用先（${anchorUsages.length} 箇所）`} />
+            <Section
+              id="anchor-usages"
+              collapsible
+              title={`引用の利用先（${anchorUsages.length} 箇所）`}
+              summary={
+                anchorUsages.length === 0
+                  ? '引用している定性情報・原稿はありません'
+                  : `定性情報・原稿 ${anchorUsages.length} 箇所`
+              }
+            >
               {anchorUsages.length === 0 ? (
-                <p className="px-3 pb-3 text-[12px] text-ink-muted">
+                <p className="text-small text-ink-muted">
                   この資料を引用している定性情報・原稿はありません。
                 </p>
               ) : (
                 <ul className="divide-y divide-line">
                   {anchorUsages.map((u) => (
-                    <li key={u.anchorId} className="px-3 py-1.5 text-[12px]">
-                      <p className="text-[11px] font-medium text-ink-muted">{u.locationLabel}</p>
+                    <li key={u.anchorId} className="py-1.5 text-small">
+                      <p className="text-caption font-medium text-ink-muted">{u.locationLabel}</p>
                       <p className="line-clamp-2 text-ink">「{u.quoteText}」</p>
-                      <ul className="mt-0.5 space-y-0.5 text-[11px]">
+                      <ul className="mt-0.5 space-y-0.5 text-caption">
                         {u.narratives.map((n) => (
                           <li key={n.recordId}>
                             定性情報:{' '}
@@ -525,22 +610,19 @@ export default async function EvidenceViewerPage({
                   ))}
                 </ul>
               )}
-            </Card>
+            </Section>
           )}
 
           {/* 履歴は既定で閉じる（見出しは常に見せる。docs/disclosure-first.md §10.4 B6） */}
-          <CollapsibleSection
+          <Section
             id="evidence-versions"
+            collapsible
             title={`版の履歴（${versions.length}）`}
             summary={`版の一覧（${versions.length} 版・表示中 v${current.versionNo}）`}
-            bodyClassName="px-0 pb-0"
           >
             <ul className="divide-y divide-line">
               {versions.map((v) => (
-                <li
-                  key={v.id}
-                  className="flex items-center justify-between px-3 py-1.5 text-[12px]"
-                >
+                <li key={v.id} className="flex items-center justify-between py-1.5 text-small">
                   <span className="flex items-center gap-1.5">
                     <FileText className="size-3.5 text-ink-muted" aria-hidden="true" />v
                     {v.versionNo}
@@ -551,11 +633,11 @@ export default async function EvidenceViewerPage({
                       </Badge>
                     )}
                   </span>
-                  <span className="text-[11px] text-ink-muted">{formatJst(v.createdAt)}</span>
+                  <span className="text-caption text-ink-muted">{formatJst(v.createdAt)}</span>
                 </li>
               ))}
             </ul>
-          </CollapsibleSection>
+          </Section>
         </div>
       </div>
     </>

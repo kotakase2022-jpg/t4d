@@ -13,7 +13,8 @@ test.describe.configure({ mode: 'serial' });
 test('フォーム: 極端な入力（巨大値・負数・長文・記号・改行）でも破綻しない', async ({ page }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/data?status=draft');
-  const detail = page.getByRole('link', { name: '詳細' }).first();
+  // 行の指標名のリンクから詳細へ（同じ行から同じ行き先へのリンクを 2 つ置かない。plan §1.12-7）
+  const detail = page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first();
   test.skip((await detail.count()) === 0, '編集可能な Data Point が無い');
   await detail.click();
   await expect(page).toHaveURL(/\/enterprise\/data\/[0-9a-f-]+/);

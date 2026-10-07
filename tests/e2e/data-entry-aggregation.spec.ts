@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
+import { DEMO_USERS, confirmInDialog, loginAs, openCollapsible, openMoreMenu } from './helpers';
 
 /**
  * DATA-P0-004（前年度複製・テンプレート・コピペ表入力）と
@@ -80,7 +80,9 @@ test('前年度から複製: 未入力の組合せが前年値の draft で埋�
   await page.goto('/enterprise/data');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  await page.getByRole('button', { name: '前年度から複製' }).click();
+  // 前年度からの複製は見出しの「その他」→ 範囲を確認するダイアログ（plan §1.16 区分 2）
+  await (await openMoreMenu(page)).getByRole('menuitem', { name: /^前年度から複製/ }).click();
+  await confirmInDialog(page);
   await page.waitForURL(/flash=carried/);
 
   // 複製結果が URL に載る（count=0 でも冪等成功。件数はサーバー再起動状態に依存するため
@@ -90,7 +92,8 @@ test('前年度から複製: 未入力の組合せが前年値の draft で埋�
   expect(url1).toMatch(/count=\d+/);
 
   // 二重実行（冪等）
-  await page.getByRole('button', { name: '前年度から複製' }).click();
+  await (await openMoreMenu(page)).getByRole('menuitem', { name: /^前年度から複製/ }).click();
+  await confirmInDialog(page);
   await page.waitForURL(/flash=carried/);
   expect(page.url()).toMatch(/count=0/);
 });
@@ -101,5 +104,8 @@ test('拠点担当には権限どおり: 前年度複製ボタンは表示され
   // site_contributor は enterprise.data.write を持つため表示される
   await loginAs(page, DEMO_USERS.siteUser);
   await page.goto('/enterprise/data');
-  await expect(page.getByRole('button', { name: '前年度から複製' })).toBeVisible();
+  // 頻度の低い操作なので見出しの「その他」の中（plan S16）
+  await expect(
+    (await openMoreMenu(page)).getByRole('menuitem', { name: /^前年度から複製/ }),
+  ).toBeVisible();
 });

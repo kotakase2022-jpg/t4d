@@ -28,6 +28,13 @@ const items: ReviewListItem[] = [
   },
 ];
 
+// 一覧は DataTable（列の切替・表示件数は URL を書き換える Client Component で、App Router が要る）
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  usePathname: () => '/enterprise/disclosure-projects/p1',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams('tab=reviews'),
+}));
 vi.mock('@/lib/services/shell', () => ({
   loadEnterpriseShell: async () => ({ db: {}, ctx: {} }),
 }));

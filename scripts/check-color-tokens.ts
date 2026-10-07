@@ -79,6 +79,8 @@ function listFiles(dir: string): string[] {
 export function findUndefinedColorClasses(): Map<string, string[]> {
   const css = readFileSync(TOKEN_SOURCE, 'utf8');
   const tokens = new Set([...css.matchAll(/--color-([a-z0-9-]+):/g)].map((m) => m[1]!));
+  // 文字サイズのトークン（text-caption など）は色ではない。text- だけで照合から外す
+  const textSizes = new Set([...css.matchAll(/--text-([a-z0-9-]+):/g)].map((m) => m[1]!));
   const bad = new Map<string, string[]>();
 
   for (const file of listFiles(SCAN_DIR)) {
@@ -89,6 +91,7 @@ export function findUndefinedColorClasses(): Map<string, string[]> {
       const head = name.split('-')[0]!;
       if (BUILTIN.test(name) || NON_COLOR.has(name) || NON_COLOR.has(head) || tokens.has(name))
         continue;
+      if (utility === 'text' && textSizes.has(name)) continue;
       const key = `${utility}-${name}`;
       const files = bad.get(key) ?? [];
       if (!files.includes(file)) files.push(file);

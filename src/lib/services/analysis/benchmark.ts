@@ -145,7 +145,8 @@ async function ownValues(
         conditions: { ...baseConditions(spec.unit), method: spec.ownMethod },
         approvedUnitCount: 0,
         expectedUnitCount: 0,
-        fix: { label: '報告期間の設定', href: '/enterprise/settings' },
+        // 報告年度は組織・拠点の「報告年度」タブで追加する（設定画面には期間の節が無い。N-16）
+        fix: { label: '報告期間の設定', href: '/enterprise/organizations?tab=periods' },
       });
     }
     return result;

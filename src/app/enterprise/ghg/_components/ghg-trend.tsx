@@ -50,7 +50,7 @@ export function GhgTrendMetric({ series }: { series: readonly TrendPoint[] }) {
         width={460}
         height={150}
       />
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink">
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink">
         <span className="text-ink-muted">前年比</span>
         {changes.map(({ period, yoy }) => (
           <span key={period.id} className="inline-flex items-center gap-1">

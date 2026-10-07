@@ -53,7 +53,7 @@ function FactLink({ fact }: { fact: DiagnosisFact }) {
     <Link
       href={fact.href}
       aria-label={`${fact.label}を見る`}
-      className="inline-flex items-center gap-0.5 text-[11px] text-brand-700 hover:underline"
+      className="inline-flex items-center gap-0.5 text-caption text-brand-700 hover:underline"
     >
       見る
       <ArrowRight className="size-3" aria-hidden="true" />
@@ -77,7 +77,7 @@ function FactItem({ fact, showDenominator }: { fact: DiagnosisFact; showDenomina
         />
       ) : (
         // 分母の無い事実・値の無い事実（未算定など）は帯にしない（0 の帯を描かない）
-        <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-[12px]">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-small">
           <span className="text-ink">{fact.label}</span>
           <span className="tnum font-medium text-ink">
             {fact.count === null ? (fact.text ?? '—') : `${fact.count} ${fact.unitLabel}`}
@@ -89,7 +89,7 @@ function FactItem({ fact, showDenominator }: { fact: DiagnosisFact; showDenomina
           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
             <AttentionBadge attention={fact.attention} />
             {showDenominator && fact.denominatorLabel && fact.count !== null && (
-              <span className="text-[11px] text-ink-muted">分母: {fact.denominatorLabel}</span>
+              <span className="text-caption text-ink-muted">分母: {fact.denominatorLabel}</span>
             )}
           </span>
           <FactLink fact={fact} />
@@ -117,7 +117,7 @@ function FactList({ facts }: { facts: DiagnosisFact[] }) {
           <FactItem key={f.key} fact={f} showDenominator={shared === null} />
         ))}
       </ul>
-      {shared && <p className="text-[11px] text-ink-muted">分母: {shared}</p>}
+      {shared && <p className="text-caption text-ink-muted">分母: {shared}</p>}
     </div>
   );
 }
@@ -156,12 +156,12 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
       className="space-y-2.5 rounded-t4d-lg border border-line bg-surface p-3"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id={headingId} className="text-[14px] font-semibold text-ink">
+        <h2 id={headingId} className="text-title-sm font-semibold text-ink">
           {area.title}
         </h2>
         <DiagnosisStateBadge state={area.state} label={area.stateLabel} />
       </div>
-      <p className="text-[12px] text-ink">{area.stateReason}</p>
+      <p className="text-small text-ink">{area.stateReason}</p>
 
       <FactList facts={facts} />
 
@@ -169,7 +169,7 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
         <Collapsible variant="plain" summary={`拠点別の承認状況（${area.units.length} 拠点）`}>
           <div className="t4d-scroll-x">
             <Table>
-              <caption className="px-2 pb-1 text-left text-[12px] font-medium text-ink">
+              <caption className="px-2 pb-1 text-left text-small font-medium text-ink">
                 拠点別の承認状況（サプライヤーを除く）
               </caption>
               <THead>
@@ -184,21 +184,21 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
               <TBody>
                 {area.units.map((row) => (
                   <TR key={row.unitId}>
-                    <th scope="row" className="px-2 text-left text-[12px] font-medium">
+                    <th scope="row" className="px-2 text-left text-small font-medium">
                       <Link href={row.href} className="text-brand-700 hover:underline">
                         {row.unitName}
                       </Link>
                     </th>
-                    <TD align="right" className="text-[12px]">
+                    <TD align="right" className="text-small">
                       {row.total === 0 ? '項目なし' : `${row.approved} / ${row.total} 件`}
                     </TD>
-                    <TD align="right" className="text-[12px]">
+                    <TD align="right" className="text-small">
                       {row.notSubmitted} 件
                     </TD>
-                    <TD align="right" className="text-[12px]">
+                    <TD align="right" className="text-small">
                       {row.reviewPending} 件
                     </TD>
-                    <TD align="right" className="text-[12px]">
+                    <TD align="right" className="text-small">
                       {row.validationErrors} 件
                     </TD>
                   </TR>
@@ -213,7 +213,7 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
         <div className="space-y-2">
           <div className="t4d-scroll-x">
             <Table>
-              <caption className="px-2 pb-1 text-left text-[12px] font-medium text-ink">
+              <caption className="px-2 pb-1 text-left text-small font-medium text-ink">
                 Scope1・Scope2 の承認済み拠点（連結対象の拠点が分母）
               </caption>
               <THead>
@@ -229,27 +229,27 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
               <TBody>
                 {area.ghg.map((row) => (
                   <TR key={row.code}>
-                    <th scope="row" className="px-2 text-left text-[12px] font-medium">
+                    <th scope="row" className="px-2 text-left text-small font-medium">
                       <Link href={row.href} className="text-brand-700 hover:underline">
                         {row.label}
                       </Link>
                     </th>
-                    <TD align="right" className="text-[12px]">
+                    <TD align="right" className="text-small">
                       {row.registered
                         ? `${row.approvedUnits} / ${row.expectedUnits} 拠点`
                         : '指標が未登録'}
                     </TD>
-                    <TD className="text-[12px]">{nameList(row.reviewUnits)}</TD>
-                    <TD className="text-[12px]">{nameList(row.unsubmittedUnits)}</TD>
-                    <TD className="text-[12px]">{nameList(row.missingUnits)}</TD>
-                    <TD className="text-[12px]">{nameList(row.noActualUnits)}</TD>
+                    <TD className="text-small">{nameList(row.reviewUnits)}</TD>
+                    <TD className="text-small">{nameList(row.unsubmittedUnits)}</TD>
+                    <TD className="text-small">{nameList(row.missingUnits)}</TD>
+                    <TD className="text-small">{nameList(row.noActualUnits)}</TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
           </div>
           {area.excludedUnitNames && area.excludedUnitNames.length > 0 && (
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-caption text-ink-muted">
               持分法・連結対象外の拠点は分母に含めません: {area.excludedUnitNames.join('、')}
             </p>
           )}
@@ -260,7 +260,7 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
                 items={scope3GridItems(area.scope3)}
                 columns={5}
               />
-              <p className="text-[11px] text-ink-muted">
+              <p className="text-caption text-ink-muted">
                 値あり {area.scope3.presentCount}・対象外と判断 {area.scope3.notApplicableCount}
                 ・未登録・未算定 {area.scope3.pendingCount}（{area.scope3.categoryTotal}{' '}
                 カテゴリ）。
@@ -278,7 +278,7 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
           {area.frameworks.map((f) => (
             <li
               key={f.key}
-              className="flex flex-wrap items-start gap-2 rounded-t4d border border-line px-2.5 py-1.5 text-[12px]"
+              className="flex flex-wrap items-start gap-2 rounded-t4d border border-line px-2.5 py-1.5 text-small"
             >
               <span className="min-w-[96px] font-medium text-ink">{f.name}</span>
               <DiagnosisStateBadge state={f.state} label={DIAGNOSIS_STATE_LABEL[f.state]} />
@@ -294,7 +294,7 @@ export function DiagnosisAreaSection({ area }: { area: DiagnosisArea }) {
             <Link
               key={link.href}
               href={link.href}
-              className="inline-flex items-center gap-1 text-[12px] text-brand-700 hover:underline"
+              className="inline-flex items-center gap-1 text-small text-brand-700 hover:underline"
             >
               {link.label}
               <ArrowRight className="size-3" aria-hidden="true" />

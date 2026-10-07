@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Collapsible } from '@/components/ui/collapsible';
 import { changedSinceRun } from '@/lib/ai/draft-conflict';
 import { contentHashOf, diffChars } from '@/lib/domain/disclosure-block';
 import { formatJst } from '@/lib/format/datetime';
@@ -227,24 +228,24 @@ export function AiPanel(props: AiPanelProps) {
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <Bot className="size-4 text-brand-700" aria-hidden="true" />
-        <h2 id="ai-panel-title" className="text-[13px] font-semibold text-ink">
+        <h2 id="ai-panel-title" className="text-body font-semibold text-ink">
           AI 下書き支援（補助）
         </h2>
         <Badge tone={props.aiMode === 'mock' ? 'warning' : 'brand'}>
           <Info className="size-3" aria-hidden="true" />
           {props.aiMode === 'mock' ? 'デモ生成（Mock）' : 'AI 接続中'}
         </Badge>
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-caption text-ink-muted">
           候補を出すだけで、本文への反映・承認は人が行います。
         </span>
       </div>
 
       <div className="space-y-2 p-3">
         {disabledReason ? (
-          <p className="text-[12px] text-ink-muted">{disabledReason}</p>
+          <p className="text-small text-ink-muted">{disabledReason}</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
-            {OPERATIONS.map(({ op, label, hint }) => {
+            {OPERATIONS.map(({ op, label }) => {
               const needsSources =
                 op === 'draft_from_sources' && props.selectedSources.length === 0;
               return (
@@ -252,10 +253,9 @@ export function AiPanel(props: AiPanelProps) {
                   key={op}
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   disabled={pending !== null || needsSources}
                   onClick={() => generate(op)}
-                  title={hint}
                   aria-describedby={`ai-hint-${op}`}
                 >
                   {pending === op ? (
@@ -282,7 +282,7 @@ export function AiPanel(props: AiPanelProps) {
           </div>
         )}
         {!disabledReason && (
-          <ul className="space-y-0.5 text-[11px] text-ink-muted">
+          <ul className="space-y-0.5 text-caption text-ink-muted">
             {OPERATIONS.map(({ op, hint }) => (
               <li key={op} id={`ai-hint-${op}`}>
                 {hint}
@@ -293,7 +293,7 @@ export function AiPanel(props: AiPanelProps) {
         )}
 
         {pending && pending !== 'adopt' && pending !== 'close' && (
-          <p role="status" className="flex items-center gap-1 text-[12px] text-ink">
+          <p role="status" className="flex items-center gap-1 text-small text-ink">
             <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
             実行中です。完了までの間も本文は編集できます（完了後に本文が変わっていれば自動では反映しません）。
           </p>
@@ -301,7 +301,7 @@ export function AiPanel(props: AiPanelProps) {
         {error && (
           <p
             role="alert"
-            className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft p-2 text-[12px] text-ink"
+            className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft p-2 text-small text-ink"
           >
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" aria-hidden="true" />
             {error}
@@ -316,11 +316,8 @@ export function AiPanel(props: AiPanelProps) {
         )}
 
         {runs.length > 1 && (
-          <details className="text-[12px]">
-            <summary className="cursor-pointer text-ink-muted">
-              これまでの実行（{runs.length - 1} 件）
-            </summary>
-            <ul className="mt-1 space-y-1">
+          <Collapsible variant="plain" summary={`これまでの実行（${runs.length - 1} 件）`}>
+            <ul className="space-y-1">
               {runs.slice(1).map((run) => (
                 <li key={run.runId} className="text-ink-muted">
                   {formatJst(run.metadata.startedAt)} ／ {run.operationLabel} ／ {run.stateLabel} ／{' '}
@@ -329,7 +326,7 @@ export function AiPanel(props: AiPanelProps) {
                 </li>
               ))}
             </ul>
-          </details>
+          </Collapsible>
         )}
       </div>
     </section>
@@ -359,7 +356,7 @@ function RunView({
 
   return (
     <div className="rounded-t4d border border-line">
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-surface-muted px-2 py-1.5 text-[12px]">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-surface-muted px-2 py-1.5 text-small">
         <span className="font-medium text-ink">{run.operationLabel}</span>
         <Badge
           tone={
@@ -384,7 +381,7 @@ function RunView({
         <span className="text-ink-muted">{formatJst(run.metadata.startedAt)}</span>
       </div>
 
-      <div className="space-y-2 p-2 text-[12px]">
+      <div className="space-y-2 p-2 text-small">
         {(run.state === 'failed' || run.state === 'timeout') && (
           <p className="text-ink">
             {run.metadata.failureReason ?? 'AI の実行に失敗しました。'}
@@ -397,7 +394,10 @@ function RunView({
             role="alert"
             className="flex items-start gap-1 rounded-t4d border border-warning/40 bg-warning-soft p-2 text-ink"
           >
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+            <AlertTriangle
+              className="mt-0.5 size-3.5 shrink-0 text-warning-ink"
+              aria-hidden="true"
+            />
             生成を始めた後に本文が変更されています。候補は自動では反映しません。差分を確認し、段落ごとに採用してください（置き換えずに元の段落の直後へ追加します）。
           </p>
         )}
@@ -405,12 +405,12 @@ function RunView({
         {run.candidates.length > 0 && (
           <div>
             <div className="mb-1 flex flex-wrap items-center gap-1.5">
-              <h3 className="text-[12px] font-semibold text-ink">本文の候補（差分プレビュー）</h3>
+              <h3 className="text-small font-semibold text-ink">本文の候補（差分プレビュー）</h3>
               {canAct && !conflict && run.state === 'pending' && (
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   onClick={() =>
                     adopt(
                       run,
@@ -427,7 +427,7 @@ function RunView({
                 const current = c.paragraphId ? props.paragraphText(c.paragraphId) : null;
                 return (
                   <li key={c.index} className="rounded-t4d border border-line p-2">
-                    <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
+                    <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-caption text-ink-muted">
                       <span>候補 {c.index + 1}</span>
                       <Badge tone={current !== null ? 'warning' : 'success'}>
                         {current !== null ? (
@@ -454,14 +454,14 @@ function RunView({
                         {c.text}
                       </ins>
                     )}
-                    <p className="mt-1 text-[11px] text-ink-muted">
+                    <p className="mt-1 text-caption text-ink-muted">
                       根拠: {c.sourceLabels.join(' ／ ') || '—'}
                     </p>
                     {canAct && (
                       <Button
                         type="button"
                         size="sm"
-                        variant="outline"
+                        variant="secondary"
                         className="mt-1"
                         onClick={() => adopt(run, [c.index], conflict)}
                       >
@@ -477,8 +477,8 @@ function RunView({
 
         {run.missingInformation.length > 0 && (
           <div className="rounded-t4d border border-warning/40 bg-warning-soft/40 p-2">
-            <h3 className="mb-1 flex items-center gap-1 text-[12px] font-semibold text-ink">
-              <AlertTriangle className="size-3.5 text-[#8a5d00]" aria-hidden="true" />
+            <h3 className="mb-1 flex items-center gap-1 text-small font-semibold text-ink">
+              <AlertTriangle className="size-3.5 text-warning-ink" aria-hidden="true" />
               不足情報（本文には書いていません）
             </h3>
             <ul className="list-disc space-y-1 pl-4">
@@ -496,7 +496,7 @@ function RunView({
 
         {run.conflicts.length > 0 && (
           <div className="rounded-t4d border border-danger/40 bg-danger-soft/40 p-2">
-            <h3 className="mb-1 flex items-center gap-1 text-[12px] font-semibold text-ink">
+            <h3 className="mb-1 flex items-center gap-1 text-small font-semibold text-ink">
               <AlertTriangle className="size-3.5 text-danger" aria-hidden="true" />
               相反する根拠（人が判断するまで本文にしません）
             </h3>
@@ -521,7 +521,7 @@ function RunView({
 
         {canAct && run.state === 'pending' && (
           <div className="flex flex-wrap gap-1.5">
-            <Button type="button" size="sm" variant="outline" onClick={() => close(run, false)}>
+            <Button type="button" size="sm" variant="secondary" onClick={() => close(run, false)}>
               候補の確認を終える
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => close(run, true)}>
@@ -530,16 +530,15 @@ function RunView({
           </div>
         )}
 
-        <details>
-          <summary className="cursor-pointer text-[11px] text-ink-muted">生成の記録</summary>
-          <dl className="mt-1 grid grid-cols-[96px_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[11px]">
+        <Collapsible variant="plain" summary="生成の記録（AI の実行記録）">
+          <dl className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-caption">
             <dt className="text-ink-muted">実行 ID</dt>
             <dd className="break-all font-mono text-ink">{run.metadata.runId}</dd>
             <dt className="text-ink-muted">モデル</dt>
             <dd className="text-ink">
               {run.providerLabel} ／ {run.metadata.model}
             </dd>
-            <dt className="text-ink-muted">プロンプト版</dt>
+            <dt className="text-ink-muted">プロンプトの版</dt>
             <dd className="break-all text-ink">{run.metadata.promptVersion}</dd>
             <dt className="text-ink-muted">開始・終了</dt>
             <dd className="text-ink">
@@ -562,7 +561,7 @@ function RunView({
               </>
             )}
           </dl>
-        </details>
+        </Collapsible>
       </div>
     </div>
   );

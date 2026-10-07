@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
 
 export interface PickerFragment {
   id: string;
@@ -35,23 +36,22 @@ export function FragmentPicker({ fragments }: { fragments: PickerFragment[] }) {
 
   return (
     <fieldset aria-describedby="fragment-count">
-      <legend className="text-[12px] font-medium text-ink">
+      <legend className="text-small font-medium text-ink">
         使う抜粋（{MIN_FRAGMENTS}〜{MAX_FRAGMENTS} 件）
       </legend>
       <p
         id="fragment-count"
         role="status"
-        className={`mt-0.5 text-[11px] ${message && count > 0 ? 'text-danger' : 'text-ink-muted'}`}
+        className={`mt-0.5 text-caption ${message && count > 0 ? 'text-danger' : 'text-ink-muted'}`}
       >
         選択中 {count} 件{count > MAX_FRAGMENTS ? `（${MAX_FRAGMENTS} 件まで）` : ''}
       </p>
       <ul className="mt-1 max-h-[50vh] space-y-1 overflow-y-auto">
         {fragments.map((f, index) => (
           <li key={f.id} className="rounded-t4d border border-line px-2 py-1">
-            <label className="flex gap-2 text-[12px]">
-              <input
+            <label className="flex gap-2 text-small">
+              <NativeCheckbox
                 ref={index === 0 ? firstRef : undefined}
-                type="checkbox"
                 name="fragmentIds"
                 value={f.id}
                 checked={selected.has(f.id)}
@@ -66,7 +66,7 @@ export function FragmentPicker({ fragments }: { fragments: PickerFragment[] }) {
                 className="mt-0.5"
               />
               <span>
-                <span className="block text-[11px] font-medium text-ink-muted">
+                <span className="block text-caption font-medium text-ink-muted">
                   {f.locationLabel}
                   {f.manual ? '（手動の抜粋）' : ''}
                 </span>

@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import { saveProjectFrameworkFormAction, type FrameworkConditionsFormState } from '../../actions';
@@ -77,7 +78,7 @@ export function FrameworkConditionsForm({
         <p
           id={errorId}
           role="alert"
-          className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1.5 text-[12px] text-ink"
+          className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1.5 text-small text-ink"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" aria-hidden="true" />
           <span>
@@ -106,7 +107,7 @@ export function FrameworkConditionsForm({
             .join(' ');
           return (
             <div key={field.key}>
-              <label htmlFor={id} className="block text-[12px] text-ink">
+              <label htmlFor={id} className="block text-small text-ink">
                 {field.label}
                 {field.unit ? `（${field.unit}）` : ''}
               </label>
@@ -121,12 +122,12 @@ export function FrameworkConditionsForm({
                 aria-describedby={describedBy || undefined}
               />
               {fieldError && (
-                <p id={`${id}-error`} className="text-[11px] text-danger">
+                <p id={`${id}-error`} className="text-caption text-danger">
                   {fieldError}
                 </p>
               )}
               {field.help && (
-                <p id={`${id}-help`} className="text-[11px] text-ink-muted">
+                <p id={`${id}-help`} className="text-caption text-ink-muted">
                   {field.help}
                 </p>
               )}
@@ -135,30 +136,30 @@ export function FrameworkConditionsForm({
         })}
       </div>
       <div>
-        <label htmlFor={`prep-${projectFrameworkId}`} className="block text-[12px] text-ink">
+        <label htmlFor={`prep-${projectFrameworkId}`} className="block text-small text-ink">
           準備の区分
         </label>
         {decided ? (
-          <p className="text-[11px] text-ink-muted">
+          <p className="text-caption text-ink-muted">
             判断が確定済みのため区分は変わりません（{decidedStatusLabel}
             ）。見直す場合は判断を追記してください。
           </p>
         ) : (
-          <select
+          <NativeSelect
             id={`prep-${projectFrameworkId}`}
             name="preparationStatus"
             defaultValue={valueOf('preparationStatus', preparationStatus)}
-            className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
+            className="mt-0.5"
           >
             <option value="candidate">適用候補</option>
             <option value="awaiting_confirmation">確認待ち</option>
-          </select>
+          </NativeSelect>
         )}
       </div>
-      <SubmitButton variant="outline" pendingLabel="保存中…">
+      <SubmitButton variant="secondary" pendingLabel="保存中…">
         {state.status === 'conflict' ? 'このまま上書き保存' : '保存して準備を始める'}
       </SubmitButton>
-      <p className="text-[11px] text-ink-muted">
+      <p className="text-caption text-ink-muted">
         空欄は「不明」として保存し、0 や対象外とは扱いません。保存しても適用判断は確定しません。
       </p>
     </form>

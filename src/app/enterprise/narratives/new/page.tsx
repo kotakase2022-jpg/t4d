@@ -1,11 +1,15 @@
 import Link from 'next/link';
 import { Calendar, FileText, Info, Quote, Tag } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { SegmentedFilter } from '@/components/shared/nav-tabs';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { can } from '@/lib/authorization/can';
 import { NARRATIVE_TEMPLATE_FIELDS } from '@/lib/domain/narrative-template';
@@ -36,7 +40,7 @@ export default async function NewNarrativePage({
   const { db, ctx } = shell;
   const mode = query.mode === 'documents' ? 'documents' : 'manual';
   const breadcrumbs = [
-    { label: '企業ワークスペース' },
+    { label: 'ホーム', href: '/enterprise/dashboard' },
     { label: '定性情報', href: '/enterprise/narratives' },
     { label: mode === 'documents' ? '資料から候補を作成' : '新しく登録' },
   ];
@@ -45,7 +49,10 @@ export default async function NewNarrativePage({
     return (
       <>
         <PageHeader title="定性情報の登録" breadcrumbs={breadcrumbs} />
-        <PermissionDeniedState description="定性情報を登録するには、開示の編集権限が必要です。" />
+        <PermissionDeniedState
+          description="定性情報を登録するには、開示の編集権限が必要です。"
+          permission="enterprise.disclosure.write"
+        />
       </>
     );
   }
@@ -62,29 +69,20 @@ export default async function NewNarrativePage({
   }));
   const themes = NARRATIVE_THEMES.map((t) => ({ value: t, label: NARRATIVE_THEME_LABELS[t] }));
 
+  // 登録の 2 つのしかたは URL（?mode=）で切り替える（plan §2.26 E43: SegmentedFilter）
   const tabs = (
-    <nav aria-label="登録のしかた" className="flex gap-1">
-      {(
-        [
-          ['manual', '新しく登録', '/enterprise/narratives/new'],
-          ['documents', '資料から候補を作成', '/enterprise/narratives/new?mode=documents'],
-        ] as const
-      ).map(([key, label, href]) => (
-        <Link
-          key={key}
-          href={href}
-          aria-current={mode === key ? 'page' : undefined}
-          className={cn(
-            'rounded-t4d border px-2.5 py-1 text-[12px]',
-            mode === key
-              ? 'border-brand-300 bg-brand-50 font-semibold text-brand-900'
-              : 'border-line bg-surface text-ink',
-          )}
-        >
-          {label}
-        </Link>
-      ))}
-    </nav>
+    <SegmentedFilter
+      ariaLabel="登録のしかた"
+      current={mode}
+      items={[
+        { key: 'manual', label: '新しく登録', href: '/enterprise/narratives/new' },
+        {
+          key: 'documents',
+          label: '資料から候補を作成',
+          href: '/enterprise/narratives/new?mode=documents',
+        },
+      ]}
+    />
   );
 
   if (mode === 'manual') {
@@ -164,33 +162,30 @@ export default async function NewNarrativePage({
         <FlashMessage searchParams={query} />
         {tabs}
         {documents.length === 0 ? (
-          <Card>
-            <EmptyState
-              title="抜粋を選べる資料がありません"
-              description="定性情報の資料を登録すると、抽出した段落・ページから候補を作れます。"
-              icon={<FileText className="size-5" aria-hidden="true" />}
-              action={
-                <Link
-                  href="/enterprise/evidence?purpose=qualitative"
-                  className="text-[12px] text-brand-800 underline"
-                >
+          <EmptyState
+            kind="no-data"
+            title="抜粋を選べる資料がありません"
+            description="定性情報の資料を登録すると、抽出した段落・ページから候補を作れます。"
+            icon={<FileText className="size-5" aria-hidden="true" />}
+            action={
+              <Button variant="secondary" size="sm" asChild>
+                <Link href="/enterprise/evidence?purpose=qualitative&new=1#evidence-create">
                   定性情報の資料を登録
                 </Link>
-              }
-            />
-          </Card>
+              </Button>
+            }
+          />
         ) : (
           <div className="grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)]">
-            <Card>
-              <SectionTitle title="資料" />
-              <ul className="space-y-1 px-3 pb-3">
+            <Section title="資料" divider="none">
+              <ul className="space-y-1">
                 {documents.map((d) => (
                   <li key={d.fileId}>
                     <Link
                       href={`/enterprise/narratives/new?mode=documents&fileId=${d.fileId}`}
                       aria-current={d.fileId === fileId ? 'page' : undefined}
                       className={cn(
-                        'block rounded-t4d border px-2 py-1 text-[12px]',
+                        'block rounded-t4d border px-2 py-1 text-small',
                         d.fileId === fileId ? 'border-brand-300 bg-brand-50' : 'border-line',
                       )}
                     >
@@ -217,20 +212,25 @@ export default async function NewNarrativePage({
                   </li>
                 ))}
               </ul>
-            </Card>
+            </Section>
 
-            <Card>
-              <SectionTitle
-                title={selectedDoc ? `抜粋を選ぶ: ${selectedDoc.name}` : '抜粋を選ぶ'}
-              />
+            <Section
+              title={selectedDoc ? `抜粋を選ぶ: ${selectedDoc.name}` : '抜粋を選ぶ'}
+              divider="none"
+            >
               {!selected ? (
-                <EmptyState title="資料を選んでください" />
+                <EmptyState
+                  kind="not-applicable"
+                  size="compact"
+                  title="資料を選んでください"
+                  description="左の一覧から、抜粋を使う資料を選びます。"
+                />
               ) : (
-                <form action={createNarrativeCandidateAction} className="space-y-3 px-3 pb-3">
+                <form action={createNarrativeCandidateAction} className="space-y-3">
                   <input type="hidden" name="fileId" value={selected.file.id} />
                   {selectedDoc && selectedDoc.usagePurposeLabel !== '当年度の根拠' && (
-                    <p className="flex items-center gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1 text-[12px]">
-                      <Info className="size-3.5 text-[#8a5d00]" aria-hidden="true" />
+                    <p className="flex items-center gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1 text-small">
+                      <Info className="size-3.5 text-warning-ink" aria-hidden="true" />
                       この資料は「{selectedDoc.usagePurposeLabel}
                       」です。候補の本文でもその旨を示し、当年度の事実としては扱いません。
                     </p>
@@ -244,61 +244,46 @@ export default async function NewNarrativePage({
                     }))}
                   />
                   <div className="grid gap-2 md:grid-cols-3">
-                    <div>
-                      <label
-                        htmlFor="cand-theme"
-                        className="block text-[12px] font-medium text-ink"
-                      >
-                        情報の種別（必須）
-                      </label>
-                      <select
-                        id="cand-theme"
-                        name="theme"
-                        required
-                        defaultValue="governance"
-                        className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
-                      >
-                        {themes.map((t) => (
-                          <option key={t.value} value={t.value}>
-                            {t.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="cand-title"
-                        className="block text-[12px] font-medium text-ink"
-                      >
-                        題名（必須）
-                      </label>
-                      <Input id="cand-title" name="title" required className="mt-0.5" />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="cand-period"
-                        className="block text-[12px] font-medium text-ink"
-                      >
-                        年度
-                      </label>
-                      <select
-                        id="cand-period"
-                        name="reportingPeriodId"
-                        defaultValue={shell.currentPeriod.id}
-                        className="mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px]"
-                      >
-                        {shell.periods.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.code}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <Field label="情報の種別" id="cand-theme" required>
+                      {(control) => (
+                        <NativeSelect {...control} name="theme" defaultValue="governance">
+                          {themes.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.label}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      )}
+                    </Field>
+                    <Field label="題名" id="cand-title" required>
+                      {(control) => <Input {...control} name="title" />}
+                    </Field>
+                    <Field
+                      label="年度"
+                      id="cand-period"
+                      hint="既定はヘッダーで選んでいる報告期間です"
+                    >
+                      {(control) => (
+                        <NativeSelect
+                          {...control}
+                          name="reportingPeriodId"
+                          defaultValue={shell.currentPeriod.id}
+                        >
+                          {shell.periods.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.code}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      )}
+                    </Field>
                   </div>
-                  <SubmitButton pendingLabel="作成中…">候補（下書き）を作成</SubmitButton>
+                  <SubmitButton variant="primary" pendingLabel="作成中…">
+                    候補（下書き）を作成
+                  </SubmitButton>
                 </form>
               )}
-            </Card>
+            </Section>
           </div>
         )}
       </div>

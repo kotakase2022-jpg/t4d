@@ -228,6 +228,9 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
   await page.goto('/enterprise/evidence');
   await expect(page.getByRole('heading', { level: 1, name: 'Evidence' })).toBeVisible();
   await expect(page.getByRole('link', { name: '定性情報の資料として登録する' })).toHaveCount(0);
+  // 登録欄は見出しの「資料を登録」で開く作成パネル（plan S23）。開いた状態で、開示優先の入力が無いことを確かめる
+  await page.goto('/enterprise/evidence?new=1');
+  await expect(page.locator('input[type="file"][name="file"]')).toBeVisible();
   for (const name of ['usagePurpose', 'editionLabel', 'issuedOn', 'confidentiality']) {
     await expect(page.locator(`[name="${name}"]`), name).toHaveCount(0);
   }
@@ -246,7 +249,7 @@ test('A01・A39: 開示優先モードが OFF（既定）なら従来のメニ�
   await expect(
     page.getByRole('navigation', { name: 'パンくず' }).getByRole('link', { name: 'Evidence' }),
   ).toBeVisible();
-  await expect(page).toHaveTitle(/Evidence Viewer/);
+  await expect(page).toHaveTitle(/資料の詳細/);
   await expect(page.getByText(/^利用目的:/)).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '手動抜粋を登録' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /^引用の利用先/ })).toHaveCount(0);

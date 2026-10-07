@@ -18,7 +18,7 @@ export const TooltipContent = React.forwardRef<
         ref={ref}
         sideOffset={sideOffset}
         className={cn(
-          'z-50 max-w-xs rounded-t4d bg-brand-950 px-2 py-1 text-[12px] leading-4 text-white shadow-md',
+          'z-(--z-popover) max-w-xs rounded-t4d bg-brand-950 px-2 py-1 text-small leading-4 text-white shadow-overlay',
           className,
         )}
         {...props}
@@ -27,12 +27,18 @@ export const TooltipContent = React.forwardRef<
   );
 });
 
-/** アイコンボタン等に短い説明を付ける薄いラッパー。 */
+/**
+ * アイコンボタン等に短い説明を付ける薄いラッパー。
+ * 自前の Provider を持つ: 単体テストや Provider の外（ポータルの中など）で描いても落ちないようにする
+ * （内側の Provider が外側の設定を上書きするだけで、挙動は同じ）。
+ */
 export function Hint({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

@@ -141,6 +141,13 @@ async function auditClickNavigation(
       continue;
     }
     const expected = new URL(href, 'http://x');
+    // 既定で閉じた節（Section collapsible・折りたたみ）の中のリンクは、節を開いてから押す
+    // （plan §5.3 の 1「開いてから確かめる」。L2 へ移したリンクも同じ Client 遷移で開くことを確かめる）
+    await link.evaluate((el) => {
+      for (let d = el.closest('details'); d; d = d.parentElement?.closest('details') ?? null) {
+        (d as HTMLDetailsElement).open = true;
+      }
+    });
     await link.click();
     try {
       await page.waitForURL(

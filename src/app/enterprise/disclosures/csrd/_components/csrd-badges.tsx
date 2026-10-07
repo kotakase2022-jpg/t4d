@@ -21,6 +21,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { DetailBadge } from '@/components/shared/detail-badge';
 import {
   CSRD_DATA_STATE_LABEL,
   CSRD_PROVISIONAL_LABEL,
@@ -247,9 +248,9 @@ export function RequiredItemBadge() {
 /** 承認済みの値が推計であること（推計は推計のまま示し、実績と見誤らせない） */
 export function EstimateValueBadge() {
   return (
-    <Badge tone="warning" title="承認済みですが推計値です（実績値ではありません）">
+    <DetailBadge tone="warning" detail="承認済みですが推計値です（実績値ではありません）">
       <Calculator className="size-3" aria-hidden="true" />
       推計
-    </Badge>
+    </DetailBadge>
   );
 }

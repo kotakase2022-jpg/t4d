@@ -1,7 +1,8 @@
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { Notice } from '@/components/shared/notice';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { PermissionDeniedState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { requireAssuranceContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
@@ -16,11 +17,11 @@ export default async function AssuranceSettingsPage() {
   if (!can(ctx, 'assurance.firm.manage')) {
     return (
       <>
-        <PageHeader
-          title="設定"
-          breadcrumbs={[{ label: '監査法人ワークスペース' }, { label: '設定' }]}
+        <PageHeader title="設定" autoBreadcrumbs />
+        <PermissionDeniedState
+          permission="assurance.firm.manage"
+          description="設定画面は監査法人管理者のみ閲覧できます。"
         />
-        <PermissionDeniedState description="設定画面は監査法人管理者のみ閲覧できます。" />
       </>
     );
   }
@@ -49,52 +50,48 @@ export default async function AssuranceSettingsPage() {
       <PageHeader
         title="設定"
         description="監査法人テナントのユーザー管理。クライアントデータへのアクセスは含まれません。"
-        breadcrumbs={[{ label: '監査法人ワークスペース' }, { label: '設定' }]}
+        autoBreadcrumbs
       />
 
       <div className="space-y-3 p-4">
-        <Card className="border-warning/40 bg-warning-soft">
-          <p className="px-3 py-2 text-[12px] text-[#8a5d00]">
-            監査法人管理者は法人テナントとユーザーを管理しますが、
-            <strong>未アサイン案件のクライアントデータを閲覧する権限は持ちません</strong>
-            （アプリ層と RLS の両方で遮断しています）。 現在アサインされている案件: {
-              assignedCount
-            }{' '}
-            件。
-          </p>
-        </Card>
+        {/* 権限の範囲は安全の注記（折りたたまない） */}
+        <Notice tone="warning">
+          監査法人管理者は法人テナントとユーザーを管理しますが、
+          <strong>未アサイン案件のクライアントデータを閲覧する権限は持ちません</strong>
+          （アプリ層と RLS の両方で遮断しています）。
+          <span className="ml-1">現在アサインされている案件: {assignedCount} 件。</span>
+        </Notice>
 
-        <Card className="overflow-hidden">
-          <SectionTitle title={`法人メンバー（${memberships.length}）`} />
-          <Table>
-            <THead>
-              <TR>
-                <TH>氏名</TH>
-                <TH>メールアドレス</TH>
-                <TH>ロール</TH>
-                <TH>状態</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {memberships.map((membership) => {
-                const profile = profiles.find((p) => p.id === membership.userId);
-                const memberRoles = roles.filter((r) => r.membershipId === membership.id);
-                return (
-                  <TR key={membership.id}>
-                    <TD className="font-medium">{profile?.displayName ?? '—'}</TD>
-                    <TD className="text-[12px] text-ink-muted">{profile?.email}</TD>
-                    <TD>{memberRoles.map((r) => roleLabel(r.roleKey)).join(' / ')}</TD>
-                    <TD>
-                      <Badge tone={membership.status === 'active' ? 'success' : 'neutral'}>
-                        {membership.status}
-                      </Badge>
-                    </TD>
-                  </TR>
-                );
-              })}
-            </TBody>
-          </Table>
-        </Card>
+        <Section title={`法人メンバー（${memberships.length}）`} divider="none">
+          <div className="t4d-scroll-x rounded-t4d border border-line">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>氏名</TH>
+                  <TH>メールアドレス</TH>
+                  <TH>役割</TH>
+                  <TH>状態</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {memberships.map((membership) => {
+                  const profile = profiles.find((p) => p.id === membership.userId);
+                  const memberRoles = roles.filter((r) => r.membershipId === membership.id);
+                  return (
+                    <TR key={membership.id}>
+                      <TD className="font-medium">{profile?.displayName ?? '—'}</TD>
+                      <TD className="text-small text-ink-muted">{profile?.email}</TD>
+                      <TD>{memberRoles.map((r) => roleLabel(r.roleKey)).join(' / ')}</TD>
+                      <TD>
+                        <StatusBadge domain="membership" value={membership.status} />
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </div>
+        </Section>
       </div>
     </>
   );

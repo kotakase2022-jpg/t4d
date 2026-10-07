@@ -1,8 +1,12 @@
 'use client';
 
 import * as React from 'react';
-import { AlertTriangle, Upload } from 'lucide-react';
+import { Upload } from 'lucide-react';
+import { ActionResult } from '@/components/shared/notice';
+import { Field } from '@/components/ui/field';
+import { FormSection } from '@/components/ui/form-section';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { EVIDENCE_USAGE_PURPOSE_LABELS } from '@/lib/domain/disclosure-status';
 import { withNetworkFallback } from '@/lib/errors/safe-form-action';
@@ -16,9 +20,7 @@ import {
   type EvidenceUploadFormState,
   type EvidenceUploadValues,
 } from './actions';
-
-const selectClass =
-  'mt-0.5 block h-7 w-full rounded-t4d border border-line bg-surface px-2 text-[13px] focus-visible:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100';
+import { inferEvidenceAttributes } from './infer-attributes';
 
 const INITIAL: EvidenceUploadFormState = { status: 'idle', message: null, values: null };
 
@@ -55,10 +57,13 @@ export interface EvidenceUploadFormProps {
 }
 
 /**
- * 資料・証跡の登録フォーム。
- *  - 送信中はボタンを止めて「登録中…」と示す（二度押しで同じ資料を 2 件登録しない）
- *  - サーバーが断ったとき・通信に失敗したときも、資料名・版・発行日・利用目的などの入力は残す
- *    （ファイルだけはブラウザの制約で選び直しが要るため、その旨を示す）
+ * 資料・証跡の登録フォーム（plan S23。作成パネルの中に置く）。
+ *
+ * - 2 段: ① ファイル（必須。定性情報は利用目的も必須）→ ② 資料の属性（任意）。属性は既定で閉じ、
+ *   システムが分かる値は入れておく（対象年度＝ヘッダーの期間、資料名・文書種別・発行日はファイル名から推定）
+ * - 送信中はボタンを止めて「登録中…」と示す（二度押しで同じ資料を 2 件登録しない）
+ * - サーバーが断ったとき・通信に失敗したときも、資料名・版・発行日・利用目的などの入力は残す
+ *   （ファイルだけはブラウザの制約で選び直しが要るため、その旨を示す）
  */
 export function EvidenceUploadForm({
   qualitative,
@@ -78,167 +83,239 @@ export function EvidenceUploadForm({
   const full = disclosureFirst || qualitative;
   const errorId = 'ev-upload-error';
 
+  // ファイル名から推定した属性（人が入れた値は上書きしない。空の欄にだけ入れる。資料名は空欄なら
+  // サーバーがファイル名を使うので、候補として placeholder にだけ出す）
+  const [inferred, setInferred] = React.useState<{
+    title: string;
+    documentType: string;
+    issuedOn: string;
+  }>({ title: '', documentType: '', issuedOn: '' });
+  const typeRef = React.useRef<HTMLInputElement>(null);
+  const issuedRef = React.useRef<HTMLInputElement>(null);
+
+  const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const name = event.target.files?.[0]?.name;
+    if (!name) return;
+    const guess = inferEvidenceAttributes(name);
+    setInferred(guess);
+    const fill = (input: HTMLInputElement | null, value: string) => {
+      if (input && input.value === '' && value) input.value = value;
+    };
+    fill(typeRef.current, guess.documentType);
+    fill(issuedRef.current, guess.issuedOn);
+  };
+  const hasInferred = Boolean(inferred.documentType || inferred.issuedOn);
+  // 前回の値（失敗して戻ったとき）があれば属性の節を開いて描く。従来の画面は項目が 2 つだけなので開いておく
+  const attributesOpen =
+    !full ||
+    Boolean(
+      values &&
+      (values.title ||
+        values.editionLabel ||
+        values.issuedOn ||
+        values.documentType ||
+        (!qualitative && values.usagePurpose)),
+    );
+
   return (
     <form
       key={generation}
       action={formAction}
-      className="space-y-2 px-3 pb-3"
+      className="space-y-2"
       aria-describedby={values ? errorId : undefined}
     >
       <input type="hidden" name="kind" value={qualitative ? 'qualitative' : 'evidence'} />
       {qualitative && (
-        <p className="text-[12px] text-ink-muted">
+        <p className="text-small text-ink-muted">
           利用目的は必須です。「当年度の根拠」以外（過年度の記載・文体の参考）は、当年度の事実の根拠として扱いません。
           資料を登録しただけでは、要求事項は対応済みになりません。
         </p>
       )}
       {state.status === 'error' && state.message && (
-        <p
+        <ActionResult
           id={errorId}
-          role="alert"
-          className="flex items-start gap-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1.5 text-[12px] text-ink"
-        >
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" aria-hidden="true" />
-          {state.message}
-          （入力は残っています。ファイルだけはもう一度選んでください）
-        </p>
+          state={{
+            status: 'error',
+            message: `${state.message}（入力は残っています。ファイルだけはもう一度選んでください）`,
+          }}
+        />
       )}
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="sm:col-span-2">
-          <label htmlFor="ev-file" className="block text-[12px] text-ink-muted">
-            {qualitative
-              ? `ファイル（${extensions.join(' ')}）`
-              : 'ファイル（形式は問いません。本文を抽出できる形式は引用にも使えます）'}
-          </label>
-          <input
+
+      <FormSection title="① ファイル" kind="required">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Field
+            label={
+              qualitative
+                ? `ファイル（${extensions.join(' ')}）`
+                : 'ファイル（形式は問いません。本文を抽出できる形式は引用にも使えます）'
+            }
             id="ev-file"
-            type="file"
             name="file"
             required
-            accept={qualitative ? extensions.join(',') : undefined}
-            className="mt-0.5 block text-[12px] file:mr-2 file:rounded-t4d file:border file:border-line file:bg-surface file:px-2 file:py-1 file:text-[12px]"
-          />
+          >
+            {(p) => (
+              <input
+                {...p}
+                type="file"
+                name="file"
+                accept={qualitative ? extensions.join(',') : undefined}
+                onChange={onFileChange}
+                className="block text-small file:mr-2 file:rounded-t4d file:border file:border-line file:bg-surface file:px-2 file:py-1 file:text-small"
+              />
+            )}
+          </Field>
+          {qualitative && (
+            <Field label="利用目的" id="ev-purpose" name="usagePurpose" required>
+              {(p) => (
+                <NativeSelect
+                  {...p}
+                  name="usagePurpose"
+                  defaultValue={values?.usagePurpose || 'current_fact'}
+                >
+                  {EVIDENCE_USAGE_PURPOSES.map((purpose) => (
+                    <option key={purpose} value={purpose}>
+                      {EVIDENCE_USAGE_PURPOSE_LABELS[purpose]}
+                    </option>
+                  ))}
+                </NativeSelect>
+              )}
+            </Field>
+          )}
         </div>
-        {full && (
-          <div>
-            <label htmlFor="ev-title" className="block text-[12px] text-ink-muted">
-              資料名
-            </label>
-            <Input
-              id="ev-title"
-              name="title"
-              placeholder="空欄ならファイル名"
-              defaultValue={values?.title ?? ''}
-              className="mt-0.5"
-            />
-          </div>
-        )}
-        <div>
-          <label htmlFor="ev-period" className="block text-[12px] text-ink-muted">
-            {full ? '対象年度' : '対象期間'}
-          </label>
-          <select
+      </FormSection>
+
+      <FormSection
+        title={full ? '② 資料の属性（ファイル名から推定した値が入ります）' : '② 資料の属性'}
+        kind="optional"
+        open={attributesOpen}
+      >
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {full && (
+            <Field label="資料名" id="ev-title" name="title" hint="空欄ならファイル名">
+              {(p) => (
+                <Input
+                  {...p}
+                  name="title"
+                  placeholder={inferred.title || '空欄ならファイル名'}
+                  defaultValue={values?.title ?? ''}
+                />
+              )}
+            </Field>
+          )}
+          <Field
+            label={full ? '対象年度' : '対象期間'}
             id="ev-period"
             name="reportingPeriodId"
-            defaultValue={values?.reportingPeriodId ?? currentPeriodId}
-            className={selectClass}
+            hint="既定は画面上部で選んでいる報告期間"
           >
-            {full && <option value="">指定しない</option>}
-            {periods.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.code}
-              </option>
-            ))}
-          </select>
-        </div>
-        {full && (
-          <>
-            <div>
-              <label htmlFor="ev-edition" className="block text-[12px] text-ink-muted">
-                版
-              </label>
-              <Input
-                id="ev-edition"
-                name="editionLabel"
-                placeholder="例: 2026年6月 第2版"
-                defaultValue={values?.editionLabel ?? ''}
-                className="mt-0.5"
-              />
-            </div>
-            <div>
-              <label htmlFor="ev-issued" className="block text-[12px] text-ink-muted">
-                発行日
-              </label>
-              <Input
-                id="ev-issued"
-                name="issuedOn"
-                type="date"
-                defaultValue={values?.issuedOn ?? ''}
-                className="mt-0.5"
-              />
-            </div>
-          </>
-        )}
-        <div>
-          <label htmlFor="ev-type" className="block text-[12px] text-ink-muted">
-            文書種別
-          </label>
-          <Input
-            id="ev-type"
-            name="documentType"
-            placeholder={full ? '例: 議事録・請求書' : '例: 請求書'}
-            defaultValue={values?.documentType ?? ''}
-            className="mt-0.5"
-          />
-        </div>
-        {full && (
-          <>
-            <div>
-              <label htmlFor="ev-conf" className="block text-[12px] text-ink-muted">
-                機密区分
-              </label>
-              <select
-                id="ev-conf"
-                name="confidentiality"
-                defaultValue={values?.confidentiality || 'confidential'}
-                className={selectClass}
+            {(p) => (
+              <NativeSelect
+                {...p}
+                name="reportingPeriodId"
+                defaultValue={values?.reportingPeriodId ?? currentPeriodId}
               >
-                {CONFIDENTIALITY_LEVELS.map((c) => (
-                  <option key={c} value={c}>
-                    {confidentialityLabels[c]}
+                {full && <option value="">指定しない</option>}
+                {periods.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    {period.code}
                   </option>
                 ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="ev-purpose" className="block text-[12px] text-ink-muted">
-                利用目的{qualitative ? '（必須）' : ''}
-              </label>
-              <select
-                id="ev-purpose"
-                name="usagePurpose"
-                required={qualitative}
-                defaultValue={values?.usagePurpose ?? (qualitative ? 'current_fact' : '')}
-                className={selectClass}
-              >
-                {!qualitative && <option value="">未設定（証憑）</option>}
-                {EVIDENCE_USAGE_PURPOSES.map((p) => (
-                  <option key={p} value={p}>
-                    {EVIDENCE_USAGE_PURPOSE_LABELS[p]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </>
+              </NativeSelect>
+            )}
+          </Field>
+          {full && (
+            <>
+              <Field label="版" id="ev-edition" name="editionLabel">
+                {(p) => (
+                  <Input
+                    {...p}
+                    name="editionLabel"
+                    placeholder="例: 2026年6月 第2版"
+                    defaultValue={values?.editionLabel ?? ''}
+                  />
+                )}
+              </Field>
+              <Field label="発行日" id="ev-issued" name="issuedOn">
+                {(p) => (
+                  <Input
+                    {...p}
+                    ref={issuedRef}
+                    name="issuedOn"
+                    type="date"
+                    defaultValue={values?.issuedOn ?? ''}
+                  />
+                )}
+              </Field>
+            </>
+          )}
+          <Field label="文書種別" id="ev-type" name="documentType">
+            {(p) => (
+              <Input
+                {...p}
+                ref={typeRef}
+                name="documentType"
+                placeholder={full ? '例: 議事録・請求書' : '例: 請求書'}
+                defaultValue={values?.documentType ?? ''}
+              />
+            )}
+          </Field>
+          {full && (
+            <>
+              <Field label="機密区分" id="ev-conf" name="confidentiality" hint="既定は「機密」">
+                {(p) => (
+                  <NativeSelect
+                    {...p}
+                    name="confidentiality"
+                    defaultValue={values?.confidentiality || 'confidential'}
+                  >
+                    {CONFIDENTIALITY_LEVELS.map((c) => (
+                      <option key={c} value={c}>
+                        {confidentialityLabels[c]}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                )}
+              </Field>
+              {!qualitative && (
+                <Field label="利用目的" id="ev-purpose" name="usagePurpose">
+                  {(p) => (
+                    <NativeSelect
+                      {...p}
+                      name="usagePurpose"
+                      defaultValue={values?.usagePurpose ?? ''}
+                    >
+                      <option value="">未設定（証憑）</option>
+                      {EVIDENCE_USAGE_PURPOSES.map((purpose) => (
+                        <option key={purpose} value={purpose}>
+                          {EVIDENCE_USAGE_PURPOSE_LABELS[purpose]}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  )}
+                </Field>
+              )}
+            </>
+          )}
+        </div>
+        {hasInferred && (
+          <p className="text-caption text-ink-muted" aria-live="polite">
+            ファイル名から推定して空欄に入れました（推定です。違っていれば直してください）。
+          </p>
         )}
-      </div>
+      </FormSection>
+
       <div className="flex flex-wrap items-center gap-2">
-        <SubmitButton size="sm" pendingLabel="登録中…" icon={<Upload aria-hidden="true" />}>
+        <SubmitButton
+          variant="primary"
+          size="sm"
+          pendingLabel="登録中…"
+          icon={<Upload aria-hidden="true" />}
+        >
           登録
         </SubmitButton>
         {full && (
-          <span className="text-[11px] text-ink-muted">
-            PDF・Word・テキストは段落・ページ単位で引用できる箇所を抽出します。機密区分の既定は「機密」です。
+          <span className="text-caption text-ink-muted">
+            PDF・Word・テキストは段落・ページ単位で引用できる箇所を抽出します。
           </span>
         )}
       </div>

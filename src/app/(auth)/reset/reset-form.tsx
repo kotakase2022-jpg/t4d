@@ -3,8 +3,10 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Notice } from '@/components/shared/notice';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { Card } from '@/components/ui/card';
+import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 
@@ -78,31 +80,53 @@ export function ResetPasswordForm() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-4 p-6">
       <Card className="p-5">
-        <h1 className="flex items-center gap-1.5 text-[16px] font-semibold text-ink">
+        <h1 className="flex items-center gap-1.5 text-title-lg font-semibold text-ink">
           <KeyRound className="size-4" aria-hidden="true" />
           パスワードの再設定
         </h1>
-        {ready === 'checking' && <p className="mt-2 text-[13px] text-ink-muted">確認中…</p>}
+        {ready === 'checking' && (
+          <p role="status" className="mt-2 text-body text-ink-muted">
+            確認中…
+          </p>
+        )}
         {ready === 'invalid' && (
-          <p className="mt-2 text-[13px] text-ink">
-            このページは再設定リンクからのみ利用できます（Supabase Mode 専用）。
+          <p className="mt-2 text-body text-ink">
+            このページは、管理者が発行した再設定リンクからのみ利用できます。
             リンクの有効期限が切れている場合は、管理者へ再発行を依頼してください。
           </p>
         )}
         {ready === 'ok' && !done && (
           <form onSubmit={onSubmit} className="mt-3 space-y-2">
-            <label className="block text-[12px] text-ink-muted">
-              新しいパスワード（8 文字以上）
-              <Input name="password" type="password" required minLength={8} className="mt-0.5" />
-            </label>
-            <label className="block text-[12px] text-ink-muted">
-              新しいパスワード（確認）
-              <Input name="confirm" type="password" required minLength={8} className="mt-0.5" />
-            </label>
-            {error && <p className="text-[12px] text-danger">{error}</p>}
-            <Button type="submit" size="sm" className="w-full">
+            <Field label="新しいパスワード（8 文字以上）" name="password" required>
+              {(p) => (
+                <Input
+                  {...p}
+                  name="password"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                />
+              )}
+            </Field>
+            <Field label="新しいパスワード（確認）" name="confirm" required>
+              {(p) => (
+                <Input
+                  {...p}
+                  name="confirm"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                />
+              )}
+            </Field>
+            {error && (
+              <Notice tone="danger" role="alert">
+                {error}
+              </Notice>
+            )}
+            <SubmitButton variant="primary" size="sm" className="w-full">
               パスワードを更新する
-            </Button>
+            </SubmitButton>
           </form>
         )}
       </Card>

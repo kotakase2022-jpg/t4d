@@ -265,23 +265,95 @@ export async function gotoEngagementPage(page: Page, pageName: string): Promise<
 
 /** 管理者の設定画面で開示優先モードを切り替える（enterprise.org.manage が要る） */
 export async function setDisclosureFirst(page: Page, on: boolean): Promise<void> {
-  await page.goto('/enterprise/settings');
+  // 設定の「機能設定」タブ。保存は組織の全員のメニューを変えるため確認ダイアログを通る（plan S17・§1.16）
+  await page.goto('/enterprise/settings?tab=features');
   await page.getByLabel(on ? '有効にする' : '無効にする（従来の構成）').check();
   await page
     .locator('form')
     .filter({ has: page.getByRole('group', { name: '開示優先モード' }) })
     .getByRole('button', { name: '保存' })
     .click();
+  await confirmInDialog(page);
   await page.waitForURL(new RegExp(`flash=disclosureFirstChanged&state=${on ? 'on' : 'off'}`));
+  // URL が変わった時点では Server Action の後の描画がまだ続いている。描き終わる前に次の page.goto を
+  // 始めると、遅れて届いた遷移に打ち消されて net::ERR_ABORTED になる。切替の通知が出るまで待つ
+  await expect(
+    page.getByText(on ? /開示優先モードを有効にしました/ : /開示優先モードを無効にしました/),
+  ).toBeVisible();
+}
+
+// ----------------------------------------------------------------------
+// L2・L3 に移した操作を開く（docs/ui-redesign/plan.md §5.3 の「開いてから確かめる」）
+// ----------------------------------------------------------------------
+
+/**
+ * 見出しの「その他 ▾」を開く（PageActions・MoreMenu）。label は起動ボタンの文字（既定「その他」）。
+ * scope を渡すとその範囲（例: main）の中の起動ボタンを押す。開いたメニュー（role=menu）を返す
+ */
+export async function openMoreMenu(
+  scope: Page | Locator,
+  label: string = 'その他',
+): Promise<Locator> {
+  const page = pageOf(scope);
+  const trigger = scope.locator('[data-more-menu]').filter({ hasText: label }).first();
+  await expect(trigger, `「${label}」のメニューが見つからない`).toBeVisible();
+  await trigger.click();
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/** 行の「操作 ▾」を開く（RowActions。起動ボタンの読み上げ名は「{行の名前} の操作」） */
+export async function openRowActions(scope: Page | Locator, rowLabel: string): Promise<Locator> {
+  const page = pageOf(scope);
+  await scope.getByRole('button', { name: `${rowLabel} の操作` }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  return menu;
 }
 
 /**
- * 開示デモのリセット（ホームの開示業務タブにある。開示優先モードが ON のときだけ表示される）。
+ * 開いている確認ダイアログ（ConfirmDialog）で、理由の入力・必須チェックを済ませて確定ボタンを押す。
+ * 範囲 1 行（data-confirm-scope）が見えていることも確かめる（閉じた中に入れない規則。plan §1.16）
+ */
+export async function confirmInDialog(
+  page: Page,
+  options: { acknowledge?: string | RegExp; reason?: string; reasonLabel?: string | RegExp } = {},
+): Promise<void> {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-confirm-scope]')).toBeVisible();
+  if (options.reason !== undefined) {
+    const reason = options.reasonLabel
+      ? dialog.getByLabel(options.reasonLabel)
+      : dialog.locator('textarea').first();
+    await reason.fill(options.reason);
+  }
+  if (options.acknowledge !== undefined) {
+    await dialog.getByLabel(options.acknowledge).check();
+  }
+  await dialog.locator('[data-confirm-submit]').click();
+}
+
+/** ホームの「その他」に開示デモのリセットがあるか（開示優先モード・Demo Mode・開示の編集権限） */
+export async function hasDisclosureDemoReset(page: Page): Promise<boolean> {
+  const trigger = page.locator('#t4d-main [data-more-menu]').filter({ hasText: 'その他' });
+  if ((await trigger.count()) === 0) return false;
+  await trigger.first().click();
+  const item = page.getByRole('menuitem', { name: /^開示デモを初期状態に戻す/ });
+  const visible = await item.isVisible().catch(() => false);
+  await page.keyboard.press('Escape');
+  return visible;
+}
+
+/**
+ * 開示デモのリセット（ホームの開示業務タブの「その他」→ 確認ダイアログ。開示優先モードが ON のときだけ）。
  * 開示優先モードの表と CSRD の 6 表（DMA・評価・計画・開示ドラフト）を Fixture の値へ戻す
  */
 export async function resetDisclosureDemo(page: Page): Promise<void> {
-  await page.getByLabel('上記の範囲だけを初期状態へ戻すことを確認しました').check();
-  await page.getByRole('button', { name: '開示デモを初期状態に戻す' }).click();
+  const menu = await openMoreMenu(page.locator('#t4d-main'));
+  await menu.getByRole('menuitem', { name: /^開示デモを初期状態に戻す/ }).click();
+  await confirmInDialog(page, { acknowledge: '上記の範囲だけを初期状態へ戻すことを確認しました' });
   await page.waitForURL(/flash=disclosureDemoReset/);
   await expect(page.getByText(/開示デモのデータを初期状態に戻しました/)).toBeVisible();
 }

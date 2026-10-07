@@ -44,21 +44,21 @@ export function DisclosureSteps({ steps }: { steps: DisclosureStep[] }) {
               aria-current={step.state === 'current' ? 'step' : undefined}
             >
               <div className="flex items-center gap-1.5">
-                <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-[11px] font-semibold text-ink-muted">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-caption font-semibold text-ink-muted">
                   {i + 1}
                 </span>
-                <span className="text-[13px] font-semibold text-ink">{step.title}</span>
+                <span className="text-body font-semibold text-ink">{step.title}</span>
                 <Badge tone={s.tone}>
                   <s.Icon className="size-3" aria-hidden="true" />
                   {s.label}
                 </Badge>
               </div>
-              <p className="text-[12px] leading-relaxed text-ink-muted">{step.description}</p>
-              {step.detail && <div className="text-[12px] text-ink">{step.detail}</div>}
+              <p className="text-small leading-relaxed text-ink-muted">{step.description}</p>
+              {step.detail && <div className="text-small text-ink">{step.detail}</div>}
               {step.action && (
                 <Button
                   size="xs"
-                  variant={step.state === 'current' ? 'primary' : 'outline'}
+                  variant={step.state === 'current' ? 'primary' : 'secondary'}
                   asChild
                 >
                   <Link href={step.action.href}>{step.action.label}</Link>

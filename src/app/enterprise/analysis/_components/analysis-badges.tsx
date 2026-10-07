@@ -100,7 +100,7 @@ export function UndisclosedBadge() {
 export function AssuranceNote({ assured }: { assured: boolean }) {
   const Icon = assured ? ShieldCheck : ShieldOff;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
+    <span className="inline-flex items-center gap-1 text-caption text-ink-muted">
       <Icon className="size-3" aria-hidden="true" />
       {assured ? '保証あり' : '保証なし'}
     </span>
@@ -113,12 +113,12 @@ export function DemoBenchmarkBanner() {
     <div
       role="note"
       aria-label="比較データについて"
-      className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-ink"
+      className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-small text-ink"
     >
-      <FlaskConical className="mt-0.5 size-4 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+      <FlaskConical className="mt-0.5 size-4 shrink-0 text-warning-ink" aria-hidden="true" />
       <div>
         <p className="font-semibold">{DEMO_BENCHMARK_NOTICE}</p>
-        <p className="mt-0.5 text-[11px] text-ink-muted">
+        <p className="mt-0.5 text-caption text-ink-muted">
           ピアA〜E社はデモ用に作った架空の会社です。他のテナント（他社の利用企業）のデータは使っていません。
         </p>
       </div>

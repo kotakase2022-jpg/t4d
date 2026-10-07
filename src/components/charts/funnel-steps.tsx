@@ -32,7 +32,7 @@ export function FunnelSteps({
       {steps.map((step, index) => (
         <li
           key={`${step.label}-${index}`}
-          className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-2 text-[12px]"
+          className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-2 text-small"
         >
           <span className="truncate text-ink" title={step.label}>
             {step.href ? (

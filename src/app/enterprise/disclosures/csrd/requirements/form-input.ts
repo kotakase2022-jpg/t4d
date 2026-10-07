@@ -1,3 +1,4 @@
+import type { DataCoverage } from '@/lib/services/aggregation';
 import type { CreateCsrdActionPlanInput } from '@/lib/services/csrd/plans';
 import type {
   CsrdRequirementFilters,
@@ -122,6 +123,56 @@ export function parseRequirementQuery(query: SearchParams): {
     },
     q: (typeof q === 'string' ? q : '').trim(),
   };
+}
+
+/**
+ * データの揃い具合・回答の状況を出した要求事項の一覧の列（URL の cols）。
+ * 対応状況の画面にあったギャップ分析表（要求事項と同じ母集団の 2 つ目の表）を一覧へ寄せたため、
+ * 対応状況の件数からはこの列の組で一覧を開く（plan T8。列は「列 ▾」でいつでも出し入れできる）
+ */
+export const CSRD_REQUIREMENT_DATA_COLS =
+  'applicability,combined,review,required,availability,metrics,current,response';
+
+/** データ・回答・必須での絞り込み（?data=&answer=&required=1）。サービスの絞り込みに無い、画面の表示用の条件 */
+export interface RequirementDataFilters {
+  data: string[];
+  answer: string[];
+  required: boolean;
+}
+
+/** 1 要求事項のデータ・回答の事実（ギャップ分析と同じ数え方。answered は回答本文のある未着手以外） */
+export interface RequirementDataFacts {
+  dataCoverage: DataCoverage;
+  answered: boolean;
+  required: boolean;
+}
+
+export function parseRequirementDataQuery(query: SearchParams): RequirementDataFilters {
+  const required = query.required;
+  return {
+    data: toList(query.data),
+    answer: toList(query.answer),
+    required: required === '1' || (Array.isArray(required) && required.includes('1')),
+  };
+}
+
+/** 条件に合うか。事実が無い（ギャップ分析の行が無い）要求事項は、条件があれば外す */
+export function matchesRequirementData(
+  facts: RequirementDataFacts | undefined,
+  filters: RequirementDataFilters,
+): boolean {
+  const active = filters.data.length > 0 || filters.answer.length > 0 || filters.required;
+  if (!active) return true;
+  if (!facts) return false;
+  if (filters.data.length > 0 && !filters.data.includes(facts.dataCoverage)) return false;
+  if (
+    filters.answer.length > 0 &&
+    !filters.answer.includes(facts.answered ? 'answered' : 'not_answered')
+  ) {
+    return false;
+  }
+  if (filters.required && !facts.required) return false;
+  return true;
 }
 
 /** 検索語（要求事項コード・見出し）。大文字小文字を区別しない。空なら全件 */

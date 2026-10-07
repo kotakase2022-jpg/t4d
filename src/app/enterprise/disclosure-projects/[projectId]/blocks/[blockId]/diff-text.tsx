@@ -12,7 +12,7 @@ export function DiffText({ segments }: { segments: readonly DiffSegment[] }) {
           return (
             <ins
               key={index}
-              className="rounded-sm bg-success-soft text-ink underline decoration-success"
+              className="rounded-t4d-sm bg-success-soft text-ink underline decoration-success"
             >
               <span className="sr-only">（追加）</span>
               {segment.text}
@@ -22,7 +22,7 @@ export function DiffText({ segments }: { segments: readonly DiffSegment[] }) {
         return (
           <del
             key={index}
-            className="rounded-sm bg-danger-soft text-ink-muted line-through decoration-danger"
+            className="rounded-t4d-sm bg-danger-soft text-ink-muted line-through decoration-danger"
           >
             <span className="sr-only">（削除）</span>
             {segment.text}

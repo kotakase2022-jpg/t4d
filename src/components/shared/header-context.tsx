@@ -57,19 +57,19 @@ export function HeaderProjectContext({
       <Hint label={`対象範囲: ${project.scopeDetail}`}>
         <Link
           href={`/enterprise/disclosure-projects/${project.id}`}
-          className="inline-flex min-w-[8.5rem] max-w-[420px] items-center gap-1.5 overflow-hidden rounded-t4d px-1.5 py-0.5 text-[12px] text-ink hover:bg-brand-50"
+          className="inline-flex min-w-[8.5rem] max-w-[420px] items-center gap-1.5 overflow-hidden rounded-t4d px-1.5 py-0.5 text-small text-ink hover:bg-brand-50"
         >
           <FolderKanban className="size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
           <span className="sr-only">開示プロジェクト:</span>
           <span className="min-w-[7rem] truncate font-medium">{project.name}</span>
-          <span className="hidden shrink-0 text-ink-muted min-[1600px]:inline" aria-hidden="true">
+          <span className="hidden shrink-0 text-ink-muted xwide:inline" aria-hidden="true">
             ｜
           </span>
-          <span className="hidden truncate text-ink-muted min-[1600px]:inline">
+          <span className="hidden truncate text-ink-muted xwide:inline">
             範囲 {project.reportingEntity}
           </span>
           {otherPeriod && (
-            <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-ink-muted min-[1600px]:inline">
+            <span className="hidden shrink-0 whitespace-nowrap text-caption text-ink-muted xwide:inline">
               （{project.periodText}）
             </span>
           )}
@@ -77,7 +77,7 @@ export function HeaderProjectContext({
       </Hint>
       {otherPeriod && (
         <span
-          className="inline-flex shrink-0 items-center gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-1.5 py-0.5 text-[11px] text-[#8a5d00]"
+          className="inline-flex shrink-0 items-center gap-1 rounded-t4d border border-warning/40 bg-warning-soft px-1.5 py-0.5 text-caption text-warning-ink"
           role="note"
         >
           <AlertTriangle className="size-3" aria-hidden="true" />

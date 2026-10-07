@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openMoreMenu } from './helpers';
 
 /**
  * 左メニューの構成（発注者会議での再設計 + 2026-09 の 3 階層化 + 2026-10-01 の追加要望）。
@@ -176,9 +176,11 @@ test('SSBJ 配下は 3 階層で並び、開示ドラフトへの導線が 3 か
   await main.getByRole('link', { name: 'SSBJ 開示ドラフト' }).click();
   await expect(page).toHaveURL(/\/enterprise\/disclosures\/ssbj\/draft/);
 
-  // ③ データ取込（取込ジョブの一覧画面）の右上
+  // ③ データ取込（取込ジョブの一覧画面）の右上の「その他」（関係の薄い入口は L2。plan §2.26 E11）
   await page.goto('/enterprise/imports');
-  await expect(main.getByRole('link', { name: 'SSBJ 開示ドラフト' })).toBeVisible();
+  await expect(
+    (await openMoreMenu(main)).getByRole('menuitem', { name: 'SSBJ 開示ドラフト' }),
+  ).toBeVisible();
 });
 
 test('同じ名前のリンクが SSBJ と CSRD に並んでも、現在地は開いている画面の 1 つだけ', async ({
@@ -261,4 +263,95 @@ test('設定と規制対応度は権限のある利用者だけに左メニュ�
   await page.goto('/enterprise/dashboard');
   await expect(nav(page).getByRole('link', { name: '設定', exact: true })).toBeVisible();
   await expect(nav(page).getByRole('link', { name: '規制対応度', exact: true })).toBeVisible();
+});
+
+test('グループは開閉でき、開示の閲覧権限が無い役割は「開示対応」が既定で閉じる（開閉は利用者ごとに覚える）', async ({
+  page,
+}) => {
+  // 拠点担当（開示の閲覧権限なし）: 開示対応は既定で閉じる（docs/ui-redesign/plan.md §1.4）。開けて、覚える
+  await loginAs(page, DEMO_USERS.siteUser);
+  await page.goto('/enterprise/dashboard');
+  const expand = nav(page).getByRole('button', { name: '開示対応 を展開する', exact: true });
+  await expect(expand).toHaveAttribute('aria-expanded', 'false');
+  await expect(childList(page, '開示対応')).toHaveCount(0);
+  await expand.click();
+  const collapse = nav(page).getByRole('button', { name: '開示対応 を折りたたむ', exact: true });
+  await expect(collapse).toHaveAttribute('aria-expanded', 'true');
+  // 開いた中身は権限で絞った同じツリー（定性情報・CSRD は出さない）
+  await expect(childList(page, 'SSBJ').getByRole('link')).toHaveText([
+    '対応状況',
+    '要求事項',
+    '対応計画',
+    'データ収集',
+    '開示ドラフト',
+  ]);
+  await expect(nav(page).getByRole('link', { name: 'CSRD', exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(
+    nav(page).getByRole('button', { name: '開示対応 を折りたたむ', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  // 分析は閉じない（数値を読むだけの画面で、開示の権限は要らない）
+  await expect(childList(page, '分析').getByRole('link')).toHaveText([
+    '現状診断',
+    '自社経年比較',
+    '他社比較',
+    '財務影響分析',
+  ]);
+
+  // 作成担当: すべて開いた状態から始まる。閉じたグループの子は読み上げにも出さない。現在地の祖先は開いて描く
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.goto('/enterprise/dashboard');
+  await nav(page).getByRole('button', { name: 'GHG を折りたたむ', exact: true }).click();
+  await expect(nav(page).getByRole('link', { name: 'Cat.1', exact: true })).toHaveCount(0);
+  await expect(
+    nav(page).getByRole('button', { name: 'GHG を展開する', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'false');
+  await page.goto('/enterprise/ghg/suppliers');
+  await expect(nav(page).getByRole('link', { name: 'Cat.1', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await nav(page).getByRole('button', { name: 'GHG を折りたたむ', exact: true }).click();
+  await page.goto('/enterprise/dashboard');
+  await nav(page).getByRole('button', { name: 'GHG を展開する', exact: true }).click();
+  await expect(nav(page).getByRole('link', { name: 'Cat.1', exact: true })).toBeVisible();
+});
+
+test('監査法人のメニュー: 案件を選ぶまで手続の画面を出さず、選ぶと 計画・実施・結論・記録 に並ぶ', async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.assuranceManager);
+  await page.goto('/assurance/dashboard');
+  const top = nav(page).locator(':scope > ul > li > a');
+  await expect(top).toHaveText(['案件ホーム', '保証契約']);
+  await expect(nav(page).getByText('案件を選ぶと手続の画面が並びます')).toBeVisible();
+  await expect(nav(page).getByRole('link', { name: 'Data Room', exact: true })).toHaveCount(0);
+
+  await page.goto('/assurance/engagements');
+  await page.getByRole('link', { name: 'ENG-2026-001' }).first().click();
+  await page.waitForURL(/\/assurance\/engagements\/[^/]+\/overview/);
+  await expect(top).toHaveText(['案件ホーム', '保証契約', '計画', '実施', '結論', '記録']);
+  await expect(childList(page, '計画').getByRole('link')).toHaveText(['概要', 'スコープ']);
+  await expect(childList(page, '実施').getByRole('link')).toHaveText([
+    'Data Room',
+    '母集団',
+    'サンプリング',
+    '保証手続・調書',
+    'PBC／資料依頼',
+    '指摘・例外',
+  ]);
+  await expect(childList(page, '結論').getByRole('link')).toHaveText(['レビューNote', 'Sign-off']);
+  await expect(childList(page, '記録').getByRole('link')).toHaveText(['監査ログ', '出力']);
+  // 現在地はちょうど 1 つ（概要）
+  await expect(nav(page).locator('a[aria-current="page"]')).toHaveCount(1);
+  await expect(childList(page, '計画').getByRole('link', { name: '概要' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(page.getByText('案件を選ぶと手続の画面が並びます')).toHaveCount(0);
+
+  // 法人管理者（案件の閲覧なし）には 案件ホーム・保証契約・設定 だけ
+  await loginAs(page, DEMO_USERS.assuranceAdmin);
+  await page.goto('/assurance/dashboard');
+  await expect(top).toHaveText(['案件ホーム', '保証契約', '設定']);
 });

@@ -56,7 +56,8 @@ test('承認フロー: 下書き → 提出 → 承認 → 承認済み一覧へ
   await page.goto('/enterprise/data?status=draft');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  const detail = page.getByRole('link', { name: '詳細' }).first();
+  // 行の指標名のリンクから詳細へ（同じ行から同じ行き先へのリンクを 2 つ置かない。plan §1.12-7）
+  const detail = page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first();
   test.skip((await detail.count()) === 0, 'draft の Data Point が無い');
   await detail.click();
   await page.waitForURL(/\/enterprise\/data\/[0-9a-f-]+/);

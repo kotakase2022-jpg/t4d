@@ -1,0 +1,39 @@
+{
+  "note": "UI の段階的上限（docs/ui-redesign/plan.md §3.4-4）。tests/unit/ui-ratchet.test.ts が「今の件数 ≤ この値」を検査する。Stage C で最終値に下げた（2026-10-07）。0 の項目は ESLint（eslint.config.mjs の no-restricted-syntax）でもエラーにしている。0 でない項目（Card・画面ローカルの type Tone・title= の補足）は増やさない",
+  "labels": {
+    "arbitraryTextSize": "任意値の文字サイズ（text-[Npx]）",
+    "hexColorClass": "クラスの中の hex 直書き（-[#…]）",
+    "numericZIndex": "数値の z-index（z-10・z-[1] など）",
+    "arbitraryShadow": "任意値の影（shadow-[…]）",
+    "tailwindRounded": "Tailwind 既定の角丸（rounded-sm/md/lg/xl）",
+    "variantOutline": "Button の旧 variant=\"outline\"",
+    "rawDetails": "素の <details>（Collapsible・MoreInfo・FormSection を通らない）",
+    "rawSelect": "素の <select>（NativeSelect を通らない）",
+    "rawCheckbox": "素の checkbox（NativeCheckbox を通らない）",
+    "card": "Card（装飾の枠。Section へ寄せる）",
+    "buttonTypeSubmit": "Button type=\"submit\"（SubmitButton を使う）",
+    "buttonVariantsDirect": "buttonVariants( の直使用",
+    "localToneType": "画面ローカルの type Tone（状態登録簿へ寄せる）",
+    "titleAttribute": "title= の補足説明（Hint・sr-only へ）",
+    "dialogWithManyInputs": "入力が 7 つ以上ある Dialog（専用ページ・CreatePanel へ）",
+    "legacyEmptyState": "種類（kind）の無い EmptyState"
+  },
+  "totals": {
+    "arbitraryTextSize": 0,
+    "hexColorClass": 0,
+    "numericZIndex": 0,
+    "arbitraryShadow": 0,
+    "tailwindRounded": 0,
+    "variantOutline": 0,
+    "rawDetails": 0,
+    "rawSelect": 0,
+    "rawCheckbox": 0,
+    "card": 24,
+    "buttonTypeSubmit": 0,
+    "buttonVariantsDirect": 0,
+    "localToneType": 4,
+    "titleAttribute": 8,
+    "dialogWithManyInputs": 0,
+    "legacyEmptyState": 0
+  }
+}

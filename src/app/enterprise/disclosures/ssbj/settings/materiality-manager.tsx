@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { Pencil, Plus, Target, Trash2, X } from 'lucide-react';
+import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SubmitButton } from '@/components/ui/submit-button';
@@ -18,6 +19,7 @@ import {
   updateMaterialityTopicAction,
   type MaterialityActionState,
 } from '../../../actions';
+import { NativeSelect } from '@/components/ui/native-select';
 
 /**
  * マテリアリティ評価の管理（追加・編集・削除・評価）。
@@ -30,6 +32,10 @@ import {
  *
  * 入力の誤り（理由未入力など）は画面トップではなく、
  * **操作したフォームのすぐそば**に出す。
+ *
+ * 削除は取り消せないため確認ダイアログを通す（plan §1.16・F035。以前の行内の「削除しますか？」を
+ * 共通の ConfirmDialog へ。ボタンの名前「…を削除」「削除する」は変えない）。
+ * 「マテリアリティを追加」は、設定の段階がマテリアリティのときだけ主操作（画面に primary を 1 つ）。
  */
 
 export interface TopicRowData {
@@ -72,7 +78,7 @@ function InlineError({ state }: { state: MaterialityActionState }) {
   return (
     <p
       role="alert"
-      className="mt-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1 text-[11px] text-ink"
+      className="mt-1 rounded-t4d border border-danger/40 bg-danger-soft px-2 py-1 text-caption text-ink"
     >
       {state.message}
     </p>
@@ -93,7 +99,13 @@ const PRESET_TITLES = [
 // 追加フォーム（自由記述 → 区分の提示 → 選択）
 // ----------------------------------------------------------------------
 
-function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
+function AddTopicForm({
+  reportingPeriodId,
+  isPrimary,
+}: {
+  reportingPeriodId: string;
+  isPrimary: boolean;
+}) {
   const [state, formAction] = React.useActionState(addMaterialityTopicAction, null);
   const [title, setTitle] = React.useState('');
   const [description, setDescription] = React.useState('');
@@ -123,7 +135,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
       <input type="hidden" name="reportingPeriodId" value={reportingPeriodId} />
 
       <div>
-        <label className="block text-[12px] font-medium text-ink" htmlFor="materiality-title">
+        <label className="block text-small font-medium text-ink" htmlFor="materiality-title">
           マテリアリティ名（必須）
         </label>
         <input
@@ -137,7 +149,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
             setChosen(null);
           }}
           placeholder="例: 気候変動に伴う炭素価格の上昇、熟練技術者の確保"
-          className="mt-0.5 h-8 w-full rounded-t4d border border-line px-2 text-[13px]"
+          className="mt-0.5 h-8 w-full rounded-t4d border border-line px-2 text-body"
         />
         <span className="mt-1 flex flex-wrap gap-1">
           {PRESET_TITLES.map((preset) => (
@@ -148,7 +160,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
                 setTitle(preset);
                 setChosen(null);
               }}
-              className="rounded-full border border-line bg-surface px-2 py-0.5 text-[11px] text-ink-muted hover:border-brand-300 hover:text-ink"
+              className="rounded-full border border-line bg-surface px-2 py-0.5 text-caption text-ink-muted hover:border-brand-300 hover:text-ink"
             >
               {preset}
             </button>
@@ -157,7 +169,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
       </div>
 
       <div>
-        <label className="block text-[12px] font-medium text-ink" htmlFor="materiality-description">
+        <label className="block text-small font-medium text-ink" htmlFor="materiality-description">
           マテリアリティの内容を簡潔に説明してください（任意）
         </label>
         <textarea
@@ -170,16 +182,16 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
           }}
           rows={2}
           placeholder="例: 調達先の労働環境が悪化すると、部品供給の停止と評判低下につながる"
-          className="mt-0.5 w-full rounded-t4d border border-line px-2 py-1 text-[12px] leading-relaxed"
+          className="mt-0.5 w-full rounded-t4d border border-line px-2 py-1 text-small leading-relaxed"
         />
-        <p className="mt-0.5 text-[11px] text-ink-muted">
+        <p className="mt-0.5 text-caption text-ink-muted">
           名前と内容を合わせて判断し、当てはまりそうな区分を提示します。選ぶのはあなたです。
         </p>
       </div>
 
       {title.trim() !== '' && (
         <fieldset>
-          <legend className="text-[12px] font-medium text-ink">
+          <legend className="text-small font-medium text-ink">
             区分を選ぶ
             {suggestion.top ? (
               <span className="ml-1 font-normal text-ink-muted">
@@ -197,7 +209,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
               return (
                 <label
                   key={candidate.category}
-                  className={`cursor-pointer rounded-t4d border px-2 py-1.5 text-[12px] ${
+                  className={`cursor-pointer rounded-t4d border px-2 py-1.5 text-small ${
                     isSelected
                       ? 'border-brand-400 bg-brand-50 text-ink'
                       : 'border-line bg-surface text-ink-muted hover:border-brand-300'
@@ -211,23 +223,23 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
                       checked={isSelected}
                       onChange={() => setChosen(candidate.category)}
                       aria-label={`区分: ${candidate.label}`}
-                      className="size-3 accent-[#0b57a4]"
+                      className="size-3 accent-brand-700"
                     />
                     {candidate.label}
                   </span>
                   {candidate.matched.length > 0 ? (
-                    <span className="mt-0.5 block text-[11px] text-brand-700">
+                    <span className="mt-0.5 block text-caption text-brand-700">
                       一致した語: {candidate.matched.join('・')}
                     </span>
                   ) : (
-                    <span className="mt-0.5 block text-[11px]">一致する語はありません</span>
+                    <span className="mt-0.5 block text-caption">一致する語はありません</span>
                   )}
                 </label>
               );
             })}
           </div>
           {selected && (
-            <p className="mt-1 text-[11px] text-ink-muted">
+            <p className="mt-1 text-caption text-ink-muted">
               {selected.ssbjHint}
               {selected.metricCodes.length > 0 &&
                 ` 項目（対象指標）として ${selected.metricCodes.length} 件を紐付けます。`}
@@ -242,6 +254,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
 
       <div className="flex items-center gap-2">
         <SubmitButton
+          variant={isPrimary ? 'primary' : 'secondary'}
           size="sm"
           icon={<Plus aria-hidden="true" />}
           pendingLabel="追加中…"
@@ -250,7 +263,7 @@ function AddTopicForm({ reportingPeriodId }: { reportingPeriodId: string }) {
           マテリアリティを追加
         </SubmitButton>
         {title.trim() !== '' && !selectedCategory && (
-          <span className="text-[11px] text-ink-muted">区分を選ぶと追加できます。</span>
+          <span className="text-caption text-ink-muted">区分を選ぶと追加できます。</span>
         )}
       </div>
       <InlineError state={state} />
@@ -269,6 +282,7 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
   const [riskOppState, riskOppAction] = React.useActionState(saveMaterialityRiskOppAction, null);
   const [editing, setEditing] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const deleteFields = React.useMemo(() => ({ topicId: topic.id }), [topic.id]);
 
   React.useEffect(() => {
     if (editState?.ok) setEditing(false);
@@ -279,25 +293,25 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
       {/* マテリアリティ名 → 区分 → 項目 の階層で見せる */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
+          <p className="flex items-center gap-1.5 text-body font-medium text-ink">
             <Target className="size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
             {topic.title}
             <Badge tone="neutral">{CATEGORY_LABEL[topic.category]}</Badge>
             <Badge tone={LEVEL_TONE[topic.materiality]}>{LEVEL_LABEL[topic.materiality]}</Badge>
           </p>
-          {topic.description && <p className="mt-0.5 text-[11px] text-ink">{topic.description}</p>}
-          <p className="mt-0.5 text-[11px] text-ink-muted">
+          {topic.description && <p className="mt-0.5 text-caption text-ink">{topic.description}</p>}
+          <p className="mt-0.5 text-caption text-ink-muted">
             項目: {topic.metricNames.length > 0 ? topic.metricNames.join('・') : '対象指標は未設定'}
           </p>
           {topic.rationale && (
-            <p className="mt-0.5 text-[11px] text-ink-muted">評価理由: {topic.rationale}</p>
+            <p className="mt-0.5 text-caption text-ink-muted">評価理由: {topic.rationale}</p>
           )}
         </div>
 
         <span className="flex shrink-0 items-center gap-1">
           <Button
             size="xs"
-            variant="outline"
+            variant="secondary"
             type="button"
             onClick={() => setEditing((v) => !v)}
             aria-label={`${topic.title} を編集`}
@@ -305,36 +319,31 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
             <Pencil aria-hidden="true" />
             編集
           </Button>
-          {confirmingDelete ? (
-            <span className="flex items-center gap-1">
-              <span className="text-[11px] text-ink">削除しますか？</span>
-              <form action={deleteAction} className="inline">
-                <input type="hidden" name="topicId" value={topic.id} />
-                <SubmitButton size="xs" variant="outline" pendingLabel="削除中…">
-                  削除する
-                </SubmitButton>
-              </form>
-              <Button
-                size="xs"
-                variant="outline"
-                type="button"
-                onClick={() => setConfirmingDelete(false)}
-              >
-                やめる
-              </Button>
-            </span>
-          ) : (
-            <Button
-              size="xs"
-              variant="outline"
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              aria-label={`${topic.title} を削除`}
-            >
-              <Trash2 aria-hidden="true" />
-              削除
-            </Button>
-          )}
+          <Button
+            size="xs"
+            variant="secondary"
+            type="button"
+            onClick={() => setConfirmingDelete(true)}
+            aria-label={`${topic.title} を削除`}
+            aria-haspopup="dialog"
+          >
+            <Trash2 aria-hidden="true" />
+            削除…
+          </Button>
+          <ConfirmDialog
+            tier="irreversible"
+            title={`「${topic.title}」を削除しますか？`}
+            scope={`マテリアリティ「${topic.title}」と、その評価・リスク・機会の記述を削除します。`}
+            consequences={[
+              '一覧と、以降の工程（要求事項の評価・データ収集の対象）から外れます。画面から元に戻す操作はありません。',
+              '削除したことは監査ログに残ります。',
+            ]}
+            confirmLabel="削除する"
+            action={deleteAction}
+            fields={deleteFields}
+            open={confirmingDelete}
+            onOpenChange={setConfirmingDelete}
+          />
         </span>
       </div>
       <InlineError state={deleteState} />
@@ -345,40 +354,40 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
           className="flex flex-wrap items-end gap-2 rounded-t4d border border-line bg-surface-muted px-2 py-1.5"
         >
           <input type="hidden" name="topicId" value={topic.id} />
-          <label className="text-[11px] text-ink-muted">
+          <label className="text-caption text-ink-muted">
             マテリアリティ名
             <input
               type="text"
               name="title"
               defaultValue={topic.title}
-              className="mt-0.5 block h-7 w-64 rounded-t4d border border-line px-2 text-[12px]"
+              className="mt-0.5 block h-7 w-64 rounded-t4d border border-line px-2 text-small"
             />
           </label>
-          <label className="text-[11px] text-ink-muted">
+          <label className="text-caption text-ink-muted">
             区分
-            <select
+            <NativeSelect
               name="category"
               defaultValue={topic.category}
-              className="mt-0.5 block h-7 rounded-t4d border border-line bg-surface px-1.5 text-[12px]"
+              className="mt-0.5 block w-auto px-1.5 text-small"
             >
               <option value="environment">環境</option>
               <option value="social">社会</option>
               <option value="governance">ガバナンス</option>
-            </select>
+            </NativeSelect>
           </label>
-          <label className="w-full text-[11px] text-ink-muted">
+          <label className="w-full text-caption text-ink-muted">
             マテリアリティの内容（任意）
             <textarea
               name="description"
               defaultValue={topic.description}
               rows={2}
-              className="mt-0.5 block w-full rounded-t4d border border-line px-2 py-1 text-[12px] leading-relaxed"
+              className="mt-0.5 block w-full rounded-t4d border border-line px-2 py-1 text-small leading-relaxed"
             />
           </label>
-          <SubmitButton size="xs" pendingLabel="保存中…">
+          <SubmitButton variant="secondary" size="xs" pendingLabel="保存中…">
             変更を保存
           </SubmitButton>
-          <Button size="xs" variant="outline" type="button" onClick={() => setEditing(false)}>
+          <Button size="xs" variant="secondary" type="button" onClick={() => setEditing(false)}>
             <X aria-hidden="true" />
             取消
           </Button>
@@ -398,7 +407,7 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
       >
         <input type="hidden" name="topicId" value={topic.id} />
         <div className="grid grid-cols-2 gap-2">
-          <label className="text-[11px] text-ink-muted">
+          <label className="text-caption text-ink-muted">
             リスク（この課題が事業へもたらすリスク）
             <textarea
               name="risks"
@@ -406,10 +415,10 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
               rows={2}
               placeholder="例: 炭素価格の上昇により製造原価が増加する"
               aria-label={`${topic.title} のリスク`}
-              className="mt-0.5 block w-full rounded-t4d border border-line bg-surface px-2 py-1 text-[12px] leading-relaxed"
+              className="mt-0.5 block w-full rounded-t4d border border-line bg-surface px-2 py-1 text-small leading-relaxed"
             />
           </label>
-          <label className="text-[11px] text-ink-muted">
+          <label className="text-caption text-ink-muted">
             機会（この課題が事業へもたらす機会）
             <textarea
               name="opportunities"
@@ -417,15 +426,15 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
               rows={2}
               placeholder="例: 低炭素製品の需要拡大により受注が増える"
               aria-label={`${topic.title} の機会`}
-              className="mt-0.5 block w-full rounded-t4d border border-line bg-surface px-2 py-1 text-[12px] leading-relaxed"
+              className="mt-0.5 block w-full rounded-t4d border border-line bg-surface px-2 py-1 text-small leading-relaxed"
             />
           </label>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
-          <SubmitButton size="xs" variant="outline" pendingLabel="保存中…">
+          <SubmitButton size="xs" variant="secondary" pendingLabel="保存中…">
             リスク・機会を保存
           </SubmitButton>
-          <span className="text-[11px] text-ink-muted">
+          <span className="text-caption text-ink-muted">
             SSBJ はリスク及び機会のそれぞれについて開示を求めます（一般-13）。
             記述は開示ドラフト（戦略）の材料になり、関連する項目（対象指標）も自動で追加されます。
           </span>
@@ -436,23 +445,23 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
       {/* 評価。理由は必須（重要とした根拠も、重要でないとした根拠も監査で問われる） */}
       <form action={assessAction} className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="topicId" value={topic.id} />
-        <label className="text-[11px] text-ink-muted">
+        <label className="text-caption text-ink-muted">
           評価
-          <select
+          <NativeSelect
             name="materiality"
             defaultValue={topic.materiality}
             aria-label={`${topic.title} の重要度`}
-            className="mt-0.5 block h-7 rounded-t4d border border-line bg-surface px-1.5 text-[12px]"
+            className="mt-0.5 block w-auto px-1.5 text-small"
           >
             <option value="high">重要度：高</option>
             <option value="medium">重要度：中</option>
             <option value="low">重要度：低</option>
             <option value="not_material">重要ではない</option>
             <option value="not_assessed">未評価</option>
-          </select>
+          </NativeSelect>
         </label>
         <span className="min-w-0 flex-1">
-          <label className="block text-[11px] text-ink-muted">
+          <label className="block text-caption text-ink-muted">
             評価理由 <span className="font-medium text-danger">（必須）</span>
             <input
               type="text"
@@ -460,13 +469,13 @@ function TopicRow({ topic }: { topic: TopicRowData }) {
               defaultValue={topic.rationale}
               placeholder="なぜその評価なのかを記入"
               aria-label={`${topic.title} の評価理由`}
-              className="mt-0.5 block h-7 w-full rounded-t4d border border-line px-2 text-[12px]"
+              className="mt-0.5 block h-7 w-full rounded-t4d border border-line px-2 text-small"
             />
           </label>
           {/* 誤りの指摘は入力欄の直下に出す（画面トップに飛ばさない） */}
           <InlineError state={assessState} />
         </span>
-        <SubmitButton size="xs" variant="outline" pendingLabel="保存中…">
+        <SubmitButton size="xs" variant="secondary" pendingLabel="保存中…">
           評価を保存
         </SubmitButton>
       </form>
@@ -482,17 +491,20 @@ export function MaterialityManager({
   reportingPeriodId,
   topics,
   canEdit,
+  addIsPrimary = false,
 }: {
   reportingPeriodId: string;
   topics: TopicRowData[];
   canEdit: boolean;
+  /** 設定の段階がマテリアリティのとき、追加を主操作にする（画面に primary を 1 つ） */
+  addIsPrimary?: boolean;
 }) {
   return (
     <div>
-      {canEdit && <AddTopicForm reportingPeriodId={reportingPeriodId} />}
+      {canEdit && <AddTopicForm reportingPeriodId={reportingPeriodId} isPrimary={addIsPrimary} />}
 
       {topics.length === 0 ? (
-        <p className="px-3 py-4 text-[12px] text-ink-muted">
+        <p className="px-3 py-4 text-small text-ink-muted">
           まだマテリアリティが登録されていません。
           {canEdit
             ? '上の入力欄に自社の重要課題を自由記述で入力してください。'
@@ -508,27 +520,27 @@ export function MaterialityManager({
         <ul className="divide-y divide-line">
           {topics.map((topic) => (
             <li key={topic.id} className="px-3 py-2.5">
-              <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
+              <p className="flex items-center gap-1.5 text-body font-medium text-ink">
                 <Target className="size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
                 {topic.title}
                 <Badge tone="neutral">{CATEGORY_LABEL[topic.category]}</Badge>
                 <Badge tone={LEVEL_TONE[topic.materiality]}>{LEVEL_LABEL[topic.materiality]}</Badge>
               </p>
               {topic.description && (
-                <p className="mt-0.5 text-[11px] text-ink">{topic.description}</p>
+                <p className="mt-0.5 text-caption text-ink">{topic.description}</p>
               )}
-              <p className="mt-0.5 text-[11px] text-ink-muted">
+              <p className="mt-0.5 text-caption text-ink-muted">
                 項目:{' '}
                 {topic.metricNames.length > 0 ? topic.metricNames.join('・') : '対象指標は未設定'}
               </p>
               {topic.risks && (
-                <p className="mt-0.5 text-[11px] text-ink-muted">リスク: {topic.risks}</p>
+                <p className="mt-0.5 text-caption text-ink-muted">リスク: {topic.risks}</p>
               )}
               {topic.opportunities && (
-                <p className="mt-0.5 text-[11px] text-ink-muted">機会: {topic.opportunities}</p>
+                <p className="mt-0.5 text-caption text-ink-muted">機会: {topic.opportunities}</p>
               )}
               {topic.rationale && (
-                <p className="mt-0.5 text-[11px] text-ink-muted">評価理由: {topic.rationale}</p>
+                <p className="mt-0.5 text-caption text-ink-muted">評価理由: {topic.rationale}</p>
               )}
             </li>
           ))}

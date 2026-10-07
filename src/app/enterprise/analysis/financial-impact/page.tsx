@@ -1,7 +1,7 @@
+import Link from 'next/link';
 import { CalendarOff } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
-import { Card } from '@/components/ui/card';
 import { can } from '@/lib/authorization/can';
 import { PERIOD_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import { isDemoMode } from '@/lib/config';
@@ -85,13 +85,22 @@ export default async function FinancialImpactPage({
         {view.status === 'ready' ? (
           <ReadyView view={view} />
         ) : (
-          <Card>
+          <div className="rounded-t4d-lg border border-line bg-surface">
             <EmptyState
+              kind="not-applicable"
               icon={<CalendarOff className="size-5" aria-hidden="true" />}
               title="基準年度がありません"
               description={`ヘッダーの年度（${view.period.code}）以前に、締め済み（${PERIOD_STATUS_LABELS.closed}）の報告期間がありません。起点の確定値を決められないため試算しません。`}
+              action={
+                <Link
+                  href="/enterprise/organizations?tab=periods"
+                  className="text-small text-brand-700 underline underline-offset-2"
+                >
+                  報告年度を見る
+                </Link>
+              }
             />
-          </Card>
+          </div>
         )}
       </div>
     </>

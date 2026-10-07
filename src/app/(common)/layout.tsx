@@ -1,12 +1,17 @@
 import { AppShell } from '@/components/shared/app-shell';
+import { listDemoRoleChoices } from '@/lib/auth/demo-role';
 import { requireSession } from '@/lib/auth/session';
-import { getSelectedPeriodId } from '@/lib/auth/preferences';
+import { getSelectedPeriodId } from '@/lib/auth/selected-period';
 import { getDb } from '@/lib/repositories';
+import { loadHeaderProjects } from '@/lib/services/disclosure-home';
+import { getFeatureSettings } from '@/lib/services/feature-settings';
 import { toWorkspaceChoices } from '@/lib/services/shell';
 
 /**
  * 共通ルート（/notifications, /profile）。
  * 企業／監査法人どちらのワークスペースでも同じ Shell で表示する。
+ * メニュー（開示優先モード）・ヘッダーのプロジェクト・役割切替は、企業・監査法人のレイアウトと同じものを
+ * 渡す（通知を開いた途端にメニューが従来の形に戻る・役割切替が消える食い違いを無くす。plan §1.4 N-14）
  */
 export default async function CommonLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
@@ -31,9 +36,14 @@ export default async function CommonLayout({ children }: { children: React.React
         })
       : [];
 
-  const unreadNotifications = await db.count('notifications', {
-    where: { organizationId, userId: ctx.userId, readAt: { isNull: true } },
-  });
+  const [unreadNotifications, featureSettings, projects, demoRoleChoices] = await Promise.all([
+    db.count('notifications', {
+      where: { organizationId, userId: ctx.userId, readAt: { isNull: true } },
+    }),
+    getFeatureSettings(db, ctx),
+    loadHeaderProjects(db, ctx),
+    listDemoRoleChoices(db, ctx),
+  ]);
 
   return (
     <AppShell
@@ -41,6 +51,16 @@ export default async function CommonLayout({ children }: { children: React.React
       workspaces={toWorkspaceChoices(session)}
       periods={periods.map((p) => ({ id: p.id, label: p.label, code: p.code }))}
       currentPeriodId={periods.find((p) => p.id === selectedPeriodId)?.id ?? periods[0]?.id}
+      disclosureFirst={isEnterprise && featureSettings.disclosureFirst}
+      projects={projects}
+      demoRoleChoices={demoRoleChoices.map((choice) => ({
+        email: choice.email,
+        displayName: choice.displayName,
+        jobTitle: choice.jobTitle,
+        demoRole: choice.demoRole,
+        roleLabels: choice.roleLabels,
+        current: choice.current,
+      }))}
       engagements={engagements.map((e) => ({ id: e.id, code: e.code, name: e.name }))}
       unreadNotifications={unreadNotifications}
     >

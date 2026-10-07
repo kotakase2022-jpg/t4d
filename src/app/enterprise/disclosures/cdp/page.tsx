@@ -15,23 +15,30 @@ import {
   Upload,
 } from 'lucide-react';
 import { AiGeneratedBadge, PriorityBadge, ResponseStatusBadge } from '@/components/shared/badges';
+import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { DisclosureSteps, type DisclosureStep } from '@/components/shared/disclosure-steps';
-import { FilterBar } from '@/components/shared/filter-bar';
-import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
-import { EmptyState } from '@/components/shared/states';
+import type { FilterGroup } from '@/components/shared/filter-bar';
+import { MetricStrip, MetricTile } from '@/components/shared/metric-strip';
+import { Notice } from '@/components/shared/notice';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { SubmitButton } from '@/components/ui/submit-button';
-import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
-import { filterDisclosureRows, loadDisclosureWorkspace } from '@/lib/services/disclosure';
+import {
+  filterDisclosureRows,
+  loadDisclosureWorkspace,
+  type DisclosureQuestionRow,
+} from '@/lib/services/disclosure';
 import { loadApplicability, type Applicability } from '@/lib/services/disclosure-applicability';
 import { loadQuestionMapping } from '@/lib/services/ai-assist';
 import { loadConsistencyCheck } from '@/lib/services/disclosure-check';
 import { loadDisclosureOnboarding } from '@/lib/services/disclosure-onboarding';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { DEFAULT_PAGE_SIZES, parsePage, parsePageSize } from '@/lib/table/columns';
 import type { ItemChangeType } from '@/types/domain';
 import {
   evaluateApplicabilityAction,
@@ -82,6 +89,23 @@ const SEVERITY_ICON: Record<string, typeof CircleAlert> = {
   low: Minus,
 };
 
+const BASE_PATH = '/enterprise/disclosures/cdp';
+
+/** 増減（%）。色ではなく符号で向きを示す（良し悪しを色で決めない） */
+function deltaOf(row: DisclosureQuestionRow): number | null {
+  return row.currentValue !== null && row.previousValue !== null && row.previousValue !== 0
+    ? ((row.currentValue - row.previousValue) / row.previousValue) * 100
+    : null;
+}
+
+/**
+ * CDP 開示対応（plan §2 S18）。
+ *
+ * - 見出しの操作は「適用判定を実行」（secondary）だけを出し、AI の実行・過去回答の取込・XLSX 出力は「その他」へ。
+ *   出力は出力の権限があるときだけ（R3。権限の無い役割に押すと 403 になるリンクを見せない）
+ * - 主操作は工程（DisclosureSteps）の現在の段の操作（過去回答を取り込む）
+ * - 質問の表は DataTable。既定の列は 質問・適用・前年差分・状態・当年値。残りは「列」から出す
+ */
 export default async function CdpWorkspacePage({
   searchParams,
 }: {
@@ -98,6 +122,10 @@ export default async function CdpWorkspacePage({
     shell.metrics,
   );
   if (!workspace) notFound();
+
+  const canWrite = can(shell.ctx, 'enterprise.disclosure.write');
+  const canRunAi = can(shell.ctx, 'enterprise.ai.run');
+  const canExport = can(shell.ctx, 'enterprise.export.run');
 
   // 整合チェック結果は ?check=<aiRunId> で読み直す（CDP-P0-006）
   const checkRunId = typeof params.check === 'string' ? params.check : null;
@@ -152,9 +180,10 @@ export default async function CdpWorkspacePage({
             {importedPeriods.map((p) => `${p.periodLabel}（${p.responseCount} 件）`).join(' ／ ')}
           </span>
         ) : (
-          <span className="text-[#8a5d00]">まだ過去回答がありません</span>
+          <span className="text-warning-ink">まだ過去回答がありません</span>
         ),
-      action: can(shell.ctx, 'enterprise.disclosure.write')
+      // 工程の現在の段の操作がこの画面の主操作（DisclosureSteps が現在の段だけ primary で描く）
+      action: canWrite
         ? { label: '過去回答を取り込む', href: '/enterprise/disclosures/cdp/import' }
         : undefined,
     },
@@ -177,6 +206,142 @@ export default async function CdpWorkspacePage({
     search: typeof params.q === 'string' ? params.q : undefined,
     onlyDiff,
   });
+  const pageSize = parsePageSize(params.size);
+  const lastPage = Math.max(1, Math.ceil(rows.length / pageSize));
+  const pageNo = Math.min(parsePage(params.page), lastPage);
+  const pageRows = rows.slice((pageNo - 1) * pageSize, pageNo * pageSize);
+
+  const filters: FilterGroup[] = [
+    {
+      key: 'change',
+      label: '前年差分',
+      multiple: false,
+      options: [
+        { value: 'new', label: '新規' },
+        { value: 'changed', label: '変更' },
+        { value: 'carry_forward', label: '継続' },
+      ],
+    },
+    {
+      key: 'status',
+      label: '状態',
+      multiple: false,
+      options: [
+        { value: 'not_started', label: '未着手' },
+        { value: 'draft', label: '下書き' },
+        { value: 'in_review', label: 'レビュー中' },
+        { value: 'returned', label: '差戻し' },
+        { value: 'approved', label: '承認済み' },
+      ],
+    },
+  ];
+
+  const columns: DataTableColumn<DisclosureQuestionRow>[] = [
+    {
+      key: 'question',
+      header: '質問',
+      importance: 'primary',
+      lockVisible: true,
+      cell: (row) => (
+        <div className="max-w-col-xl">
+          <Link
+            href={`${BASE_PATH}/${row.item.id}`}
+            className="font-medium text-brand-800 hover:underline"
+          >
+            {row.item.code}
+          </Link>
+          <div className="truncate text-small text-ink">{row.item.questionText}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'applicability',
+      header: '適用',
+      importance: 'secondary',
+      cell: (row) => {
+        const result = applicability.get(row.item.id);
+        if (!result) {
+          return <span className="text-caption text-ink-muted">未判定</span>;
+        }
+        const a = APPLICABILITY_LABEL[result.applicability];
+        return (
+          <span title={result.reason} className="inline-flex">
+            <Badge tone={a.tone}>
+              <a.Icon className="size-3" aria-hidden="true" />
+              {a.label}
+            </Badge>
+          </span>
+        );
+      },
+    },
+    {
+      key: 'change',
+      header: '前年差分',
+      importance: 'primary',
+      cell: (row) => {
+        const change = CHANGE_LABEL[row.item.changeType];
+        return <Badge tone={change.tone}>{change.label}</Badge>;
+      },
+    },
+    {
+      key: 'status',
+      header: '状態',
+      importance: 'primary',
+      cell: (row) => <ResponseStatusBadge status={row.response?.status ?? 'not_started'} />,
+    },
+    {
+      key: 'current',
+      header: '当年値',
+      importance: 'secondary',
+      align: 'right',
+      cell: (row) => <span className="tnum">{formatNumber(row.currentValue)}</span>,
+    },
+    {
+      key: 'section',
+      header: 'セクション',
+      importance: 'detail',
+      cell: (row) => (
+        <span className="whitespace-nowrap text-caption text-ink-muted">{row.item.section}</span>
+      ),
+    },
+    {
+      key: 'priority',
+      header: '優先度',
+      importance: 'detail',
+      cell: (row) => <PriorityBadge priority={row.priority} />,
+    },
+    {
+      key: 'mapped',
+      header: 'マッピング指標',
+      importance: 'detail',
+      cell: (row) => (
+        <span className="text-caption">
+          {row.mappedMetrics.length === 0 ? '—' : row.mappedMetrics.map((m) => m.name).join(' / ')}
+        </span>
+      ),
+    },
+    {
+      key: 'previous',
+      header: '前年値',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{formatNumber(row.previousValue)}</span>,
+    },
+    {
+      key: 'delta',
+      header: '増減',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => {
+        const delta = deltaOf(row);
+        return (
+          <span className="tnum">
+            {delta === null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`}
+          </span>
+        );
+      },
+    },
+  ];
 
   return (
     <>
@@ -195,60 +360,63 @@ export default async function CdpWorkspacePage({
             )}
           </span>
         }
-        breadcrumbs={[{ label: '企業ワークスペース' }, { label: '開示対応' }, { label: 'CDP' }]}
+        autoBreadcrumbs
         actions={
-          <div className="flex items-center gap-2">
-            {can(shell.ctx, 'enterprise.disclosure.write') && (
-              <>
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/enterprise/disclosures/cdp/import">
-                    <Upload aria-hidden="true" />
-                    過去回答を取込
-                  </Link>
-                </Button>
-                <form action={evaluateApplicabilityAction}>
-                  <input type="hidden" name="framework" value="cdp" />
-                  <Button type="submit" variant="outline" size="sm">
-                    <ListChecks aria-hidden="true" />
-                    適用判定を実行
-                  </Button>
-                </form>
-              </>
-            )}
-            {can(shell.ctx, 'enterprise.ai.run') && (
-              <form action={runQuestionMappingAction}>
-                <input type="hidden" name="frameworkKey" value="cdp" />
-                <SubmitButton
-                  variant="secondary"
-                  size="sm"
-                  icon={<Sparkles aria-hidden="true" />}
-                  pendingLabel="実行中…"
-                >
-                  質問マッピングを実行
-                </SubmitButton>
-              </form>
-            )}
-            {can(shell.ctx, 'enterprise.ai.run') && (
-              <form action={runConsistencyCheckAction}>
-                <input type="hidden" name="framework" value="cdp" />
-                <SubmitButton
-                  variant="secondary"
-                  size="sm"
-                  icon={<ShieldCheck aria-hidden="true" />}
-                  pendingLabel="実行中…"
-                >
-                  整合チェックを実行
-                </SubmitButton>
-              </form>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              {/* 期間を渡さないと常に collecting 期間が出力され、画面の選択と食い違う */}
-              <a href={`/api/exports/cdp?period=${workspace.period.id}&format=xlsx`} download>
-                <Download aria-hidden="true" />
-                XLSX
-              </a>
-            </Button>
-          </div>
+          <PageActions
+            secondary={[
+              {
+                kind: 'submit',
+                id: 'evaluate-applicability',
+                label: '適用判定を実行',
+                icon: <ListChecks aria-hidden="true" />,
+                action: evaluateApplicabilityAction,
+                fields: { framework: 'cdp' },
+                pendingLabel: '判定中…',
+                hidden: !canWrite,
+              },
+            ]}
+            more={[
+              {
+                kind: 'link',
+                id: 'import',
+                label: '過去回答の取込',
+                icon: <Upload aria-hidden="true" />,
+                href: '/enterprise/disclosures/cdp/import',
+                hidden: !canWrite,
+              },
+              {
+                kind: 'link',
+                id: 'export-xlsx',
+                group: 'export',
+                label: 'XLSX で出力',
+                icon: <Download aria-hidden="true" />,
+                // 期間を渡さないと常に collecting 期間が出力され、画面の選択と食い違う
+                href: `/api/exports/cdp?period=${workspace.period.id}&format=xlsx`,
+                download: true,
+                hidden: !canExport,
+              },
+              {
+                kind: 'submit',
+                id: 'question-mapping',
+                group: 'advanced',
+                label: '質問マッピングを実行（AI）',
+                icon: <Sparkles aria-hidden="true" />,
+                action: runQuestionMappingAction,
+                fields: { frameworkKey: 'cdp' },
+                hidden: !canRunAi,
+              },
+              {
+                kind: 'submit',
+                id: 'consistency-check',
+                group: 'advanced',
+                label: '整合チェックを実行（AI）',
+                icon: <ShieldCheck aria-hidden="true" />,
+                action: runConsistencyCheckAction,
+                fields: { framework: 'cdp' },
+                hidden: !canRunAi,
+              },
+            ]}
+          />
         }
       />
 
@@ -256,90 +424,76 @@ export default async function CdpWorkspacePage({
         <DisclosureSteps steps={steps} />
 
         {onboarding && onboarding.versions.length > 1 && (
-          <Card className="overflow-hidden">
-            <SectionTitle title="バージョン（FY）" />
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-              {onboarding.versions.map((v) => (
-                <Button
-                  key={v.id}
-                  size="xs"
-                  variant={v.id === onboarding.selectedVersionId ? 'secondary' : 'outline'}
-                  asChild
+          <nav
+            aria-label="質問書の年度"
+            className="flex flex-wrap items-center gap-2 border-b border-line pb-2"
+          >
+            <span className="text-small font-semibold text-ink">バージョン（FY）</span>
+            {onboarding.versions.map((v) => (
+              <Button
+                key={v.id}
+                size="xs"
+                variant={v.id === onboarding.selectedVersionId ? 'quiet' : 'secondary'}
+                asChild
+              >
+                <Link
+                  href={`?version=${v.id}`}
+                  aria-current={v.id === onboarding.selectedVersionId ? 'true' : undefined}
                 >
-                  <Link href={`?version=${v.id}`}>
-                    {v.label}
-                    <span className="ml-1 text-ink-muted">
-                      {v.status === 'published' ? '（最新）' : '（過年度）'}
-                    </span>
-                  </Link>
-                </Button>
-              ))}
-              <span className="text-[11px] text-ink-muted">
-                質問書の年度。過年度を選ぶと、その版の質問構成で確認できます。
-              </span>
-            </div>
-          </Card>
+                  {v.label}
+                  <span className="ml-1 text-ink-muted">
+                    {v.status === 'published' ? '（最新）' : '（過年度）'}
+                  </span>
+                </Link>
+              </Button>
+            ))}
+            <span className="text-caption text-ink-muted">
+              質問書の年度。過年度を選ぶと、その版の質問構成で確認できます。
+            </span>
+          </nav>
         )}
 
-        <ul className="grid grid-cols-6 gap-2">
-          <li>
-            <KpiCard
-              label="準備度"
-              value={workspace.summary.readiness}
-              suffix="%"
-              tone={workspace.summary.readiness >= 60 ? 'success' : 'warning'}
-              href="/enterprise/disclosures/cdp"
-            />
-          </li>
-          <li>
-            <KpiCard
-              label="承認済み"
-              value={workspace.summary.approved}
-              suffix={`/ ${workspace.summary.total}`}
-              tone="success"
-              href="/enterprise/disclosures/cdp?status=approved"
-            />
-          </li>
-          <li>
-            <KpiCard
-              label="作成中"
-              value={workspace.summary.draft}
-              suffix="件"
-              tone="brand"
-              href="/enterprise/disclosures/cdp?status=draft"
-            />
-          </li>
-          <li>
-            <KpiCard
-              label="未着手"
-              value={workspace.summary.notStarted}
-              suffix="件"
-              tone="warning"
-              href="/enterprise/disclosures/cdp?status=not_started"
-            />
-          </li>
-          <li>
-            <KpiCard
-              label="新規質問"
-              value={workspace.summary.newItems}
-              suffix="件"
-              tone="warning"
-              href="/enterprise/disclosures/cdp?change=new"
-            />
-          </li>
-          <li>
-            <KpiCard
-              label="変更質問"
-              value={workspace.summary.changedItems}
-              suffix="件"
-              tone="brand"
-              href="/enterprise/disclosures/cdp?change=changed"
-            />
-          </li>
-        </ul>
+        <MetricStrip label="回答の進み具合">
+          <MetricTile
+            label="準備度"
+            value={workspace.summary.readiness}
+            unit="%"
+            href="/enterprise/disclosures/cdp"
+          />
+          <MetricTile
+            label="承認済み"
+            value={workspace.summary.approved}
+            denominator={workspace.summary.total}
+            href="/enterprise/disclosures/cdp?status=approved"
+          />
+          <MetricTile
+            label="下書き"
+            value={workspace.summary.draft}
+            unit="件"
+            href="/enterprise/disclosures/cdp?status=draft"
+          />
+          <MetricTile
+            label="未着手"
+            value={workspace.summary.notStarted}
+            unit="件"
+            href="/enterprise/disclosures/cdp?status=not_started"
+          />
+          <MetricTile
+            label="新規質問"
+            value={workspace.summary.newItems}
+            unit="件"
+            href="/enterprise/disclosures/cdp?change=new"
+          />
+          <MetricTile
+            label="変更質問"
+            value={workspace.summary.changedItems}
+            unit="件"
+            href="/enterprise/disclosures/cdp?change=changed"
+          />
+        </MetricStrip>
 
         {hasApplicability && (
-          <div className="flex flex-wrap items-center gap-2 rounded-t4d border border-line bg-surface px-3 py-1.5 text-[12px]">
+          <div className="flex flex-wrap items-center gap-2 rounded-t4d border border-line bg-surface px-3 py-1.5 text-small">
             <span className="text-ink-muted">適用判定:</span>
             {(['applicable', 'not_applicable', 'needs_check'] as const).map((key) => {
               const a = APPLICABILITY_LABEL[key];
@@ -353,25 +507,24 @@ export default async function CdpWorkspacePage({
                 </span>
               );
             })}
-            <span className="text-[11px] text-ink-muted">
+            <span className="text-caption text-ink-muted">
               非適用の質問も一覧には残ります。判定根拠はバッジにカーソルを合わせると表示されます。
             </span>
           </div>
         )}
 
         {mapping && (
-          <Card className="overflow-hidden">
-            <SectionTitle
-              title={`質問マッピングの候補（${mapping.mappings.length} 件）`}
-              action={
-                <span className="flex items-center gap-2">
-                  <AiGeneratedBadge provider={mapping.run.provider} />
-                  <span className="text-[11px] text-ink-muted">
-                    候補です。実際の紐付けは質問ごとに確定してください
-                  </span>
+          <Section
+            title={`質問マッピングの候補（${mapping.mappings.length} 件）`}
+            actions={
+              <span className="flex items-center gap-2">
+                <AiGeneratedBadge provider={mapping.run.provider} />
+                <span className="text-caption text-ink-muted">
+                  候補です。実際の紐付けは質問ごとに確定してください
                 </span>
-              }
-            />
+              </span>
+            }
+          >
             <div className="t4d-scroll-x">
               <Table>
                 <THead>
@@ -387,37 +540,36 @@ export default async function CdpWorkspacePage({
                     <TR key={row.itemCode}>
                       <TD className="font-medium">{row.itemCode}</TD>
                       <TD>{row.metricCode ?? '—'}</TD>
-                      <TD className="text-[12px] text-ink-muted">{row.rationale}</TD>
+                      <TD className="text-small text-ink-muted">{row.rationale}</TD>
                       <TD align="right">{Math.round(row.confidence * 100)}%</TD>
                     </TR>
                   ))}
                 </TBody>
               </Table>
             </div>
-          </Card>
+          </Section>
         )}
 
         {check && (
-          <Card className="overflow-hidden">
-            <SectionTitle
-              title={`整合チェックの結果（${check.issues.length} 件の指摘）`}
-              action={
-                <span className="flex items-center gap-2">
-                  <AiGeneratedBadge provider={check.run.provider} />
-                  <span className="text-[11px] text-ink-muted">
-                    {formatJst(check.run.createdAt)} 実行
-                  </span>
-                  <Link
-                    href="/enterprise/disclosures/cdp"
-                    className="text-[11px] text-brand-800 underline"
-                  >
-                    閉じる
-                  </Link>
+          <Section
+            title={`整合チェックの結果（${check.issues.length} 件の指摘）`}
+            actions={
+              <span className="flex items-center gap-2">
+                <AiGeneratedBadge provider={check.run.provider} />
+                <span className="text-caption text-ink-muted">
+                  {formatJst(check.run.createdAt)} 実行
                 </span>
-              }
-            />
+                <Link
+                  href="/enterprise/disclosures/cdp"
+                  className="text-caption text-brand-800 underline"
+                >
+                  閉じる
+                </Link>
+              </span>
+            }
+          >
             {check.issues.length === 0 ? (
-              <p className="px-3 pb-3 text-[12px] text-ink-muted">
+              <p className="pb-2 text-small text-ink-muted">
                 不足・陳腐化・矛盾は検出されませんでした。
               </p>
             ) : (
@@ -442,49 +594,44 @@ export default async function CdpWorkspacePage({
                           {SEVERITY_LABEL[issue.severity]}
                         </Badge>
                       </TD>
-                      <TD className="whitespace-nowrap text-[12px]">
+                      <TD className="whitespace-nowrap text-small">
                         {ISSUE_KIND_LABEL[issue.kind] ?? issue.kind}
                       </TD>
-                      <TD className="font-mono text-[11px]">{issue.subject}</TD>
-                      <TD className="text-[12px] text-ink">{issue.detail}</TD>
+                      <TD className="font-mono text-caption">{issue.subject}</TD>
+                      <TD className="text-small text-ink">{issue.detail}</TD>
                     </TR>
                   ))}
                 </TBody>
               </Table>
             )}
-            <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
+            <p className="border-t border-line py-1.5 text-caption text-ink-muted">
               AI は指摘のみを行います。回答の修正・承認は人が行ってください。
             </p>
-          </Card>
+          </Section>
         )}
 
-        <Card className="overflow-hidden">
-          <FilterBar
-            total={rows.length}
-            searchPlaceholder="質問コード・質問文で検索"
-            groups={[
-              {
-                key: 'change',
-                label: '前年差分',
-                multiple: false,
-                options: [
-                  { value: 'new', label: '新規' },
-                  { value: 'changed', label: '変更' },
-                  { value: 'carry_forward', label: '継続' },
-                ],
-              },
-              {
-                key: 'status',
-                label: '状態',
-                multiple: false,
-                options: [
-                  { value: 'not_started', label: '未着手' },
-                  { value: 'draft', label: '作成中' },
-                  { value: 'in_review', label: 'レビュー中' },
-                  { value: 'approved', label: '承認済み' },
-                ],
-              },
-            ]}
+        {onlyDiff && (
+          <Notice tone="info">
+            「前年差分だけ回答」モード: 継続（前年から変わらない）質問を非表示にしています。
+            <Link href="/enterprise/disclosures/cdp" className="ml-2 underline">
+              すべて表示
+            </Link>
+          </Notice>
+        )}
+
+        <Section title="質問" divider="none">
+          <DataTable
+            id="cdp-questions"
+            caption="CDP の質問"
+            columns={columns}
+            rows={pageRows}
+            getRowId={(row) => row.item.id}
+            getRowLabel={(row) => row.item.code}
+            getRowStatus={(row) => row.response?.status ?? 'not_started'}
+            searchParams={params}
+            basePath={BASE_PATH}
+            filters={filters}
+            search={{ placeholder: '質問コード・質問文で検索' }}
             savedViews={[
               {
                 label: '前年差分だけ回答',
@@ -494,118 +641,26 @@ export default async function CdpWorkspacePage({
               { label: '未着手のみ', query: 'status=not_started' },
               { label: '承認済み', query: 'status=approved' },
             ]}
+            userViews
+            page={{ page: pageNo, pageSize, total: rows.length, sizes: DEFAULT_PAGE_SIZES }}
+            empty={{
+              noData: {
+                title: onlyDiff ? '前年から変わった質問はありません' : 'この版の質問がありません',
+                description: onlyDiff
+                  ? '継続の質問も含めて表示すると、すべての質問を確認できます。'
+                  : '質問書の版を選び直してください。質問マスターの登録は管理者が行います。',
+                action: (
+                  <Link
+                    href="/enterprise/disclosures/cdp"
+                    className="text-small text-brand-700 hover:underline"
+                  >
+                    すべての質問を表示する
+                  </Link>
+                ),
+              },
+            }}
           />
-
-          {onlyDiff && (
-            <div className="border-b border-line bg-brand-50 px-3 py-1.5 text-[12px] text-brand-900">
-              「前年差分だけ回答」モード: 継続（carry forward）質問を非表示にしています。
-              <Link href="/enterprise/disclosures/cdp" className="ml-2 underline">
-                すべて表示
-              </Link>
-            </div>
-          )}
-
-          {rows.length === 0 ? (
-            <EmptyState title="該当する質問がありません" />
-          ) : (
-            <div className="t4d-scroll-x">
-              <Table className="t4d-sticky-head">
-                <THead>
-                  <TR>
-                    <TH>セクション</TH>
-                    <TH>質問</TH>
-                    <TH>適用</TH>
-                    <TH>前年差分</TH>
-                    <TH>状態</TH>
-                    <TH>優先度</TH>
-                    <TH>マッピング指標</TH>
-                    <TH align="right">当年値</TH>
-                    <TH align="right">前年値</TH>
-                    <TH align="right">増減</TH>
-                    <TH className="w-16" aria-label="操作" />
-                  </TR>
-                </THead>
-                <TBody>
-                  {rows.map((row) => {
-                    const change = CHANGE_LABEL[row.item.changeType];
-                    const delta =
-                      row.currentValue !== null &&
-                      row.previousValue !== null &&
-                      row.previousValue !== 0
-                        ? ((row.currentValue - row.previousValue) / row.previousValue) * 100
-                        : null;
-                    return (
-                      <TR key={row.item.id}>
-                        <TD className="whitespace-nowrap text-[11px] text-ink-muted">
-                          {row.item.section}
-                        </TD>
-                        <TD className="max-w-[420px]">
-                          <Link
-                            href={`/enterprise/disclosures/cdp/${row.item.id}`}
-                            className="font-medium text-brand-800 hover:underline"
-                          >
-                            {row.item.code}
-                          </Link>
-                          <div className="truncate text-[12px] text-ink">
-                            {row.item.questionText}
-                          </div>
-                        </TD>
-                        <TD>
-                          {(() => {
-                            const result = applicability.get(row.item.id);
-                            if (!result) {
-                              return <span className="text-[11px] text-ink-muted">未判定</span>;
-                            }
-                            const a = APPLICABILITY_LABEL[result.applicability];
-                            return (
-                              <span title={result.reason} className="inline-flex">
-                                <Badge tone={a.tone}>
-                                  <a.Icon className="size-3" aria-hidden="true" />
-                                  {a.label}
-                                </Badge>
-                              </span>
-                            );
-                          })()}
-                        </TD>
-                        <TD>
-                          <Badge tone={change.tone}>{change.label}</Badge>
-                        </TD>
-                        <TD>
-                          <ResponseStatusBadge status={row.response?.status ?? 'not_started'} />
-                        </TD>
-                        <TD>
-                          <PriorityBadge priority={row.priority} />
-                        </TD>
-                        <TD className="text-[11px]">
-                          {row.mappedMetrics.length === 0
-                            ? '—'
-                            : row.mappedMetrics.map((m) => m.name).join(' / ')}
-                        </TD>
-                        <TD align="right">{formatNumber(row.currentValue)}</TD>
-                        <TD align="right">{formatNumber(row.previousValue)}</TD>
-                        <TD align="right">
-                          {delta === null ? (
-                            '—'
-                          ) : (
-                            <span className={delta >= 0 ? 'text-danger' : 'text-success'}>
-                              {delta >= 0 ? '+' : ''}
-                              {delta.toFixed(1)}%
-                            </span>
-                          )}
-                        </TD>
-                        <TD>
-                          <Button variant="ghost" size="xs" asChild>
-                            <Link href={`/enterprise/disclosures/cdp/${row.item.id}`}>開く</Link>
-                          </Button>
-                        </TD>
-                      </TR>
-                    );
-                  })}
-                </TBody>
-              </Table>
-            </div>
-          )}
-        </Card>
+        </Section>
       </div>
     </>
   );

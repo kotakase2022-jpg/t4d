@@ -3,6 +3,8 @@
 import * as React from 'react';
 import { AlertTriangle, Save } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
+import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { IDLE_FORM_STATE, formFailure, type FormActionState } from '@/lib/errors/form-action-state';
 import { withNetworkFallback } from '@/lib/errors/safe-form-action';
@@ -26,8 +28,6 @@ import {
 } from '@/types/domain';
 import { iroFormValuesFromEntries, type IroFormValues } from '../iro-form-values';
 
-const SELECT_CLASS = 'h-7 w-full rounded-t4d border border-line bg-surface px-1.5 text-[12px]';
-
 /** 1〜5 の段階の選択（整数だけを選ばせる。入力の誤りを先に減らす） */
 function ScoreSelect({
   name,
@@ -41,20 +41,20 @@ function ScoreSelect({
   defaultValue: string;
 }) {
   return (
-    <label className="space-y-1 text-[11px] text-ink-muted">
+    <label className="space-y-1 text-caption text-ink-muted">
       <span className="block">
         {label}
-        <span className="ml-1 text-[10px]">（{hint}）</span>
+        <span className="ml-1 text-caption">（{hint}）</span>
       </span>
       {/* 出している欄は、その種類の IRO で必須の欄だけ（送る前にブラウザが止める） */}
-      <select name={name} defaultValue={defaultValue} required className={SELECT_CLASS}>
+      <NativeSelect name={name} defaultValue={defaultValue} required>
         <option value="">選択</option>
         {[1, 2, 3, 4, 5].map((n) => (
           <option key={n} value={String(n)}>
             {n}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </label>
   );
 }
@@ -136,7 +136,7 @@ function IroFormFields({
         <p
           id={errorId}
           role="alert"
-          className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-2.5 py-1.5 text-[12px] text-ink"
+          className="flex items-start gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-2.5 py-1.5 text-small text-ink"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-danger" aria-hidden="true" />
           <span>{error}（入力は残っています）</span>
@@ -147,19 +147,19 @@ function IroFormFields({
       {initial.iroId && <input type="hidden" name="iroId" value={initial.iroId} />}
 
       <fieldset className="flex flex-wrap items-center gap-3">
-        <legend className="mb-1 text-[11px] font-medium text-ink">種類</legend>
+        <legend className="mb-1 text-caption font-medium text-ink">種類</legend>
         {IRO_TYPES.map((type) => (
-          <label key={type} className="flex items-center gap-1 text-[12px] text-ink">
+          <label key={type} className="flex items-center gap-1 text-small text-ink">
             <input
               type="radio"
               name="iroType"
               value={type}
               checked={iroType === type}
               onChange={() => setIroType(type)}
-              className="accent-[#0b57a4]"
+              className="accent-brand-700"
             />
             {IRO_TYPE_LABEL[type]}
-            <span className="text-[10px] text-ink-muted">
+            <span className="text-caption text-ink-muted">
               {type === 'impact' ? '（インパクト重要性）' : '（財務的重要性）'}
             </span>
           </label>
@@ -167,11 +167,11 @@ function IroFormFields({
       </fieldset>
 
       <div className="grid grid-cols-[1fr_2fr] gap-2">
-        <label className="space-y-1 text-[11px] text-ink-muted">
+        <label className="space-y-1 text-caption text-ink-muted">
           <span className="block">サブトピック（任意）</span>
           <Input name="subTopic" defaultValue={initial.subTopic} maxLength={100} />
         </label>
-        <label className="space-y-1 text-[11px] text-ink-muted">
+        <label className="space-y-1 text-caption text-ink-muted">
           <span className="block">内容（必須）</span>
           <Input
             name="description"
@@ -186,37 +186,28 @@ function IroFormFields({
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        <label className="space-y-1 text-[11px] text-ink-muted">
+        <label className="space-y-1 text-caption text-ink-muted">
           <span className="block">段階（バリューチェーン）</span>
-          <select
-            name="valueChainStage"
-            defaultValue={initial.valueChainStage}
-            className={SELECT_CLASS}
-          >
+          <NativeSelect name="valueChainStage" defaultValue={initial.valueChainStage}>
             {VALUE_CHAIN_STAGES.map((stage) => (
               <option key={stage} value={stage}>
                 {VALUE_CHAIN_STAGE_LABEL[stage]}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
-        <label className="space-y-1 text-[11px] text-ink-muted">
+        <label className="space-y-1 text-caption text-ink-muted">
           <span className="block">期間{isImpact ? '（任意）' : '（必須）'}</span>
-          <select
-            name="timeHorizon"
-            defaultValue={initial.timeHorizon}
-            required={!isImpact}
-            className={SELECT_CLASS}
-          >
+          <NativeSelect name="timeHorizon" defaultValue={initial.timeHorizon} required={!isImpact}>
             <option value="">{isImpact ? '未設定' : '選択'}</option>
             {TIME_HORIZONS.map((horizon) => (
               <option key={horizon} value={horizon}>
                 {TIME_HORIZON_LABEL[horizon]}（{TIME_HORIZON_MEANING[horizon]}）
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
-        <label className="space-y-1 text-[11px] text-ink-muted">
+        <label className="space-y-1 text-caption text-ink-muted">
           <span className="block">影響を受ける人（任意）</span>
           <Input
             name="affectedStakeholders"
@@ -228,13 +219,13 @@ function IroFormFields({
 
       {isImpact ? (
         <fieldset className="space-y-2 rounded-t4d border border-line p-2">
-          <legend className="px-1 text-[11px] font-medium text-ink">
+          <legend className="px-1 text-caption font-medium text-ink">
             インパクトの評価（人・環境への影響）
           </legend>
           <div className="flex flex-wrap gap-4">
             <div role="radiogroup" aria-label="実在か潜在か" className="flex items-center gap-2">
               {IMPACT_OCCURRENCES.map((value) => (
-                <label key={value} className="flex items-center gap-1 text-[12px] text-ink">
+                <label key={value} className="flex items-center gap-1 text-small text-ink">
                   <input
                     type="radio"
                     name="impactOccurrence"
@@ -242,7 +233,7 @@ function IroFormFields({
                     required
                     checked={occurrence === value}
                     onChange={() => setOccurrence(value)}
-                    className="accent-[#0b57a4]"
+                    className="accent-brand-700"
                   />
                   {IMPACT_OCCURRENCE_LABEL[value]}
                 </label>
@@ -250,7 +241,7 @@ function IroFormFields({
             </div>
             <div role="radiogroup" aria-label="負か正か" className="flex items-center gap-2">
               {IMPACT_DIRECTIONS.map((value) => (
-                <label key={value} className="flex items-center gap-1 text-[12px] text-ink">
+                <label key={value} className="flex items-center gap-1 text-small text-ink">
                   <input
                     type="radio"
                     name="impactDirection"
@@ -258,21 +249,17 @@ function IroFormFields({
                     required
                     checked={direction === value}
                     onChange={() => setDirection(value)}
-                    className="accent-[#0b57a4]"
+                    className="accent-brand-700"
                   />
                   {IMPACT_DIRECTION_LABEL[value]}のインパクト
                 </label>
               ))}
             </div>
-            <label className="flex items-center gap-1 text-[12px] text-ink">
-              <input
-                type="checkbox"
-                name="humanRights"
-                defaultChecked={initial.humanRights}
-                className="size-3.5 accent-[#0b57a4]"
-              />
-              人権に関わる（潜在でも深刻度で評価）
-            </label>
+            <NativeCheckbox
+              name="humanRights"
+              defaultChecked={initial.humanRights}
+              label="人権に関わる（潜在でも深刻度で評価）"
+            />
           </div>
           <div className="grid grid-cols-4 gap-2">
             <ScoreSelect
@@ -307,7 +294,7 @@ function IroFormFields({
         </fieldset>
       ) : (
         <fieldset className="space-y-2 rounded-t4d border border-line p-2">
-          <legend className="px-1 text-[11px] font-medium text-ink">
+          <legend className="px-1 text-caption font-medium text-ink">
             リスク・機会の評価（企業への財務的な影響）
           </legend>
           <div className="grid grid-cols-3 gap-2">
@@ -323,30 +310,32 @@ function IroFormFields({
               hint="1〜5"
               defaultValue={initial.financialMagnitude}
             />
-            <label className="space-y-1 text-[11px] text-ink-muted">
+            <label className="space-y-1 text-caption text-ink-muted">
               <span className="block">関連するインパクト（任意）</span>
-              <select
-                name="relatedImpactIroId"
-                defaultValue={initial.relatedImpactIroId}
-                className={SELECT_CLASS}
-              >
+              <NativeSelect name="relatedImpactIroId" defaultValue={initial.relatedImpactIroId}>
                 <option value="">なし</option>
                 {impactIroOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.description}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
           </div>
         </fieldset>
       )}
 
       <div className="flex items-center gap-2">
-        <SubmitButton size="sm" icon={<Save aria-hidden="true" />} pendingLabel="保存中…">
+        {/* 事項の画面の主操作は「判断を保存」。IRO の保存は secondary（plan S12） */}
+        <SubmitButton
+          variant="secondary"
+          size="sm"
+          icon={<Save aria-hidden="true" />}
+          pendingLabel="保存中…"
+        >
           {submitLabel}
         </SubmitButton>
-        <span className="text-[11px] text-ink-muted">
+        <span className="text-caption text-ink-muted">
           保存すると算定結果（提案）が変わり、DMA の確定は取り消されます。人の判断は変わりません。
         </span>
       </div>

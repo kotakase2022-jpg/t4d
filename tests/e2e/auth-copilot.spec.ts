@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, confirmInDialog, loginAs, openCollapsible } from './helpers';
 
 /**
  * AUTH-P0-001（招待: アプリ内リンク方式）と AI-P0-001（Copilot 対話）の実ブラウザ検証。
@@ -10,11 +10,13 @@ test.describe.configure({ mode: 'serial' });
 
 test('管理者が招待リンクを発行し、本人が受諾してログイン状態で参加できる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  // 招待は設定の「招待」タブ。発行の欄は見出しの主操作「メンバーを招待」で開く（plan S17）
+  await page.goto('/enterprise/settings?tab=invitations');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   // 招待を作成（メール送信は行わない旨が明示されている）
   await expect(page.getByText('招待メールは送信しません')).toBeVisible();
+  await page.locator('[data-page-actions]').getByRole('link', { name: 'メンバーを招待' }).click();
   await page.locator('input[name="email"]').first().fill('shinme@demo.local');
   await page.getByRole('checkbox', { name: '拠点・グループ会社担当' }).check();
   await page.getByRole('button', { name: '招待リンクを発行' }).click();
@@ -37,10 +39,11 @@ test('管理者が招待リンクを発行し、本人が受諾してログイ�
   await page.waitForURL(/\/workspace|\/enterprise/);
   await expect(page.getByText('新芽 育').first()).toBeVisible();
 
-  // 管理者側: メンバー一覧に現れ、招待は受諾済みになる
+  // 管理者側: メンバー一覧（「メンバー」タブ）に現れ、招待（「招待」タブ）は受諾済みになる
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=members');
   await expect(page.locator('tr', { hasText: '新芽 育' })).toBeVisible();
+  await page.goto('/enterprise/settings?tab=invitations');
   await expect(page.locator('tr', { hasText: 'shinme@demo.local' }).last()).toContainText(
     '受諾済み',
   );
@@ -48,7 +51,7 @@ test('管理者が招待リンクを発行し、本人が受諾してログイ�
 
 test('失効した招待リンクは使用できない', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/settings');
+  await page.goto('/enterprise/settings?tab=invitations&new=1');
 
   await page.locator('input[name="email"]').first().fill('too-late@demo.local');
   await page.getByRole('checkbox', { name: '閲覧者' }).check();
@@ -57,9 +60,12 @@ test('失効した招待リンクは使用できない', async ({ page }) => {
 
   const row = page.locator('tr', { hasText: 'too-late@demo.local' });
   const invitePath = (await row.locator('code').textContent())!.trim();
+  // 失効には逆操作が無いので確認ダイアログを通る（plan §1.16）
   await row.getByRole('button', { name: '失効' }).click();
+  await confirmInDialog(page);
   await page.waitForLoadState('networkidle');
-  await expect(row).toContainText('失効');
+  await expect(row.locator('[data-invitation-status="revoked"]')).toHaveText('失効');
+  await expect(row.getByRole('button', { name: /失効/ })).toHaveCount(0);
 
   await page.context().clearCookies();
   await page.goto(invitePath);
@@ -89,7 +95,10 @@ test('Copilot 対話: 実データに基づく回答が根拠つきで返り、�
 
   // Provenance（AI 実行履歴）へ記録される。revalidate 後に一覧へ現れる
   await page.reload();
-  await expect(page.locator('tbody tr', { hasText: 'Copilot 対話' }).first()).toBeVisible();
+  // AI の実行記録は既定で閉じた節（plan §2.26 E06: L2）。開いてから確かめる
+  const runs = page.getByRole('region', { name: /^AI の実行記録/ });
+  await openCollapsible(runs, /^直近 \d+ 件/);
+  await expect(runs.locator('tbody tr', { hasText: 'Copilot 対話' }).first()).toBeVisible();
 });
 
 test('Copilot は分からないことに推測で答えない', async ({ page }) => {

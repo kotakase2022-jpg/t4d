@@ -103,7 +103,7 @@ export function BenchmarkRangeLegend() {
   return (
     <ul
       aria-label="範囲の図の見方"
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-muted"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-ink-muted"
     >
       <li className="flex items-center gap-1">
         <svg viewBox="0 0 24 10" aria-hidden="true" focusable="false" className="h-2.5 w-6">

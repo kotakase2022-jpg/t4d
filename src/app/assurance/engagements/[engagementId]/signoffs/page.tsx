@@ -1,46 +1,45 @@
 import Link from 'next/link';
-import { CheckCircle2, Lock, Signature } from 'lucide-react';
-import { SectionTitle } from '@/components/shared/page-header';
+import { Lock, Signature } from 'lucide-react';
+import { ActionButton } from '@/components/shared/action-button';
+import { FlashMessage } from '@/components/shared/flash';
+import { Notice } from '@/components/shared/notice';
+import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { SemanticBadge } from '@/components/shared/status-badge';
 import { Input } from '@/components/ui/input';
 import { requireAssuranceContext } from '@/lib/auth/session';
 import { canSignoff } from '@/lib/authorization/can';
+import { roleLabel } from '@/lib/authorization/roles';
 import { formatJst } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
 import { evaluateSignoffBlockers, loadEngagementOr404 } from '@/lib/services/assurance';
+import { canFor } from '@/lib/ui/home-profile';
+import { signoffStateActions } from '@/lib/ui/state-actions';
+import { statusLabel } from '@/lib/ui/status/registry';
 import type { SignoffStage } from '@/types/domain';
 import { createSignoffAction } from '../../../actions';
 import { EngagementHeader } from '../engagement-header';
 
 export const metadata = { title: 'Sign-off' };
 
-const STAGES: Array<{ stage: SignoffStage; label: string; description: string }> = [
-  {
-    stage: 'prepared',
-    label: 'Prepared（作成）',
-    description: '調書の作成が完了したことを示します。',
-  },
-  {
-    stage: 'reviewed',
-    label: 'Reviewed（レビュー）',
-    description: 'マネージャー等によるレビュー完了。',
-  },
+const STAGES: Array<{ stage: SignoffStage; description: string }> = [
+  { stage: 'prepared', description: '調書の作成が完了したことを示します。' },
+  { stage: 'reviewed', description: 'マネージャー等によるレビュー完了。' },
   {
     stage: 'partner_approved',
-    label: 'Partner Approved（契約責任者承認）',
     description: '契約責任者による最終承認。保証意見の確定はシステム外で行います。',
   },
 ];
 
 export default async function SignoffsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ engagementId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { engagementId } = await params;
+  const query = await searchParams;
   const ctx = await requireAssuranceContext();
   const db = await getDb();
   const context = await loadEngagementOr404(db, ctx, engagementId);
@@ -52,6 +51,7 @@ export default async function SignoffsPage({
   const profileIds = [...new Set(signoffs.map((s) => s.userId))];
   const profiles =
     profileIds.length > 0 ? await db.select('profiles', { where: { id: { in: profileIds } } }) : [];
+  const nameOf = (userId: string) => profiles.find((p) => p.id === userId)?.displayName ?? '—';
 
   const blockersByStage = new Map<
     SignoffStage,
@@ -61,133 +61,173 @@ export default async function SignoffsPage({
     blockersByStage.set(stage, await evaluateSignoffBlockers(db, ctx, engagementId, stage));
   }
 
+  // 主操作は、自分が実行できる未完了の段階のうち最初のもの 1 つ（抑止中なら押せない理由を添える）
+  const nextStage = STAGES.find(
+    ({ stage }) => canSignoff(ctx, stage) && !signoffs.some((s) => s.signoffStage === stage),
+  )?.stage;
+  const roles = ctx.workspace.roleKeys.map(roleLabel).join(' / ');
+
   return (
     <>
       <EngagementHeader context={context} page="Sign-off" />
 
       <div className="space-y-3 p-4">
-        <Card className="border-brand-200 bg-brand-50">
-          <p className="flex items-start gap-2 px-3 py-2 text-[12px] text-brand-900">
-            <Lock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <FlashMessage searchParams={query} />
+
+        {/* 代理禁止・追記専用は安全の注記（折りたたまない） */}
+        <Notice tone="info">
+          <span className="flex items-start gap-1.5">
+            <Lock className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>
               Sign-off は<strong>本人のみ</strong>が実行できます（代理 Sign-off は禁止。RLS と DB
               トリガの両方で強制しています）。また、抑止条件を 1
               つでも満たさない場合は実行できません。 作成済みの Sign-off
               は取り消せません（追記専用）。
             </span>
-          </p>
-        </Card>
+          </span>
+        </Notice>
 
         <div className="grid grid-cols-3 gap-3">
-          {STAGES.map(({ stage, label, description }) => {
+          {STAGES.map(({ stage, description }) => {
+            const label = statusLabel('signoff', stage);
             const done = signoffs.filter((s) => s.signoffStage === stage);
             const blockers = blockersByStage.get(stage) ?? [];
-            const allowed = canSignoff(ctx, stage);
+            const plan = signoffStateActions({
+              stage,
+              can: canFor(ctx),
+              blockers: blockers.map((b) => b.message),
+            });
             return (
-              <Card key={stage}>
-                <SectionTitle
-                  title={label}
-                  action={
-                    done.length > 0 ? (
-                      <Badge tone="success">
-                        <CheckCircle2 className="size-3" aria-hidden="true" />
-                        実行済み
-                      </Badge>
-                    ) : blockers.length === 0 ? (
-                      <Badge tone="brand">実行可能</Badge>
-                    ) : (
-                      <Badge tone="danger">抑止中</Badge>
-                    )
-                  }
-                />
-                <div className="space-y-2 p-3">
-                  <p className="text-[12px] text-ink-muted">{description}</p>
-
-                  {done.length > 0 && (
-                    <ul className="space-y-1">
-                      {done.map((signoff) => (
-                        <li
-                          key={signoff.id}
-                          className="rounded-t4d border border-line bg-surface-muted p-2 text-[12px]"
-                        >
-                          <div className="font-medium text-ink">
-                            {profiles.find((p) => p.id === signoff.userId)?.displayName ?? '—'}
-                          </div>
-                          <div className="text-[11px] text-ink-muted">
-                            {signoff.roleKey} ／ v{signoff.version} ／{' '}
-                            {formatJst(signoff.createdAt)}
-                          </div>
-                          {signoff.snapshotId && (
-                            <div className="text-[11px] text-ink-muted">
-                              対象 Snapshot: {signoff.snapshotId.slice(0, 8)}
-                            </div>
-                          )}
-                          {signoff.comment && (
-                            <p className="mt-0.5 text-[12px] text-ink">{signoff.comment}</p>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {blockers.length > 0 && (
-                    <ul className="space-y-1 rounded-t4d bg-danger-soft p-2">
-                      {blockers.map((blocker) => (
-                        <li key={blocker.code} className="text-[11px] text-danger">
-                          ・{blocker.message}
-                          {blocker.href && (
-                            <Link href={blocker.href} className="ml-1 underline">
-                              対応
-                            </Link>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {allowed ? (
-                    <form action={createSignoffAction} className="space-y-1.5">
-                      <input type="hidden" name="engagementId" value={engagementId} />
-                      <input type="hidden" name="stage" value={stage} />
-                      <Input name="comment" placeholder="コメント（任意）" aria-label="コメント" />
-                      <Button type="submit" size="sm" disabled={blockers.length > 0}>
-                        <Signature aria-hidden="true" />
-                        {ctx.displayName} として Sign-off
-                      </Button>
-                    </form>
+              <section
+                key={stage}
+                aria-labelledby={`stage-${stage}`}
+                className="space-y-2 rounded-t4d-lg border border-line bg-surface p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h2 id={`stage-${stage}`} className="text-body font-semibold text-ink">
+                    {label}
+                  </h2>
+                  {done.length > 0 ? (
+                    <SemanticBadge semantic="done" label="実行済み" />
+                  ) : blockers.length === 0 ? (
+                    <SemanticBadge semantic="todo" label="実行可能" />
                   ) : (
-                    <p className="text-[11px] text-ink-muted">
-                      この段階を実行する権限がありません（現在のロール:{' '}
-                      {ctx.workspace.roleKeys.join(' / ')}）。
-                    </p>
+                    <SemanticBadge semantic="blocked" label="抑止中" />
                   )}
                 </div>
-              </Card>
+                <p className="text-small text-ink-muted">{description}</p>
+
+                {done.length > 0 && (
+                  <ul className="space-y-1">
+                    {done.map((signoff) => (
+                      <li
+                        key={signoff.id}
+                        className="rounded-t4d border border-line bg-surface-muted p-2 text-small"
+                      >
+                        <div className="font-medium text-ink">{nameOf(signoff.userId)}</div>
+                        <div className="text-caption text-ink-muted">
+                          {roleLabel(signoff.roleKey)} ／ 版 {signoff.version} ／{' '}
+                          {formatJst(signoff.createdAt)}
+                        </div>
+                        {signoff.snapshotId && (
+                          <div className="text-caption text-ink-muted">
+                            対象 Snapshot: {signoff.snapshotId.slice(0, 8)}
+                          </div>
+                        )}
+                        {signoff.comment && (
+                          <p className="mt-0.5 text-small text-ink">{signoff.comment}</p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {blockers.length > 0 && (
+                  <ul className="space-y-1 rounded-t4d bg-danger-soft p-2">
+                    {blockers.map((blocker) => (
+                      <li key={blocker.code} className="text-caption text-danger">
+                        ・{blocker.message}
+                        {blocker.href && (
+                          <Link href={blocker.href} className="ml-1 underline">
+                            対応
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {plan.primary ? (
+                  // 取り消せない記録なので、範囲（誰が・どの案件の・どの段階）を確かめてから送る（plan §1.16 区分 1）
+                  <ActionButton
+                    variant={stage === nextStage ? 'primary' : 'secondary'}
+                    action={{
+                      kind: 'confirm',
+                      id: `signoff-${stage}`,
+                      label: plan.primary.label,
+                      icon: <Signature aria-hidden="true" />,
+                      action: createSignoffAction,
+                      fields: { engagementId, stage },
+                      disabledReason: plan.primary.disabledReason,
+                      confirm: {
+                        tier: 'irreversible',
+                        title: `「${label}」の Sign-off を記録しますか`,
+                        scope: `${ctx.displayName}（本人）として、${context.engagement.code} の「${label}」を記録します。`,
+                        consequences: [
+                          '作成した Sign-off は取り消せません（追記専用）。',
+                          '代理 Sign-off は禁止です。本人のアカウントで記録されます。',
+                        ],
+                        extraFields: (
+                          <label className="block space-y-1">
+                            <span className="text-small font-medium text-ink">
+                              コメント
+                              <span className="ml-1 text-caption font-normal text-ink-muted">
+                                （任意）
+                              </span>
+                            </span>
+                            <Input name="comment" aria-label="コメント" />
+                          </label>
+                        ),
+                        confirmLabel: 'Sign-off を記録する',
+                      },
+                    }}
+                  />
+                ) : done.length === 0 ? (
+                  <p className="text-caption text-ink-muted">
+                    この段階を実行する権限がありません（現在の役割: {roles}）。
+                  </p>
+                ) : null}
+              </section>
             );
           })}
         </div>
 
-        <Card>
-          <SectionTitle title={`Sign-off 履歴（${signoffs.length}）`} />
+        <Section title={`Sign-off 履歴（${signoffs.length}）`}>
           {signoffs.length === 0 ? (
-            <EmptyState title="Sign-off はまだありません" />
+            <EmptyState
+              kind="not-applicable"
+              size="compact"
+              title="Sign-off はまだありません"
+              description="抑止条件をすべて満たすと、各段階の担当者が本人として記録できます。"
+            />
           ) : (
-            <ul className="divide-y divide-line">
+            <ul className="divide-y divide-line rounded-t4d border border-line">
               {signoffs.map((signoff) => (
                 <li
                   key={signoff.id}
                   className="flex items-center justify-between gap-2 px-3 py-1.5"
                 >
-                  <span className="text-[12px] text-ink">
-                    {signoff.signoffStage} —{' '}
-                    {profiles.find((p) => p.id === signoff.userId)?.displayName ?? '—'}
+                  <span className="text-small text-ink">
+                    {statusLabel('signoff', signoff.signoffStage)} — {nameOf(signoff.userId)}
                   </span>
-                  <span className="text-[11px] text-ink-muted">{formatJst(signoff.createdAt)}</span>
+                  <span className="text-caption text-ink-muted">
+                    {formatJst(signoff.createdAt)}
+                  </span>
                 </li>
               ))}
             </ul>
           )}
-        </Card>
+        </Section>
       </div>
     </>
   );

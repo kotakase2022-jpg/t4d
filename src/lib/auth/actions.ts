@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { getAppMode } from '@/lib/config';
+import { ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
 import { DEMO_USER_COOKIE, WORKSPACE_COOKIE, getSession, homePathFor } from './session';
 
@@ -20,12 +21,17 @@ const COOKIE_OPTS = {
  * 本番 Auth（Supabase Auth）とは完全に別経路（assumptions C-7）。
  */
 export async function demoLoginAction(formData: FormData): Promise<void> {
+  // 入力の誤り・該当なしはログイン画面の先頭に理由を出す（本番で識別子に化けさせない。plan §4 B3）
+  await withUserFacingError('/login', () => demoLogin(formData));
+}
+
+async function demoLogin(formData: FormData): Promise<void> {
   if (getAppMode() !== 'demo') {
-    throw new Error('Demo ログインは Demo Mode でのみ利用できます。');
+    throw new ValidationError('Demo ログインは Demo Mode でのみ利用できます。');
   }
   const email = String(formData.get('email') ?? '').trim();
   if (!email.endsWith('@demo.local')) {
-    throw new Error('Demo アカウント（@demo.local）を選択してください。');
+    throw new ValidationError('Demo アカウント（@demo.local）を選択してください。');
   }
 
   const db = await getDb();
@@ -37,7 +43,7 @@ export async function demoLoginAction(formData: FormData): Promise<void> {
       resourceType: 'profile',
       metadata: { reason: 'unknown_demo_account' },
     });
-    throw new Error('該当する Demo アカウントが見つかりません。');
+    throw new ValidationError('該当する Demo アカウントが見つかりません。');
   }
 
   const cookieStore = await cookies();
@@ -59,14 +65,18 @@ export async function demoLoginAction(formData: FormData): Promise<void> {
  * Supabase Mode でのみ有効。セッション Cookie は @supabase/ssr が設定する。
  */
 export async function supabaseLoginAction(formData: FormData): Promise<void> {
+  await withUserFacingError('/login', () => supabaseLogin(formData));
+}
+
+async function supabaseLogin(formData: FormData): Promise<void> {
   if (getAppMode() !== 'supabase') {
-    throw new Error('このログイン方法は Supabase Mode でのみ利用できます。');
+    throw new ValidationError('このログイン方法は Supabase Mode でのみ利用できます。');
   }
 
   const email = String(formData.get('email') ?? '').trim();
   const password = String(formData.get('password') ?? '');
   if (!email || !password) {
-    throw new Error('メールアドレスとパスワードを入力してください。');
+    throw new ValidationError('メールアドレスとパスワードを入力してください。');
   }
 
   const { createSupabaseServerClient } = await import('@/lib/supabase/server');
@@ -81,7 +91,7 @@ export async function supabaseLoginAction(formData: FormData): Promise<void> {
       // メールアドレス自体は PII のため保存しない
       metadata: { reason: 'invalid_credentials' },
     });
-    throw new Error('メールアドレスまたはパスワードが正しくありません。');
+    throw new ValidationError('メールアドレスまたはパスワードが正しくありません。');
   }
 
   await recordAuditEvent(db, null, {
@@ -124,13 +134,17 @@ export async function logoutAction(): Promise<void> {
 }
 
 export async function selectWorkspaceAction(formData: FormData): Promise<void> {
+  await withUserFacingError('/workspace', () => selectWorkspace(formData));
+}
+
+async function selectWorkspace(formData: FormData): Promise<void> {
   const organizationId = String(formData.get('organizationId') ?? '');
   const session = await getSession();
   if (!session) redirect('/login');
 
   const target = session.workspaces.find((w) => w.organizationId === organizationId);
   if (!target) {
-    throw new Error('選択されたワークスペースへのアクセス権がありません。');
+    throw new ValidationError('選択されたワークスペースへのアクセス権がありません。');
   }
 
   const cookieStore = await cookies();
@@ -165,6 +179,14 @@ export async function selectWorkspaceAction(formData: FormData): Promise<void> {
  * Supabase Mode ではメンバー登録のみ行い、ログインは通常の認証を通す。
  */
 export async function acceptInvitationAction(formData: FormData): Promise<void> {
+  const invitationId = String(formData.get('invitationId') ?? '');
+  // 期限切れ・氏名の未入力などは招待の画面に理由を出す（招待した管理者へ再発行を頼めるように）
+  await withUserFacingError(`/invite/${encodeURIComponent(invitationId)}`, () =>
+    acceptInvitationAndSignIn(formData),
+  );
+}
+
+async function acceptInvitationAndSignIn(formData: FormData): Promise<void> {
   const { acceptInvitation } = await import('@/lib/services/identity');
   const { getInvitationAcceptDb } = await import('@/lib/repositories');
   // 受諾者はまだメンバーではないため RLS 下では profiles / memberships を書けない。

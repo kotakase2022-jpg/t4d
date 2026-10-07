@@ -2,7 +2,14 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { dataPointId } from '@/lib/fixtures/dataset';
-import { DEMO_USERS, gotoEngagementPage, gotoEnterprise, loginAs } from './helpers';
+import {
+  DEMO_USERS,
+  confirmInDialog,
+  gotoEngagementPage,
+  gotoEnterprise,
+  loginAs,
+  openMoreMenu,
+} from './helpers';
 
 /**
  * E2E: 企業スライスと監査法人スライスの通し（指示書 20 章 Playwright 1〜16）。
@@ -33,9 +40,9 @@ test.describe('企業 Vertical Slice', () => {
     for (const label of [
       '期限超過',
       '未提出',
-      'Validation Error',
-      'Evidence 不足',
-      'Review 待ち',
+      '検証エラー',
+      '根拠資料の不足',
+      'レビュー・承認待ち',
       '承認率',
       'CDP 準備度',
     ]) {
@@ -49,7 +56,7 @@ test.describe('企業 Vertical Slice', () => {
   test('KPI クリックで Filter 付き一覧へ遷移する', async ({ page }) => {
     await loginAs(page, DEMO_USERS.enterpriseAdmin);
     await page
-      .getByRole('link', { name: /Validation Error/ })
+      .getByRole('link', { name: /検証エラー/ })
       .first()
       .click();
     await expect(page).toHaveURL(/\/enterprise\/data\?flag=validation_error/);
@@ -65,11 +72,12 @@ test.describe('企業 Vertical Slice', () => {
 
     // 取込ジョブ画面へ遷移し、ポーリングで解析が完了する
     await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/);
-    await expect(page.getByRole('heading', { name: /取込ジョブ/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /の取込確認$/, level: 1 })).toBeVisible();
     await expect(page.getByText('解析が完了しました。')).toBeVisible({ timeout: 60_000 });
 
     // ファイル解析結果（文字コード判定・ヘッダー推定）
-    await expect(page.getByText('east-plant-fy2026.csv')).toBeVisible();
+    // ファイル名は見出し・パンくずにも出るため、ファイル解析結果の表のセルで確かめる（同じ文字）
+    await expect(page.getByRole('cell', { name: 'east-plant-fy2026.csv' })).toBeVisible();
     await expect(page.getByRole('heading', { name: /取込プレビュー/ })).toBeVisible();
 
     // AI が指標を特定できなかった行の警告は出さない。
@@ -129,8 +137,11 @@ test.describe('企業 Vertical Slice', () => {
     // レビュー担当が差戻し理由付きで差し戻せる
     await loginAs(page, DEMO_USERS.reviewer);
     await page.goto(targetPath);
-    await page.getByLabel('差戻し理由').fill('検針票の対象期間を確認してください。');
-    await page.getByRole('button', { name: '差戻し' }).click();
+    await page.getByRole('button', { name: '差戻し…' }).click();
+    await confirmInDialog(page, {
+      reason: '検針票の対象期間を確認してください。',
+      reasonLabel: '差戻し理由',
+    });
     await expect(page.getByText('差戻し').first()).toBeVisible();
     // 差戻し理由は承認履歴とコメントの両方に残るため first() で確認する
     await expect(page.getByText('検針票の対象期間を確認してください。').first()).toBeVisible();
@@ -186,7 +197,8 @@ test.describe('企業 Vertical Slice', () => {
   test('拠点担当は承認ボタンを持たない（権限による UI 分岐）', async ({ page }) => {
     await loginAs(page, DEMO_USERS.siteUser);
     await gotoEnterprise(page, 'data');
-    await page.getByRole('link', { name: '詳細' }).first().click();
+    // 行の指標名のリンクから詳細へ（同じ行から同じ行き先へのリンクを 2 つ置かない。plan §1.12-7）
+    await page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first().click();
     await page.waitForURL(/\/enterprise\/data\/[0-9a-f-]+/);
     await expect(page.getByRole('button', { name: '承認', exact: true })).toHaveCount(0);
   });
@@ -203,7 +215,7 @@ test.describe('企業 Vertical Slice', () => {
     await page.waitForURL(/\/enterprise\/disclosures\/cdp\/[0-9a-f-]+/);
 
     // AI ドラフト生成
-    await page.getByRole('button', { name: 'ドラフトを生成' }).click();
+    await (await openMoreMenu(page)).getByRole('menuitem', { name: 'ドラフトを生成' }).click();
     await expect(page.getByText('Mock / AI未接続').first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText('参照元')).toBeVisible();
     await expect(
@@ -224,8 +236,8 @@ test.describe('企業 Vertical Slice', () => {
     const questionUrl = page.url();
     await loginAs(page, DEMO_USERS.approver);
     await page.goto(questionUrl);
-    // exact: ヘッダーの「役割切替（デモ） 現在: 承 花子・最終承認者」も名前に「承認」を含むため
-    await page.getByRole('button', { name: '承認', exact: true }).click();
+    // 保存しただけ（レビュー依頼前）の回答は「下書き」。作成と承認を兼ねる人には承認は「その他」にある（plan S6）
+    await (await openMoreMenu(page)).getByRole('menuitem', { name: '承認', exact: true }).click();
     await expect(page.getByText('承認済み').first()).toBeVisible();
   });
 
@@ -234,7 +246,7 @@ test.describe('企業 Vertical Slice', () => {
     await gotoEnterprise(page, 'data');
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.getByRole('link', { name: 'CSV' }).first().click(),
+      openMoreMenu(page).then((menu) => menu.getByRole('menuitem', { name: 'CSV 出力' }).click()),
     ]);
     expect(download.suggestedFilename()).toMatch(/\.csv$/);
   });
@@ -249,7 +261,9 @@ test.describe('監査法人 Vertical Slice', () => {
 
     engagementId = await gotoEngagementPage(page, 'overview');
     expect(engagementId).not.toBe('');
-    await expect(page.getByRole('heading', { name: /ENG-2026-001/ })).toBeVisible();
+    // h1 は画面名、案件コードは h1 の下の 1 行（plan S13）
+    await expect(page.getByRole('heading', { level: 1, name: '案件の概要' })).toBeVisible();
+    await expect(page.locator('#t4d-main [data-engagement-code]')).toHaveText('ENG-2026-001');
   });
 
   test('未アサインの法人管理者はクライアントデータを閲覧できない', async ({ page }) => {
@@ -279,8 +293,10 @@ test.describe('監査法人 Vertical Slice', () => {
     await loginAs(page, DEMO_USERS.assuranceManager);
     await page.goto(`/assurance/engagements/${engagementId}/data-room`);
 
-    await page.getByLabel('Snapshot ラベル').fill('SNAP-E2E');
+    // 固定は取り消せないため確認ダイアログを通る（plan §1.16 区分 1）。ラベルはダイアログで入力する
     await page.getByRole('button', { name: 'Snapshot を固定' }).click();
+    await page.getByRole('dialog').getByLabel('Snapshot ラベル').fill('SNAP-E2E');
+    await confirmInDialog(page);
     await expect(page.getByRole('heading', { name: /Snapshot: SNAP-E2E/ })).toBeVisible();
   });
 
@@ -288,6 +304,11 @@ test.describe('監査法人 Vertical Slice', () => {
     await loginAs(page, DEMO_USERS.assuranceStaff);
     await page.goto(`/assurance/engagements/${engagementId}/sampling`);
 
+    // 抽出の欄は一覧の上に常設しない（plan §1.13 CreatePanel）。見出しの主操作で開く
+    await page
+      .locator('[data-page-actions]')
+      .getByRole('link', { name: '新しいサンプルを抽出' })
+      .click();
     await page.getByLabel('サンプル名').fill('SMP-E2E');
     await page.getByLabel('乱数 Seed').fill('E2E-SEED-001');
     await page.getByLabel('サンプル件数').fill('4');
@@ -304,17 +325,26 @@ test.describe('監査法人 Vertical Slice', () => {
 
     // 三ペイン（左: サンプル一覧 / 中央: 手続 / 右: Evidence）
     await expect(page.getByRole('heading', { name: /SMP-E2E/ })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Procedure Checklist' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: /Evidence/ }).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: '手続チェックリスト' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /資料/ }).first()).toBeVisible();
 
-    // 先頭手続の結果を記録
-    await page.getByRole('button', { name: '記録' }).first().click();
-    await expect(page.getByText('pass').first()).toBeVisible();
+    // 先頭手続の結果を記録（サイドバーの「記録」グループの開閉ボタンと取り違えないよう本文に絞る）
+    await page
+      .locator('#t4d-main')
+      .getByRole('button', { name: '記録', exact: true })
+      .first()
+      .click();
+    await expect(page.locator('#t4d-main [data-test-result="pass"]').first()).toHaveText(
+      '相違なし',
+    );
 
     // 結論を入力して作成完了
-    await page.getByLabel('結論').fill('原資料と照合し、重要な相違は識別されなかった。');
+    await page
+      .locator('#t4d-main')
+      .getByLabel('結論', { exact: true })
+      .fill('原資料と照合し、重要な相違は識別されなかった。');
     await page.getByLabel('調書番号').fill('WP-E2E-01');
-    await page.getByRole('button', { name: '作成完了（Prepared）' }).click();
+    await page.getByRole('button', { name: '作成完了として記録' }).click();
     await expect(page.getByText('作成済み').first()).toBeVisible();
   });
 
@@ -326,13 +356,15 @@ test.describe('監査法人 Vertical Slice', () => {
         '自身が作成した調書を自身でレビューすることはできません（自己レビュー禁止）。',
       ),
     ).toBeVisible();
-    await expect(page.getByRole('button', { name: 'レビュー完了（Reviewed）' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'レビュー完了として記録' })).toBeDisabled();
   });
 
   test('13. PBC（資料依頼）を作成できる', async ({ page }) => {
     await loginAs(page, DEMO_USERS.assuranceManager);
     await page.goto(`/assurance/engagements/${engagementId}/requests`);
 
+    // 作成欄は一覧の上に常設しない（plan S14 CreatePanel）。見出しの主操作で開く
+    await page.locator('[data-page-actions]').getByRole('link', { name: '資料依頼を作成' }).click();
     await page.getByLabel('件名').fill('E2E 追加資料の依頼');
     await page.getByLabel('期限').fill('2026-09-30');
     await page
@@ -358,14 +390,17 @@ test.describe('監査法人 Vertical Slice', () => {
     await loginAs(page, DEMO_USERS.assuranceManager);
     await page.goto(`/assurance/engagements/${engagementId}/issues`);
 
+    // 起票欄は一覧の上に常設しない（plan S14 CreatePanel）。見出しの主操作で開く
+    await page.locator('[data-page-actions]').getByRole('link', { name: '指摘を起票' }).click();
     // 「内容」は既存 Issue の解消フォームにも現れるため、起票フォームに限定する
     const createForm = page.locator('form', {
       has: page.getByRole('button', { name: '起票', exact: true }),
     });
     await createForm.getByLabel('タイトル').fill('E2E 指摘: 算定根拠の不足');
     await createForm.getByLabel('重要度').selectOption('high');
+    // 欄の名前は「内容」＋「任意」の表示（Field）。起票フォームの中で「内容」で始まる欄は 1 つ
     await createForm
-      .getByLabel('内容', { exact: true })
+      .getByRole('textbox', { name: /^内容/ })
       .fill('算定根拠資料が不足しているため、再計算を確認できなかった。');
     await createForm.getByRole('button', { name: '起票' }).click();
 
@@ -549,7 +584,8 @@ test.describe('Client 側遷移', () => {
     await loginAs(page, DEMO_USERS.enterpriseAdmin);
     await gotoEnterprise(page, 'data');
 
-    await page.getByRole('link', { name: '詳細' }).first().click();
+    // 行の指標名のリンクから詳細へ（同じ行から同じ行き先へのリンクを 2 つ置かない。plan §1.12-7）
+    await page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first().click();
     await expect(page).toHaveURL(/\/enterprise\/data\/[0-9a-f-]+/, { timeout: 15_000 });
     await expect(page.locator('#t4d-main')).toBeVisible();
   });

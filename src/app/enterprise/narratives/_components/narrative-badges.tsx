@@ -1,26 +1,11 @@
-import { Check, CircleDot, Quote, RefreshCcw } from 'lucide-react';
+import { Quote } from 'lucide-react';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { Badge } from '@/components/ui/badge';
-import { NARRATIVE_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import type { NarrativeStatus } from '@/types/domain';
 
-/** 定性情報の状態バッジ（ラベルとアイコンを併記する） */
-const MAP: Record<
-  NarrativeStatus,
-  { tone: 'outline' | 'success' | 'warning'; Icon: typeof Check }
-> = {
-  draft: { tone: 'outline', Icon: CircleDot },
-  confirmed: { tone: 'success', Icon: Check },
-  needs_recheck: { tone: 'warning', Icon: RefreshCcw },
-};
-
+/** 定性情報の状態バッジ（状態登録簿の narrative から描く。ラベルとアイコンを併記する） */
 export function NarrativeStatusBadge({ status }: { status: NarrativeStatus }) {
-  const s = MAP[status];
-  return (
-    <Badge tone={s.tone}>
-      <s.Icon className="size-3" aria-hidden="true" />
-      {NARRATIVE_STATUS_LABELS[status]}
-    </Badge>
-  );
+  return <StatusBadge domain="narrative" value={status} />;
 }
 
 /** 資料の抜粋から規則で作った候補（AI ではない） */

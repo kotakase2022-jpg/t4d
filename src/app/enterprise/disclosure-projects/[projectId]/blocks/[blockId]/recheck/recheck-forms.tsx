@@ -1,9 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { AlertTriangle, Ban, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { AlertTriangle, Ban } from 'lucide-react';
 import { Textarea } from '@/components/ui/input';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import type { RecheckDecisionKind, RecheckRefKind } from '@/types/domain';
 import { decideRecheckFormAction, type RecheckFormState } from '../../actions';
@@ -36,7 +36,6 @@ const SPECS: Array<{
   reasonLabel: string;
   required: boolean;
   description: string | null;
-  variant: 'primary' | 'outline' | 'ghost';
   idPrefix: string;
 }> = [
   {
@@ -46,7 +45,6 @@ const SPECS: Array<{
     required: false,
     description:
       '新しい版で本文を書き換えた次の版を作ります（節は下書きに戻り、再レビューが必要です）。',
-    variant: 'primary',
     idPrefix: 'adopt',
   },
   {
@@ -55,7 +53,6 @@ const SPECS: Array<{
     reasonLabel: '引用中の版を維持する理由（必須）',
     required: true,
     description: null,
-    variant: 'outline',
     idPrefix: 'keep',
   },
   {
@@ -64,13 +61,13 @@ const SPECS: Array<{
     reasonLabel: '担当者へ差し戻す理由（必須）',
     required: true,
     description: null,
-    variant: 'ghost',
     idPrefix: 'return',
   },
 ];
 
 /**
- * 再確認の判断（新しい版を採用・引用中の版を維持・担当者へ差戻し）。
+ * 再確認の判断（新しい版を採用・引用中の版を維持・担当者へ差戻し）。どれも副操作の 3 択
+ * （どれが正しいかは引用の内容次第のため、1 つを主操作として勧めない。plan §2.26 E41）。
  * 選べない判断は押せる形で出さず、理由を横に示す（押してから断られ、書いた理由が消えることを防ぐ）。
  * サーバーで断られたときも、入力した理由はそのまま残す。
  */
@@ -128,8 +125,8 @@ function DecisionForm({
       <input type="hidden" name="refKind" value={refKind} />
       <input type="hidden" name="oldRefId" value={oldRefId} />
       <input type="hidden" name="decision" value={spec.decision} />
-      {spec.description && <p className="text-[12px] text-ink">{spec.description}</p>}
-      <label htmlFor={inputId} className={spec.required ? 'block text-[12px] text-ink' : 'sr-only'}>
+      {spec.description && <p className="text-small text-ink">{spec.description}</p>}
+      <label htmlFor={inputId} className={spec.required ? 'block text-small text-ink' : 'sr-only'}>
         {spec.reasonLabel}
       </label>
       <Textarea
@@ -149,31 +146,25 @@ function DecisionForm({
         }
       />
       {spec.decision === 'keep_old' && availability.allowed && (
-        <p className="text-[11px] text-ink-muted">
+        <p className="text-caption text-ink-muted">
           承認された版に限り選べます。失効した資料・削除された数値には使えません。
         </p>
       )}
       {!availability.allowed && availability.reason && (
-        <p id={hintId} className="flex items-start gap-1 text-[11px] text-ink-muted">
+        <p id={hintId} className="flex items-start gap-1 text-caption text-ink-muted">
           <Ban className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
           選べません: {availability.reason}
         </p>
       )}
       {failed && state.message && (
-        <p id={errorId} role="alert" className="flex items-start gap-1 text-[12px] text-danger">
+        <p id={errorId} role="alert" className="flex items-start gap-1 text-small text-danger">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           {state.message}
         </p>
       )}
-      <Button
-        type="submit"
-        size="sm"
-        variant={spec.variant}
-        disabled={!availability.allowed || pending}
-      >
-        {pending && <Loader2 className="animate-spin" aria-hidden="true" />}
+      <SubmitButton size="sm" variant="secondary" disabled={!availability.allowed || pending}>
         {spec.label}
-      </Button>
+      </SubmitButton>
     </form>
   );
 }

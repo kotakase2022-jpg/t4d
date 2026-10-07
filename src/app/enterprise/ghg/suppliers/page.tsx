@@ -1,29 +1,38 @@
 import Link from 'next/link';
-import { ArrowLeft, CircleCheck, Clock, Download, Link2, RotateCcw } from 'lucide-react';
+import { Download, Link2, RotateCcw } from 'lucide-react';
 import { FractionBar } from '@/components/charts/fraction-bar';
+import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { DemoSimulationNotice } from '@/components/shared/demo-simulation-notice';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { HonestyBadge } from '@/components/shared/honesty-badge';
+import { SegmentedFilter } from '@/components/shared/nav-tabs';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { SemanticBadge } from '@/components/shared/status-badge';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { CollapsibleSection } from '@/components/ui/collapsible';
 import { MoreInfo } from '@/components/ui/more-info';
-import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { PERMISSION_LABELS } from '@/lib/authorization/permission-labels';
 import { getAppMode } from '@/lib/config';
 import { formatNumber } from '@/lib/format/datetime';
 import { buildSupplierDemoFiles } from '@/lib/fixtures/supplier-demo-files';
-import { loadScope3SupplierBreakdown } from '@/lib/services/scope3-suppliers';
+import {
+  loadScope3SupplierBreakdown,
+  type SupplierBreakdownEntry,
+} from '@/lib/services/scope3-suppliers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { relinkSupplierFactorAction, resetSupplierDemoAction } from '../../actions';
+import { parsePage, parsePageSize } from '@/lib/table/columns';
+import type { MenuActionSpec } from '@/lib/ui/actions';
+import { resetSupplierDemoAction } from '../../actions';
+import { FactorRelinkDialog } from './factor-relink-dialog';
 import { SupplierUploadForm } from './supplier-upload-form';
 
 export const metadata = { title: 'サプライヤーデータ取込' };
 
 /**
- * Scope3 Cat.1 のサプライヤー一次データ取込。
+ * Scope3 Cat.1 のサプライヤー一次データ取込（plan §2 S5）。
  *
  * 排出量（t-CO2e）だけでなく、物理量（kWh・m3・L・kg）・金額（千円）の素データを
  * 受け付け、規則ベースで自動仕訳する。物理量・金額の行は排出量原単位（排出係数）と
@@ -31,23 +40,112 @@ export const metadata = { title: 'サプライヤーデータ取込' };
  * 「原単位の紐づけ状況」からの再紐づけ（新しい算定版の追記）の 2 か所で行える。
  * Data Point の確定値は変えない（値の変更は承認フロー）。
  *
- * 文字を減らすため（docs/disclosure-first.md §10.4）: 見本ファイルの一覧・データセットの説明・
- * 紐づけ状況の表・原単位マスターは既定で閉じる（見出し・架空データのバッジ・ZIP のリンク・
- * 架空の係数と為替の注記は閉じない）。
- * 紐づけ直した直後（flash=factorRelinked）と入力エラーで戻ったときは紐づけ状況を開いて描く。
- * デモ表示の注記・リセットの題・確認・ボタン・削除範囲の 1 行は閉じない。
+ * 置き場所（plan §1.5）:
+ *  - 本文: 取込（段階: ファイルを選ぶ → 解析結果を確認 → 確定。主操作は段階ごとに 1 つ）と提出状況
+ *  - 見出しの「その他」: CSV テンプレート（取込の権限のときだけ。R3）・デモ用の ZIP 2 種・
+ *    デモを初期状態に戻す（取り消せない操作。確認ダイアログで範囲 1 行と必須チェック）
+ *  - 閉じない: デモ表示の注記（DemoSimulationNotice）・架空の係数と為替の注記・架空値のバッジ・空状態
+ *  - 既定で閉じる: 見本ファイルの一覧・紐づけ状況の表・原単位マスター（紐づけ直した直後と入力エラーで
+ *    戻ったときは紐づけ状況を開いて描く）
  */
+
+type SearchParams = Record<string, string | string[] | undefined>;
+type StatusFilter = 'missing' | 'submitted' | 'all';
+
+const BASE_PATH = '/enterprise/ghg/suppliers';
+
+function one(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/** 提出状況の絞り込み。既定は未提出の社がある限り「未提出」（督促が要る社から見る） */
+function statusFilterOf(value: string | undefined, missingCount: number): StatusFilter {
+  if (value === 'missing' || value === 'submitted' || value === 'all') return value;
+  return missingCount > 0 ? 'missing' : 'all';
+}
+
+function statusHref(query: SearchParams, status: StatusFilter): string {
+  const params = new URLSearchParams();
+  const q = one(query.q);
+  if (q) params.set('q', q);
+  params.set('status', status);
+  return `${BASE_PATH}?${params.toString()}#supplier-status`;
+}
+
+const FACTOR_CATEGORY_LABEL: Record<string, string> = {
+  purchased_goods: '購入した製品',
+  purchased_services: '購入したサービス',
+};
+
+const SUPPLIER_COLUMNS: DataTableColumn<SupplierBreakdownEntry>[] = [
+  {
+    key: 'name',
+    header: 'サプライヤー',
+    importance: 'primary',
+    lockVisible: true,
+    cell: (supplier) => <span className="font-medium text-ink">{supplier.name}</span>,
+  },
+  {
+    key: 'status',
+    header: '提出状況',
+    importance: 'primary',
+    cell: (supplier) =>
+      supplier.submitted ? (
+        <SemanticBadge semantic="done" label="提出済み" />
+      ) : (
+        <SemanticBadge semantic="pending" label="未提出" />
+      ),
+  },
+  {
+    key: 'total',
+    header: '排出量（t-CO2e）',
+    importance: 'primary',
+    align: 'right',
+    cell: (supplier) => (
+      <span className="tnum">{supplier.submitted ? formatNumber(supplier.total) : '—'}</span>
+    ),
+  },
+  {
+    key: 'share',
+    header: '構成比',
+    importance: 'secondary',
+    align: 'right',
+    cell: (supplier) => (
+      <span className="tnum">
+        {supplier.sharePercent === null ? '—' : `${supplier.sharePercent}%`}
+      </span>
+    ),
+  },
+  {
+    key: 'code',
+    header: 'コード',
+    importance: 'detail',
+    cell: (supplier) => <span className="font-mono text-caption">{supplier.code}</span>,
+  },
+  {
+    key: 'rows',
+    header: '内訳行数',
+    importance: 'detail',
+    align: 'right',
+    cell: (supplier) => (
+      <span className="tnum">{supplier.submitted ? supplier.inputs.length : '—'}</span>
+    ),
+  },
+];
+
 export default async function GhgSuppliersPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<SearchParams>;
 }) {
   const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const breakdown = await loadScope3SupplierBreakdown(shell.db, shell.ctx, shell.currentPeriod.id);
+  const demo = getAppMode() === 'demo';
 
   const missing = breakdown.suppliers.filter((s) => !s.submitted);
   const canImport = can(shell.ctx, 'enterprise.import.run');
+  const importPermission = PERMISSION_LABELS['enterprise.import.run'];
   // 紐づけ直した直後と、入力エラーで戻ったとき（紐づけ直しの失敗もここに戻る）は紐づけ状況を開いて描く
   const openLinks = query.flash === 'factorRelinked' || typeof query.error === 'string';
 
@@ -66,6 +164,86 @@ export default async function GhgSuppliersPage({
     .map((row, index) => ({ ...row, index }));
   const demoFiles = buildSupplierDemoFiles();
 
+  // 提出状況（50 社）: 未提出／提出済み／すべて・検索・25 件のページ送り
+  const statusFilter = statusFilterOf(one(query.status), missing.length);
+  const q = (one(query.q) ?? '').trim().toLowerCase();
+  const statusRows = breakdown.suppliers.filter(
+    (s) =>
+      (statusFilter === 'all' || (statusFilter === 'missing' ? !s.submitted : s.submitted)) &&
+      (q === '' || s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)),
+  );
+  const sizes = [25, 50, 100] as const;
+  const pageSize = parsePageSize(query.size, sizes);
+  const lastPage = Math.max(1, Math.ceil(statusRows.length / pageSize));
+  const page = Math.min(parsePage(query.page), lastPage);
+  const tableQuery = { ...query, status: statusFilter };
+
+  const more: MenuActionSpec[] = [
+    {
+      kind: 'link',
+      id: 'csv-template',
+      label: 'CSV テンプレート',
+      icon: <Download aria-hidden="true" />,
+      // a 要素で落とす（Next の Link だと RSC フェッチになりダウンロードにならない）
+      href: `/api/exports/supplier-template?period=${shell.currentPeriod.id}`,
+      download: true,
+      group: 'export',
+      // テンプレートの API は取込の権限を求める。権限の無い役割に 403 になるリンクを出さない（R3）
+      hidden: !canImport,
+    },
+    {
+      kind: 'link',
+      id: 'demo-zip-upload',
+      label: '投入用 ZIP（20 ファイルのみ）',
+      icon: <Download aria-hidden="true" />,
+      href: '/demo/murata-scope3-cat1-upload.zip',
+      download: true,
+      group: 'export',
+      hidden: !canImport || !demo,
+    },
+    {
+      kind: 'link',
+      id: 'demo-zip-full',
+      label: '一式 ZIP（正解データ・手順書つき）',
+      icon: <Download aria-hidden="true" />,
+      href: '/demo/murata-scope3-cat1-full.zip',
+      download: true,
+      group: 'export',
+      hidden: !canImport || !demo,
+    },
+    {
+      kind: 'confirm',
+      id: 'reset-supplier-demo',
+      label: 'デモを初期状態に戻す',
+      icon: <RotateCcw aria-hidden="true" />,
+      destructive: true,
+      group: 'advanced',
+      hidden: !canImport || !demo,
+      action: resetSupplierDemoAction,
+      fields: { reportingPeriodId: shell.currentPeriod.id },
+      confirm: {
+        tier: 'irreversible',
+        title: 'サプライヤーデモの算定版をリセットしますか',
+        // 「上記の削除範囲」が指す 1 行。ダイアログの本文に常に出す（閉じない）
+        scope: `削除範囲: この組織 × ${shell.currentPeriod.label} の Scope3 Cat.1 に「サプライヤーデータ取込・原単位の再紐づけ」で追記された算定版のみ。`,
+        consequences: [
+          '取り消せません（Demo Mode 専用の操作です）。',
+          '初期の算定内訳（版 1）は残ります。同じファイルを再投入すると同じ結果になります。',
+        ],
+        preview: (
+          <MoreInfo label="リセットで変わらないもの">
+            <p>
+              初期の算定内訳（版 1）・Data Point 本体・承認履歴・他の指標・ログイン情報・
+              ブラウザの他の保存領域には触りません。
+            </p>
+          </MoreInfo>
+        ),
+        acknowledge: { name: 'confirmScope', label: '上記の削除範囲を確認しました' },
+        confirmLabel: '取込済みの算定版をリセットする',
+      },
+    },
+  ];
+
   return (
     <>
       <PageHeader
@@ -82,249 +260,193 @@ export default async function GhgSuppliersPage({
             <p>Data Point の確定値は変えません（値の変更は承認フローで行います）。</p>
           </>
         }
-        breadcrumbs={[
-          { label: '企業ワークスペース' },
-          { label: 'GHG', href: '/enterprise/ghg' },
-          { label: 'サプライヤーデータ取込' },
-        ]}
-        actions={
-          <div className="flex items-center gap-1.5">
-            <Button variant="outline" size="sm" asChild>
-              {/* a 要素にするのは Next の Link だと RSC フェッチになりダウンロードにならないため */}
-              <a href={`/api/exports/supplier-template?period=${shell.currentPeriod.id}`} download>
-                <Download aria-hidden="true" />
-                CSV テンプレート
-              </a>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/enterprise/ghg">
-                <ArrowLeft aria-hidden="true" />
-                GHG へ戻る
-              </Link>
-            </Button>
-          </div>
-        }
+        autoBreadcrumbs
+        actions={<PageActions more={more} />}
       />
 
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
-        {getAppMode() === 'demo' && <DemoSimulationNotice />}
+        {demo && <DemoSimulationNotice />}
+        {demo && canImport && (
+          // 架空の係数・為替で実算定に使えないことは誠実さの注記なので閉じない。
+          // データセットの ZIP は見出しの「その他」から取得する
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-ink-muted">
+            <HonestyBadge kind="fictional" />
+            <span>
+              Scope3 Cat.1 デモデータセット（電子部品メーカー・20 ファイル 240
+              明細。「その他」から取得）の係数コード（DEMO-EF-*）・為替レートはすべて架空の説明用で、実算定には使用できません。
+            </span>
+            <MoreInfo label="データセットの内容（20 ファイル・架空サプライヤー 20 社）">
+              <p>
+                架空の電子部品メーカーを想定した Scope3 カテゴリー1（購入した製品・サービス）の
+                購買データです。20 ファイル（Excel 14 ／ CSV 6・日英混在）に架空サプライヤー 20 社 ×
+                各 12 明細＝240 明細を収録。下の取込へ 20 ファイルまとめてドロップできます。
+              </p>
+            </MoreInfo>
+          </div>
+        )}
 
         {/* 提出の進捗は「n / N 社」を文字で書き、帯は補助（% や色の段階で良し悪しを示さない） */}
-        <div className="grid grid-cols-2 gap-2">
-          <Card className="space-y-1.5 p-2.5">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1.5 rounded-t4d border border-line bg-surface p-2.5">
             <FractionBar
               label="サプライヤー提出"
               numerator={breakdown.submittedCount}
               denominator={breakdown.suppliers.length}
               unit="社"
             />
-            <p className="text-[11px] text-ink">
+            <p className="text-caption text-ink">
               未提出 <span className="tabular-nums">{missing.length}</span> 社
             </p>
-          </Card>
-          <Card className="space-y-1 p-2.5">
+          </div>
+          <div className="space-y-1 rounded-t4d border border-line bg-surface p-2.5">
             {/* 金額×係数（推計）を含むため「一次データ合計」とは呼ばない（W0 O6） */}
-            <p className="text-[11px] text-ink-muted">内訳合計</p>
-            <p className="text-[20px] font-semibold leading-none tabular-nums text-ink">
+            <p className="text-caption text-ink-muted">内訳合計</p>
+            <p className="text-figure font-semibold leading-none tabular-nums text-ink">
               {formatNumber(breakdown.breakdownTotal)}
-              <span className="ml-1 text-[11px] font-normal text-ink-muted">t-CO2e</span>
+              <span className="ml-1 text-caption font-normal text-ink-muted">t-CO2e</span>
             </p>
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-caption text-ink-muted">
               うち一次データ（固有＋活動量ベース） {formatNumber(breakdown.primaryDataTotal)}
             </p>
-          </Card>
+          </div>
         </div>
 
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title="ファイルから取り込む（排出量・物理量・金額の素データ ／ CSV・Excel）"
-            action={
-              <span className="text-[11px] text-ink-muted">
-                仕訳・原単位の解決は規則ベース（AI 不使用）／ 確定は人が行います
-              </span>
-            }
-          />
+        <Section
+          title="ファイルから取り込む（排出量・物理量・金額の素データ ／ CSV・Excel）"
+          summary="仕訳・原単位の解決は規則ベース（AI 不使用）／ 確定は人が行います"
+        >
           {canImport ? (
-            <div className="p-3">
-              <SupplierUploadForm reportingPeriodId={shell.currentPeriod.id} />
-            </div>
+            <SupplierUploadForm reportingPeriodId={shell.currentPeriod.id} />
           ) : (
-            <p className="px-3 pb-3 text-[12px] text-ink-muted">
-              取込には「取込の実行」権限（enterprise.import.run）が必要です。閲覧のみ可能です。
+            <p className="text-small text-ink-muted">
+              取込には「{importPermission.label}」の権限が必要です。{importPermission.holders}
+              に依頼してください。この画面では提出状況を確かめられます。
             </p>
           )}
-        </Card>
+        </Section>
 
         {canImport && (
-          <CollapsibleSection
+          <Section
             id="supplier-demo-files"
+            collapsible
             title="デモ用サンプルファイル（多様なフォーマット・言語）"
             summary={`見本 ${demoFiles.length} 件（ダウンロードして上の取込へドロップ）`}
             actions={<Badge tone="warning">架空データ</Badge>}
-            className="overflow-hidden"
           >
             <ul className="divide-y divide-line">
               {demoFiles.map((file) => (
                 <li key={file.key} className="flex items-center justify-between gap-3 py-2">
                   <div>
-                    <p className="text-[13px] font-medium text-ink">{file.title}</p>
-                    <p className="text-[11px] text-ink-muted">{file.description}</p>
+                    <p className="text-body font-medium text-ink">{file.title}</p>
+                    <p className="text-caption text-ink-muted">{file.description}</p>
                   </div>
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={`/api/exports/supplier-demo-files?file=${file.key}`} download>
-                      <Download aria-hidden="true" />
-                      ダウンロード
-                    </a>
-                  </Button>
+                  <a
+                    href={`/api/exports/supplier-demo-files?file=${file.key}`}
+                    download
+                    aria-label={`${file.title} をダウンロード`}
+                    className="inline-flex shrink-0 items-center gap-1 text-small text-brand-700 hover:underline"
+                  >
+                    <Download className="size-3.5" aria-hidden="true" />
+                    ダウンロード
+                  </a>
                 </li>
               ))}
             </ul>
-            <p className="pt-1.5 text-[11px] text-ink-muted">
-              ダウンロードして、そのまま上の取込へドロップすると自動仕訳を体験できます。
-            </p>
-          </CollapsibleSection>
+          </Section>
         )}
 
-        {canImport && getAppMode() === 'demo' && (
-          <Card className="overflow-hidden">
-            <SectionTitle
-              title="Scope3 Cat.1 デモデータセット（電子部品メーカー・20 ファイル 240 明細）"
-              action={<Badge tone="warning">架空データ</Badge>}
-            />
-            <div className="space-y-2 px-3 pb-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Button variant="outline" size="sm" asChild>
-                  <a href="/demo/murata-scope3-cat1-upload.zip" download>
-                    <Download aria-hidden="true" />
-                    投入用 ZIP（20 ファイルのみ）
-                  </a>
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a href="/demo/murata-scope3-cat1-full.zip" download>
-                    <Download aria-hidden="true" />
-                    一式 ZIP（正解データ・手順書つき）
-                  </a>
-                </Button>
-              </div>
-              {/* 架空の係数・為替で実算定に使えないことは誠実さの注記なので閉じない */}
-              <p className="text-[11px] text-ink-muted">
-                収録の係数コード（DEMO-EF-*）・為替レートはすべて架空の説明用で、実算定には使用できません。
-              </p>
-              <MoreInfo label="データセットの内容（20 ファイル・架空サプライヤー 20 社）">
-                <p>
-                  架空の電子部品メーカーを想定した Scope3 カテゴリー1（購入した製品・サービス）の
-                  購買データです。20 ファイル（Excel 14 ／ CSV 6・日英混在）に架空サプライヤー 20 社
-                  × 各 12 明細＝240 明細を収録。上の取込へ 20 ファイルまとめてドロップできます。
-                </p>
-              </MoreInfo>
-            </div>
-          </Card>
-        )}
-
-        {canImport && getAppMode() === 'demo' && (
-          <Card className="overflow-hidden">
-            <SectionTitle
-              title="デモのリセット（Demo Mode 専用）"
-              action={<Badge tone="warning">取り消せません</Badge>}
-            />
-            <form action={resetSupplierDemoAction} className="space-y-2 px-3 pb-3">
-              <input type="hidden" name="reportingPeriodId" value={shell.currentPeriod.id} />
-              {/* チェックの「上記の削除範囲」が指す 1 行は閉じない。触らないものの一覧だけを閉じる */}
-              <p className="text-[12px] text-ink-muted">
-                削除範囲: この組織 × {shell.currentPeriod.label} の Scope3 Cat.1
-                に「サプライヤーデータ取込・原単位の再紐づけ」で追記された算定版のみ。
-              </p>
-              <MoreInfo label="リセットで変わらないもの">
-                <p>
-                  初期の算定内訳（版 1）・Data Point 本体・承認履歴・他の指標・ログイン情報・
-                  ブラウザの他の保存領域には触りません。
-                </p>
-              </MoreInfo>
-              <label className="flex items-center gap-1.5 text-[12px] text-ink">
-                <input
-                  type="checkbox"
-                  name="confirmScope"
-                  required
-                  className="size-3.5 accent-brand-600"
-                />
-                上記の削除範囲を確認しました
-              </label>
-              <SubmitButton
-                size="sm"
-                variant="outline"
-                icon={<RotateCcw aria-hidden="true" />}
-                pendingLabel="リセット中…"
-              >
-                取込済みの算定版をリセットする
-              </SubmitButton>
-            </form>
-          </Card>
-        )}
-
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`サプライヤー別の提出状況（${breakdown.submittedCount} / ${breakdown.suppliers.length} 社）`}
-            action={
-              <Link href="/enterprise/ghg" className="text-[12px] text-brand-700 hover:underline">
-                内訳の可視化を見る
-              </Link>
-            }
+        <Section
+          id="supplier-status"
+          title={`サプライヤー別の提出状況（${breakdown.submittedCount} / ${breakdown.suppliers.length} 社）`}
+          actions={
+            <Link href="/enterprise/ghg" className="text-small text-brand-700 hover:underline">
+              内訳の可視化を見る
+            </Link>
+          }
+        >
+          <SegmentedFilter
+            ariaLabel="提出状況で絞り込む"
+            className="mb-1.5"
+            current={statusFilter}
+            items={[
+              {
+                key: 'missing',
+                label: '未提出',
+                href: statusHref(query, 'missing'),
+                count: missing.length,
+                attention: missing.length > 0,
+              },
+              {
+                key: 'submitted',
+                label: '提出済み',
+                href: statusHref(query, 'submitted'),
+                count: breakdown.submittedCount,
+              },
+              {
+                key: 'all',
+                label: 'すべて',
+                href: statusHref(query, 'all'),
+                count: breakdown.suppliers.length,
+              },
+            ]}
           />
-          <Table>
-            <THead>
-              <TR>
-                <TH>コード</TH>
-                <TH>サプライヤー</TH>
-                <TH>提出状況</TH>
-                {/* TH は uppercase が掛かるため、大小文字に意味がある単位は normal-case で守る */}
-                <TH align="right">
-                  排出量<span className="normal-case">(t-CO2e)</span>
-                </TH>
-                <TH align="right">内訳行数</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {breakdown.suppliers.map((supplier) => (
-                <TR key={supplier.unitId}>
-                  <TD className="font-mono text-[11px]">{supplier.code}</TD>
-                  <TD className="font-medium text-ink">{supplier.name}</TD>
-                  <TD>
-                    {supplier.submitted ? (
-                      <Badge tone="success">
-                        <CircleCheck className="size-3" aria-hidden="true" />
-                        提出済み
-                      </Badge>
-                    ) : (
-                      <Badge tone="warning">
-                        <Clock className="size-3" aria-hidden="true" />
-                        未提出
-                      </Badge>
-                    )}
-                  </TD>
-                  <TD align="right">{supplier.submitted ? formatNumber(supplier.total) : '—'}</TD>
-                  <TD align="right">{supplier.submitted ? supplier.inputs.length : '—'}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </Card>
+          <DataTable<SupplierBreakdownEntry>
+            id="supplier-status-table"
+            caption="サプライヤーごとの提出状況"
+            columns={SUPPLIER_COLUMNS}
+            rows={statusRows.slice((page - 1) * pageSize, page * pageSize)}
+            getRowId={(s) => s.unitId}
+            getRowLabel={(s) => s.name}
+            searchParams={tableQuery}
+            basePath={BASE_PATH}
+            search={{ placeholder: 'サプライヤー名・コードで検索' }}
+            page={{ page, pageSize, total: statusRows.length, sizes }}
+            empty={{
+              noData:
+                statusFilter === 'missing'
+                  ? {
+                      title: '未提出のサプライヤーはありません',
+                      action: (
+                        <Link
+                          href={statusHref(query, 'all')}
+                          className="text-small text-brand-700 underline underline-offset-2"
+                        >
+                          すべてのサプライヤーを見る
+                        </Link>
+                      ),
+                    }
+                  : {
+                      title: 'サプライヤーが登録されていません',
+                      description:
+                        'サプライヤーは組織・拠点に種別「サプライヤー」として登録します。',
+                      action: (
+                        <Link
+                          href="/enterprise/organizations?tab=units"
+                          className="text-small text-brand-700 underline underline-offset-2"
+                        >
+                          組織・拠点を開く
+                        </Link>
+                      ),
+                    },
+            }}
+          />
+        </Section>
 
         {linkedRows.length === 0 ? (
           // 空状態は閉じない
-          <Card className="overflow-hidden">
-            <SectionTitle title={`排出量原単位の紐づけ状況（素データ ${linkedRows.length} 行）`} />
-            <p className="px-3 pb-3 text-[12px] text-ink-muted">
+          <Section title={`排出量原単位の紐づけ状況（素データ ${linkedRows.length} 行）`}>
+            <p className="text-small text-ink-muted">
               活動量を持つ内訳行がまだありません。物理量・金額の素データを取り込むとここに並びます。
             </p>
-          </Card>
+          </Section>
         ) : (
-          <CollapsibleSection
+          <Section
             id="supplier-factor-links"
+            collapsible
             title={`排出量原単位の紐づけ状況（素データ ${linkedRows.length} 行）`}
             summary={`${linkedRows.length} 行の原単位と変更（紐づけ直すと新しい算定版を追記し、過去の版は残ります）`}
             open={openLinks}
-            className="overflow-hidden"
           >
             <div className="t4d-scroll-x">
               <Table>
@@ -350,14 +472,14 @@ export default async function GhgSuppliersPage({
                       <TR key={`${supplier.code}-${input.item}-${index}`}>
                         <TD className="font-medium text-ink">
                           {supplier.name}
-                          <span className="ml-1 font-mono text-[11px] font-normal text-ink-muted">
+                          <span className="ml-1 font-mono text-caption font-normal text-ink-muted">
                             {supplier.code}
                           </span>
                         </TD>
                         <TD>{input.item}</TD>
                         <TD align="right">{formatNumber(input.activityAmount)}</TD>
-                        <TD className="text-[11px]">{input.activityUnit}</TD>
-                        <TD className="text-[11px]">
+                        <TD className="text-caption">{input.activityUnit}</TD>
+                        <TD className="text-caption">
                           {factor ? (
                             <>
                               {factor.name}
@@ -371,41 +493,25 @@ export default async function GhgSuppliersPage({
                         {canImport && (
                           <TD>
                             {candidates.length > 1 ? (
-                              <form
-                                action={relinkSupplierFactorAction}
-                                className="flex items-center gap-1"
-                              >
-                                <input
-                                  type="hidden"
-                                  name="reportingPeriodId"
-                                  value={shell.currentPeriod.id}
-                                />
-                                <input type="hidden" name="supplierCode" value={supplier.code} />
-                                <input type="hidden" name="item" value={input.item} />
-                                <select
-                                  name="factorCode"
-                                  defaultValue={factor?.code ?? ''}
-                                  aria-label={`${supplier.name} ${input.item} の排出量原単位`}
-                                  className="h-6 rounded-t4d border border-line bg-surface px-1 text-[11px]"
-                                >
-                                  {candidates.map((candidate) => (
-                                    <option key={candidate.id} value={candidate.code}>
-                                      {candidate.name}（{candidate.factorValue}{' '}
-                                      {candidate.factorUnit}）
-                                    </option>
-                                  ))}
-                                </select>
-                                <SubmitButton
-                                  size="sm"
-                                  variant="outline"
-                                  icon={<Link2 aria-hidden="true" />}
-                                  pendingLabel="更新中…"
-                                >
-                                  更新
-                                </SubmitButton>
-                              </form>
+                              <FactorRelinkDialog
+                                reportingPeriodId={shell.currentPeriod.id}
+                                supplierCode={supplier.code}
+                                supplierName={supplier.name}
+                                item={input.item}
+                                activityAmount={input.activityAmount ?? 0}
+                                activityUnit={input.activityUnit ?? ''}
+                                currentValue={input.value}
+                                currentCode={factor?.code ?? ''}
+                                candidates={candidates.map((candidate) => ({
+                                  code: candidate.code,
+                                  name: candidate.name,
+                                  factorValue: candidate.factorValue,
+                                  factorUnit: candidate.factorUnit,
+                                }))}
+                              />
                             ) : (
-                              <span className="text-[11px] text-ink-muted">
+                              <span className="inline-flex items-center gap-1 text-caption text-ink-muted">
+                                <Link2 className="size-3" aria-hidden="true" />
                                 同じ単位の原単位が他にありません
                               </span>
                             )}
@@ -417,16 +523,16 @@ export default async function GhgSuppliersPage({
                 </TBody>
               </Table>
             </div>
-          </CollapsibleSection>
+          </Section>
         )}
 
-        {/* 題と架空値のバッジは折りたたみの外（閉じていても見える） */}
-        <CollapsibleSection
+        {/* 題と架空値のバッジは折りたたみの外（閉じていても見える）。GHG 画面の排出係数マスターもここを指す（T8） */}
+        <Section
           id="supplier-emission-factors"
+          collapsible
           title={`排出量原単位（排出係数）マスター（${breakdown.factors.length}）`}
           summary={`原単位 ${breakdown.factors.length} 件（CSV の「排出係数コード」列に記入するコード）`}
           actions={<Badge tone="warning">架空値（実係数ではありません）</Badge>}
-          className="overflow-hidden"
         >
           <div className="t4d-scroll-x">
             <Table>
@@ -434,36 +540,42 @@ export default async function GhgSuppliersPage({
                 <TR>
                   <TH>コード</TH>
                   <TH>名称</TH>
+                  <TH>区分</TH>
                   <TH align="right">係数</TH>
                   <TH>単位</TH>
                   <TH>活動量単位</TH>
                   <TH>用途</TH>
                   <TH align="right">係数年度</TH>
+                  <TH>出典</TH>
                 </TR>
               </THead>
               <TBody>
                 {breakdown.factors.map((factor) => (
                   <TR key={factor.id}>
-                    <TD className="font-mono text-[11px]">{factor.code}</TD>
+                    <TD className="font-mono text-caption">{factor.code}</TD>
                     <TD>{factor.name}</TD>
+                    <TD className="text-caption">
+                      {FACTOR_CATEGORY_LABEL[factor.category] ?? factor.category}
+                    </TD>
                     <TD align="right">{factor.factorValue}</TD>
-                    <TD className="text-[11px]">{factor.factorUnit}</TD>
-                    <TD className="text-[11px]">{factor.activityUnit}</TD>
-                    <TD className="text-[11px]">
+                    <TD className="text-caption">{factor.factorUnit}</TD>
+                    <TD className="text-caption">{factor.activityUnit}</TD>
+                    <TD className="text-caption">
                       {factor.activityUnit === '千円' ? '金額データ' : '物理データ'}
                     </TD>
                     <TD align="right">{factor.factorYear}</TD>
+                    <TD className="text-caption text-ink-muted">{factor.factorSource}</TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
           </div>
-          <p className="pt-1.5 text-[11px] text-ink-muted">
+          <p className="pt-1.5 text-caption text-ink-muted">
             CSV
             の「排出係数コード」列にはこの一覧のコードを記入してください（空欄でも単位・過去実績から
             自動解決し、候補が複数のときは取込時に選べます）。
           </p>
-        </CollapsibleSection>
+        </Section>
       </div>
     </>
   );

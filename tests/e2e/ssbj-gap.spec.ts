@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible, openMoreMenu } from './helpers';
 
 /**
  * SSBJ ギャップ分析の 5 画面。
@@ -88,8 +88,19 @@ test.describe('SSBJ 要求事項の評価（統合画面）', () => {
     await page.goto('/enterprise/disclosures/ssbj/requirements');
     const main = page.locator('#t4d-main');
 
-    // 表の見出しが日本語で、AI 判定と最終判定が別の列になっている
+    // 既定の列は主な 5 列（plan S19）。低頻度の列（領域・重要性・AI による判定・紐づけ）は「列」から出す。
+    // 出した列も含めて、表の見出しが日本語で、AI 判定と最終判定が別の列になっている
     // （マッピング表の「紐づく要求事項」列と部分一致しないよう厳密一致で取る）
+    const detailHeaders = ['領域', '重要性', '人工知能による判定', '紐づけ'];
+    for (const header of detailHeaders) {
+      await expect(main.getByRole('columnheader', { name: header, exact: true })).toHaveCount(0);
+      await main.locator('[data-t4d-column-selector]').click();
+      await page.getByRole('menuitemcheckbox', { name: new RegExp(`^${header}`) }).click();
+      // メニューは複数の列を続けて選べるよう開いたまま（開いている間は本文が読み上げの外になる）。
+      // 閉じてから、出した列の見出しを確かめる（table-controls.spec と同じ手順）
+      await page.keyboard.press('Escape');
+      await expect(main.getByRole('columnheader', { name: header, exact: true })).toBeVisible();
+    }
     for (const header of [
       '要求事項',
       '領域',
@@ -104,11 +115,13 @@ test.describe('SSBJ 要求事項の評価（統合画面）', () => {
       await expect(main.getByRole('columnheader', { name: header, exact: true })).toBeVisible();
     }
 
+    // 133 行は 25 件ずつのページ送り。表示件数を 100 にして、1 ページに 50 行より多く出ることを確かめる
+    await page.goto('/enterprise/disclosures/ssbj/requirements?size=100');
     const allRows = await page.locator('tbody tr').count();
     expect(allRows).toBeGreaterThan(50);
 
     // 未対応で絞り込むと件数が減る
-    await page.goto('/enterprise/disclosures/ssbj/requirements?coverage=not_covered');
+    await page.goto('/enterprise/disclosures/ssbj/requirements?coverage=not_covered&size=100');
     const filtered = await page.locator('tbody tr').count();
     expect(filtered).toBeGreaterThan(0);
     expect(filtered).toBeLessThan(allRows);
@@ -182,7 +195,9 @@ test.describe('SSBJ 要求事項の評価（統合画面）', () => {
     await page.goto('/enterprise/disclosures/ssbj/requirements?priority=high');
     const main = page.locator('#t4d-main');
 
-    const csvLink = main.getByRole('link', { name: /CSV を書き出す/ });
+    // 出力は見出しの「その他」にある（開いてから確かめる）
+    const menu = await openMoreMenu(main);
+    const csvLink = menu.getByRole('menuitem', { name: /CSV を書き出す/ });
     await expect(csvLink).toBeVisible();
     // リンクは画面の絞り込みを引き継ぐ（見えている一覧と同じ行が出る）
     await expect(csvLink).toHaveAttribute('href', /priority=high/);
@@ -214,8 +229,9 @@ test.describe('SSBJ 要求事項の評価（統合画面）', () => {
       }),
     ).toBeVisible();
 
-    // 未分析が残っていればボタンが出る（他テストの実行順により消化済みのこともある）
-    const bulk = main.getByRole('button', { name: /未分析をまとめて分析/ });
+    // 未分析が残っていれば「その他」に出る（他テストの実行順により消化済みのこともある）
+    const menu = await openMoreMenu(main);
+    const bulk = menu.getByRole('menuitem', { name: /未分析をまとめて分析/ });
     if (!(await bulk.isVisible().catch(() => false))) return;
 
     await bulk.click();
@@ -293,7 +309,7 @@ test.describe('SSBJ 要求事項の詳細・ギャップ分析', () => {
 
     // 全画面エラーではなく、画面内の警告として出る
     await expect(main.getByRole('alert')).toContainText('理由を入力');
-    await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+    await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
   });
 });
 

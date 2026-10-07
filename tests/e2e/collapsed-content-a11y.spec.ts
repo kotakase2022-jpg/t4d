@@ -35,10 +35,16 @@ const PATHS = [
   '/enterprise/disclosures/ssbj/draft',
   '/enterprise/disclosures/csrd',
   '/enterprise/disclosures/csrd/settings',
+  // CSRD 設定は段階 UI（plan S11）。既定の URL は ③ だけを描くので、① ② も開く（算定式の折りたたみと 2 つのフォーム）
+  '/enterprise/disclosures/csrd/settings?step=boundary',
+  '/enterprise/disclosures/csrd/settings?step=method',
   '/enterprise/disclosures/csrd/settings/matters/E1',
+  // 作成パネル（?new=1。plan §1.13）は既定で閉じるため、開いた状態も確かめる
+  '/enterprise/disclosures/csrd/settings/matters/S1?new=1',
   '/enterprise/disclosures/csrd/requirements',
   '/enterprise/disclosures/csrd/plans',
   '/enterprise/disclosures/csrd/collection',
+  '/enterprise/disclosures/csrd/collection?new=1',
   '/enterprise/disclosures/csrd/draft',
   '/enterprise/narratives',
   '/enterprise/data',

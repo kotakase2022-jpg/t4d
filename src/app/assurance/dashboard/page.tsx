@@ -1,232 +1,360 @@
 import Link from 'next/link';
 import { BadgeCheck } from 'lucide-react';
-import { KpiCard, PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
+import { MetricStrip, MetricTile } from '@/components/shared/metric-strip';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { SemanticBadge, StatusBadge } from '@/components/shared/status-badge';
+import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
-import { getReferenceDate } from '@/lib/clock';
-import { daysUntilJst, formatJstDate } from '@/lib/format/datetime';
-import { loadAssuranceDashboard } from '@/lib/services/assurance';
+import { can } from '@/lib/authorization/can';
+import { formatJstDate } from '@/lib/format/datetime';
 import { loadAssuranceShell } from '@/lib/services/shell';
+import { assuranceHomeProfileOf } from '@/lib/ui/home-profile';
+import {
+  ASSURANCE_FOCUS,
+  ASSURANCE_FOCUS_LABEL,
+  assuranceAttention,
+  assuranceWorkItems,
+  engagementBase,
+  matchesAssuranceFocus,
+  parseAssuranceFocus,
+  type AssuranceFocus,
+} from '@/lib/ui/assurance-work';
+import { assuranceLevelLabel } from '../_components/labels';
+import { loadEngagementWorkRows, type EngagementWorkRow } from '../_components/load-work-counts';
+import { AssuranceNextWork } from '@/components/shared/assurance-next-work';
 
 export const metadata = { title: '案件ホーム' };
 
-export default async function AssuranceDashboardPage() {
-  const shell = await loadAssuranceShell();
-  const rows = await loadAssuranceDashboard(shell.db, shell.ctx, shell.engagements);
+type SearchParams = Record<string, string | string[] | undefined>;
 
-  const totals = rows.reduce(
-    (acc, row) => ({
-      pbc: acc.pbc + row.pbcOutstanding,
-      tests: acc.tests + row.testsPending,
-      review: acc.review + row.reviewPending,
-      issues: acc.issues + row.openHighIssues,
-      changes: acc.changes + row.changesSinceSnapshot,
-    }),
-    { pbc: 0, tests: 0, review: 0, issues: 0, changes: 0 },
+/** 1 案件だけが該当するときに開く画面（KPI・要対応から一覧を経ずに直行する） */
+const FOCUS_PAGE: Record<AssuranceFocus, string> = {
+  active: 'overview',
+  pbc: 'requests?filter=open',
+  tests: 'testing',
+  review: 'testing',
+  high_issues: 'issues?filter=high',
+  changes: 'data-room',
+  deadline: 'overview',
+};
+
+export default async function AssuranceDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const params = await searchParams;
+  const shell = await loadAssuranceShell();
+  const { ctx } = shell;
+  const rows = await loadEngagementWorkRows(shell.db, ctx, shell.engagements);
+  const profile = assuranceHomeProfileOf(ctx);
+
+  const focusRows = (focus: AssuranceFocus) => rows.filter((r) => matchesAssuranceFocus(focus, r));
+  const focusHref = (focus: AssuranceFocus): string => {
+    const hits = focusRows(focus);
+    return hits.length === 1
+      ? `${engagementBase(hits[0]!.engagementId)}/${FOCUS_PAGE[focus]}`
+      : `/assurance/dashboard?focus=${focus}#engagements`;
+  };
+
+  const sum = (pick: (row: EngagementWorkRow) => number) =>
+    rows.reduce((total, row) => total + pick(row), 0);
+
+  // 表の絞り込み（KPI・要対応から来たとき）と検索
+  const focus = parseAssuranceFocus(params.focus);
+  const query = typeof params.q === 'string' ? params.q.trim().toLowerCase() : '';
+  const tableRows = rows
+    .filter((row) => (focus ? matchesAssuranceFocus(focus, row) : true))
+    .filter((row) =>
+      query === ''
+        ? true
+        : `${row.code} ${row.clientName} ${row.dashboard.engagement.name}`
+            .toLowerCase()
+            .includes(query),
+    );
+
+  const header = (
+    <PageHeader
+      title="案件ホーム"
+      description={`${ctx.workspace.organizationName} ／ アサインされている案件のみ表示しています`}
+      autoBreadcrumbs
+    />
   );
 
-  // 期限の基準日は 1 か所（デモは FIXTURE_TODAY、Supabase Mode は実時計）
-  const today = getReferenceDate();
-  const upcoming = rows.filter((r) => {
-    const remaining = daysUntilJst(r.engagement.deadlineDate, today);
-    return remaining !== null && remaining <= 60;
-  }).length;
+  if (rows.length === 0) {
+    const canManage = can(ctx, 'assurance.engagement.manage');
+    return (
+      <>
+        {header}
+        <div className="p-4">
+          {canManage ? (
+            <EmptyState
+              kind="no-data"
+              title="アサインされている案件がありません"
+              description="案件を起票すると、起票した本人がチームに入り、ここに表示されます。"
+              icon={<BadgeCheck className="size-5" aria-hidden="true" />}
+              action={
+                <Button variant="primary" size="sm" asChild>
+                  <Link href="/assurance/engagements?new=1">保証契約を起票</Link>
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              kind="not-applicable"
+              title="アサインされている案件がありません"
+              description="案件は契約責任者・マネージャーが起票し、チームに担当者を加えます。監査法人管理者であっても、チームに入っていない案件のクライアントデータは閲覧できません。"
+              icon={<BadgeCheck className="size-5" aria-hidden="true" />}
+              action={
+                can(ctx, 'assurance.firm.manage') ? (
+                  <Button variant="secondary" size="sm" asChild>
+                    <Link href="/assurance/settings">法人メンバーを確認する</Link>
+                  </Button>
+                ) : undefined
+              }
+            />
+          )}
+        </div>
+      </>
+    );
+  }
+
+  const columns: DataTableColumn<EngagementWorkRow>[] = [
+    {
+      key: 'client',
+      header: 'クライアント',
+      importance: 'primary',
+      lockVisible: true,
+      pinned: 'left',
+      cell: (row) => (
+        <>
+          <Link
+            href={`${engagementBase(row.engagementId)}/overview`}
+            className="font-medium text-brand-800 hover:underline"
+          >
+            {row.clientName}
+          </Link>
+          <div className="font-mono text-caption text-ink-muted">{row.code}</div>
+        </>
+      ),
+    },
+    {
+      key: 'progress',
+      header: '手続の進捗',
+      importance: 'primary',
+      width: 'sm',
+      cell: (row) => (
+        <div className="flex items-center gap-1.5">
+          <Progress value={row.dashboard.progressPercent} label={`${row.clientName} の進捗`} />
+          <span className="tnum w-8 text-right text-caption text-ink-muted">
+            {row.dashboard.progressPercent}%
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'issues',
+      header: '重要度「高」の指摘',
+      importance: 'primary',
+      align: 'right',
+      cell: (row) =>
+        row.openHighIssues > 0 ? (
+          <SemanticBadge semantic="error" label={`未解決 ${row.openHighIssues} 件`} />
+        ) : (
+          <span className="tnum text-ink-muted">0</span>
+        ),
+    },
+    {
+      key: 'deadline',
+      header: '期限',
+      importance: 'primary',
+      cell: (row) => (
+        <span className="whitespace-nowrap">
+          {formatJstDate(row.deadlineDate)}
+          {row.daysUntilDeadline !== null && (
+            <span className="ml-1 text-caption text-ink-muted">
+              {row.daysUntilDeadline < 0
+                ? `（${-row.daysUntilDeadline} 日超過）`
+                : `（あと ${row.daysUntilDeadline} 日）`}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'signoff',
+      header: 'Sign-off',
+      importance: 'primary',
+      cell: (row) =>
+        row.signoffStages.length === 0 ? (
+          <span className="text-caption text-ink-muted">未着手</span>
+        ) : (
+          <span className="flex flex-wrap gap-0.5">
+            {row.signoffStages.map((stage) => (
+              <StatusBadge key={stage} domain="signoff" value={stage} />
+            ))}
+          </span>
+        ),
+    },
+    {
+      key: 'period',
+      header: '対象期間',
+      importance: 'detail',
+      cell: (row) => row.dashboard.periodCode,
+    },
+    {
+      key: 'level',
+      header: '保証水準',
+      importance: 'detail',
+      cell: (row) => assuranceLevelLabel(row.dashboard.engagement.assuranceLevel),
+    },
+    {
+      key: 'pbc',
+      header: '未完了の資料依頼',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{row.pbcOpen}</span>,
+    },
+    {
+      key: 'tests',
+      header: '手続が未完了',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{row.testsPending}</span>,
+    },
+    {
+      key: 'review',
+      header: 'レビュー待ち',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{row.reviewPending}</span>,
+    },
+    {
+      key: 'changes',
+      header: 'Snapshot 後の変更',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{row.changesSinceSnapshot}</span>,
+    },
+  ];
+
+  const pbcTotal = sum((r) => r.pbcOpen);
+  const testsTotal = sum((r) => r.testsPending);
+  const reviewTotal = sum((r) => r.reviewPending);
+  const issuesTotal = sum((r) => r.openHighIssues);
+  const changesTotal = sum((r) => r.changesSinceSnapshot);
+  const upcoming = focusRows('deadline').length;
 
   return (
     <>
-      <PageHeader
-        title="案件ホーム"
-        description={`${shell.ctx.workspace.organizationName} ／ アサインされている案件のみ表示しています`}
-        breadcrumbs={[{ label: '監査法人ワークスペース' }, { label: '案件ホーム' }]}
-      />
+      {header}
 
       <div className="space-y-3 p-4">
-        {rows.length === 0 ? (
-          <Card>
-            <EmptyState
-              title="アサインされている案件がありません"
-              description="監査法人管理者であっても、Engagement Member でない案件のクライアントデータは閲覧できません。契約責任者へアサインを依頼してください。"
-              icon={<BadgeCheck className="size-5" aria-hidden="true" />}
-            />
-          </Card>
-        ) : (
-          <>
-            <ul className="grid grid-cols-7 gap-2">
-              <li>
-                <KpiCard
-                  label="Active Engagements"
-                  value={rows.filter((r) => r.engagement.status !== 'completed').length}
-                  suffix="件"
-                  tone="brand"
-                  href="/assurance/engagements"
-                />
-              </li>
-              <li>
-                <KpiCard
-                  label="PBC 未受領"
-                  value={totals.pbc}
-                  suffix="件"
-                  tone={totals.pbc > 0 ? 'warning' : 'success'}
-                  href="/assurance/engagements"
-                />
-              </li>
-              <li>
-                <KpiCard
-                  label="Testing 未完了"
-                  value={totals.tests}
-                  suffix="件"
-                  tone={totals.tests > 0 ? 'warning' : 'success'}
-                  href="/assurance/engagements"
-                />
-              </li>
-              <li>
-                <KpiCard
-                  label="Review 待ち"
-                  value={totals.review}
-                  suffix="件"
-                  tone="brand"
-                  href="/assurance/engagements"
-                />
-              </li>
-              <li>
-                <KpiCard
-                  label="未解決 High Issue"
-                  value={totals.issues}
-                  suffix="件"
-                  tone={totals.issues > 0 ? 'danger' : 'success'}
-                  href="/assurance/engagements"
-                />
-              </li>
-              <li>
-                <KpiCard
-                  label="Snapshot 後変更"
-                  value={totals.changes}
-                  suffix="件"
-                  tone={totals.changes > 0 ? 'danger' : 'success'}
-                  href="/assurance/engagements"
-                />
-              </li>
-              <li>
-                <KpiCard
-                  label="期限接近（60日以内）"
-                  value={upcoming}
-                  suffix="件"
-                  tone={upcoming > 0 ? 'warning' : 'neutral'}
-                  href="/assurance/engagements"
-                />
-              </li>
-            </ul>
+        {/* Attention → Action（役割ごとの作業） */}
+        <AssuranceNextWork
+          attention={assuranceAttention(rows, (f) => `/assurance/dashboard?focus=${f}#engagements`)}
+          items={assuranceWorkItems(profile, rows)}
+          showWork={profile !== 'firm_admin' && profile !== 'viewer'}
+        />
 
-            <Card className="overflow-hidden">
-              <SectionTitle title={`案件一覧（${rows.length}）`} />
-              <div className="t4d-scroll-x">
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Client</TH>
-                      <TH>Period</TH>
-                      <TH>保証水準</TH>
-                      <TH className="w-[140px]">Progress</TH>
-                      <TH align="right">PBC</TH>
-                      <TH align="right">Testing</TH>
-                      <TH align="right">Issues</TH>
-                      <TH align="right">Review</TH>
-                      <TH align="right">Snapshot後変更</TH>
-                      <TH>Deadline</TH>
-                      <TH>Sign-off</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {rows.map((row) => {
-                      const remaining = daysUntilJst(row.engagement.deadlineDate, today);
-                      return (
-                        <TR key={row.engagement.id}>
-                          <TD>
-                            <Link
-                              href={`/assurance/engagements/${row.engagement.id}/overview`}
-                              className="font-medium text-brand-800 hover:underline"
-                            >
-                              {row.clientName}
-                            </Link>
-                            <div className="text-[11px] text-ink-muted">{row.engagement.code}</div>
-                          </TD>
-                          <TD>{row.periodCode}</TD>
-                          <TD>
-                            <Badge tone="neutral">
-                              {row.engagement.assuranceLevel === 'limited' ? '限定的' : '合理的'}
-                            </Badge>
-                          </TD>
-                          <TD>
-                            <div className="flex items-center gap-1.5">
-                              <Progress
-                                value={row.progressPercent}
-                                label={`${row.clientName} の進捗`}
-                              />
-                              <span className="tnum w-8 text-right text-[11px] text-ink-muted">
-                                {row.progressPercent}%
-                              </span>
-                            </div>
-                          </TD>
-                          <TD align="right">
-                            {row.pbcOutstanding > 0 ? (
-                              <span className="font-medium text-[#8a5d00]">
-                                {row.pbcOutstanding}
-                              </span>
-                            ) : (
-                              0
-                            )}
-                          </TD>
-                          <TD align="right">{row.testsPending}</TD>
-                          <TD align="right">
-                            {row.openHighIssues > 0 ? (
-                              <span className="font-medium text-danger">{row.openHighIssues}</span>
-                            ) : (
-                              0
-                            )}
-                          </TD>
-                          <TD align="right">{row.reviewPending}</TD>
-                          <TD align="right">
-                            {row.changesSinceSnapshot > 0 ? (
-                              <span className="font-medium text-danger">
-                                {row.changesSinceSnapshot}
-                              </span>
-                            ) : (
-                              0
-                            )}
-                          </TD>
-                          <TD className="whitespace-nowrap">
-                            {formatJstDate(row.engagement.deadlineDate)}
-                            {remaining !== null && (
-                              <span className="ml-1 text-[11px] text-ink-muted">
-                                （あと {remaining} 日）
-                              </span>
-                            )}
-                          </TD>
-                          <TD>
-                            {row.signoffStages.length === 0 ? (
-                              <span className="text-[11px] text-ink-muted">未着手</span>
-                            ) : (
-                              <span className="flex flex-wrap gap-0.5">
-                                {row.signoffStages.map((stage) => (
-                                  <Badge key={stage} tone="success">
-                                    {stage}
-                                  </Badge>
-                                ))}
-                              </span>
-                            )}
-                          </TD>
-                        </TR>
-                      );
-                    })}
-                  </TBody>
-                </Table>
-              </div>
-            </Card>
-          </>
-        )}
+        {/* Status: 押すと案件と状態で絞った行き先へ（N-13） */}
+        <MetricStrip label="案件の状況">
+          <MetricTile
+            label="進行中の案件"
+            value={focusRows('active').length}
+            unit="件"
+            href={focusHref('active')}
+          />
+          <MetricTile
+            label="未完了の資料依頼"
+            value={pbcTotal}
+            unit="件"
+            status={pbcTotal > 0 ? { semantic: 'pending', label: '回答・確認待ち' } : undefined}
+            href={focusHref('pbc')}
+          />
+          <MetricTile
+            label="手続が未完了"
+            value={testsTotal}
+            unit="件"
+            status={testsTotal > 0 ? { semantic: 'pending', label: '未着手・実施中' } : undefined}
+            href={focusHref('tests')}
+          />
+          <MetricTile
+            label="レビュー待ちの調書"
+            value={reviewTotal}
+            unit="件"
+            href={focusHref('review')}
+          />
+          <MetricTile
+            label="重要度「高」の指摘"
+            value={issuesTotal}
+            unit="件"
+            status={
+              issuesTotal > 0
+                ? { semantic: 'error', label: '未解決（Sign-off を止めます）' }
+                : { semantic: 'done', label: 'なし' }
+            }
+            href={focusHref('high_issues')}
+          />
+          <MetricTile
+            label="Snapshot 後の変更"
+            value={changesTotal}
+            unit="件"
+            status={
+              changesTotal > 0
+                ? { semantic: 'blocked', label: '影響の評価が必要' }
+                : { semantic: 'done', label: 'なし' }
+            }
+            href={focusHref('changes')}
+          />
+          <MetricTile
+            label="期限接近（60 日以内）"
+            value={upcoming}
+            unit="件"
+            href={focusHref('deadline')}
+          />
+        </MetricStrip>
+
+        <Section
+          id="engagements"
+          title={`案件（${rows.length}）`}
+          summary={focus ? `絞り込み: ${ASSURANCE_FOCUS_LABEL[focus]}` : undefined}
+        >
+          <DataTable<EngagementWorkRow>
+            id="assurance-engagements"
+            caption="アサインされている案件"
+            columns={columns}
+            rows={tableRows}
+            getRowId={(row) => row.engagementId}
+            getRowLabel={(row) => `${row.code} ${row.clientName}`}
+            searchParams={params}
+            basePath="/assurance/dashboard"
+            search={{ placeholder: '案件コード・クライアントで検索' }}
+            filters={[
+              {
+                key: 'focus',
+                label: '絞り込み',
+                options: ASSURANCE_FOCUS.map((value) => ({
+                  value,
+                  label: ASSURANCE_FOCUS_LABEL[value],
+                })),
+              },
+            ]}
+            empty={{
+              noData: {
+                title: 'アサインされている案件がありません',
+                action: (
+                  <Link href="/assurance/engagements" className="text-small text-brand-700">
+                    保証契約の一覧へ
+                  </Link>
+                ),
+              },
+            }}
+          />
+        </Section>
       </div>
     </>
   );

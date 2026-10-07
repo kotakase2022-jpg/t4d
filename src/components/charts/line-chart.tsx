@@ -105,7 +105,7 @@ export function LineChart({
     series.length >= 2 ? (
       <ul
         aria-label={`${title}の凡例`}
-        className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink"
+        className="flex flex-wrap gap-x-3 gap-y-1 text-caption text-ink"
       >
         {layout.series.map((s) => (
           <li key={`${s.label}-${s.seriesIndex}`} className="flex items-center gap-1">

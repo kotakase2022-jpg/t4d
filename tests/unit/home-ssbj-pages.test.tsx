@@ -26,6 +26,8 @@ vi.mock('@/lib/services/shell', () => ({
   loadEnterpriseShell: async () => shellState.shell,
 }));
 vi.mock('@/app/enterprise/actions', () => ({
+  // 要求事項の評価の「その他」に置いた前年度評価の引継ぎ（F048。plan §4 B8）
+  carryOverSsbjAction: vi.fn(),
   runSsbjGapAnalysisBulkAction: vi.fn(),
   createSsbjDataCollectionAction: vi.fn(),
   updateSsbjActionPlanAction: vi.fn(),
@@ -34,6 +36,12 @@ vi.mock('@/app/enterprise/actions', () => ({
   confirmSsbjDraftAction: vi.fn(),
 }));
 vi.mock('@/app/enterprise/dashboard/actions', () => ({ resetDisclosureDemoAction: vi.fn() }));
+// 一覧は DataTable（表示件数・列のメニューが URL を読む）。描画だけを見るので固定の URL を渡す
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/enterprise/disclosures/ssbj',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('@/components/shared/filter-bar', () => ({
   FilterBar: ({ total }: { total: number }) => <p data-testid="filter-bar">{total} 件</p>,
 }));
@@ -46,8 +54,9 @@ const { default: SsbjCollectionPage } =
   await import('@/app/enterprise/disclosures/ssbj/collection/page');
 const { default: SsbjDraftPage } = await import('@/app/enterprise/disclosures/ssbj/draft/page');
 const { LegacyHomeBody } = await import('@/app/enterprise/dashboard/legacy-home');
-const { DemoResetCard, DisclosureHomeView } =
-  await import('@/app/enterprise/dashboard/disclosure-home-view');
+const { DisclosureHomeView } = await import('@/app/enterprise/dashboard/disclosure-home-view');
+// 開示デモのリセットはホームの「その他」から開く確認ダイアログへ移した（plan §1.16・S2）。中身は同じ
+const { DemoResetConfirm } = await import('@/app/enterprise/dashboard/demo-reset');
 
 let fixture: FixtureDb;
 let db: DemoDbClient;
@@ -373,7 +382,7 @@ describe('ホーム（開示業務）', () => {
       today: FIXTURE_TODAY,
     });
     expect(home.progress).not.toBeNull();
-    render(<DisclosureHomeView home={home} showDemoReset />);
+    render(<DisclosureHomeView home={home} />);
 
     // 数値は <strong> に分かれているので、要素全体の文字で探す
     const headline = screen.getByText(
@@ -401,7 +410,7 @@ describe('ホーム（開示業務）', () => {
   });
 
   it('リセット: 確認のチェックと、それが指す範囲の 1 行は閉じない。戻す表の一覧だけを閉じる', () => {
-    render(<DemoResetCard />);
+    render(<DemoResetConfirm />);
     expectOutsideDetails(screen.getByText(/^戻す範囲: /));
     expectOutsideDetails(screen.getByLabelText('上記の範囲だけを初期状態へ戻すことを確認しました'));
     expectOutsideDetails(screen.getByRole('button', { name: '開示デモを初期状態に戻す' }));

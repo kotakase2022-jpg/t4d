@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import {
+  ArrowRight,
   CircleAlert,
   ClipboardList,
-  Clock,
   Database,
   FileText,
   FlaskConical,
@@ -11,10 +11,15 @@ import {
   ScrollText,
   ShieldCheck,
   Target,
+  Clock,
+  Upload,
 } from 'lucide-react';
 import { StatusBreakdown } from '@/components/charts/status-breakdown';
+import { AttentionStrip } from '@/components/shared/attention-strip';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { SsbjFlow, type SsbjFlowStep } from '@/components/shared/ssbj-flow';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
@@ -35,15 +40,19 @@ import { SSBJ_FRAMEWORK_INFO } from '@/lib/frameworks/ssbj-2026';
 import { CATEGORY_LABEL, loadMateriality, MATERIALITY_LABEL } from '@/lib/services/materiality';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import {
+  loadDataCollection,
   loadSsbjOverview,
   OPEN_HIGH_PRIORITY_QUERY,
   TOP_PRIORITY_LIMIT,
 } from '@/lib/services/ssbj-gap';
 import { loadSsbjSettings } from '@/lib/services/ssbj-settings';
+import type { ActionSpec } from '@/lib/ui/actions';
 import type { MaterialityLevel } from '@/types/domain';
 import { ssbjRequirementItems } from './_components/breakdown-items';
 
 export const metadata = { title: 'SSBJ 対応状況' };
+
+const SSBJ = '/enterprise/disclosures/ssbj';
 
 const LEVEL_TONE: Record<MaterialityLevel, 'danger' | 'warning' | 'neutral' | 'brand'> = {
   high: 'danger',
@@ -80,11 +89,13 @@ function ReadinessCard({
     <Card className="space-y-2 p-3">
       <div className="flex items-center gap-1.5">
         <Icon className="size-4 text-ink-muted" aria-hidden="true" />
-        <span className="text-[13px] font-semibold text-ink">{label}</span>
+        <span className="text-body font-semibold text-ink">{label}</span>
       </div>
       <div className="flex items-baseline gap-1">
-        <span className="text-[28px] font-semibold leading-none text-ink tabular-nums">{rate}</span>
-        <span className="text-[13px] text-ink-muted">%</span>
+        <span className="text-figure-lg font-semibold leading-none text-ink tabular-nums">
+          {rate}
+        </span>
+        <span className="text-body text-ink-muted">%</span>
       </div>
       <Progress value={rate} tone={rateTone(rate)} label={`${label} ${rate}%`} />
       <MoreInfo label="何を測るか">
@@ -94,6 +105,13 @@ function ReadinessCard({
   );
 }
 
+/**
+ * SSBJ 対応状況（plan §2.26 E16）。Attention（放置すると問題になる件数）→ 工程の現在の段の操作（primary）→
+ * 整備度・内訳・領域別 → マテリアリティ → 出所 の順に並べる。
+ *
+ * 工程の状態は実データから求める（資料の取り込み＝取込資料から抽出した箇所の有無、データ収集＝収集項目の
+ * 承認状況）。読み取りの既存サービス・表だけを使い、サービスは変えない。
+ */
 export default async function SsbjPage({
   searchParams,
 }: {
@@ -111,19 +129,28 @@ export default async function SsbjPage({
   if (!overview) {
     return (
       <>
-        <PageHeader
-          title="SSBJ 対応状況"
-          breadcrumbs={[{ label: '企業ワークスペース' }, { label: '開示対応' }, { label: 'SSBJ' }]}
-        />
+        <PageHeader title="SSBJ 対応状況" autoBreadcrumbs />
         <div className="p-4">
-          <EmptyState title="SSBJ の要求事項マスターが登録されていません" />
+          <EmptyState
+            kind="not-applicable"
+            title="SSBJ の要求事項マスターが登録されていません"
+            description="要求事項マスターは管理者が登録します。登録されると、ここに対応状況が表示されます。"
+          />
         </div>
       </>
     );
   }
 
+  const [fragments, collection] = await Promise.all([
+    // 人工知能のギャップ分析が読む「取込資料から抽出した箇所」。無ければ資料の取り込みは未完了
+    shell.db.select('fragments', { where: { organizationId: shell.ctx.workspace.organizationId } }),
+    loadDataCollection(shell.db, shell.ctx, shell.currentPeriod),
+  ]);
+
   const { counts, areas } = overview;
   const remaining = counts.partial + counts.notCovered;
+  const collectionApproved = collection.filter((r) => r.collectedStatus === 'approved').length;
+  const unassessedTopics = settings.totalTopicCount - settings.assessedTopicCount;
 
   const steps: SsbjFlowStep[] = [
     {
@@ -134,12 +161,16 @@ export default async function SsbjPage({
       detail: settings.confirmed
         ? `確定済み ／ 重要性あり ${settings.materialTopicCount} 件`
         : `未完了 ／ 残り ${settings.steps.filter((s) => !s.done).length} 項目`,
-      href: '/enterprise/disclosures/ssbj/settings',
+      href: `${SSBJ}/settings`,
     },
     {
       title: '資料の取り込み',
       description: '有価証券報告書・統合報告書・社内規程などを取り込みます。',
-      state: 'done',
+      state: fragments.length > 0 ? 'done' : 'current',
+      detail:
+        fragments.length > 0
+          ? `抽出した箇所 ${fragments.length} 件`
+          : 'まだ資料を取り込んでいません',
       href: '/enterprise/imports',
     },
     {
@@ -152,7 +183,7 @@ export default async function SsbjPage({
       // 優先度「高」は下の「上位 N 件」から数えない（以前は 8 件を超えなかった。W0 O1）。
       // 母集団（評価対象・未対応）を件数の横に書き、要求事項画面の工程 4 と同じ数にする
       detail: `対象外 ${counts.notApplicable} 件／確認待ち ${counts.awaitingReview} 件／優先度「高」${counts.highPriority} 件（評価対象・未対応）`,
-      href: '/enterprise/disclosures/ssbj/requirements',
+      href: `${SSBJ}/requirements`,
     },
     {
       title: '対応計画の作成',
@@ -160,14 +191,89 @@ export default async function SsbjPage({
       state:
         overview.planCounts.not_started + overview.planCounts.in_progress > 0 ? 'current' : 'todo',
       detail: `対応中 ${overview.planCounts.in_progress} 件／未着手 ${overview.planCounts.not_started} 件`,
-      href: '/enterprise/disclosures/ssbj/plans',
+      href: `${SSBJ}/plans`,
     },
     {
       title: 'データ収集・開示・内部統制',
       description:
         '不足データを最大 5 階層の承認を通して集め、開示ドラフトを作り、証跡と承認履歴を残します。',
-      state: 'todo',
-      href: '/enterprise/disclosures/ssbj/collection',
+      // 収集項目が無ければ未着手、すべて承認済みなら完了、それ以外は進行中（実データから求める）
+      state:
+        collection.length === 0
+          ? 'todo'
+          : collectionApproved === collection.length
+            ? 'done'
+            : 'current',
+      detail:
+        collection.length === 0
+          ? '収集項目はまだありません'
+          : `収集対象 ${collection.length} 件／承認済み ${collectionApproved} 件`,
+      href: `${SSBJ}/collection`,
+    },
+  ];
+
+  // 工程の現在の段（進行中の最初の段）の操作を、この画面の主操作にする（plan §1.6・E16）。
+  // 見出しに固定していた「要求事項の評価」は、主操作でなければ secondary に下げる
+  const STEP_ACTIONS: Array<{ id: string; label: string; href: string; icon: React.ReactNode }> = [
+    {
+      id: 'step-settings',
+      label: '分析条件を設定する',
+      href: `${SSBJ}/settings`,
+      icon: <Target aria-hidden="true" />,
+    },
+    {
+      id: 'step-import',
+      label: '資料を取り込む',
+      href: '/enterprise/imports',
+      icon: <Upload aria-hidden="true" />,
+    },
+    {
+      id: 'step-requirements',
+      label: '要求事項を評価する',
+      href: `${SSBJ}/requirements`,
+      icon: <ListChecks aria-hidden="true" />,
+    },
+    {
+      id: 'step-plans',
+      label: '対応計画を進める',
+      href: `${SSBJ}/plans`,
+      icon: <ClipboardList aria-hidden="true" />,
+    },
+    {
+      id: 'step-collection',
+      label: 'データ収集を進める',
+      href: `${SSBJ}/collection`,
+      icon: <Database aria-hidden="true" />,
+    },
+  ];
+  const currentIndex = steps.findIndex((step) => step.state === 'current');
+  const stepAction = currentIndex >= 0 ? STEP_ACTIONS[currentIndex] : undefined;
+  const primary: ActionSpec = stepAction
+    ? { kind: 'link', ...stepAction }
+    : {
+        kind: 'link',
+        id: 'step-draft',
+        label: '開示ドラフトを作る',
+        href: `${SSBJ}/draft`,
+        icon: <FileText aria-hidden="true" />,
+      };
+  const secondary: ActionSpec[] = [
+    {
+      kind: 'link',
+      id: 'requirements',
+      label: '要求事項の評価',
+      href: `${SSBJ}/requirements`,
+      icon: <ListChecks aria-hidden="true" />,
+      hidden: primary.id === 'step-requirements',
+    },
+    {
+      // 書き出すだけでなく、草案を作るところから扱えるようにする
+      kind: 'link',
+      id: 'draft',
+      label: '開示ドラフト',
+      href: `${SSBJ}/draft`,
+      icon: <FileText aria-hidden="true" />,
+      hidden: primary.id === 'step-draft',
     },
   ];
 
@@ -193,33 +299,79 @@ export default async function SsbjPage({
             )}
           </span>
         }
-        breadcrumbs={[{ label: '企業ワークスペース' }, { label: '開示対応' }, { label: 'SSBJ' }]}
+        autoBreadcrumbs
         actions={
-          <div className="flex items-center gap-1.5">
-            <Button size="sm" asChild>
-              <Link href="/enterprise/disclosures/ssbj/requirements">
-                <ListChecks aria-hidden="true" />
-                要求事項の評価
-              </Link>
-            </Button>
-            {/* 書き出すだけでなく、草案を作るところから扱えるようにする */}
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/enterprise/disclosures/ssbj/draft">
-                <FileText aria-hidden="true" />
-                開示ドラフト
-              </Link>
-            </Button>
-          </div>
+          <PageActions
+            primary={primary}
+            secondary={secondary}
+            more={[
+              {
+                kind: 'link',
+                id: 'top-priority',
+                label: '最優先のギャップを開く',
+                href: `${SSBJ}/requirements/top-priority`,
+                icon: <ArrowRight aria-hidden="true" />,
+              },
+              {
+                kind: 'link',
+                id: 'plans',
+                label: '対応計画を管理する',
+                href: `${SSBJ}/plans`,
+                icon: <ClipboardList aria-hidden="true" />,
+              },
+              {
+                kind: 'link',
+                id: 'collection',
+                label: 'データ収集を管理する',
+                href: `${SSBJ}/collection`,
+                icon: <Database aria-hidden="true" />,
+              },
+            ]}
+          />
         }
       />
 
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
+        {/* Attention: 放置すると問題になる件数だけ（0 件は出さない）。押すと絞り込んだ一覧へ */}
+        <AttentionStrip
+          items={[
+            {
+              key: 'awaiting-review',
+              label: '担当者の確認が済んでいない要求事項',
+              count: counts.awaitingReview,
+              href: `${SSBJ}/requirements?coverage=unconfirmed`,
+              semantic: 'pending',
+            },
+            {
+              key: 'high-priority',
+              label: '優先度「高」の未対応ギャップ',
+              count: counts.highPriority,
+              href: `${SSBJ}/requirements?${OPEN_HIGH_PRIORITY_QUERY}`,
+              semantic: 'blocked',
+            },
+            {
+              key: 'unassessed-topics',
+              label: '未評価のマテリアリティ',
+              count: unassessedTopics,
+              href: `${SSBJ}/settings`,
+              semantic: 'todo',
+            },
+            {
+              key: 'plans-not-started',
+              label: '未着手の対応計画',
+              count: overview.planCounts.not_started,
+              href: `${SSBJ}/plans?status=not_started`,
+              semantic: 'todo',
+            },
+          ]}
+        />
+
         <SsbjFlow steps={steps} />
 
         {/* 単一の総合点にまとめない。何が遅れているのかを 3 つに分けて示す */}
-        <section className="grid grid-cols-3 gap-2">
+        <section className="grid grid-cols-3 gap-2" aria-label="整備度">
           <ReadinessCard
             label="開示対応度"
             description="要求される情報が、現在の開示資料に記載されている度合い"
@@ -243,10 +395,10 @@ export default async function SsbjPage({
         {/* 件数の内訳。重ならない 6 区分を 1 本の帯（合計 = 全要求事項）にし、
             区分と重なる「確認待ち」は帯の外に別に書く（帯の幅が嘘にならないように） */}
         <Card className="space-y-2 p-3">
-          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[12px]">
+          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-small">
             <p className="flex items-baseline gap-1">
               <span className="text-ink-muted">全要求事項</span>
-              <span className="text-[20px] font-semibold leading-none tabular-nums text-ink">
+              <span className="text-figure font-semibold leading-none tabular-nums text-ink">
                 {counts.total}
               </span>
               <span className="text-ink-muted">件</span>
@@ -260,7 +412,7 @@ export default async function SsbjPage({
           </div>
           {/* 収録範囲は誠実さの注記（基準のすべての条項ではない）。「正式基準準拠」のバッジと
               全要求事項の件数が見えている間は、閉じた「件数の数え方」の中だけに置かない */}
-          <p className="flex items-start gap-1 text-[11px] text-ink-muted">
+          <p className="flex items-start gap-1 text-caption text-ink-muted">
             <Info className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
             <span>
               {overview.coverageNote
@@ -290,15 +442,14 @@ export default async function SsbjPage({
 
         <div className="grid grid-cols-[1fr_1.4fr] gap-3">
           {/* 領域別の対応状況 */}
-          <Card className="overflow-hidden">
-            <SectionTitle
-              title="領域別の対応状況"
-              action={
-                <span className="text-[11px] text-ink-muted">
-                  対象外・重要性なしを除いた要求事項で集計
-                </span>
-              }
-            />
+          <Section
+            title="領域別の対応状況"
+            summary={
+              <span className="text-caption text-ink-muted">
+                対象外・重要性なしを除いた要求事項で集計
+              </span>
+            }
+          >
             <Table>
               <THead>
                 <TR>
@@ -321,13 +472,13 @@ export default async function SsbjPage({
                           className="w-24"
                           label={`${AREA_LABEL[area.area]} の対応率 ${area.rate}%`}
                         />
-                        <span className="text-[12px] tabular-nums">{area.rate}%</span>
+                        <span className="text-small tabular-nums">{area.rate}%</span>
                       </span>
                     </TD>
                     <TD align="right">
                       {area.notCovered > 0 ? (
                         <Link
-                          href={`/enterprise/disclosures/ssbj/requirements?area=${area.area}&coverage=not_covered&coverage=unconfirmed`}
+                          href={`${SSBJ}/requirements?area=${area.area}&coverage=not_covered&coverage=unconfirmed`}
                           className="font-medium text-danger underline-offset-2 hover:underline"
                         >
                           {area.notCovered}
@@ -340,26 +491,36 @@ export default async function SsbjPage({
                 ))}
               </TBody>
             </Table>
-          </Card>
+          </Section>
 
           {/* 優先度の高いギャップ。表示は上位 N 件に切り詰めるため、件数（全体）を別に示す */}
-          <Card className="overflow-hidden">
-            <SectionTitle
-              title={`優先して対応するギャップ（上位 ${TOP_PRIORITY_LIMIT} 件を表示）`}
-              action={
-                <span className="flex flex-wrap items-center justify-end gap-x-2 text-[11px] text-ink-muted">
-                  <Link
-                    href={`/enterprise/disclosures/ssbj/requirements?${OPEN_HIGH_PRIORITY_QUERY}`}
-                    className="font-medium text-brand-700 underline-offset-2 hover:underline"
-                  >
-                    優先度「高」は全 {counts.highPriority} 件（評価対象・未対応）
-                  </Link>
-                  <span>優先度「高」= {PRIORITY_MEANING.high}</span>
-                </span>
-              }
-            />
+          <Section
+            title={`優先して対応するギャップ（上位 ${TOP_PRIORITY_LIMIT} 件を表示）`}
+            actions={
+              // 最も優先度の高い 1 件へ直行する入口（E18。一覧を目で追わずに着手できる）
+              <Button variant="secondary" size="xs" asChild>
+                <Link href={`${SSBJ}/requirements/top-priority`}>
+                  <ArrowRight aria-hidden="true" />
+                  最優先のギャップを開く
+                </Link>
+              </Button>
+            }
+          >
+            <p className="flex flex-wrap items-center gap-x-2 pb-1.5 text-caption text-ink-muted">
+              <Link
+                href={`${SSBJ}/requirements?${OPEN_HIGH_PRIORITY_QUERY}`}
+                className="font-medium text-brand-700 underline-offset-2 hover:underline"
+              >
+                優先度「高」は全 {counts.highPriority} 件（評価対象・未対応）
+              </Link>
+              <span>優先度「高」= {PRIORITY_MEANING.high}</span>
+            </p>
             {overview.topPriorities.length === 0 ? (
-              <EmptyState title="優先して対応すべきギャップはありません" />
+              <EmptyState
+                kind="done"
+                size="compact"
+                title="優先して対応すべきギャップはありません"
+              />
             ) : (
               <Table>
                 <THead>
@@ -374,12 +535,12 @@ export default async function SsbjPage({
                 <TBody>
                   {overview.topPriorities.map((view) => (
                     <TR key={view.item.id}>
-                      <TD className="max-w-[280px]">
+                      <TD className="max-w-col-lg">
                         <Link
-                          href={`/enterprise/disclosures/ssbj/requirements/${view.item.id}`}
+                          href={`${SSBJ}/requirements/${view.item.id}`}
                           className="font-medium text-brand-700 underline-offset-2 hover:underline"
                         >
-                          <span className="font-mono text-[11px]">{view.item.code}</span>{' '}
+                          <span className="font-mono text-caption">{view.item.code}</span>{' '}
                           {view.item.questionText}
                         </Link>
                       </TD>
@@ -395,57 +556,55 @@ export default async function SsbjPage({
                           {PRIORITY_LABEL[view.priority.priority]}
                         </Badge>
                       </TD>
-                      <TD className="text-[11px]">{view.assessment.ownerDepartment || '未設定'}</TD>
+                      <TD className="text-caption">
+                        {view.assessment.ownerDepartment || '未設定'}
+                      </TD>
                     </TR>
                   ))}
                 </TBody>
               </Table>
             )}
-          </Card>
+          </Section>
         </div>
 
         {/* マテリアリティ評価（重要性判断の起点）。
             評価そのものは「①マテリアリティ・分析条件の設定」で行う。
             ここでは結果だけを見せ、決める場所を 1 つに寄せる */}
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title="マテリアリティ評価"
-            action={
-              <Button variant="outline" size="xs" asChild>
-                <Link href="/enterprise/disclosures/ssbj/settings">
-                  <Target aria-hidden="true" />
-                  評価・分析条件を設定する
-                </Link>
-              </Button>
-            }
-          />
-          <div className="flex items-center gap-3 border-b border-line px-3 py-2">
-            <span className="text-[12px] text-ink-muted">マテリアリティ充足度</span>
+        <Section
+          title="マテリアリティ評価"
+          actions={
+            <Button variant="secondary" size="xs" asChild>
+              <Link href={`${SSBJ}/settings`}>
+                <Target aria-hidden="true" />
+                評価・分析条件を設定する
+              </Link>
+            </Button>
+          }
+        >
+          <div className="flex items-center gap-3 border-b border-line pb-2">
+            <span className="text-small text-ink-muted">マテリアリティ充足度</span>
             <Progress
               value={materiality.overallCoverage}
               tone={rateTone(materiality.overallCoverage)}
               className="w-40"
               label={`マテリアリティ充足度 ${materiality.overallCoverage}%`}
             />
-            <span className="text-[13px] font-semibold tabular-nums text-ink">
+            <span className="text-body font-semibold tabular-nums text-ink">
               {materiality.overallCoverage}%
             </span>
-            <span className="text-[12px] text-ink-muted">
+            <span className="text-small text-ink-muted">
               重要と評価: {materiality.materialCount} トピック
             </span>
-            {settings.assessedTopicCount < settings.totalTopicCount && (
-              <Badge tone="warning">
-                未評価 {settings.totalTopicCount - settings.assessedTopicCount} 件
-              </Badge>
-            )}
+            {unassessedTopics > 0 && <Badge tone="warning">未評価 {unassessedTopics} 件</Badge>}
           </div>
           {materiality.topics.length === 0 ? (
             <EmptyState
+              kind="no-data"
               title="マテリアリティが未登録です"
               description="「①マテリアリティ・分析条件の設定」で、自社の重要課題を自由記述で登録してください。"
               action={
-                <Button size="sm" asChild>
-                  <Link href="/enterprise/disclosures/ssbj/settings">
+                <Button variant="secondary" size="sm" asChild>
+                  <Link href={`${SSBJ}/settings`}>
                     <Target aria-hidden="true" />
                     登録しに行く
                   </Link>
@@ -480,10 +639,10 @@ export default async function SsbjPage({
                       )}
                     </TD>
                     <TD>{CATEGORY_LABEL[topic.category]}</TD>
-                    <TD className="text-[11px] text-ink-muted">
+                    <TD className="text-caption text-ink-muted">
                       {topic.totalMetricCount} 件
                       {topic.missingMetricNames.length > 0 && (
-                        <span className="ml-1 text-[#8a5d00]">
+                        <span className="ml-1 text-warning-ink">
                           （未収集: {topic.missingMetricNames.join('・')}）
                         </span>
                       )}
@@ -504,7 +663,7 @@ export default async function SsbjPage({
                             className="w-16"
                             label={`${topic.title} の充足度 ${topic.coverage}%`}
                           />
-                          <span className="text-[12px] tabular-nums">
+                          <span className="text-small tabular-nums">
                             {topic.coverage}%（{topic.collectedMetricCount}/{topic.totalMetricCount}
                             ）
                           </span>
@@ -516,26 +675,11 @@ export default async function SsbjPage({
               </TBody>
             </Table>
           )}
-        </Card>
-
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/enterprise/disclosures/ssbj/plans">
-              <ClipboardList aria-hidden="true" />
-              対応計画を管理する
-            </Link>
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/enterprise/disclosures/ssbj/collection">
-              <Database aria-hidden="true" />
-              データ収集を管理する
-            </Link>
-          </Button>
-        </div>
+        </Section>
 
         {/* 正式基準を収録しているため、出所と転載許可を必ず明示する */}
         {!overview.isFixture && (
-          <p className="text-[11px] leading-relaxed text-ink-muted">{overview.attribution}</p>
+          <p className="text-caption leading-relaxed text-ink-muted">{overview.attribution}</p>
         )}
       </div>
     </>

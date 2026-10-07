@@ -84,7 +84,7 @@ export function RefChip({
     if (d?.newer) flag = '新版あり';
     else if (d && !d.approved) flag = '未承認';
     details = d ? (
-      <dl className="text-[12px]">
+      <dl className="text-small">
         <Row label="指標">{d.metricName}</Row>
         <Row label="期間">{d.periodLabel}</Row>
         <Row label="範囲">
@@ -102,7 +102,7 @@ export function RefChip({
             </span>
           ) : (
             <span className="inline-flex items-center gap-1">
-              <AlertTriangle className="size-3 text-[#8a5d00]" aria-hidden="true" />
+              <AlertTriangle className="size-3 text-warning-ink" aria-hidden="true" />
               未承認の版
             </span>
           )}
@@ -124,7 +124,7 @@ export function RefChip({
         )}
       </dl>
     ) : (
-      <p className="text-[12px] text-ink-muted">この数値の詳細を読み込めませんでした。</p>
+      <p className="text-small text-ink-muted">この数値の詳細を読み込めませんでした。</p>
     );
   } else if (inline.t === 'narrative') {
     const d = lookup.narrative(inline.narrativeVersionId);
@@ -133,7 +133,7 @@ export function RefChip({
     if (d?.stale) flag = '新版あり';
     else if (d && !d.confirmed) flag = '未確認';
     details = (
-      <div className="text-[12px]">
+      <div className="text-small">
         {d && (
           <dl>
             <Row label="定性情報">{d.title}</Row>
@@ -148,7 +148,7 @@ export function RefChip({
           {inline.quote}
         </blockquote>
         {d?.stale && (
-          <p className="mt-1 text-[#8a5d00]">
+          <p className="mt-1 text-warning-ink">
             台帳に新しい版があります。本文は引用した時点の文言のままです（黙って書き換えません）。
           </p>
         )}
@@ -160,9 +160,9 @@ export function RefChip({
     label = '出典';
     if (d?.fileDeleted) flag = '根拠失効';
     details = !lookup.canReadEvidence ? (
-      <p className="text-[12px] text-ink-muted">この資料を閲覧する権限がありません。</p>
+      <p className="text-small text-ink-muted">この資料を閲覧する権限がありません。</p>
     ) : d ? (
-      <div className="text-[12px]">
+      <div className="text-small">
         <dl>
           <Row label="資料">{d.fileName}</Row>
           <Row label="利用目的">{d.usageLabel}</Row>
@@ -181,7 +181,7 @@ export function RefChip({
         )}
       </div>
     ) : (
-      <p className="text-[12px] text-ink-muted">引用位置が見つかりません。</p>
+      <p className="text-small text-ink-muted">引用位置が見つかりません。</p>
     );
   }
 
@@ -190,14 +190,14 @@ export function RefChip({
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="inline-flex max-w-full items-center gap-1 rounded-t4d border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-[12px] text-brand-900 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+          className="inline-flex max-w-full items-center gap-1 rounded-t4d border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-small text-brand-900 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
           aria-label={`${token} ${label}${flag ? `（${flag}）` : ''} の詳細を開く`}
         >
-          <span className="font-mono text-[10px] text-ink-muted">{token}</span>
+          <span className="font-mono text-caption text-ink-muted">{token}</span>
           {icon}
           <span className="truncate">{label}</span>
           {flag && (
-            <span className="inline-flex items-center gap-0.5 rounded bg-warning-soft px-1 text-[10px] text-[#8a5d00]">
+            <span className="inline-flex items-center gap-0.5 rounded bg-warning-soft px-1 text-caption text-warning-ink">
               <AlertTriangle className="size-2.5" aria-hidden="true" />
               {flag}
             </span>
@@ -210,10 +210,10 @@ export function RefChip({
           align="start"
           sideOffset={4}
           collisionPadding={16}
-          className="z-50 w-[min(360px,calc(100vw-32px))] rounded-t4d-lg border border-line bg-surface p-3 shadow-lg focus:outline-none"
+          className="z-(--z-popover) w-[min(360px,calc(100vw-32px))] rounded-t4d-lg border border-line bg-surface p-3 shadow-overlay focus:outline-none"
         >
           <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="text-[12px] font-semibold text-ink">
+            <span className="text-small font-semibold text-ink">
               {inline.t === 'metric'
                 ? '数値の参照'
                 : inline.t === 'narrative'

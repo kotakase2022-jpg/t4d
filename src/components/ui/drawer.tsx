@@ -22,11 +22,11 @@ export const DrawerContent = React.forwardRef<
   const widthClass = width === 'md' ? 'w-[420px]' : width === 'xl' ? 'w-[760px]' : 'w-[560px]';
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-[#0b1b34]/25" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-(--z-overlay) bg-overlay/25" />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          'fixed right-0 top-0 z-50 flex h-full flex-col border-l border-line bg-surface shadow-xl focus:outline-none',
+          'fixed right-0 top-0 z-(--z-modal) flex h-full flex-col border-l border-line bg-surface shadow-overlay focus:outline-none',
           widthClass,
           className,
         )}
@@ -73,7 +73,7 @@ export const DrawerTitle = React.forwardRef<
   return (
     <DialogPrimitive.Title
       ref={ref}
-      className={cn('truncate text-[14px] font-semibold text-ink', className)}
+      className={cn('truncate text-title-sm font-semibold text-ink', className)}
       {...props}
     />
   );
@@ -86,7 +86,7 @@ export const DrawerDescription = React.forwardRef<
   return (
     <DialogPrimitive.Description
       ref={ref}
-      className={cn('mt-0.5 truncate text-[12px] text-ink-muted', className)}
+      className={cn('mt-0.5 truncate text-small text-ink-muted', className)}
       {...props}
     />
   );

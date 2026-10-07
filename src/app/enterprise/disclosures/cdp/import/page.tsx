@@ -1,11 +1,16 @@
 import Link from 'next/link';
-import { CircleAlert, Upload } from 'lucide-react';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
-import { EmptyState } from '@/components/shared/states';
+import { Upload } from 'lucide-react';
+import { Notice } from '@/components/shared/notice';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
+import { StepNav, type StepItem } from '@/components/shared/step-nav';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
+import { NativeSelect } from '@/components/ui/native-select';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { buildImportPreview, type ImportPreview } from '@/lib/services/disclosure-import';
@@ -31,6 +36,12 @@ const PARSED_AS_LABEL: Record<ImportPreview['parsedAs'], string> = {
   docx: 'Word',
 };
 
+/**
+ * 過去回答の取込（plan §2.26 E34）。段階は ① ファイルを選ぶ → ② 解析結果を確認して選ぶ → ③ 取り込む。
+ * 主操作は段階ごとに 1 つ（解析前は「解析する」、解析後は「選択した n 件を取り込む」）。
+ * 取込先の期間は、当期の直前の報告期間を既定にする（plan D1。過去回答の取込なので当期は選べない）。
+ * 権限の無い利用者には、誰に頼めばよいかを添えて権限なしを出す（EmptyState で代用しない）。
+ */
 export default async function DisclosureImportPage({
   searchParams,
 }: {
@@ -46,8 +57,12 @@ export default async function DisclosureImportPage({
       ? params.targetPeriodId
       : null;
 
-  // 当年度は取込先に選べない（過去回答の取込なので）
-  const pastPeriods = shell.periods.filter((p) => p.id !== shell.currentPeriod.id);
+  // 当年度は取込先に選べない（過去回答の取込なので）。新しい年度から並べ、直前の年度を既定にする
+  const pastPeriods = shell.periods
+    .filter((p) => p.id !== shell.currentPeriod.id)
+    .sort((a, b) => (a.startDate < b.startDate ? 1 : -1));
+  const defaultPeriodId =
+    pastPeriods.find((p) => p.startDate < shell.currentPeriod.startDate)?.id ?? pastPeriods[0]?.id;
 
   let preview: ImportPreview | null = null;
   let error: string | null = null;
@@ -55,7 +70,8 @@ export default async function DisclosureImportPage({
   if (canWrite && fileVersionId && targetPeriodId) {
     const stored = await readOwnedFileBytes(shell.db, shell.ctx, fileVersionId);
     if (!stored) {
-      error = 'アップロードしたファイルが見つかりません。';
+      error =
+        'アップロードしたファイルが見つかりません。もう一度ファイルを選んで解析してください。';
     } else {
       try {
         preview = await buildImportPreview(shell.db, shell.ctx, {
@@ -72,99 +88,120 @@ export default async function DisclosureImportPage({
   }
 
   const matched = preview?.rows.filter((r) => r.status === 'matched') ?? [];
+  const steps: StepItem[] = [
+    { key: 'file', label: 'ファイルを選ぶ', state: preview ? 'done' : 'current' },
+    {
+      key: 'review',
+      label: '解析結果を確認して選ぶ',
+      state: preview ? 'current' : 'todo',
+    },
+    { key: 'import', label: '取り込む', state: 'todo' },
+  ];
 
   return (
     <>
       <PageHeader
         title="過去回答の取込"
         description="過年度の CDP 回答書（Excel / CSV / PDF / Word）を質問単位に分解して取り込みます。"
-        breadcrumbs={[
-          { label: '企業ワークスペース' },
-          { label: '開示対応' },
-          { label: 'CDP', href: '/enterprise/disclosures/cdp' },
-          { label: '過去回答の取込' },
-        ]}
+        breadcrumbsTail={[{ label: '過去回答の取込' }]}
       />
 
       <div className="space-y-3 p-4">
         {!canWrite ? (
-          <EmptyState title="この操作を行う権限がありません" />
+          <PermissionDeniedState
+            permission="enterprise.disclosure.write"
+            description="この操作を行う権限がありません。過去回答の取込は、開示の編集を担当する人が行います。"
+          />
         ) : (
-          <Card className="overflow-hidden">
-            <SectionTitle title="ファイルをアップロード" />
-            <form action={previewDisclosureImportAction} className="space-y-2 p-4">
-              <div className="grid max-w-2xl grid-cols-2 gap-3">
-                <label className="block text-[12px] text-ink-muted">
-                  取込先の報告期間
-                  <select
-                    name="targetPeriodId"
-                    required
-                    defaultValue={targetPeriodId ?? pastPeriods[0]?.id}
-                    className="mt-0.5 h-8 w-full rounded-t4d border border-line bg-surface px-2 text-[13px] text-ink"
-                  >
-                    {pastPeriods.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block text-[12px] text-ink-muted">
-                  回答書ファイル
-                  <Input
-                    type="file"
-                    name="file"
-                    required
-                    accept=".csv,.tsv,.txt,.xlsx,.xlsm,.pdf,.docx"
-                    className="mt-0.5"
-                  />
-                </label>
-              </div>
-              <p className="text-[11px] text-ink-muted">
-                「質問コード」「回答」列を持つ表、または「C1.1
-                …」のように質問コードで始まる本文に対応します。 取り込んだ内容は
-                <strong>この画面で確認してから</strong>保存されます。
-              </p>
-              <Button type="submit" size="sm">
-                <Upload aria-hidden="true" />
-                解析する
-              </Button>
-            </form>
-          </Card>
+          <>
+            <StepNav ariaLabel="取込の段階" steps={steps} />
+            <Section title="ファイルをアップロード" divider="none">
+              <form action={previewDisclosureImportAction} className="space-y-2">
+                <div className="grid max-w-2xl grid-cols-2 gap-3">
+                  <label className="block text-small text-ink-muted">
+                    取込先の報告期間
+                    <NativeSelect
+                      name="targetPeriodId"
+                      required
+                      size="md"
+                      defaultValue={targetPeriodId ?? defaultPeriodId}
+                      className="mt-0.5"
+                    >
+                      {pastPeriods.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                  <label className="block text-small text-ink-muted">
+                    回答書ファイル
+                    <Input
+                      type="file"
+                      name="file"
+                      required
+                      accept=".csv,.tsv,.txt,.xlsx,.xlsm,.pdf,.docx"
+                      className="mt-0.5"
+                    />
+                  </label>
+                </div>
+                <p className="text-caption text-ink-muted">
+                  「質問コード」「回答」列を持つ表、または「C1.1
+                  …」のように質問コードで始まる本文に対応します。 取り込んだ内容は
+                  <strong>この画面で確認してから</strong>保存されます。
+                </p>
+                <SubmitButton
+                  variant={preview ? 'secondary' : 'primary'}
+                  size="sm"
+                  icon={<Upload aria-hidden="true" />}
+                  pendingLabel="解析中…"
+                >
+                  解析する
+                </SubmitButton>
+              </form>
+            </Section>
+          </>
         )}
 
         {error && (
-          <Card className="border-danger/40 bg-danger-soft p-3">
-            <p className="flex items-center gap-1.5 text-[13px] text-danger">
-              <CircleAlert className="size-4" aria-hidden="true" />
-              {error}
-            </p>
-          </Card>
+          <Notice tone="danger" role="alert" title="解析できませんでした">
+            {error}
+          </Notice>
         )}
 
         {preview && (
-          <Card className="overflow-hidden">
-            <SectionTitle
-              title={`解析結果（${preview.rows.length} 件 / 取り込める ${matched.length} 件）`}
-              action={
-                <span className="text-[11px] text-ink-muted">
-                  {preview.fileName}（{PARSED_AS_LABEL[preview.parsedAs]} として解析）
-                </span>
-              }
-            />
-
+          <Section
+            title={`解析結果（${preview.rows.length} 件 / 取り込める ${matched.length} 件）`}
+            actions={
+              <span className="text-caption text-ink-muted">
+                {preview.fileName}（{PARSED_AS_LABEL[preview.parsedAs]} として解析）
+              </span>
+            }
+          >
             {preview.warnings.length > 0 && (
-              <ul className="border-b border-line bg-warning-soft px-3 py-1.5 text-[12px] text-[#8a5d00]">
-                {preview.warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
+              <Notice tone="warning">
+                <ul>
+                  {preview.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </Notice>
             )}
 
             {preview.rows.length === 0 ? (
               <EmptyState
+                kind="no-data"
                 title="取り込める回答が見つかりませんでした"
-                description="ファイル形式と質問コードの記載を確認してください。"
+                description="ファイル形式と質問コードの記載を確認し、ファイルを選び直してください。"
+                action={
+                  <Link
+                    href="/enterprise/disclosures/cdp/import"
+                    className="inline-flex items-center gap-1 text-small text-brand-700 hover:underline"
+                  >
+                    <Upload className="size-3.5" aria-hidden="true" />
+                    別のファイルを選ぶ
+                  </Link>
+                }
               />
             ) : (
               <form action={confirmDisclosureImportAction}>
@@ -174,7 +211,9 @@ export default async function DisclosureImportPage({
                   <Table>
                     <THead>
                       <TR>
-                        <TH className="w-10" aria-label="選択" />
+                        <TH className="w-10">
+                          <span className="sr-only">選択</span>
+                        </TH>
                         <TH>質問コード</TH>
                         <TH>質問</TH>
                         <TH>抽出した回答</TH>
@@ -188,13 +227,11 @@ export default async function DisclosureImportPage({
                           <TD>
                             {row.status === 'matched' && row.itemId ? (
                               <>
-                                <input
-                                  type="checkbox"
+                                <NativeCheckbox
                                   name="selected"
                                   value={row.itemId}
                                   defaultChecked
                                   aria-label={`${row.itemCode} を取り込む`}
-                                  className="size-3.5"
                                 />
                                 <input
                                   type="hidden"
@@ -204,14 +241,14 @@ export default async function DisclosureImportPage({
                               </>
                             ) : null}
                           </TD>
-                          <TD className="font-mono text-[11px]">{row.itemCode}</TD>
-                          <TD className="max-w-[280px] truncate text-[12px]">
+                          <TD className="font-mono text-caption">{row.itemCode}</TD>
+                          <TD className="max-w-col-lg truncate text-small">
                             {row.questionText ?? '—'}
                           </TD>
-                          <TD className="max-w-[360px] text-[12px] text-ink">
+                          <TD className="max-w-col-xl text-small text-ink">
                             <span className="line-clamp-2">{row.answerText || '（空）'}</span>
                           </TD>
-                          <TD className="whitespace-nowrap text-[11px] text-ink-muted">
+                          <TD className="whitespace-nowrap text-caption text-ink-muted">
                             {row.locator}
                           </TD>
                           <TD>
@@ -219,7 +256,7 @@ export default async function DisclosureImportPage({
                               {STATUS_LABEL[row.status].label}
                             </Badge>
                             {row.existingResponseId && (
-                              <span className="ml-1 text-[11px] text-ink-muted">上書き</span>
+                              <span className="ml-1 text-caption text-ink-muted">上書き</span>
                             )}
                           </TD>
                         </TR>
@@ -227,23 +264,28 @@ export default async function DisclosureImportPage({
                     </TBody>
                   </Table>
                 </div>
-                <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-2">
-                  <span className="text-[11px] text-ink-muted">
+                <div className="flex items-center justify-between gap-2 border-t border-line py-2">
+                  <span className="text-caption text-ink-muted">
                     取り込んだ回答は選んだ報告期間に保存され、当年度の回答には前年回答として紐付きます。
                     <strong>当年度の回答本文は変更されません。</strong>
                   </span>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" asChild>
+                    <Button variant="ghost" size="sm" asChild>
                       <Link href="/enterprise/disclosures/cdp">キャンセル</Link>
                     </Button>
-                    <Button type="submit" size="sm" disabled={matched.length === 0}>
+                    <SubmitButton
+                      variant="primary"
+                      size="sm"
+                      pendingLabel="取り込み中…"
+                      disabled={matched.length === 0}
+                    >
                       選択した {matched.length} 件を取り込む
-                    </Button>
+                    </SubmitButton>
                   </div>
                 </div>
               </form>
             )}
-          </Card>
+          </Section>
         )}
       </div>
     </>

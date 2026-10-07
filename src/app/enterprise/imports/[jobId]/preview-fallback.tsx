@@ -3,8 +3,8 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { SectionTitle } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { PanelSkeleton } from '@/components/shared/states';
 import { loadPreview } from '../preview-store';
 import { ImportPreviewTable, type PreviewOption } from '../preview-table';
 import type { ImportPreviewPayload } from '../preview-types';
@@ -34,47 +34,39 @@ export function ImportPreviewFallback({
   }, [jobId]);
 
   if (payload === undefined) {
-    return (
-      <Card>
-        <p className="px-3 py-4 text-[13px] text-ink-muted">取込内容を読み込んでいます…</p>
-      </Card>
-    );
+    // 読み込み中は固定の高さの骨組み（読み込み後に画面がずれない。plan §1.18）
+    return <PanelSkeleton lines={4} label="取込内容を読み込んでいます" />;
   }
 
   if (!payload) {
     return (
-      <Card className="p-4">
-        <p className="text-[13px] text-ink">
+      <div className="rounded-t4d-lg border border-line bg-surface p-4">
+        <p className="text-body text-ink">
           この取込内容は、投入したブラウザのタブでのみ参照できます。
         </p>
-        <p className="mt-2 text-[12px] text-ink-muted">
+        <p className="mt-2 text-small text-ink-muted">
           デモ環境（Demo Mode）は取込結果をサーバーへ保存しません。
           別のブラウザやタブから開いた場合、または投入したタブを閉じた場合は表示できません。
-          お手数ですが、もう一度「データ収集」から取り込んでください。
+          お手数ですが、もう一度「データ取込」から取り込んでください。
         </p>
-        <p className="mt-2 text-[12px] text-ink-muted">
+        <p className="mt-2 text-small text-ink-muted">
           実 Supabase へ接続した環境ではこの制限はありません。
         </p>
         <div className="mt-3">
-          <Button size="sm" variant="outline" asChild>
-            <Link href="/enterprise/imports">データ収集へ戻る</Link>
+          <Button size="sm" variant="secondary" asChild>
+            <Link href="/enterprise/imports">データ取込へ戻る</Link>
           </Button>
         </div>
-      </Card>
+      </div>
     );
   }
 
   return (
     <>
-      <Card className="overflow-hidden">
-        <SectionTitle
-          title={`取込プレビュー（${payload.rows.length} 行 / ${payload.fileNames.length} ファイル）`}
-          action={
-            <span className="text-[11px] text-ink-muted">
-              このタブが保持している取込内容です（Demo Mode）
-            </span>
-          }
-        />
+      <Section
+        title={`取込プレビュー（${payload.rows.length} 行 / ${payload.fileNames.length} ファイル）`}
+        summary="このタブが保持している取込内容です（Demo Mode）"
+      >
         <ImportPreviewTable
           jobId={payload.jobId}
           reportingPeriodId={payload.reportingPeriodId}
@@ -82,20 +74,19 @@ export function ImportPreviewFallback({
           metrics={metrics}
           units={units}
         />
-      </Card>
+      </Section>
 
       {payload.failedFiles.length > 0 && (
-        <Card className="overflow-hidden">
-          <SectionTitle title={`解析できなかったファイル（${payload.failedFiles.length}）`} />
+        <Section title={`解析できなかったファイル（${payload.failedFiles.length}）`}>
           <ul className="divide-y divide-line">
             {payload.failedFiles.map((file) => (
-              <li key={file.name} className="px-3 py-2">
-                <span className="text-[13px] text-ink">{file.name}</span>
-                <span className="ml-2 text-[12px] text-ink-muted">{file.message}</span>
+              <li key={file.name} className="py-1.5">
+                <span className="text-body text-ink">{file.name}</span>
+                <span className="ml-2 text-small text-ink-muted">{file.message}</span>
               </li>
             ))}
           </ul>
-        </Card>
+        </Section>
       )}
     </>
   );

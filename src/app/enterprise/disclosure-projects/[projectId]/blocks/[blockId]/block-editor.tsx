@@ -22,8 +22,11 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SubmitButton } from '@/components/ui/submit-button';
+import { Collapsible } from '@/components/ui/collapsible';
 import { Textarea } from '@/components/ui/input';
 import { canonicalJson, detectHandwrittenNumbers } from '@/lib/domain/disclosure-block';
 import { formatJst } from '@/lib/format/datetime';
@@ -71,9 +74,21 @@ const NETWORK_ERROR_MESSAGE =
 /** 根拠パネルを本文の横に並べる幅（これより狭い幅ではドロワー） */
 const WIDE_QUERY = '(min-width: 1366px)';
 
-/** 移動の前に確認する（保存できていない入力がある）ときの文面 */
-const LEAVE_CONFIRM_MESSAGE =
-  '保存できていない入力があります。このまま移動すると、その入力は失われます。移動しますか？';
+/**
+ * 画面内のリンクで離れる前に、保存できていない入力があるときの確認（window.confirm の置き換え。plan §1.16）。
+ * ブラウザを閉じる・再読み込みは beforeunload（ブラウザの既定の確認）のまま
+ */
+const LEAVE_CONFIRM = {
+  tier: 'irreversible',
+  title: '保存できていない入力があります',
+  scope: 'この節の本文のうち、まだ保存できていない入力',
+  consequences: [
+    'このまま移動すると、その入力は失われます。',
+    '残す場合は「キャンセル」で戻り、保存の状態を確かめてから移動してください。',
+  ],
+  confirmLabel: '保存せずに移動する',
+  destructive: true,
+} as const;
 
 /** 「保存済み HH:mm」の時刻部分（日時は formatJst を通す） */
 function timeOf(iso: string | null): string {
@@ -189,6 +204,8 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
   const [requestPending, setRequestPending] = React.useState(false);
   /** このタブの控えから作業本文を戻した（サーバーに作業本文が無かった） */
   const [restoredDraftAt, setRestoredDraftAt] = React.useState<string | null>(null);
+  /** 未保存の入力を残したまま移動しようとした行き先（確認ダイアログを開いている間だけ） */
+  const [leaveHref, setLeaveHref] = React.useState<string | null>(null);
 
   const revision = React.useRef(0);
   const savedRevision = React.useRef(0);
@@ -398,7 +415,8 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
       const href = `${url.pathname}${url.search}${url.hash}`;
       void (async () => {
         const saved = canAutosave && state !== 'conflict' ? await flush() : false;
-        if (saved || window.confirm(LEAVE_CONFIRM_MESSAGE)) router.push(href);
+        if (saved) router.push(href);
+        else setLeaveHref(href);
       })();
     };
     document.addEventListener('click', onClick, true);
@@ -888,7 +906,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
         );
       case 'offline':
         return (
-          <span className="inline-flex items-center gap-1 text-[#8a5d00]">
+          <span className="inline-flex items-center gap-1 text-warning-ink">
             <CloudOff className="size-3.5" aria-hidden="true" />
             オフライン（入力は保持しています）
           </span>
@@ -911,14 +929,28 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
+      <ConfirmDialog
+        {...LEAVE_CONFIRM}
+        consequences={[...LEAVE_CONFIRM.consequences]}
+        open={leaveHref !== null}
+        onOpenChange={(open) => {
+          if (!open) setLeaveHref(null);
+        }}
+        action={() => {
+          const href = leaveHref;
+          setLeaveHref(null);
+          if (href) router.push(href);
+        }}
+      />
 
-      {/* 上部の操作列: 保存状態・版として保存・レビュー依頼（主要な操作は 1 つ） */}
+      {/* 上部の操作列: 保存状態・版として保存・レビュー依頼（主要な操作は 1 つ。plan §1.15 原稿の作成中:
+          primary「レビュー依頼」・secondary「版として保存」。版の入力欄を開いている間は「この内容で版を作る」が主操作） */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2">
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          className="min-[1366px]:hidden"
+          className="wide:hidden"
           aria-expanded={tocOpen}
           aria-controls="block-toc"
           onClick={() => setTocOpen((v) => !v)}
@@ -926,7 +958,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           <ListTree aria-hidden="true" />
           目次
         </Button>
-        <div className="text-[12px]" aria-live="polite">
+        <div className="text-small" aria-live="polite">
           {saveIndicator}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -934,7 +966,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="secondary"
               ref={versionToggleRef}
               aria-expanded={versionFormOpen}
               aria-controls="version-form"
@@ -946,6 +978,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           )}
           {canRequestReview && (
             <Button
+              variant={versionFormOpen && canType ? 'secondary' : 'primary'}
               type="button"
               size="sm"
               disabled={requestPending}
@@ -963,7 +996,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="secondary"
             aria-expanded={paneExpanded}
             aria-controls="block-right-pane"
             ref={paneTriggerRef}
@@ -982,7 +1015,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
       {restoredDraftAt && (
         <p
           role="status"
-          className="border-b border-line bg-brand-50 px-3 py-1.5 text-[12px] text-brand-900"
+          className="border-b border-line bg-brand-50 px-3 py-1.5 text-small text-brand-900"
         >
           このタブに残っていた自動保存の本文（{formatJst(restoredDraftAt)}）を戻しました。
           作業中の本文はサーバーをまたいで持ち回さないため、この画面の本文を正として保存し直します。
@@ -992,37 +1025,37 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
       {requestError && (
         <p
           role="alert"
-          className="border-b border-line bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
+          className="border-b border-line bg-danger-soft px-3 py-1.5 text-small text-ink"
         >
           レビューを依頼できませんでした: {requestError}
         </p>
       )}
       {data.block.scopeRecheckNeeded && (
-        <p className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-[12px] text-ink">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+        <p className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-small text-ink">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning-ink" aria-hidden="true" />
           報告範囲（報告主体・期間・対象範囲）の変更より前に承認された節です。変更後の範囲で本文を確認し、「版として保存」してから再承認を受けてください（本文を変えなくても版を作れます）。
         </p>
       )}
       {data.block.applicabilityRecheckNeeded && (
         <p
-          className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-[12px] text-ink"
+          className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-small text-ink"
           data-testid="applicability-recheck-banner"
         >
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning-ink" aria-hidden="true" />
           最終承認の後に、この節の基準の適用判断が確定し直されました。更新後の判断で本文を確認し、「版として保存」してから再承認を受けてください（本文を変えなくても版を作れます）。
         </p>
       )}
       {data.block.translationNeedsCheck && data.block.currentVersionId && (
         <p
-          className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-[12px] text-ink"
+          className="flex items-start gap-1 border-b border-line bg-warning-soft/50 px-3 py-1.5 text-small text-ink"
           data-testid="translation-recheck-banner"
         >
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning-ink" aria-hidden="true" />
           翻訳元が、この翻訳の版より後に更新されています。翻訳元と照らして翻訳を確認し、「版として保存」してからレビューを受けてください（翻訳を直す必要が無ければ、本文を変えずに版を作れます）。
         </p>
       )}
       {data.block.workingUpdatedByOtherName && (
-        <p className="flex items-start gap-1 border-b border-line bg-surface-muted px-3 py-1.5 text-[12px] text-ink">
+        <p className="flex items-start gap-1 border-b border-line bg-surface-muted px-3 py-1.5 text-small text-ink">
           <CircleDot className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
           {data.block.workingUpdatedByOtherName}
           さんが自動保存した作業中の本文を表示しています。この本文を編集・提出すると、
@@ -1031,7 +1064,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
         </p>
       )}
       {canRequestReview && data.blockers.length > 0 && (
-        <div className="border-b border-line bg-warning-soft/50 px-3 py-1.5 text-[12px] text-ink">
+        <div className="border-b border-line bg-warning-soft/50 px-3 py-1.5 text-small text-ink">
           <span className="font-medium">レビュー依頼の前に解消が必要: </span>
           {data.blockers.map((b) => b.message).join(' ／ ')}
         </div>
@@ -1043,7 +1076,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           onSubmit={saveVersion}
           className="space-y-1.5 border-b border-line bg-surface-muted px-3 py-2"
         >
-          <label htmlFor="change-reason" className="text-[12px] font-medium text-ink">
+          <label htmlFor="change-reason" className="text-small font-medium text-ink">
             変更理由{baseVersionId ? '（必須）' : '（任意。初版）'}
           </label>
           <Textarea
@@ -1059,20 +1092,20 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
             placeholder="例: 委員会資料に基づき開催頻度を更新"
           />
           {permissions.reviseAfterApproval && (
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-caption text-ink-muted">
               承認済みの節です。保存すると新しい版になり、節は下書きへ戻ります（承認済みの版はそのまま残ります）。
             </p>
           )}
           {versionError && (
-            <p role="alert" className="text-[12px] text-danger">
+            <p role="alert" className="text-small text-danger">
               {versionError}
             </p>
           )}
           <div className="flex gap-1.5">
-            <Button type="submit" size="sm" disabled={versionPending}>
+            <SubmitButton variant="primary" size="sm" disabled={versionPending}>
               {versionPending && <Loader2 className="animate-spin" aria-hidden="true" />}
               この内容で版を作る
-            </Button>
+            </SubmitButton>
             <Button type="button" size="sm" variant="ghost" onClick={closeVersionForm}>
               閉じる
             </Button>
@@ -1081,14 +1114,14 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
       )}
 
       {!canType && permissions.readOnlyReason && (
-        <p className="border-b border-line bg-surface-muted px-3 py-1.5 text-[12px] text-ink-muted">
+        <p className="border-b border-line bg-surface-muted px-3 py-1.5 text-small text-ink-muted">
           {permissions.readOnlyReason}
         </p>
       )}
       {saveError && saveState === 'error' && (
         <p
           role="alert"
-          className="border-b border-line bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
+          className="border-b border-line bg-danger-soft px-3 py-1.5 text-small text-ink"
         >
           保存に失敗しました: {saveError}（入力内容は画面に残っています）
         </p>
@@ -1096,7 +1129,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
       {conflictBody && (
         <div
           role="alert"
-          className="border-b border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-ink"
+          className="border-b border-danger/40 bg-danger-soft px-3 py-2 text-small text-ink"
         >
           <p className="font-medium">
             {conflictKind === 'working'
@@ -1106,21 +1139,24 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           <p className="mt-0.5">
             この画面の入力内容はそのまま残っています。必要な文をコピーしてから、最新の版を開いて取り込み直してください。
           </p>
-          <details className="mt-1">
-            <summary className="cursor-pointer">
-              {conflictKind === 'working' ? 'ほかの人の作業中の本文を表示' : '最新の版の本文を表示'}
-            </summary>
-            <div className="mt-1 space-y-1 rounded-t4d border border-line bg-surface p-2">
+          <Collapsible
+            variant="plain"
+            className="mt-1"
+            summary={
+              conflictKind === 'working' ? 'ほかの人の作業中の本文を表示' : '最新の版の本文を表示'
+            }
+          >
+            <div className="space-y-1 rounded-t4d border border-line bg-surface p-2">
               {editableFromBody(conflictBody).paragraphs.map((p, _index, all) => (
                 <p key={p.id} className="whitespace-pre-wrap">
-                  <span className="mr-1 text-[10px] text-ink-muted">
+                  <span className="mr-1 text-caption text-ink-muted">
                     {paragraphLabelOf(all, p.id)}
                   </span>
                   {displayText(p, editableFromBody(conflictBody).refs)}
                 </p>
               ))}
             </div>
-          </details>
+          </Collapsible>
           <a
             href={`/enterprise/disclosure-projects/${projectId}/blocks/${blockId}`}
             className="mt-1 inline-block text-brand-700 underline-offset-2 hover:underline"
@@ -1133,17 +1169,17 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
       <div
         className={`grid min-w-0 grid-cols-1 ${
           paneDocked
-            ? 'min-[1366px]:grid-cols-[220px_minmax(0,1fr)_380px]'
-            : 'min-[1366px]:grid-cols-[220px_minmax(0,1fr)]'
+            ? 'wide:grid-cols-[220px_minmax(0,1fr)_380px]'
+            : 'wide:grid-cols-[220px_minmax(0,1fr)]'
         }`}
       >
         {/* 左: 目次 */}
         <nav
           id="block-toc"
           aria-label="節の目次"
-          className={`${tocOpen ? 'block' : 'hidden'} border-b border-line bg-surface min-[1366px]:block min-[1366px]:border-b-0 min-[1366px]:border-r`}
+          className={`${tocOpen ? 'block' : 'hidden'} border-b border-line bg-surface wide:block wide:border-b-0 wide:border-r`}
         >
-          <ol className="p-2 text-[12px]">
+          <ol className="p-2 text-small">
             {data.siblings.map((s) => {
               const current = s.id === blockId;
               return (
@@ -1162,10 +1198,10 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
                       {s.language === 'en' ? '（英語）' : ''}
                       <LinkPending />
                     </span>
-                    <span className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-ink-muted">
+                    <span className="mt-0.5 flex flex-wrap gap-1 text-caption text-ink-muted">
                       <span>{s.statusLabel}</span>
                       {s.freshness !== 'current' && (
-                        <span className="inline-flex items-center gap-0.5 text-[#8a5d00]">
+                        <span className="inline-flex items-center gap-0.5 text-warning-ink">
                           <AlertTriangle className="size-2.5" aria-hidden="true" />
                           {s.freshness === 'evidence_invalid'
                             ? '根拠失効'
@@ -1227,14 +1263,14 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           />
 
           {editable.paragraphs.length === 0 && (
-            <div className="rounded-t4d-lg border border-dashed border-line p-4 text-center text-[12px] text-ink-muted">
+            <div className="rounded-t4d-lg border border-dashed border-line p-4 text-center text-small text-ink-muted">
               本文がまだありません。
               {canType && (
                 <div className="mt-2 flex justify-center gap-1.5">
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     onClick={() => addParagraph(null, 'heading')}
                   >
                     <Heading aria-hidden="true" />
@@ -1243,7 +1279,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     onClick={() => addParagraph(null)}
                   >
                     <Plus aria-hidden="true" />
@@ -1270,7 +1306,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
                   tabIndex={-1}
                   className="rounded-t4d-lg border border-line bg-surface p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
                 >
-                  <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
+                  <div className="mb-1 flex flex-wrap items-center gap-1.5 text-caption text-ink-muted">
                     <label htmlFor={inputId} className="inline-flex items-center gap-1">
                       {p.kind === 'heading' ? (
                         <Heading className="size-3" aria-hidden="true" />
@@ -1357,7 +1393,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
                     </div>
                   )}
                   {refs.length > 0 && (
-                    <p className="mt-1 whitespace-pre-wrap text-[12px] text-ink-muted">
+                    <p className="mt-1 whitespace-pre-wrap text-small text-ink-muted">
                       <span className="sr-only">表示: </span>
                       {paragraph.children
                         .map((c) =>
@@ -1375,10 +1411,10 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
                   {warnings.map((w) => (
                     <p
                       key={w.text}
-                      className="mt-1 flex items-start gap-1 rounded-t4d border border-warning/40 bg-warning-soft p-1.5 text-[12px] text-ink"
+                      className="mt-1 flex items-start gap-1 rounded-t4d border border-warning/40 bg-warning-soft p-1.5 text-small text-ink"
                     >
                       <AlertTriangle
-                        className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]"
+                        className="mt-0.5 size-3.5 shrink-0 text-warning-ink"
                         aria-hidden="true"
                       />
                       <span>
@@ -1396,7 +1432,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
             })}
           </ol>
           {canType && editable.paragraphs.length > 0 && (
-            <Button type="button" size="sm" variant="outline" onClick={() => addParagraph(null)}>
+            <Button type="button" size="sm" variant="secondary" onClick={() => addParagraph(null)}>
               <Plus aria-hidden="true" />
               末尾に段落を追加
             </Button>
@@ -1410,12 +1446,12 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           {...(drawerOpen
             ? { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'block-right-pane-title' }
             : { 'aria-label': '根拠パネル' })}
-          className={`${paneOpen ? 'fixed inset-y-0 right-0 z-40 flex w-[min(420px,100vw)] shadow-xl' : 'hidden'} flex-col border-l border-line bg-surface ${
+          className={`${paneOpen ? 'fixed inset-y-0 right-0 z-(--z-overlay) flex w-[min(420px,100vw)] shadow-overlay' : 'hidden'} flex-col border-l border-line bg-surface ${
             paneDocked
               ? // 高さはスクロール領域（画面 − ヘッダー 48px）から、下に固定した「本文の状態」の帯（約 44px）を除いた分。
                 // 画面の高さ（100vh）にすると、下端が帯の裏とスクロール領域の外に隠れていた
-                'min-[1366px]:sticky min-[1366px]:top-0 min-[1366px]:z-auto min-[1366px]:flex min-[1366px]:max-h-[calc(100vh-48px-2.75rem)] min-[1366px]:self-start min-[1366px]:w-auto min-[1366px]:shadow-none'
-              : 'min-[1366px]:hidden'
+                'wide:sticky wide:top-0 wide:z-auto wide:flex wide:max-h-[calc(100vh-48px-2.75rem)] wide:self-start wide:w-auto wide:shadow-none'
+              : 'wide:hidden'
           }`}
           ref={asideRef}
         >
@@ -1424,7 +1460,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
             tabIndex={-1}
             className="flex items-center justify-between border-b border-line px-3 py-1.5 focus-visible:outline-none"
           >
-            <span id="block-right-pane-title" className="text-[13px] font-semibold text-ink">
+            <span id="block-right-pane-title" className="text-body font-semibold text-ink">
               根拠パネル
             </span>
             <button
@@ -1463,7 +1499,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
           <button
             type="button"
             aria-label="根拠パネルを閉じる"
-            className="fixed inset-0 z-30 bg-[#0b1b34]/25 min-[1366px]:hidden"
+            className="fixed inset-0 z-(--z-pane-overlay) bg-overlay/25 wide:hidden"
             onClick={closePane}
           />
         )}
@@ -1474,7 +1510,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
         role="toolbar"
         aria-label="本文の状態"
         inert={drawerOpen}
-        className="sticky bottom-0 z-20 flex min-h-[2.75rem] flex-wrap items-center gap-1.5 border-t border-line bg-surface px-3 py-1.5 text-[12px]"
+        className="sticky bottom-0 z-(--z-pane) flex min-h-[2.75rem] flex-wrap items-center gap-1.5 border-t border-line bg-surface px-3 py-1.5 text-small"
       >
         {statusItems.map(({ key, label }) => {
           const item = data.statusBar[key];
@@ -1492,7 +1528,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
               }`}
             >
               {item.count > 0 ? (
-                <AlertTriangle className="size-3 text-[#8a5d00]" aria-hidden="true" />
+                <AlertTriangle className="size-3 text-warning-ink" aria-hidden="true" />
               ) : (
                 <CheckCircle2 className="size-3 text-success" aria-hidden="true" />
               )}

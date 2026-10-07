@@ -70,6 +70,9 @@ test('Evidence Viewer: 画像が画面内に表示され、メタデータ・Ver
 }) => {
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/evidence');
+  // 登録は見出しの「資料を登録」で開く作成パネル（一覧の上に常設しない。plan S23）
+  await page.getByRole('link', { name: '資料を登録' }).click();
+  await page.waitForURL(/[?&]new=1/);
 
   // 画像 Evidence をアップロード
   await page.locator('input[type="file"]').setInputFiles({
@@ -103,6 +106,8 @@ test('Evidence Viewer: PDF が画面内 iframe で表示される', async ({ pag
 
   await loginAs(page, DEMO_USERS.sustainability);
   await page.goto('/enterprise/evidence');
+  await page.getByRole('link', { name: '資料を登録' }).click();
+  await page.waitForURL(/[?&]new=1/);
   await page.locator('input[type="file"]').setInputFiles({
     name: pdf.name,
     mimeType: 'application/pdf',

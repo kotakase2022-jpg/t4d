@@ -1,18 +1,46 @@
 import Link from 'next/link';
-import { AlertTriangle } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { SeverityBadge } from '@/components/shared/badges';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { MetricStrip, MetricTile } from '@/components/shared/metric-strip';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { SemanticBadge } from '@/components/shared/status-badge';
 import { EmptyState } from '@/components/shared/states';
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { describeReferenceDate } from '@/lib/clock';
-import { isOverdue } from '@/lib/format/datetime';
+import { formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { loadPeriodDataset } from '@/lib/services/enterprise-data';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import type { StatusSemantic } from '@/lib/ui/status/registry';
+import { statusLabel } from '@/lib/ui/status/registry';
+import { validationRuleLabel } from '../data/_components/validation-rule-labels';
+import { taskTargetHref } from '../workflows/task-target';
 
 export const metadata = { title: 'アラート' };
 
+/** 件数の帯の状態（色だけで示さない: アイコンと語を MetricTile が併記する） */
+function tileStatus(
+  count: number,
+  semantic: StatusSemantic,
+): { semantic: StatusSemantic; label: string } {
+  return count > 0 ? { semantic, label: '要対応' } : { semantic: 'done', label: 'なし' };
+}
+
+/** 一覧のリンク（見出しの右の 1 行。見出しと同じ親に置き、どの一覧かが分かるようにする） */
+function ListLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link href={href} className="text-small text-brand-700 hover:underline">
+      {children}
+    </Link>
+  );
+}
+
+/**
+ * アラート（plan S21）。組織の「放置すると問題になる事実」を重要度の順に並べる
+ * （検証エラー → 期限超過 → 資料依頼 → 未提出 → 開示質問の更新）。
+ * 件数の帯は押すと絞り込んだ一覧へ移る。表は先頭 10 件までにし、残りは一覧で開く（同じ事実を
+ * ホーム・ワークフローと別の条件で数えない。行き先はそれぞれの一覧の絞り込み）。
+ */
 export default async function AlertsPage() {
   const shell = await loadEnterpriseShell();
   const dataset = await loadPeriodDataset(
@@ -42,15 +70,17 @@ export default async function AlertsPage() {
   const unitById = dataset.unitById;
   const dataPointById = new Map(dataset.dataPoints.map((dp) => [dp.id, dp]));
 
-  // 画面の説明文が挙げる 7 種のうち、未提出・資料依頼・質問更新が抜けていた。
   const unsubmitted = dataset.dataPoints.filter(
     (dp) => dp.status === 'not_started' || dp.status === 'draft',
   );
+  const changedAfterApproval = dataset.dataPoints.filter((dp) => dp.changedAfterApproval).length;
   // draft の PBC は企業側へ届いていない（監査法人の下書き）ので除く
   const pbcRequests = await shell.db.select('pbcRequests', {
     where: { clientOrganizationId: shell.ctx.workspace.organizationId },
   });
-  const openPbc = pbcRequests.filter((r) => r.status !== 'draft' && r.status !== 'accepted');
+  const openPbc = pbcRequests
+    .filter((r) => r.status !== 'draft' && r.status !== 'accepted')
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   // 開示質問は組織ではなく「フレームワークの版」に属する（マスターは共通）
   const disclosureResponses = await shell.db.select('disclosureResponses', {
     where: { organizationId: shell.ctx.workspace.organizationId },
@@ -66,104 +96,78 @@ export default async function AlertsPage() {
   return (
     <>
       <PageHeader
-        title="統合アラートセンター"
-        description="未提出・期限超過・異常値・資料依頼・開示質問の更新"
+        title="アラート"
+        description="未提出・期限超過・異常値・資料依頼・開示質問の更新を、重要度の順に"
         help={
           <p>
-            未提出・期限超過・異常値・資料依頼・開示質問の更新を集約します。行をクリックすると対象へ直接遷移します。
+            未提出・期限超過・異常値・資料依頼・開示質問の更新を集約します。件数を押すと絞り込んだ一覧へ、行を押すと対象へ直接移ります。
           </p>
         }
-        breadcrumbs={[{ label: '企業ワークスペース' }, { label: 'アラート' }]}
+        autoBreadcrumbs
       />
 
-      <div className="space-y-3 p-4">
-        <div className="grid grid-cols-3 gap-2">
-          <SummaryCard label="検証エラー" value={errors.length} tone="danger" />
-          <SummaryCard label="検証警告" value={warnings.length} tone="warning" />
-          <SummaryCard label="期限超過タスク" value={overdueTasks.length} tone="danger" />
-          <SummaryCard label="未提出データ" value={unsubmitted.length} tone="warning" />
-          <SummaryCard label="未回答の資料依頼" value={openPbc.length} tone="warning" />
-          <SummaryCard label="新規・変更の開示質問" value={changedItems} tone="warning" />
-        </div>
-
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`未提出のデータ（${unsubmitted.length}）`}
-            action={
-              <Link
-                href="/enterprise/data?status=not_started&status=draft"
-                className="text-[12px] text-brand-700 hover:underline"
-              >
-                一覧で開く
-              </Link>
-            }
+      <div className="space-y-3 px-4 pb-4 pt-3">
+        <MetricStrip label="アラートの件数（重要度の順）">
+          <MetricTile
+            label="検証エラー"
+            value={errors.length}
+            unit="件"
+            status={tileStatus(errors.length, 'error')}
+            href="/enterprise/data?flag=validation_error"
           />
-          {unsubmitted.length === 0 ? (
-            <EmptyState title="未提出のデータはありません" />
-          ) : (
-            <ul className="divide-y divide-line">
-              {unsubmitted.slice(0, 10).map((dp) => (
-                <li key={dp.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                  <Link
-                    href={`/enterprise/data/${dp.id}`}
-                    className="truncate text-[12px] text-brand-700 hover:underline"
-                  >
-                    {metricById.get(dp.metricId)?.name ?? '指標'} ／{' '}
-                    {unitById.get(dp.unitId)?.name ?? '組織'}
-                  </Link>
-                  <Badge tone="warning">{dp.status === 'draft' ? '作成中' : '未着手'}</Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`監査法人からの資料依頼（${openPbc.length}）`}
-            action={
-              <Link
-                href="/enterprise/workflows"
-                className="text-[12px] text-brand-700 hover:underline"
-              >
-                ワークフローで開く
-              </Link>
-            }
+          <MetricTile
+            label="期限超過タスク"
+            value={overdueTasks.length}
+            unit="件"
+            status={tileStatus(overdueTasks.length, 'error')}
+            href="/enterprise/workflows?flag=overdue"
           />
-          {openPbc.length === 0 ? (
-            <EmptyState title="未回答の資料依頼はありません" />
-          ) : (
-            <ul className="divide-y divide-line">
-              {openPbc.map((request) => (
-                <li key={request.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                  <Link
-                    href="/enterprise/workflows"
-                    className="truncate text-[12px] text-brand-700 hover:underline"
-                  >
-                    {request.code} {request.title}
-                  </Link>
-                  <Badge tone={isOverdue(request.dueDate, today) ? 'danger' : 'neutral'}>
-                    期限 {request.dueDate}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+          <MetricTile
+            label="未回答の資料依頼"
+            value={openPbc.length}
+            unit="件"
+            status={tileStatus(openPbc.length, 'pending')}
+            href="/enterprise/workflows#pbc"
+          />
+          <MetricTile
+            label="承認後に変更されたデータ"
+            value={changedAfterApproval}
+            unit="件"
+            status={tileStatus(changedAfterApproval, 'blocked')}
+            href="/enterprise/data?flag=changed_after_approval"
+          />
+          <MetricTile
+            label="検証警告"
+            value={warnings.length}
+            unit="件"
+            status={tileStatus(warnings.length, 'blocked')}
+            href="#data-quality"
+          />
+          <MetricTile
+            label="未提出データ"
+            value={unsubmitted.length}
+            unit="件"
+            status={tileStatus(unsubmitted.length, 'pending')}
+            href="/enterprise/data?status=not_started&status=draft"
+          />
+          <MetricTile
+            label="新規・変更の開示質問"
+            value={changedItems}
+            unit="件"
+            status={tileStatus(changedItems, 'info')}
+            href="/enterprise/disclosures/cdp"
+          />
+        </MetricStrip>
 
-        <Card className="overflow-hidden">
-          <SectionTitle title={`データ品質アラート（${dataset.validations.length}）`} />
+        <Section id="data-quality" title={`データ品質アラート（${dataset.validations.length}）`}>
           {dataset.validations.length === 0 ? (
-            <EmptyState
-              title="アラートはありません"
-              icon={<AlertTriangle className="size-5" aria-hidden="true" />}
-            />
+            <EmptyState kind="done" size="compact" title="検証エラー・警告はありません" />
           ) : (
-            <Table>
+            <Table aria-label="データ品質アラート">
               <THead>
                 <TR>
                   <TH>重要度</TH>
-                  <TH>ルール</TH>
+                  <TH>検証の種類</TH>
                   <TH>対象</TH>
                   <TH>内容</TH>
                 </TR>
@@ -174,11 +178,11 @@ export default async function AlertsPage() {
                   const metric = dp ? metricById.get(dp.metricId) : undefined;
                   const unit = dp ? unitById.get(dp.unitId) : undefined;
                   return (
-                    <TR key={v.id}>
+                    <TR key={v.id} data-t4d-record="">
                       <TD>
                         <SeverityBadge severity={v.severity} />
                       </TD>
-                      <TD className="font-mono text-[11px]">{v.ruleKey}</TD>
+                      <TD className="text-small">{validationRuleLabel(v.ruleKey)}</TD>
                       <TD>
                         <Link
                           href={`/enterprise/data/${v.dataPointId}`}
@@ -187,78 +191,106 @@ export default async function AlertsPage() {
                           {unit?.name} / {metric?.name}
                         </Link>
                       </TD>
-                      <TD className="text-[12px]">{v.message}</TD>
+                      <TD className="text-small">{v.message}</TD>
                     </TR>
                   );
                 })}
               </TBody>
             </Table>
           )}
-        </Card>
+        </Section>
 
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`期限超過（${overdueTasks.length}）`}
-            action={
-              // デモでは期限の判定が固定の基準日によることを示す（実時計では出さない）
-              referenceDate.label ? (
-                <span className="text-[11px] text-ink-muted">{referenceDate.label} で判定</span>
-              ) : undefined
-            }
-          />
+        <Section
+          id="overdue"
+          title={`期限超過（${overdueTasks.length}）`}
+          // デモでは期限の判定が固定の基準日によることを示す（実時計では出さない）
+          summary={referenceDate.label ? `${referenceDate.label} で判定` : undefined}
+        >
           {overdueTasks.length === 0 ? (
-            <EmptyState title="期限超過はありません" />
+            <EmptyState kind="done" size="compact" title="期限超過はありません" />
           ) : (
             <ul className="divide-y divide-line">
               {overdueTasks.map((task) => (
-                <li key={task.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                  {/* 「行をクリックすると対象へ直接遷移します」と案内している以上、遷移先を必ず持たせる */}
+                <li key={task.id} className="flex items-center justify-between gap-2 py-1.5">
+                  {/* 「行を押すと対象へ直接移ります」と案内している以上、遷移先を必ず持たせる */}
                   <Link
-                    href={taskHref(task.targetType, task.targetId)}
-                    className="truncate text-[12px] text-brand-700 hover:underline"
+                    href={taskTargetHref(task.targetType, task.targetId)}
+                    className="truncate text-small text-brand-700 hover:underline"
                   >
                     {task.title}
                   </Link>
-                  <Badge tone="danger">期限 {task.dueDate}</Badge>
+                  <SemanticBadge semantic="error" label={`期限 ${formatJstDate(task.dueDate)}`} />
                 </li>
               ))}
             </ul>
           )}
-        </Card>
+        </Section>
+
+        <Section
+          id="pbc"
+          title={`監査法人からの資料依頼（${openPbc.length}）`}
+          summary={<ListLink href="/enterprise/workflows#pbc">ワークフローで開く</ListLink>}
+        >
+          {openPbc.length === 0 ? (
+            <EmptyState kind="done" size="compact" title="未回答の資料依頼はありません" />
+          ) : (
+            <ul className="divide-y divide-line">
+              {openPbc.map((request) => {
+                const overdue = isOverdue(request.dueDate, today);
+                return (
+                  <li key={request.id} className="flex items-center justify-between gap-2 py-1.5">
+                    <Link
+                      href="/enterprise/workflows#pbc"
+                      className="truncate text-small text-brand-700 hover:underline"
+                    >
+                      {request.code} {request.title}
+                    </Link>
+                    <SemanticBadge
+                      semantic={overdue ? 'error' : 'pending'}
+                      label={`期限 ${formatJstDate(request.dueDate)}${overdue ? '（超過）' : ''}`}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Section>
+
+        <Section
+          id="unsubmitted"
+          title={`未提出のデータ（${unsubmitted.length}）`}
+          summary={
+            <ListLink href="/enterprise/data?status=not_started&status=draft">一覧で開く</ListLink>
+          }
+        >
+          {unsubmitted.length === 0 ? (
+            <EmptyState kind="done" size="compact" title="未提出のデータはありません" />
+          ) : (
+            <ul className="divide-y divide-line">
+              {unsubmitted.slice(0, 10).map((dp) => (
+                <li key={dp.id} className="flex items-center justify-between gap-2 py-1.5">
+                  <Link
+                    href={`/enterprise/data/${dp.id}`}
+                    className="truncate text-small text-brand-700 hover:underline"
+                  >
+                    {metricById.get(dp.metricId)?.name ?? '指標'} ／{' '}
+                    {unitById.get(dp.unitId)?.name ?? '組織'}
+                  </Link>
+                  <SemanticBadge
+                    semantic={dp.status === 'draft' ? 'draft' : 'todo'}
+                    label={statusLabel('dataPoint', dp.status)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+          {unsubmitted.length > 10 && (
+            <p className="pt-1 text-caption text-ink-muted">
+              先頭 10 件を表示しています（全 {unsubmitted.length} 件は一覧で開く）。
+            </p>
+          )}
+        </Section>
       </div>
     </>
-  );
-}
-
-/** タスクの対象から遷移先を決める。分からないときは一覧へ送る。 */
-function taskHref(targetType: string, targetId: string | null): string {
-  if (targetType === 'data_point' && targetId) return `/enterprise/data/${targetId}`;
-  if (targetType === 'pbc_request') return '/enterprise/workflows';
-  if (targetType === 'disclosure_response') return '/enterprise/disclosures/cdp';
-  return '/enterprise/workflows';
-}
-
-function SummaryCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: 'danger' | 'warning';
-}) {
-  return (
-    <Card>
-      <div className="px-3 py-2">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-          {label}
-        </div>
-        <div
-          className={`tnum text-[22px] font-semibold ${tone === 'danger' ? 'text-danger' : 'text-[#8a5d00]'}`}
-        >
-          {value}
-        </div>
-      </div>
-    </Card>
   );
 }

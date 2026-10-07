@@ -9,17 +9,14 @@ import {
   CircleDashed,
   CircleDot,
   CircleHelp,
-  FileWarning,
   FlaskConical,
   Hourglass,
-  Loader2,
   Lock,
-  Send,
   Target,
-  Undo2,
-  XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { DetailBadge } from './detail-badge';
+import { SemanticBadge, StatusBadge } from './status-badge';
 import { AVAILABILITY_STATUS_LABELS, VALUE_KIND_LABELS } from '@/lib/domain/disclosure-status';
 import type {
   AvailabilityStatus,
@@ -44,21 +41,10 @@ type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'outline';
  * すべてのバッジがラベル文字列とアイコンを併記する。
  */
 
-const DATA_POINT_STATUS_MAP: Record<
-  DataPointStatus,
-  { label: string; tone: Tone; Icon: typeof Check }
-> = {
-  not_started: { label: '未着手', tone: 'neutral', Icon: CircleDashed },
-  draft: { label: '入力中', tone: 'outline', Icon: CircleDot },
-  submitted: { label: '提出済み', tone: 'brand', Icon: Send },
-  in_review: { label: 'レビュー中', tone: 'brand', Icon: Loader2 },
-  returned: { label: '差戻し', tone: 'warning', Icon: Undo2 },
-  approved: { label: '承認済み', tone: 'success', Icon: Check },
-};
-
 /**
  * Data Point の状態。`needsRecheck` は「承認済みだが、承認後に証跡不足が見つかった」
- * （src/lib/validation/display-state.ts）。DB の状態は承認済みのまま、表示だけ変える（W0 O3）
+ * （src/lib/validation/display-state.ts）。DB の状態は承認済みのまま、表示だけ変える（W0 O3）。
+ * ラベル・色・アイコンは状態登録簿（src/lib/ui/status/dataPoint.ts）から決める
  */
 export function DataPointStatusBadge({
   status,
@@ -69,22 +55,14 @@ export function DataPointStatusBadge({
 }) {
   if (status === 'approved' && needsRecheck) {
     return (
-      <Badge
-        tone="warning"
-        title="承認後に証跡不足が見つかりました。承認は取り消されていません。証跡を確認してください。"
-      >
-        <AlertTriangle className="size-3" aria-hidden="true" />
-        承認済み・要再確認
-      </Badge>
+      <SemanticBadge
+        semantic="blocked"
+        label="承認済み・要再確認"
+        detail="承認後に証跡不足が見つかりました。承認は取り消されていません。証跡を確認してください。"
+      />
     );
   }
-  const s = DATA_POINT_STATUS_MAP[status];
-  return (
-    <Badge tone={s.tone}>
-      <s.Icon className="size-3" aria-hidden="true" />
-      {s.label}
-    </Badge>
-  );
+  return <StatusBadge domain="dataPoint" value={status} />;
 }
 
 const AVAILABILITY_MAP: Record<AvailabilityStatus, { tone: Tone; Icon: typeof Check }> = {
@@ -111,10 +89,10 @@ export function AvailabilityBadge({
   const known: AvailabilityStatus = status && status in AVAILABILITY_MAP ? status : 'value_present';
   const s = AVAILABILITY_MAP[known];
   return (
-    <Badge tone={s.tone} title={reason ?? undefined}>
+    <DetailBadge tone={s.tone} detail={reason}>
       <s.Icon className="size-3" aria-hidden="true" />
       {AVAILABILITY_STATUS_LABELS[known]}
-    </Badge>
+    </DetailBadge>
   );
 }
 
@@ -142,10 +120,10 @@ export function ValueKindBadge({ kind }: { kind: ValueKind | undefined }) {
  */
 export function AggregationIncompleteBadge({ detail }: { detail?: string }) {
   return (
-    <Badge tone="warning" title={detail}>
+    <DetailBadge tone="warning" detail={detail}>
       <Hourglass className="size-3" aria-hidden="true" />
       集計未完了
-    </Badge>
+    </DetailBadge>
   );
 }
 
@@ -187,25 +165,8 @@ export function DataCoverageBadge({
   );
 }
 
-const RESPONSE_STATUS_MAP: Record<
-  ResponseStatus,
-  { label: string; tone: Tone; Icon: typeof Check }
-> = {
-  not_started: { label: '未着手', tone: 'neutral', Icon: CircleDashed },
-  draft: { label: '作成中', tone: 'outline', Icon: CircleDot },
-  in_review: { label: 'レビュー中', tone: 'brand', Icon: Loader2 },
-  returned: { label: '差戻し', tone: 'warning', Icon: Undo2 },
-  approved: { label: '承認済み', tone: 'success', Icon: Check },
-};
-
 export function ResponseStatusBadge({ status }: { status: ResponseStatus }) {
-  const s = RESPONSE_STATUS_MAP[status];
-  return (
-    <Badge tone={s.tone}>
-      <s.Icon className="size-3" aria-hidden="true" />
-      {s.label}
-    </Badge>
-  );
+  return <StatusBadge domain="response" value={status} />;
 }
 
 const PRIORITY_MAP: Record<Priority, { label: string; tone: Tone }> = {
@@ -225,37 +186,6 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
   );
 }
 
-export function ValidationBadge({
-  errorCount,
-  warningCount,
-}: {
-  errorCount: number;
-  warningCount: number;
-}) {
-  if (errorCount > 0) {
-    return (
-      <Badge tone="danger">
-        <XCircle className="size-3" aria-hidden="true" />
-        エラー {errorCount}
-      </Badge>
-    );
-  }
-  if (warningCount > 0) {
-    return (
-      <Badge tone="warning">
-        <AlertTriangle className="size-3" aria-hidden="true" />
-        警告 {warningCount}
-      </Badge>
-    );
-  }
-  return (
-    <Badge tone="success">
-      <Check className="size-3" aria-hidden="true" />
-      検証OK
-    </Badge>
-  );
-}
-
 export function SeverityBadge({ severity }: { severity: ValidationSeverity }) {
   const map: Record<ValidationSeverity, { label: string; tone: Tone }> = {
     error: { label: 'エラー', tone: 'danger' },
@@ -271,105 +201,21 @@ export function SeverityBadge({ severity }: { severity: ValidationSeverity }) {
   );
 }
 
-export function EvidenceBadge({ count, required }: { count: number; required: boolean }) {
-  if (count > 0) {
-    return (
-      <Badge tone="success">
-        <Check className="size-3" aria-hidden="true" />
-        Evidence {count}
-      </Badge>
-    );
-  }
-  return required ? (
-    <Badge tone="danger">
-      <FileWarning className="size-3" aria-hidden="true" />
-      Evidence 不足
-    </Badge>
-  ) : (
-    <Badge tone="neutral">
-      <CircleDashed className="size-3" aria-hidden="true" />
-      Evidence なし
-    </Badge>
-  );
-}
-
-const JOB_STATUS_MAP: Record<JobStatus, { label: string; tone: Tone }> = {
-  queued: { label: '待機中', tone: 'neutral' },
-  processing: { label: '処理中', tone: 'brand' },
-  needs_review: { label: '要確認', tone: 'warning' },
-  completed: { label: '完了', tone: 'success' },
-  failed: { label: '失敗', tone: 'danger' },
-  cancelled: { label: '中止', tone: 'neutral' },
-};
-
 export function JobStatusBadge({ status }: { status: JobStatus }) {
-  const s = JOB_STATUS_MAP[status];
-  return (
-    <Badge tone={s.tone}>
-      <CircleDot className="size-3" aria-hidden="true" />
-      {s.label}
-    </Badge>
-  );
+  return <StatusBadge domain="job" value={status} />;
 }
-
-const PBC_STATUS_MAP: Record<PbcStatus, { label: string; tone: Tone }> = {
-  draft: { label: '下書き', tone: 'neutral' },
-  sent: { label: '送付済み', tone: 'brand' },
-  acknowledged: { label: '受領確認', tone: 'brand' },
-  submitted: { label: '提出済み', tone: 'brand' },
-  under_review: { label: '確認中', tone: 'brand' },
-  accepted: { label: '受理', tone: 'success' },
-  rejected: { label: '差戻し', tone: 'warning' },
-  overdue: { label: '期限超過', tone: 'danger' },
-  closed: { label: 'クローズ', tone: 'neutral' },
-};
 
 export function PbcStatusBadge({ status }: { status: PbcStatus }) {
-  const s = PBC_STATUS_MAP[status];
-  return (
-    <Badge tone={s.tone}>
-      <CircleDot className="size-3" aria-hidden="true" />
-      {s.label}
-    </Badge>
-  );
+  return <StatusBadge domain="pbc" value={status} />;
 }
-
-const TASK_STATUS_MAP: Record<TaskStatus, { label: string; tone: Tone; icon: typeof CircleDot }> = {
-  open: { label: '未着手', tone: 'neutral', icon: CircleDashed },
-  in_progress: { label: '対応中', tone: 'brand', icon: Loader2 },
-  blocked: { label: '保留（阻害あり）', tone: 'warning', icon: AlertTriangle },
-  done: { label: '完了', tone: 'success', icon: CircleCheck },
-  cancelled: { label: '取消', tone: 'neutral', icon: Ban },
-};
 
 /** タスクの状態（DB の値 open / in_progress をそのまま出さない。ラベル＋アイコン） */
 export function TaskStatusBadge({ status }: { status: TaskStatus }) {
-  const s = TASK_STATUS_MAP[status] ?? { label: '状態不明', tone: 'neutral', icon: CircleHelp };
-  const Icon = s.icon;
-  return (
-    <Badge tone={s.tone}>
-      <Icon className="size-3" aria-hidden="true" />
-      {s.label}
-    </Badge>
-  );
+  return <StatusBadge domain="task" value={status} />;
 }
 
-const TEST_STATUS_MAP: Record<TestStatus, { label: string; tone: Tone }> = {
-  not_started: { label: '未着手', tone: 'neutral' },
-  in_progress: { label: '実施中', tone: 'brand' },
-  prepared: { label: '作成済み', tone: 'brand' },
-  reviewed: { label: 'レビュー済み', tone: 'success' },
-  exception: { label: '例外あり', tone: 'danger' },
-};
-
 export function TestStatusBadge({ status }: { status: TestStatus }) {
-  const s = TEST_STATUS_MAP[status];
-  return (
-    <Badge tone={s.tone}>
-      <FlaskConical className="size-3" aria-hidden="true" />
-      {s.label}
-    </Badge>
-  );
+  return <StatusBadge domain="test" value={status} />;
 }
 
 export function IssueSeverityBadge({ severity }: { severity: IssueSeverity }) {
@@ -404,24 +250,24 @@ export function ScopeInclusionBadge({ inclusion }: { inclusion: ScopeInclusion }
 
 export function DemoDataBadge() {
   return (
-    <Badge tone="warning" title="Supabase へ接続していません。表示は架空の Fixture です。">
+    <DetailBadge tone="warning" detail="Supabase へ接続していません。表示は架空の Fixture です。">
       <FlaskConical className="size-3" aria-hidden="true" />
       デモデータ
-    </Badge>
+    </DetailBadge>
   );
 }
 
 export function AiGeneratedBadge({ provider }: { provider: 'openai' | 'mock' }) {
   return provider === 'mock' ? (
-    <Badge tone="warning" title="OpenAI API 未接続。決定論的 Mock AI の出力です。">
+    <DetailBadge tone="warning" detail="OpenAI API 未接続。決定論的 Mock AI の出力です。">
       <Bot className="size-3" aria-hidden="true" />
       Mock / AI未接続
-    </Badge>
+    </DetailBadge>
   ) : (
-    <Badge tone="brand" title="AI が生成した下書きです。人の確認・承認が必要です。">
+    <DetailBadge tone="brand" detail="AI が生成した下書きです。人の確認・承認が必要です。">
       <Bot className="size-3" aria-hidden="true" />
       AI生成
-    </Badge>
+    </DetailBadge>
   );
 }
 
@@ -434,27 +280,12 @@ export function ReadOnlyBadge({ label = 'Read-only（企業原本）' }: { label
   );
 }
 
-const MEMBERSHIP_STATUS_MAP: Record<
-  MembershipStatus,
-  { label: string; tone: Tone; Icon: typeof Check }
-> = {
-  invited: { label: '招待中', tone: 'outline', Icon: Send },
-  active: { label: '有効', tone: 'success', Icon: Check },
-  suspended: { label: '停止中', tone: 'danger', Icon: Lock },
-};
-
 /**
  * メンバーの状態。
  * 生の enum（invited / active / suspended）をそのまま出すと、
  * 日本語 UI の中で読み手が意味を推測することになる。
- * 色だけに頼らないよう、ラベルとアイコンを併記する。
+ * 色だけに頼らないよう、ラベルとアイコンを併記する（状態登録簿 membership）。
  */
 export function MembershipStatusBadge({ status }: { status: MembershipStatus }) {
-  const s = MEMBERSHIP_STATUS_MAP[status];
-  return (
-    <Badge tone={s.tone}>
-      <s.Icon className="size-3" aria-hidden="true" />
-      {s.label}
-    </Badge>
-  );
+  return <StatusBadge domain="membership" value={status} />;
 }

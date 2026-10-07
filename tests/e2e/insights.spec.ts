@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
 
 /**
  * AI Copilot インサイト（機能追加要望 ④）。
@@ -61,5 +61,8 @@ test('実行履歴にインサイト実行が Provenance として残る', async
   await page.getByRole('button', { name: 'インサイトを発見' }).click();
   await page.waitForURL(/insight=/);
 
-  await expect(page.locator('table tbody tr', { hasText: 'インサイト発見' }).first()).toBeVisible();
+  // 実行記録は既定で閉じた節（plan §2.26 E06: L2）。開いてから確かめる
+  const runs = page.getByRole('region', { name: /^AI の実行記録/ });
+  await openCollapsible(runs, /^直近 \d+ 件/);
+  await expect(runs.locator('table tbody tr', { hasText: 'インサイト発見' }).first()).toBeVisible();
 });

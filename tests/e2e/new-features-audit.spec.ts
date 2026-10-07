@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { dataPointId } from '@/lib/fixtures/dataset';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, confirmInDialog, loginAs, openCollapsible } from './helpers';
 
 /**
  * 追加した 5 機能の実操作監査（自己検証ミッション用）。
@@ -79,12 +79,14 @@ function watchProblems(page: Page): string[] {
 test('① 指標マスター: 死んだ導線が無く、基準の出所が実データと一致する', async ({ page }) => {
   const problems = watchProblems(page);
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/organizations');
-  await expect(page.locator('#t4d-main')).toBeVisible();
+  // 組織・拠点はタブ（?tab=）に分かれた（plan §2 S10）。どのタブにも死んだ導線が無い
+  for (const tab of ['units', 'periods', 'campaigns', 'metrics', 'coverage']) {
+    await page.goto(`/enterprise/organizations?tab=${tab}`);
+    await expect(page.locator('#t4d-main')).toBeVisible();
+    expect(await findDeadControls(page), tab).toEqual([]);
+  }
 
-  expect(await findDeadControls(page)).toEqual([]);
-
-  // 充足率は「値のある指標 / 求められている指標」と一致する
+  // 充足率は「値のある指標 / 求められている指標」と一致する（基準別の充足のタブ）
   const ssbjCard = page.locator('li', { hasText: 'SSBJ が求める指標' });
   const text = await ssbjCard.innerText();
   const m = text.match(/(\d+)\s*\/\s*(\d+)\s*件[\s\S]*?(\d+)%/);
@@ -98,27 +100,30 @@ test('① 指標マスター: 死んだ導線が無く、基準の出所が実�
 
 test('① 指標マスター: 追加した指標が一覧・編集ともに壊れない（CRUD 回帰）', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/organizations');
+  // 指標マスターは 25 件ずつのページ送り。コードで探す
+  await page.goto('/enterprise/organizations?tab=metrics&q=internal_carbon_price');
 
-  // 基準から取り込んだ指標も、既存の編集ダイアログで開ける
+  // 基準から取り込んだ指標も、編集ページ（モーダルから専用ページへ移した。plan §2 S10）で開ける
   const row = page.locator('tr', { hasText: 'internal_carbon_price' });
   await expect(row).toHaveCount(1);
-  await row.getByRole('button').last().click();
-  const dialog = page.getByRole('dialog', { name: '指標マスターを編集' });
+  await row.getByRole('link', { name: '編集' }).click();
+  const dialog = page.getByRole('form', { name: '指標を編集' });
   await expect(dialog).toBeVisible();
 
   // 既存の値が読み込まれている（基準から取り込んだ指標も編集画面が成立する）
   await expect(dialog.locator('input[name="code"]')).toHaveValue('internal_carbon_price');
   await expect(dialog.locator('input[name="unit"]')).toHaveValue('円/t-CO2e');
 
-  // 閉じる導線（× と Escape）がどちらも効く
-  await dialog.getByRole('button', { name: '閉じる' }).click();
+  // 戻る導線（キャンセル・ブラウザの戻る）がどちらも効く
+  await page.getByRole('link', { name: 'キャンセル（指標マスターへ戻る）' }).click();
+  await page.waitForURL(/\/enterprise\/organizations\?tab=metrics/);
   await expect(dialog).toHaveCount(0);
 
-  await row.getByRole('button').last().click();
+  await page.goBack();
   await expect(dialog).toBeVisible();
-  await page.keyboard.press('Escape');
+  await page.goBack();
   await expect(dialog).toHaveCount(0);
+  await expect(page.locator('tr', { hasText: 'internal_carbon_price' })).toHaveCount(1);
 });
 
 // ----------------------------------------------------------------------
@@ -149,7 +154,7 @@ test('② 取込: 全行が無関係なファイルでも画面が壊れず、�
 
   // 何も取り込めなくても、失敗にせず理由を出す
   await expect(page.getByText(/指標マスターに対応する数値が見つかりません/)).toBeVisible();
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
   expect(problems.filter((p) => !p.startsWith('network: 5'))).toEqual([]);
 });
 
@@ -233,7 +238,7 @@ test('③ 設定: 異常値を弾き、全画面エラーにしない', async ({
   await page.getByRole('button', { name: '分析条件を保存' }).click();
   await page.waitForURL(/error=/, { timeout: 30_000 });
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('1 つ以上');
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 
   // 連結範囲を「異なる範囲」にして理由未記入 → こちらも画面内の指摘
   await page.goto('/enterprise/disclosures/ssbj/settings');
@@ -323,21 +328,31 @@ test('④ 承認: 差し戻しは理由が必須で、履歴に誰がなぜが�
   await page.goto(target);
   await expect(page.locator('#承認フロー')).toBeVisible();
 
-  // 理由なしで差し戻すと、画面内の指摘になる（全画面エラーにしない）
-  await page.getByRole('button', { name: '差し戻す' }).click();
-  await page.waitForURL(/error=/, { timeout: 30_000 });
-  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('理由');
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  // 差し戻しは理由が必須の確認ダイアログ（plan §1.16 区分 2）。理由なしでは送られない
+  // （ブラウザの必須の検証でダイアログが閉じず、画面も変わらない。全画面エラーにもならない）。
+  // サーバー側の「理由なしでは差し戻せない」は integration（approval-route.test.ts）が確かめる
+  await page.getByRole('button', { name: '差し戻す…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('[data-confirm-scope]')).toBeVisible();
+  await dialog.locator('[data-confirm-submit]').click();
+  await expect(dialog).toBeVisible();
+  expect(
+    await dialog
+      .getByLabel('差戻し理由')
+      .evaluate((el) => (el as HTMLTextAreaElement).validity.valueMissing),
+  ).toBe(true);
+  expect(page.url()).not.toContain('error=');
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 
   // 理由を書けば差し戻せて、誰がなぜが履歴に残る
   const reason = `監査差し戻し ${Date.now().toString(36)}`;
-  await page.goto(target);
-  await page.getByLabel('コメント（差し戻すときは理由が必須）').fill(reason);
-  await page.getByRole('button', { name: '差し戻す' }).click();
+  await confirmInDialog(page, { reason, reasonLabel: '差戻し理由' });
   await page.waitForLoadState('networkidle');
 
   await page.goto(target);
+  // 承認・修正の履歴は既定で閉じた節（plan S3 の L2）。開いてから確かめる
   const history = page.locator('#承認履歴');
+  await openCollapsible(history, /^いつ・誰が承認/);
   await expect(history.getByText(reason)).toBeVisible();
   await expect(history.getByText('検見川 涼').first()).toBeVisible();
 });
@@ -415,7 +430,7 @@ test('⑤ 開示ドラフト: 空の本文では確定できず、直すと確�
   await draftCard(page).getByRole('button', { name: 'この内容で確定' }).click();
   await page.waitForURL(/error=/, { timeout: 30_000 });
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('空');
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 
   // 中身を入れれば確定でき、直すと確定が外れる
   await page.goto('/enterprise/disclosures/ssbj/draft');

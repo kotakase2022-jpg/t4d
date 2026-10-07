@@ -100,8 +100,8 @@ test('アップロード: 許可されない拡張子は受け付けない', asy
 
   // 拒否の理由を画面の中で伝える。
   // 以前は「Internal Server Error」の文字列だけを見ていたため、
-  // 日本語のエラー画面（データを取得できませんでした）に落ちても検知できなかった。
+  // 日本語のエラー画面（処理を完了できませんでした）に落ちても検知できなかった。
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('malicious.exe');
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
   await expect(page.locator('body')).not.toHaveText(/Internal Server Error/);
 });

@@ -95,7 +95,11 @@ test('データ収集: 評価対象の要求事項 × 指標 × 拠点の状況�
   await expect(created).toContainText('欧州販売子会社');
   await expect(created).toContainText('青海マテリアル合弁会社');
 
-  // 収集項目の作成フォーム（計画・指標・拠点・担当・期限）と、次の工程（開示ドラフト）
+  // 収集項目の作成フォーム（計画・指標・拠点・担当・期限）は、見出しの「収集項目を作成」で開く枠（?new=1）。
+  // 一覧の上に常設しない（開いてから確かめる）。次の工程（開示ドラフト）へのリンクは secondary
+  await expect(page.getByRole('combobox', { name: '対象の対応計画' })).toHaveCount(0);
+  await page.locator('[data-page-actions]').getByRole('link', { name: '収集項目を作成' }).click();
+  await page.waitForURL(/[?&]new=1/);
   await expect(page.getByRole('combobox', { name: '対象の対応計画' })).toBeVisible();
   await expect(page.getByRole('button', { name: '収集項目を作成' })).toBeVisible();
   // 既にある指標・割当を選んだときの扱いは既定で閉じる（開いてから確かめる）

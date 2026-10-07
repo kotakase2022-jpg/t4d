@@ -1,5 +1,6 @@
 import { Ban, CircleCheck, CircleDashed, CircleDot, Eye } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { DetailBadge } from '@/components/shared/detail-badge';
 import { ACTION_STATUS_LABEL, ACTION_STATUS_TONE } from '@/lib/domain/ssbj';
 import type { SsbjActionStatus } from '@/types/domain';
 
@@ -32,9 +33,12 @@ export function ActionStatusBadge({ status }: { status: SsbjActionStatus }) {
 /** 計画を立てた後に DMA の判断が変わり、評価対象から外れた要求事項の計画 */
 export function OutOfScopeRequirementBadge() {
   return (
-    <Badge tone="warning" title="DMA の判断が変わり、この要求事項は評価対象ではなくなりました">
+    <DetailBadge
+      tone="warning"
+      detail="DMA の判断が変わり、この要求事項は評価対象ではなくなりました"
+    >
       <Ban className="size-3" aria-hidden="true" />
       対象外の要求事項
-    </Badge>
+    </DetailBadge>
   );
 }

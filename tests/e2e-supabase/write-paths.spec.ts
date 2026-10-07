@@ -85,7 +85,7 @@ test('common.audit.read を持たないロールでも値を編集できる（�
   await page.waitForLoadState('networkidle');
 
   // エラー境界（内部エラーの露出）に落ちていないこと
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
   await expect(page.locator('#t4d-main')).not.toContainText('row-level security');
 
   const { data: after } = await db.from('data_points').select('value').eq('id', dp!.id).single();
@@ -115,7 +115,7 @@ test('メンション付きコメントで、相手に通知が届く', async ({
   await page.locator('textarea[name="body"]').fill(`@東一郎 ${marker}`);
   await page.getByRole('button', { name: 'コメントする' }).click();
 
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
   await expect(page.locator('#t4d-main')).toContainText(marker);
 
   const { data: profile } = await db

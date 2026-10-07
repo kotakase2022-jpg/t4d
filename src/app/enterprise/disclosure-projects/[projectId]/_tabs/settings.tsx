@@ -1,9 +1,10 @@
 import { AlertTriangle, CheckCircle2, Info, Lock } from 'lucide-react';
-import { SectionTitle } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
+import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
 import { Collapsible } from '@/components/ui/collapsible';
 import { MoreInfo } from '@/components/ui/more-info';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { permissionsFor } from '@/lib/authorization/can';
 import { getReferenceDate } from '@/lib/clock';
@@ -33,11 +34,14 @@ import { ProjectForm } from '../../new/project-form';
 import { FrameworkConditionsForm } from './framework-conditions-form';
 
 /**
- * 設定タブ（§6.2・§8.4）。
+ * 設定タブ（§6.2・§8.4。plan S1）。節は「プロジェクト情報（基本・期間と期限・報告範囲と承認）」→
+ * 「基準と適用条件」の順。版の移行（新しい版の差分と追加）は詳細設定として既定で閉じる。
+ *  - 主操作は「変更を保存」1 つ。影響があるときだけ「影響を確認して保存」に置き換わる（同時に 2 つ出さない）
  *  - プロジェクト情報: 報告範囲・期間を変えるときは影響する原稿・数値・承認を先に示す。
  *  - 基準ごと: 「保存して準備を始める」（適用条件と準備の区分）と「適用判断を確定」を別の操作にする。
  *    条件の未入力は「未入力（不明）」のまま表示し、0 や対象外として扱わない。
- *  - 新しい版: 自動では切り替えず、移行差分と影響を見てから人が追加する（A23）。
+ *  - 新しい版: 自動では切り替えず、移行差分と影響を見てから人が追加する（A23）。新しい版があることは
+ *    折りたたみの外に出す（気付かないまま旧版で進めない）。
  */
 export async function SettingsTab({
   projectId,
@@ -53,6 +57,8 @@ export async function SettingsTab({
   const today = getReferenceDate();
   // 判断を確定した直後は、確定した判断が載る履歴を開いて描く（フラッシュが中身を指すとき。§10.4）
   const historyOpen = searchParams.flash === 'applicabilityConfirmed';
+  // 新しい版を追加した直後は、版の移行の節を開いて描く
+  const migrationOpen = searchParams.flash === 'frameworkVersionAttached';
 
   // 新しい版ごとの移行差分と、旧版で書いた原稿への影響
   const newerInfo = new Map<
@@ -84,87 +90,90 @@ export async function SettingsTab({
   return (
     <div className="space-y-3">
       {!detail.canWrite && (
-        <p className="flex items-center gap-1.5 rounded-t4d border border-line bg-surface-muted px-3 py-1.5 text-[12px] text-ink">
+        <p className="flex items-center gap-1.5 rounded-t4d border border-line bg-surface-muted px-3 py-1.5 text-small text-ink">
           <Lock className="size-3.5" aria-hidden="true" />
           設定の変更には開示の編集権限が必要です。内容の確認だけできます。
         </p>
       )}
 
-      <Card>
-        <SectionTitle title="プロジェクト情報" />
-        <div className="px-3 pb-3">
-          {detail.canWrite ? (
-            <ProjectForm
-              mode="edit"
-              action={updateProjectAction}
+      <Section title="プロジェクト情報" divider="none">
+        {detail.canWrite ? (
+          <ProjectForm
+            mode="edit"
+            action={updateProjectAction}
+            projectId={project.id}
+            baseUpdatedAt={project.updatedAt}
+            initial={{
+              name: project.name,
+              reportingEntity: project.reportingEntity,
+              periodStart: project.periodStart,
+              periodEnd: project.periodEnd,
+              currency: project.currency,
+              dueDate: project.dueDate ?? '',
+              status: project.status,
+              ownerUserId: project.ownerUserId ?? '',
+              reviewerUserId: project.reviewerUserId ?? '',
+              finalApproverUserId: project.finalApproverUserId ?? '',
+              languages: project.languages,
+              scopeOrgNote: project.scopeOrgNote,
+              scopeConsolidationNote: project.scopeConsolidationNote,
+              scopeGhgBoundaryNote: project.scopeGhgBoundaryNote,
+              scopeValueChainNote: project.scopeValueChainNote,
+              includedUnitIds: project.includedUnitIds,
+            }}
+            periods={[]}
+            members={detail.members.map((m) => ({
+              userId: m.userId,
+              displayName: m.displayName,
+              canApprove: permissionsFor(m.roleKeys).has('enterprise.disclosure.approve'),
+            }))}
+            units={shell.units.map((u) => ({ id: u.id, name: u.name }))}
+            purposes={[]}
+            versionOptions={{}}
+            languages={DISCLOSURE_LANGUAGES.map((l) => ({
+              value: l,
+              label: DISCLOSURE_LANGUAGE_LABELS[l],
+            }))}
+            statuses={DISCLOSURE_PROJECT_STATUSES.map((s) => ({
+              value: s,
+              label: DISCLOSURE_PROJECT_STATUS_LABELS[s],
+            }))}
+            fieldLabels={{ ...PROJECT_FIELD_LABELS }}
+          />
+        ) : (
+          <p className="text-small text-ink-muted">
+            {project.name}（{formatJstDate(project.periodStart)}〜{formatJstDate(project.periodEnd)}
+            ）
+          </p>
+        )}
+      </Section>
+
+      <Section title={`基準と適用条件（${detail.frameworks.length}）`}>
+        <div className="space-y-3">
+          {detail.frameworks.map((f) => (
+            <FrameworkSettings
+              key={f.projectFramework.id}
               projectId={project.id}
-              baseUpdatedAt={project.updatedAt}
-              initial={{
-                name: project.name,
-                reportingEntity: project.reportingEntity,
-                periodStart: project.periodStart,
-                periodEnd: project.periodEnd,
-                currency: project.currency,
-                dueDate: project.dueDate ?? '',
-                status: project.status,
-                ownerUserId: project.ownerUserId ?? '',
-                reviewerUserId: project.reviewerUserId ?? '',
-                finalApproverUserId: project.finalApproverUserId ?? '',
-                languages: project.languages,
-                scopeOrgNote: project.scopeOrgNote,
-                scopeConsolidationNote: project.scopeConsolidationNote,
-                scopeGhgBoundaryNote: project.scopeGhgBoundaryNote,
-                scopeValueChainNote: project.scopeValueChainNote,
-                includedUnitIds: project.includedUnitIds,
-              }}
-              periods={[]}
-              members={detail.members.map((m) => ({
-                userId: m.userId,
-                displayName: m.displayName,
-                canApprove: permissionsFor(m.roleKeys).has('enterprise.disclosure.approve'),
-              }))}
-              units={shell.units.map((u) => ({ id: u.id, name: u.name }))}
-              purposes={[]}
-              versionOptions={{}}
-              languages={DISCLOSURE_LANGUAGES.map((l) => ({
-                value: l,
-                label: DISCLOSURE_LANGUAGE_LABELS[l],
-              }))}
-              statuses={DISCLOSURE_PROJECT_STATUSES.map((s) => ({
-                value: s,
-                label: DISCLOSURE_PROJECT_STATUS_LABELS[s],
-              }))}
-              fieldLabels={{ ...PROJECT_FIELD_LABELS }}
+              framework={f}
+              canWrite={detail.canWrite}
+              today={today}
+              decidedByName={(id) => nameOf(detail.members, id)}
+              newer={newerInfo.get(f.projectFramework.id) ?? []}
+              impact={impactByPf.get(f.projectFramework.id) ?? null}
+              historyOpen={historyOpen}
+              migrationOpen={migrationOpen}
             />
-          ) : (
-            <p className="text-[12px] text-ink-muted">
-              {project.name}（{formatJstDate(project.periodStart)}〜
-              {formatJstDate(project.periodEnd)}）
-            </p>
+          ))}
+          {detail.frameworks.length === 0 && (
+            <EmptyState
+              kind="not-applicable"
+              size="compact"
+              title="基準が登録されていません（社内 ESG 管理のみ）"
+              description="基準を使う開示は、対応する制度を選んで新しいプロジェクトとして作成します。"
+            />
           )}
         </div>
-      </Card>
-
-      {detail.frameworks.map((f) => (
-        <FrameworkSettings
-          key={f.projectFramework.id}
-          projectId={project.id}
-          framework={f}
-          canWrite={detail.canWrite}
-          today={today}
-          decidedByName={(id) => nameOf(detail.members, id)}
-          newer={newerInfo.get(f.projectFramework.id) ?? []}
-          impact={impactByPf.get(f.projectFramework.id) ?? null}
-          historyOpen={historyOpen}
-        />
-      ))}
-      {detail.frameworks.length === 0 && (
-        <Card>
-          <p className="px-3 py-3 text-[12px] text-ink-muted">
-            基準が登録されていません（社内 ESG 管理のみ）。
-          </p>
-        </Card>
-      )}
+      </Section>
     </div>
   );
 }
@@ -178,6 +187,7 @@ function FrameworkSettings({
   newer,
   impact,
   historyOpen,
+  migrationOpen,
 }: {
   projectId: string;
   framework: ProjectFrameworkView;
@@ -191,6 +201,7 @@ function FrameworkSettings({
   }>;
   impact: Awaited<ReturnType<typeof computeBlockImpact>> | null;
   historyOpen: boolean;
+  migrationOpen: boolean;
 }) {
   const pfId = f.projectFramework.id;
   const decided = f.projectFramework.currentDecisionId !== null;
@@ -198,10 +209,16 @@ function FrameworkSettings({
   const defaultRuleRef = `${f.label}${f.version.versionCode ? `（${f.version.versionCode}）` : ''}`;
 
   return (
-    <Card id={`pf-${pfId}`} className="scroll-mt-4">
+    <section
+      id={`pf-${pfId}`}
+      aria-labelledby={`pf-${pfId}-title`}
+      className="scroll-mt-4 rounded-t4d-lg border border-line bg-surface"
+    >
       <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-2">
-        <h3 className="text-[13px] font-semibold text-ink">{f.label}</h3>
-        <span className="text-[12px] text-ink-muted">{f.purposeLabel}</span>
+        <h3 id={`pf-${pfId}-title`} className="text-body font-semibold text-ink">
+          {f.label}
+        </h3>
+        <span className="text-small text-ink-muted">{f.purposeLabel}</span>
         <LegalStatusBadge legal={f.legal} />
         <ApplicabilityBadge
           status={f.projectFramework.applicabilityStatus}
@@ -212,11 +229,11 @@ function FrameworkSettings({
       <div className="grid gap-3 p-3 lg:grid-cols-2">
         {/* 適用条件（保存して準備を始める） */}
         <section aria-labelledby={`cond-${pfId}`} className="min-w-0 space-y-2">
-          <h4 id={`cond-${pfId}`} className="text-[12px] font-semibold text-ink">
+          <h4 id={`cond-${pfId}`} className="text-small font-semibold text-ink">
             適用条件（保存して準備を始める）
           </h4>
           {f.legal.coverageLabel && (
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-caption text-ink-muted">
               収録: {f.legal.coverageLabel}
               {f.legal.coverageNote ? `（${f.legal.coverageNote}）` : ''}／重要性の考え方:{' '}
               {f.legal.materialityLabel ?? '—'}
@@ -228,13 +245,13 @@ function FrameworkSettings({
             </MoreInfo>
           )}
           {f.conditionsChangedSinceDecision && (
-            <p className="flex items-center gap-1 text-[11px] text-[#8a5d00]">
+            <p className="flex items-center gap-1 text-caption text-warning-ink">
               <AlertTriangle className="size-3" aria-hidden="true" />
               判断を確定した後に条件が変わっています。必要なら判断を見直して追記してください。
             </p>
           )}
           {f.conditionFields.length === 0 ? (
-            <p className="text-[12px] text-ink-muted">この基準に記録する適用条件はありません。</p>
+            <p className="text-small text-ink-muted">この基準に記録する適用条件はありません。</p>
           ) : canWrite ? (
             <FrameworkConditionsForm
               projectId={projectId}
@@ -262,7 +279,7 @@ function FrameworkSettings({
               }
             />
           ) : (
-            <dl className="space-y-0.5 text-[12px]">
+            <dl className="space-y-0.5 text-small">
               {f.conditionFields.map((field) => (
                 <div key={field.key} className="flex justify-between gap-2">
                   <dt className="text-ink-muted">{field.label}</dt>
@@ -275,11 +292,11 @@ function FrameworkSettings({
 
         {/* 適用判断を確定 */}
         <section aria-labelledby={`dec-${pfId}`} className="min-w-0 space-y-2">
-          <h4 id={`dec-${pfId}`} className="text-[12px] font-semibold text-ink">
+          <h4 id={`dec-${pfId}`} className="text-small font-semibold text-ink">
             適用判断を確定
           </h4>
           {f.unknownConditions.length > 0 && f.conditionFields.length > 0 && (
-            <p className="flex gap-1 text-[11px] text-[#8a5d00]">
+            <p className="flex gap-1 text-caption text-warning-ink">
               <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
               未入力（不明）の条件: {f.unknownConditions.map((c) => c.label).join('、')}。
               不明のまま判断する場合は、理由にその旨を書いてください。
@@ -300,7 +317,7 @@ function FrameworkSettings({
 
           {/* 判断の履歴は既定で閉じる（件数は閉じていても見える。§10.4 B6） */}
           {f.decisions.length === 0 ? (
-            <p className="text-[11px] text-ink-muted">まだ判断は確定していません。</p>
+            <p className="text-caption text-ink-muted">まだ判断は確定していません。</p>
           ) : (
             <Collapsible
               variant="plain"
@@ -309,7 +326,7 @@ function FrameworkSettings({
             >
               <ol className="space-y-1">
                 {f.decisions.map((d) => (
-                  <li key={d.id} className="rounded-t4d bg-surface-muted px-2 py-1 text-[11px]">
+                  <li key={d.id} className="rounded-t4d bg-surface-muted px-2 py-1 text-caption">
                     <span className="font-medium">
                       判断 {d.decisionNo}：{APPLICABILITY_STATUS_LABELS[d.applicabilityStatus]}
                     </span>
@@ -335,74 +352,77 @@ function FrameworkSettings({
       {newer.length > 0 && (
         <section
           aria-labelledby={`newer-${pfId}`}
-          className="space-y-2 border-t border-line bg-warning-soft/30 px-3 py-3"
+          className="space-y-2 border-t border-line bg-warning-soft/30 px-3 py-2"
         >
+          {/* 新しい版があることは閉じない（気付かないまま旧版で進めない） */}
           <h4
             id={`newer-${pfId}`}
-            className="flex items-center gap-1 text-[12px] font-semibold text-ink"
+            className="flex items-center gap-1 text-small font-semibold text-ink"
           >
             <Info className="size-3.5" aria-hidden="true" />
             新しい版があります（このプロジェクトは自動では切り替えていません）
           </h4>
-          {newer.map((n) => (
-            <div key={n.versionId} className="space-y-1 text-[12px]">
-              <p className="font-medium">{n.label}</p>
-              <p className="text-ink-muted">
-                移行差分: 追加 {n.diff.added.length} 項目／変更 {n.diff.changed.length} 項目／削除{' '}
-                {n.diff.removed.length} 項目／変更なし {n.diff.unchangedCount} 項目
-              </p>
-              {n.diff.added.length + n.diff.changed.length + n.diff.removed.length > 0 && (
-                <details>
-                  <summary className="cursor-pointer text-[11px] text-brand-800">
-                    差分の項番を見る
-                  </summary>
-                  <ul className="mt-1 space-y-0.5 text-[11px]">
-                    {n.diff.added.map((i) => (
-                      <li key={`a-${i.code}`}>
-                        追加: {i.code} {i.title}
-                      </li>
-                    ))}
-                    {n.diff.changed.map((i) => (
-                      <li key={`c-${i.code}`}>
-                        変更: {i.code} {i.title}
-                      </li>
-                    ))}
-                    {n.diff.removed.map((i) => (
-                      <li key={`r-${i.code}`}>
-                        削除: {i.code} {i.title}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {impact && impact.blocks.length > 0 && (
-                <p className="text-[11px] text-ink-muted">
-                  現在の版で書いた原稿 {impact.blocks.length} 節（
-                  {impact.blocks.map((b) => `${b.title}（${b.statusLabel}）`).join('、')}）
-                  と承認・レビュー {impact.approvals.length} 件は、旧版のまま残ります。
-                </p>
-              )}
-              {canWrite && (
-                <form
-                  action={attachFrameworkVersionAction}
-                  className="flex flex-wrap items-center gap-2"
-                >
-                  <input type="hidden" name="projectId" value={projectId} />
-                  <input type="hidden" name="projectFrameworkId" value={pfId} />
-                  <input type="hidden" name="newVersionId" value={n.versionId} />
-                  <label className="flex items-center gap-1 text-[12px]">
-                    <input type="checkbox" name="acknowledgeImpact" />
-                    影響を確認しました
-                  </label>
-                  <SubmitButton variant="outline" size="xs" pendingLabel="追加中…">
-                    新しい版をこのプロジェクトに追加
-                  </SubmitButton>
-                </form>
-              )}
+          <Collapsible
+            variant="plain"
+            summary={`版の移行（詳細設定）: ${newer.map((n) => n.label).join('、')}`}
+            open={migrationOpen || undefined}
+          >
+            <div className="space-y-3">
+              {newer.map((n) => (
+                <div key={n.versionId} className="space-y-1 text-small">
+                  <p className="font-medium">{n.label}</p>
+                  <p className="text-ink-muted">
+                    移行差分: 追加 {n.diff.added.length} 項目／変更 {n.diff.changed.length}{' '}
+                    項目／削除 {n.diff.removed.length} 項目／変更なし {n.diff.unchangedCount} 項目
+                  </p>
+                  {n.diff.added.length + n.diff.changed.length + n.diff.removed.length > 0 && (
+                    <Collapsible variant="plain" summary="差分の項番を見る">
+                      <ul className="space-y-0.5 text-caption">
+                        {n.diff.added.map((i) => (
+                          <li key={`a-${i.code}`}>
+                            追加: {i.code} {i.title}
+                          </li>
+                        ))}
+                        {n.diff.changed.map((i) => (
+                          <li key={`c-${i.code}`}>
+                            変更: {i.code} {i.title}
+                          </li>
+                        ))}
+                        {n.diff.removed.map((i) => (
+                          <li key={`r-${i.code}`}>
+                            削除: {i.code} {i.title}
+                          </li>
+                        ))}
+                      </ul>
+                    </Collapsible>
+                  )}
+                  {impact && impact.blocks.length > 0 && (
+                    <p className="text-caption text-ink-muted">
+                      現在の版で書いた原稿 {impact.blocks.length} 節（
+                      {impact.blocks.map((b) => `${b.title}（${b.statusLabel}）`).join('、')}）
+                      と承認・レビュー {impact.approvals.length} 件は、旧版のまま残ります。
+                    </p>
+                  )}
+                  {canWrite && (
+                    <form
+                      action={attachFrameworkVersionAction}
+                      className="flex flex-wrap items-center gap-2"
+                    >
+                      <input type="hidden" name="projectId" value={projectId} />
+                      <input type="hidden" name="projectFrameworkId" value={pfId} />
+                      <input type="hidden" name="newVersionId" value={n.versionId} />
+                      <NativeCheckbox name="acknowledgeImpact" label="影響を確認しました" />
+                      <SubmitButton variant="secondary" size="xs" pendingLabel="追加中…">
+                        新しい版をこのプロジェクトに追加
+                      </SubmitButton>
+                    </form>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          </Collapsible>
         </section>
       )}
-    </Card>
+    </section>
   );
 }

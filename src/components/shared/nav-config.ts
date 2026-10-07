@@ -64,6 +64,14 @@ export interface NavItem {
    * 付けないと、折りたたみ中に規制対応度・他社比較の画面で現在地が 1 つも付かない
    */
   currentPrefix?: string;
+  /**
+   * グループの行だけに付ける。グループの入口の画面（href）を開くのに要る権限。持たない利用者には
+   * グループと開ける子を残したまま、行のリンク先を「開ける最初の子」にする（開くと「アクセス権限が
+   * ありません」になる項目をメニューに出さない。plan §1.5）。permission と違い、子は隠さない
+   */
+  linkPermission?: PermissionKey;
+  /** visibleNavTree が付ける印: 行のリンク先を最初の子に置き換えた（パレットに入口として出さない） */
+  linkFallback?: true;
 }
 
 /**
@@ -434,6 +442,8 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
     label: '開示プロジェクト',
     href: '/enterprise/disclosure-projects',
     icon: FolderKanban,
+    // 一覧は開示の閲覧権限が要る（拠点担当は持たない）。配下の SSBJ・CDP は開けるのでグループは残す
+    linkPermission: 'enterprise.disclosure.read',
     keywords: ['開示', 'プロジェクト', '原稿', 'レビュー', '承認', '出力'],
     children: [
       legacyItemWithSecondaryChild('/enterprise/disclosures/ssbj', 'SSBJ', NARRATIVES_ITEM.href),
@@ -466,6 +476,9 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
         label: '数値を登録（標準CSV）',
         href: '/enterprise/imports/standard',
         icon: FileSpreadsheet,
+        // 画面は取込とデータ入力の権限が要る（取込の権限を持つ役割はすべてデータ入力も持つ）。
+        // レビュー担当・最終承認者に「開くと権限なし」の項目を出さない
+        permission: 'enterprise.import.run',
         keywords: ['CSV', '標準', '手入力', '数値', '登録'],
       },
       { ...legacyItem('/enterprise/ghg', '算定サマリー'), label: 'GHG算定' },
@@ -749,16 +762,18 @@ export function branchToRemember(
   return navBranchOf(items, key);
 }
 
+/**
+ * 監査法人のメニュー（plan §1.4。形を固定するテストが無い範囲で、手続の流れの順に再編した）。
+ *
+ * 案件ホーム／保証契約／〔案件を選んでいるときだけ〕計画・実施・結論・記録／設定。
+ * 案件を選んでいないときは案件の 12 画面を出さない（行き先の無い 11 項目が並び、押すと案件一覧へ
+ * 戻るだけだった。N-12）。サイドバーは代わりに「案件を選ぶと手続の画面が並びます」の 1 行を出す。
+ * 案件の画面は案件の閲覧権限（assurance.engagement.read）を求める: 法人管理者には出さない
+ * （未アサイン案件のクライアントデータを見られない。assumptions C-1）。
+ * 現在地はツリー全体で 1 つ（single）。
+ */
 export function assuranceNav(engagementId: string | null): NavItem[] {
-  const base = engagementId ? `/assurance/engagements/${engagementId}` : null;
-  const item = (label: string, path: string, icon: LucideIcon, keywords?: string[]): NavItem => ({
-    label,
-    href: base ? `${base}/${path}` : '/assurance/engagements',
-    icon,
-    keywords,
-  });
-
-  return [
+  const top: NavItem[] = [
     { label: '案件ホーム', href: '/assurance/dashboard', icon: Home, keywords: ['dashboard'] },
     {
       label: '保証契約',
@@ -766,22 +781,144 @@ export function assuranceNav(engagementId: string | null): NavItem[] {
       icon: BadgeCheck,
       keywords: ['engagement', '案件'],
     },
-    item('スコープ', 'scope', Layers, ['scope', '範囲']),
-    item('Data Room', 'data-room', FolderOpen, ['共有', 'snapshot']),
-    item('母集団', 'population', Filter, ['population', '完全性']),
-    item('サンプリング', 'sampling', ListChecks, ['sample', '抽出']),
-    item('保証手続・調書', 'testing', FileSearch, ['test', '調書', 'workpaper']),
-    item('PBC／資料依頼', 'requests', Inbox, ['pbc', '依頼']),
-    item('指摘・例外', 'issues', MessageSquareWarning, ['issue', '指摘']),
-    item('レビューNote', 'review-notes', PenLine, ['review']),
-    item('Sign-off', 'signoffs', Signature, ['signoff', '承認']),
-    item('監査ログ', 'audit-trail', ShieldCheck, ['audit', 'ログ']),
-    item('Export', 'exports', ClipboardList, ['export', '出力']),
-    {
-      label: '設定',
-      href: '/assurance/settings',
-      icon: Settings,
-      permission: 'assurance.firm.manage',
-    },
   ];
+  const settings: NavItem = {
+    label: '設定',
+    href: '/assurance/settings',
+    icon: Settings,
+    permission: 'assurance.firm.manage',
+  };
+  if (!engagementId) return [...top, settings];
+
+  const base = `/assurance/engagements/${engagementId}`;
+  const item = (label: string, path: string, icon: LucideIcon, keywords?: string[]): NavItem => ({
+    label,
+    href: `${base}/${path}`,
+    icon,
+    keywords,
+    permission: ENGAGEMENT_READ,
+  });
+  const group = (label: string, icon: LucideIcon, children: NavItem[]): NavItem => ({
+    label,
+    // グループ行の行き先は先頭の画面（グループ名を押しても行き止まりにしない）
+    href: children[0]!.href,
+    icon,
+    permission: ENGAGEMENT_READ,
+    children,
+  });
+
+  return [
+    ...top,
+    group('計画', ClipboardList, [
+      item('概要', 'overview', Gauge, ['overview', '概要', '進捗', 'チーム']),
+      item('スコープ', 'scope', Layers, ['scope', '範囲']),
+    ]),
+    group('実施', FileSearch, [
+      item('Data Room', 'data-room', FolderOpen, ['共有', 'snapshot']),
+      item('母集団', 'population', Filter, ['population', '完全性']),
+      item('サンプリング', 'sampling', ListChecks, ['sample', '抽出']),
+      item('保証手続・調書', 'testing', FileSearch, ['test', '調書', 'workpaper']),
+      item('PBC／資料依頼', 'requests', Inbox, ['pbc', '依頼']),
+      item('指摘・例外', 'issues', MessageSquareWarning, ['issue', '指摘']),
+    ]),
+    group('結論', Signature, [
+      item('レビューNote', 'review-notes', PenLine, ['review']),
+      item('Sign-off', 'signoffs', Signature, ['signoff', '承認']),
+    ]),
+    group('記録', ShieldCheck, [
+      item('監査ログ', 'audit-trail', ShieldCheck, ['audit', 'ログ']),
+      // 出力は出力の権限が要る（無い役割は開くと権限なしになるため、メニューに出さない。R3 と同じ考え方）
+      {
+        ...item('出力', 'exports', ClipboardList, ['export', '出力', 'Export']),
+        permission: 'assurance.export.run',
+      },
+    ]),
+    settings,
+  ];
+}
+
+const ENGAGEMENT_READ: PermissionKey = 'assurance.engagement.read';
+
+/** 案件を選んでいないときにサイドバーへ出す 1 行（N-12） */
+export const ASSURANCE_NO_ENGAGEMENT_HINT = '案件を選ぶと手続の画面が並びます';
+
+/** 現在地の付け方（従来ツリーは最上位＋葉の既存仕様、開示優先・監査法人は 1 つ） */
+export function navCurrentModeFor(variant: NavVariant): NavCurrentMode {
+  return variant === 'enterprise' ? 'top-and-leaf' : 'single';
+}
+
+// ----------------------------------------------------------------------
+// グループの開閉（plan §1.4）
+// ----------------------------------------------------------------------
+
+/**
+ * グループの識別子＝自分までのラベルの経路（例: 「開示対応」「開示対応 / SSBJ」）。
+ * 権限で項目が隠れると位置キー（添字）がずれるため、保存にはラベルの経路を使う
+ */
+export function navGroupId(trail: readonly string[]): string {
+  return joinNavBranch(trail);
+}
+
+/**
+ * 役割で既定を閉じるグループ。開示の閲覧権限が無い利用者（拠点担当・サプライヤー担当）には、
+ * 開示の仕事のグループを既定で閉じる（開けられる。開閉は利用者ごとに覚える）。分析は閉じない
+ * （数値を読むだけの画面で、開示の権限は要らない）
+ */
+export function defaultCollapsedGroups(
+  variant: NavVariant,
+  has: (permission: PermissionKey) => boolean,
+): string[] {
+  if (has('enterprise.disclosure.read')) return [];
+  if (variant === 'enterprise') return [navGroupId(['開示対応'])];
+  if (variant === 'enterprise-disclosure') return [navGroupId(['開示プロジェクト'])];
+  return [];
+}
+
+/**
+ * 権限が無いため出さない項目の権限キー（Sidebar・Command Palette が項目の permission で隠す）。
+ * href で隠すと、案件の画面のように URL に ID を含む項目を案件ごとに数え直す必要があるため
+ */
+export function missingNavPermissions(
+  items: NavItem[],
+  has: (permission: PermissionKey) => boolean,
+): PermissionKey[] {
+  const missing = new Set<PermissionKey>();
+  const walk = (nodes: NavItem[]) => {
+    for (const node of nodes) {
+      if (node.permission && !has(node.permission)) missing.add(node.permission);
+      if (node.linkPermission && !has(node.linkPermission)) missing.add(node.linkPermission);
+      walk(node.children ?? []);
+    }
+  };
+  walk(items);
+  return [...missing];
+}
+
+/**
+ * 利用者に見せるツリー（Sidebar・Command Palette・パンくずが同じものを使う）。
+ *  - href・権限で隠す項目を全階層から外す（例: 管理 > 設定）
+ *  - linkPermission を持たない利用者には、グループの行のリンク先を開ける最初の子にする（linkFallback）
+ */
+export function visibleNavTree(
+  items: NavItem[],
+  hiddenHrefs: readonly string[],
+  hiddenPermissions: readonly PermissionKey[],
+): NavItem[] {
+  const filterTree = (nodes: NavItem[]): NavItem[] =>
+    nodes
+      .filter(
+        (node) =>
+          !hiddenHrefs.includes(node.href) &&
+          !(node.permission && hiddenPermissions.includes(node.permission)),
+      )
+      .map((node) => {
+        const children = node.children ? filterTree(node.children) : undefined;
+        const next: NavItem = children ? { ...node, children } : node;
+        if (node.linkPermission && hiddenPermissions.includes(node.linkPermission)) {
+          const first = children?.find((child) => !child.secondary);
+          if (first) return { ...next, href: first.href, linkFallback: true };
+        }
+        return next;
+      });
+  return filterTree(items);
 }

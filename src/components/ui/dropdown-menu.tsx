@@ -19,7 +19,7 @@ export const DropdownMenuContent = React.forwardRef<
         ref={ref}
         sideOffset={sideOffset}
         className={cn(
-          'z-50 min-w-[180px] overflow-hidden rounded-t4d border border-line bg-surface p-1 shadow-md',
+          'z-(--z-popover) min-w-[180px] overflow-hidden rounded-t4d border border-line bg-surface p-1 shadow-overlay',
           className,
         )}
         {...props}
@@ -36,7 +36,7 @@ export const DropdownMenuItem = React.forwardRef<
     <DropdownMenuPrimitive.Item
       ref={ref}
       className={cn(
-        'flex cursor-pointer select-none items-center gap-2 rounded-[4px] px-2 py-1.5 text-[13px] text-ink outline-none',
+        'flex cursor-pointer select-none items-center gap-2 rounded-[4px] px-2 py-1.5 text-body text-ink outline-none',
         'focus:bg-brand-50 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
@@ -53,7 +53,7 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
     <DropdownMenuPrimitive.CheckboxItem
       ref={ref}
       className={cn(
-        'flex cursor-pointer select-none items-center gap-2 rounded-[4px] py-1.5 pl-7 pr-2 text-[13px] text-ink outline-none',
+        'flex cursor-pointer select-none items-center gap-2 rounded-[4px] py-1.5 pl-7 pr-2 text-body text-ink outline-none',
         'relative focus:bg-brand-50 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
@@ -77,7 +77,7 @@ export const DropdownMenuLabel = React.forwardRef<
     <DropdownMenuPrimitive.Label
       ref={ref}
       className={cn(
-        'px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-muted',
+        'px-2 py-1 text-caption font-semibold uppercase tracking-wide text-ink-muted',
         className,
       )}
       {...props}

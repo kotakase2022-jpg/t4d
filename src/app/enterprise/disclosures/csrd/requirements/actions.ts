@@ -103,12 +103,15 @@ export async function reviewCsrdAssessmentFormAction(
   );
 }
 
-/** 対応計画を追加する（評価対象の要求事項のみ） */
+/**
+ * 対応計画を追加する（評価対象の要求事項のみ）。断られたときは追加の枠（CreatePanel・?new=1）を
+ * 開いたまま理由を示す（閉じた画面へ戻すと、どこで何を直すのかが分からなくなる）
+ */
 export async function createCsrdActionPlanAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const back = requirementDetailPath(formData.get('itemId'));
-  await withUserFacingError(back, async () => {
+  await withUserFacingError(`${back}?new=1`, async () => {
     await createCsrdActionPlan(db, ctx, parsePlanForm(formData));
   });
   revalidateCsrd();

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, confirmInDialog, loginAs, openMoreMenu } from './helpers';
 
 /**
  * 「操作したのに何も起きないように見える」問題の回帰テスト。
@@ -10,7 +10,9 @@ test('前年度から複製すると、完了メッセージが表示される',
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
   await page.goto('/enterprise/data');
 
-  await page.getByRole('button', { name: '前年度から複製' }).click();
+  // 見出しの「その他」→ 範囲を確認するダイアログ（plan §1.16 区分 2）
+  await (await openMoreMenu(page)).getByRole('menuitem', { name: /^前年度から複製/ }).click();
+  await confirmInDialog(page);
   await page.waitForURL(/flash=carried/);
 
   const status = page.getByRole('status');

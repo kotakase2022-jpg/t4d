@@ -238,13 +238,15 @@ export async function confirmImportAction(formData: FormData): Promise<void> {
   }
   const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
 
-  await confirmIngestionJob(
-    db,
-    ctx,
-    jobId,
-    decisions,
-    reportingPeriodId ? { reportingPeriodId, sourceLocatorByRowId } : undefined,
-  );
+  await withUserFacingError(`/enterprise/imports/${jobId}`, async () => {
+    await confirmIngestionJob(
+      db,
+      ctx,
+      jobId,
+      decisions,
+      reportingPeriodId ? { reportingPeriodId, sourceLocatorByRowId } : undefined,
+    );
+  });
   revalidatePath('/enterprise/imports');
   revalidatePath('/enterprise/data');
   redirect('/enterprise/data?flash=imported');
@@ -419,10 +421,13 @@ export async function relinkSupplierFactorAction(formData: FormData): Promise<vo
 export async function transitionDataPointAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  await transitionDataPoint(db, ctx, {
-    dataPointId: String(formData.get('dataPointId') ?? ''),
-    to: String(formData.get('to') ?? '') as DataPointStatus,
-    comment: (formData.get('comment') as string) || null,
+  const dataPointId = String(formData.get('dataPointId') ?? '');
+  await withUserFacingError(`/enterprise/data/${dataPointId}`, async () => {
+    await transitionDataPoint(db, ctx, {
+      dataPointId,
+      to: String(formData.get('to') ?? '') as DataPointStatus,
+      comment: (formData.get('comment') as string) || null,
+    });
   });
   revalidatePath('/enterprise/data');
   revalidatePath(`/enterprise/data/${String(formData.get('dataPointId') ?? '')}`);
@@ -478,13 +483,15 @@ export async function bulkTransitionAction(
   const db = await getDb();
   const ids = formData.getAll('selected').map(String);
   const to = String(formData.get('to') ?? '') as DataPointStatus;
+  // 一括の差戻しの理由（確認ダイアログで必須）。各行のコメントと承認の記録に残す
+  const comment = String(formData.get('comment') ?? '').trim() || null;
   if (ids.length === 0) {
     return { succeeded: 0, failures: [], message: '対象が選択されていません。' };
   }
 
   // 一括操作は 1 件ずつ権限・状態遷移を検査するため、部分的に失敗する。
   // 結果を捨てると「押しても何も起きない」ように見えるので、必ず画面へ返す。
-  const result = await bulkTransition(db, ctx, ids, to);
+  const result = await bulkTransition(db, ctx, ids, to, { comment });
   revalidatePath('/enterprise/data');
   revalidatePath('/enterprise/dashboard');
 
@@ -502,14 +509,18 @@ export async function updateDataPointAction(formData: FormData): Promise<void> {
   const dataPointId = String(formData.get('dataPointId') ?? '');
   const rawValue = String(formData.get('value') ?? '').replace(/,/g, '');
   const value = rawValue === '' ? null : Number(rawValue);
-  if (value !== null && !Number.isFinite(value)) throw new Error('値が数値ではありません。');
 
-  await updateDataPointValue(db, ctx, {
-    dataPointId,
-    value,
-    unitOfMeasure: String(formData.get('unitOfMeasure') ?? ''),
-    methodology: (formData.get('methodology') as string) || null,
-    changeReason: String(formData.get('changeReason') ?? '画面からの修正'),
+  await withUserFacingError(`/enterprise/data/${dataPointId}`, async () => {
+    // 入力の誤りは利用者に見せる（画面へ戻して理由を出す）
+    if (value !== null && !Number.isFinite(value))
+      throw new ValidationError('値が数値ではありません。');
+    await updateDataPointValue(db, ctx, {
+      dataPointId,
+      value,
+      unitOfMeasure: String(formData.get('unitOfMeasure') ?? ''),
+      methodology: (formData.get('methodology') as string) || null,
+      changeReason: String(formData.get('changeReason') ?? '画面からの修正'),
+    });
   });
   revalidatePath(`/enterprise/data/${dataPointId}`);
   revalidatePath('/enterprise/data');
@@ -552,6 +563,31 @@ export async function linkEvidenceAction(formData: FormData): Promise<void> {
 // CDP / CSRD（質問詳細ビューを共有するため、両フレームワークの画面を再検証する）
 // ----------------------------------------------------------------------
 
+/**
+ * 回答の画面（question-view。CDP・CSRD 共用）のパス。業務エラーをその画面へ戻すために使う。
+ * フォームは基準を送らないため、要求事項から基準を引く（見つからなければ CDP の一覧）
+ */
+async function disclosureItemPath(
+  db: Awaited<ReturnType<typeof getDb>>,
+  itemId: string | null,
+): Promise<string> {
+  if (!itemId) return '/enterprise/disclosures/cdp';
+  const item = await db.findById('disclosureItems', itemId);
+  const version = item ? await db.findById('frameworkVersions', item.frameworkVersionId) : null;
+  const framework = version ? await db.findById('frameworks', version.frameworkId) : null;
+  return framework && (framework.key === 'cdp' || framework.key === 'csrd')
+    ? `/enterprise/disclosures/${framework.key}/${itemId}`
+    : '/enterprise/disclosures/cdp';
+}
+
+async function responsePath(
+  db: Awaited<ReturnType<typeof getDb>>,
+  responseId: string,
+): Promise<string> {
+  const response = responseId ? await db.findById('disclosureResponses', responseId) : null;
+  return disclosureItemPath(db, response?.itemId ?? null);
+}
+
 function revalidateDisclosure(itemId: string | null): void {
   for (const base of ['/enterprise/disclosures/cdp', '/enterprise/disclosures/csrd']) {
     if (itemId) revalidatePath(`${base}/${itemId}`);
@@ -568,7 +604,9 @@ export async function generateCdpDraftAction(formData: FormData): Promise<void> 
   const responseId = String(formData.get('responseId') ?? '');
   const response = await db.findById('disclosureResponses', responseId);
 
-  await generateDisclosureDraft(db, ctx, responseId);
+  await withUserFacingError(await responsePath(db, responseId), async () => {
+    await generateDisclosureDraft(db, ctx, responseId);
+  });
 
   revalidateDisclosure(response?.itemId ?? null);
 }
@@ -579,21 +617,23 @@ export async function saveCdpResponseAction(formData: FormData): Promise<void> {
   const responseId = String(formData.get('responseId') ?? '');
   const numericRaw = String(formData.get('answerNumeric') ?? '').replace(/,/g, '');
   const answerNumeric = numericRaw === '' ? null : Number(numericRaw);
-  // 数値として読めない入力を黙って null に落とすと、入力した値が消える。
-  // 空欄（未入力）と「数値でない文字列」は区別して、後者は理由を返す。
-  if (numericRaw !== '' && !Number.isFinite(answerNumeric)) {
-    throw new AuthorizationError('数値欄には数値を入力してください（例: 1234.5）。');
-  }
 
-  await saveDisclosureResponse(db, ctx, {
-    responseId,
-    answerText: (formData.get('answerText') as string) ?? '',
-    answerNumeric,
-    answerChoice: formData.getAll('answerChoice').map(String).filter(Boolean),
-    aiRunId: (formData.get('aiRunId') as string) || null,
-    editedFromAi: formData.get('editedFromAi') === 'true',
-    carryForwardDecision:
-      (formData.get('carryForwardDecision') as 'reuse' | 'update' | 'new') || null,
+  await withUserFacingError(await responsePath(db, responseId), async () => {
+    // 数値として読めない入力を黙って null に落とすと、入力した値が消える。
+    // 空欄（未入力）と「数値でない文字列」は区別して、後者は理由を返す。
+    if (numericRaw !== '' && !Number.isFinite(answerNumeric)) {
+      throw new AuthorizationError('数値欄には数値を入力してください（例: 1234.5）。');
+    }
+    await saveDisclosureResponse(db, ctx, {
+      responseId,
+      answerText: (formData.get('answerText') as string) ?? '',
+      answerNumeric,
+      answerChoice: formData.getAll('answerChoice').map(String).filter(Boolean),
+      aiRunId: (formData.get('aiRunId') as string) || null,
+      editedFromAi: formData.get('editedFromAi') === 'true',
+      carryForwardDecision:
+        (formData.get('carryForwardDecision') as 'reuse' | 'update' | 'new') || null,
+    });
   });
 
   const response = await db.findById('disclosureResponses', responseId);
@@ -612,10 +652,11 @@ export async function explainAnomaliesAction(formData: FormData): Promise<void> 
   const dataPointId = String(formData.get('dataPointId') ?? '');
 
   const { explainDataPointAnomalies } = await import('@/lib/services/anomaly-explanation');
-  const { run } = await explainDataPointAnomalies(db, ctx, dataPointId);
-
-  revalidatePath(`/enterprise/data/${dataPointId}`);
-  redirect(`/enterprise/data/${dataPointId}?explain=${run.id}`);
+  await withUserFacingError(`/enterprise/data/${dataPointId}`, async () => {
+    const { run } = await explainDataPointAnomalies(db, ctx, dataPointId);
+    revalidatePath(`/enterprise/data/${dataPointId}`);
+    redirect(`/enterprise/data/${dataPointId}?explain=${run.id}`);
+  });
 }
 
 /**
@@ -663,11 +704,22 @@ export async function rejectAiDraftAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const aiRunId = String(formData.get('aiRunId') ?? '');
-  await recordAiDecision(db, ctx, aiRunId, 'rejected', (formData.get('comment') as string) || null);
+  const itemId = String(formData.get('itemId') ?? '');
+  await withUserFacingError(
+    itemId ? await disclosureItemPath(db, itemId) : '/enterprise/ai',
+    async () => {
+      await recordAiDecision(
+        db,
+        ctx,
+        aiRunId,
+        'rejected',
+        (formData.get('comment') as string) || null,
+      );
+    },
+  );
 
   // 質問詳細も再検証する。以前は一覧しか revalidate しておらず、
   // Reject を押した当の画面が更新されないため「押しても何も起きない」ように見えていた。
-  const itemId = String(formData.get('itemId') ?? '');
   revalidateDisclosure(itemId || null);
   revalidatePath('/enterprise/ai');
 }
@@ -678,9 +730,13 @@ export async function transitionCdpResponseAction(formData: FormData): Promise<v
   const responseId = String(formData.get('responseId') ?? '');
   const to = String(formData.get('to') ?? '') as ResponseStatus;
 
-  const response = await transitionDisclosureResponse(db, ctx, responseId, to);
+  let itemId: string | null = null;
+  await withUserFacingError(await responsePath(db, responseId), async () => {
+    const response = await transitionDisclosureResponse(db, ctx, responseId, to);
+    itemId = response.itemId;
+  });
 
-  revalidateDisclosure(response.itemId);
+  revalidateDisclosure(itemId);
 }
 
 // ----------------------------------------------------------------------
@@ -695,7 +751,8 @@ export async function transitionCdpResponseAction(formData: FormData): Promise<v
  * 付与できるのは企業側の権限を持つ人だけで、対象が自社のものであることも確認する。
  */
 export async function createGrantAction(formData: FormData): Promise<void> {
-  await withUserFacingError('/enterprise/settings', async () => {
+  // 業務エラーは「アクセス許諾」タブの作成欄（?new=1）へ戻す。設定の既定のタブ（メンバー）へ飛ばさない
+  await withUserFacingError('/enterprise/settings?tab=grants&new=1', async () => {
     const ctx = await requireEnterpriseContext();
     assertCan(ctx, 'enterprise.grant.manage');
     const db = await getDb();
@@ -803,6 +860,21 @@ export async function createGrantAction(formData: FormData): Promise<void> {
 }
 
 export async function toggleGrantAction(formData: FormData): Promise<void> {
+  await withUserFacingError('/enterprise/settings?tab=grants', async () => {
+    await toggleGrant(formData);
+  });
+  revalidatePath('/enterprise/settings');
+  // 結果を通知に出す（plan §1.16 区分 3）。取消の通知には「元に戻す」（再付与）を置くため、対象の ID を渡す
+  const grantId = String(formData.get('grantId') ?? '');
+  if (grantId) {
+    const flash = formData.get('revoke') === 'true' ? 'grantRevoked' : 'grantRestored';
+    redirect(
+      `/enterprise/settings?tab=grants&flash=${flash}&grantId=${encodeURIComponent(grantId)}`,
+    );
+  }
+}
+
+async function toggleGrant(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   assertCan(ctx, 'enterprise.grant.manage');
   const db = await getDb();
@@ -837,8 +909,6 @@ export async function toggleGrantAction(formData: FormData): Promise<void> {
       resourceId: grantId,
     });
   }
-
-  revalidatePath('/enterprise/settings');
 }
 
 // ----------------------------------------------------------------------
@@ -846,6 +916,13 @@ export async function toggleGrantAction(formData: FormData): Promise<void> {
 // ----------------------------------------------------------------------
 
 export async function respondPbcAction(formData: FormData): Promise<void> {
+  await withUserFacingError('/enterprise/workflows', async () => {
+    await respondPbc(formData);
+  });
+  revalidatePath('/enterprise/workflows');
+}
+
+async function respondPbc(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   assertCan(ctx, 'enterprise.pbc.respond');
   const db = await getDb();
@@ -853,11 +930,11 @@ export async function respondPbcAction(formData: FormData): Promise<void> {
   const requestId = String(formData.get('requestId') ?? '');
   const request = await db.findById('pbcRequests', requestId);
   if (!request || request.clientOrganizationId !== ctx.workspace.organizationId) {
-    throw new Error('資料依頼が見つかりません。');
+    throw new NotFoundError('資料依頼が見つかりません。');
   }
 
   const body = String(formData.get('body') ?? '').trim();
-  if (!body) throw new Error('回答内容を入力してください。');
+  if (!body) throw new ValidationError('回答内容を入力してください。');
 
   const now = new Date().toISOString();
   const fileVersionIds: Uuid[] = [];
@@ -900,8 +977,6 @@ export async function respondPbcAction(formData: FormData): Promise<void> {
     resourceId: requestId,
     engagementId: request.engagementId,
   });
-
-  revalidatePath('/enterprise/workflows');
 }
 
 // ----------------------------------------------------------------------
@@ -951,7 +1026,9 @@ export async function createReportingPeriodAction(formData: FormData): Promise<v
 export async function createUnitAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  await createOrganizationUnit(db, ctx, parseOrganizationUnitInput(formGetter(formData)));
+  await withUserFacingError('/enterprise/organizations', async () => {
+    await createOrganizationUnit(db, ctx, parseOrganizationUnitInput(formGetter(formData)));
+  });
   revalidatePath('/enterprise/organizations');
 }
 
@@ -959,21 +1036,25 @@ export async function updateUnitAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const unitId = String(formData.get('unitId') ?? '');
-  await updateOrganizationUnit(db, ctx, unitId, parseOrganizationUnitInput(formGetter(formData)));
+  await withUserFacingError('/enterprise/organizations', async () => {
+    await updateOrganizationUnit(db, ctx, unitId, parseOrganizationUnitInput(formGetter(formData)));
+  });
   revalidatePath('/enterprise/organizations');
 }
 
 export async function createCampaignAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  await createCollectionCampaign(db, ctx, {
-    name: String(formData.get('name') ?? ''),
-    reportingPeriodId: String(formData.get('reportingPeriodId') ?? ''),
-    dueDate: String(formData.get('dueDate') ?? ''),
-    description: (formData.get('description') as string) || null,
-    unitIds: formData.getAll('unitIds').map(String),
-    metricIds: formData.getAll('metricIds').map(String),
-    ownerUserId: (formData.get('ownerUserId') as string) || null,
+  await withUserFacingError('/enterprise/organizations', async () => {
+    await createCollectionCampaign(db, ctx, {
+      name: String(formData.get('name') ?? ''),
+      reportingPeriodId: String(formData.get('reportingPeriodId') ?? ''),
+      dueDate: String(formData.get('dueDate') ?? ''),
+      description: (formData.get('description') as string) || null,
+      unitIds: formData.getAll('unitIds').map(String),
+      metricIds: formData.getAll('metricIds').map(String),
+      ownerUserId: (formData.get('ownerUserId') as string) || null,
+    });
   });
   revalidatePath('/enterprise/organizations');
 }
@@ -988,18 +1069,19 @@ export async function runConsistencyCheckAction(formData: FormData): Promise<voi
   const shell = await loadEnterpriseShell();
   const frameworkKey = String(formData.get('framework') ?? 'cdp') as FrameworkKey;
 
-  const { run } = await runDisclosureConsistencyCheck(
-    db,
-    ctx,
-    frameworkKey,
-    shell.currentPeriod,
-    shell.periods,
-  );
-
-  revalidatePath(`/enterprise/disclosures/${frameworkKey}`);
-  revalidatePath('/enterprise/ai');
-  // 結果は URL State で持つ（再読込しても同じ結果を読み直せる）
-  redirect(`/enterprise/disclosures/${frameworkKey}?check=${run.id}`);
+  await withUserFacingError(`/enterprise/disclosures/${frameworkKey}`, async () => {
+    const { run } = await runDisclosureConsistencyCheck(
+      db,
+      ctx,
+      frameworkKey,
+      shell.currentPeriod,
+      shell.periods,
+    );
+    revalidatePath(`/enterprise/disclosures/${frameworkKey}`);
+    revalidatePath('/enterprise/ai');
+    // 結果は URL State で持つ（再読込しても同じ結果を読み直せる）
+    redirect(`/enterprise/disclosures/${frameworkKey}?check=${run.id}`);
+  });
 }
 
 // ----------------------------------------------------------------------
@@ -1012,7 +1094,9 @@ export async function evaluateApplicabilityAction(formData: FormData): Promise<v
   const shell = await loadEnterpriseShell();
   const frameworkKey = String(formData.get('framework') ?? 'cdp') as FrameworkKey;
 
-  await evaluateApplicability(db, ctx, frameworkKey, shell.currentPeriod);
+  await withUserFacingError(`/enterprise/disclosures/${frameworkKey}`, async () => {
+    await evaluateApplicability(db, ctx, frameworkKey, shell.currentPeriod);
+  });
 
   revalidatePath(`/enterprise/disclosures/${frameworkKey}`);
   redirect(`/enterprise/disclosures/${frameworkKey}?applicability=1`);
@@ -1030,28 +1114,30 @@ export async function evaluateApplicabilityAction(formData: FormData): Promise<v
  * 取り込み元の原本も残る（保証手続で「何を取り込んだか」を示せる）。
  */
 export async function previewDisclosureImportAction(formData: FormData): Promise<void> {
-  const ctx = await requireEnterpriseContext();
-  assertCan(ctx, 'enterprise.disclosure.write');
-  const db = await getDb();
+  await withUserFacingError('/enterprise/disclosures/cdp/import', async () => {
+    const ctx = await requireEnterpriseContext();
+    assertCan(ctx, 'enterprise.disclosure.write');
+    const db = await getDb();
 
-  const file = formData.get('file');
-  if (!(file instanceof File) || file.size === 0) {
-    throw new Error('ファイルを選択してください。');
-  }
-  const targetPeriodId = String(formData.get('targetPeriodId') ?? '');
+    const file = formData.get('file');
+    if (!(file instanceof File) || file.size === 0) {
+      throw new ValidationError('ファイルを選択してください。');
+    }
+    const targetPeriodId = String(formData.get('targetPeriodId') ?? '');
 
-  const stored = await storeNewFile(db, ctx, {
-    bucket: 'evidence-private',
-    scope: 'enterprise-original',
-    originalName: file.name,
-    mimeType: file.type || 'application/octet-stream',
-    bytes: new Uint8Array(await file.arrayBuffer()),
-    reportingPeriodId: targetPeriodId || null,
-    documentType: 'past_disclosure_answers',
+    const stored = await storeNewFile(db, ctx, {
+      bucket: 'evidence-private',
+      scope: 'enterprise-original',
+      originalName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      bytes: new Uint8Array(await file.arrayBuffer()),
+      reportingPeriodId: targetPeriodId || null,
+      documentType: 'past_disclosure_answers',
+    });
+
+    const params = new URLSearchParams({ file: stored.version.id, targetPeriodId });
+    redirect(`/enterprise/disclosures/cdp/import?${params.toString()}`);
   });
-
-  const params = new URLSearchParams({ file: stored.version.id, targetPeriodId });
-  redirect(`/enterprise/disclosures/cdp/import?${params.toString()}`);
 }
 
 export async function confirmDisclosureImportAction(formData: FormData): Promise<void> {
@@ -1069,18 +1155,20 @@ export async function confirmDisclosureImportAction(formData: FormData): Promise
     }))
     .filter((s) => s.itemId && s.answerText);
 
-  if (selections.length === 0) throw new Error('取り込む行を 1 つ以上選んでください。');
-
-  const result = await confirmDisclosureImport(db, ctx, {
-    targetPeriodId,
-    currentPeriodId,
-    selections,
+  await withUserFacingError('/enterprise/disclosures/cdp/import', async () => {
+    if (selections.length === 0) {
+      throw new ValidationError('取り込む行を 1 つ以上選んでください。');
+    }
+    const result = await confirmDisclosureImport(db, ctx, {
+      targetPeriodId,
+      currentPeriodId,
+      selections,
+    });
+    revalidatePath('/enterprise/disclosures/cdp');
+    redirect(
+      `/enterprise/disclosures/cdp?imported=${result.created + result.updated}&linked=${result.linkedToCurrent}`,
+    );
   });
-
-  revalidatePath('/enterprise/disclosures/cdp');
-  redirect(
-    `/enterprise/disclosures/cdp?imported=${result.created + result.updated}&linked=${result.linkedToCurrent}`,
-  );
 }
 
 // ----------------------------------------------------------------------
@@ -1092,10 +1180,11 @@ export async function runInsightDiscoveryAction(): Promise<void> {
   const db = await getDb();
   const shell = await loadEnterpriseShell();
 
-  const { run } = await runInsightDiscovery(db, ctx, shell.currentPeriod, shell.periods);
-
-  revalidatePath('/enterprise/ai');
-  redirect(`/enterprise/ai?insight=${run.id}`);
+  await withUserFacingError('/enterprise/ai', async () => {
+    const { run } = await runInsightDiscovery(db, ctx, shell.currentPeriod, shell.periods);
+    revalidatePath('/enterprise/ai');
+    redirect(`/enterprise/ai?insight=${run.id}`);
+  });
 }
 
 // ----------------------------------------------------------------------
@@ -1109,16 +1198,19 @@ export async function addCommentAction(formData: FormData): Promise<void> {
     'data_point' | 'disclosure_response';
   const targetId = String(formData.get('targetId') ?? '');
   const href = String(formData.get('href') ?? '');
+  // 通知の遷移先・エラーの戻り先はサーバー側で組み立て直す（フォーム値をそのまま信じない）
+  const pagePath =
+    targetType === 'data_point'
+      ? `/enterprise/data/${targetId}`
+      : (safeAppLinkOrNull(href) ?? '/enterprise/disclosures/cdp');
 
-  await addComment(db, ctx, {
-    targetType,
-    targetId,
-    body: String(formData.get('body') ?? ''),
-    // 通知の遷移先はサーバー側で組み立て直す（フォーム値をそのまま信じない）
-    href:
-      targetType === 'data_point'
-        ? `/enterprise/data/${targetId}`
-        : (safeAppLinkOrNull(href) ?? '/enterprise/disclosures/cdp'),
+  await withUserFacingError(pagePath, async () => {
+    await addComment(db, ctx, {
+      targetType,
+      targetId,
+      body: String(formData.get('body') ?? ''),
+      href: pagePath,
+    });
   });
 
   if (targetType === 'data_point') {
@@ -1137,11 +1229,17 @@ export async function carryForwardAction(): Promise<void> {
   const db = await getDb();
   const shell = await loadEnterpriseShell();
 
-  const result = await carryForwardFromPreviousPeriod(db, ctx, shell.currentPeriod, shell.periods);
-
-  revalidatePath('/enterprise/data');
-  revalidatePath('/enterprise/dashboard');
-  redirect(`/enterprise/data?flash=carried&count=${result.created}`);
+  await withUserFacingError('/enterprise/data', async () => {
+    const result = await carryForwardFromPreviousPeriod(
+      db,
+      ctx,
+      shell.currentPeriod,
+      shell.periods,
+    );
+    revalidatePath('/enterprise/data');
+    revalidatePath('/enterprise/dashboard');
+    redirect(`/enterprise/data?flash=carried&count=${result.created}`);
+  });
 }
 
 export async function pasteImportAction(formData: FormData): Promise<void> {
@@ -1150,26 +1248,29 @@ export async function pasteImportAction(formData: FormData): Promise<void> {
   const shell = await loadEnterpriseShell();
 
   const pasted = String(formData.get('pasted') ?? '').trim();
-  if (!pasted) throw new Error('貼り付ける表データを入力してください。');
-  if (pasted.length > 500_000) throw new Error('貼り付けデータが大きすぎます（500KB まで）。');
 
-  // Excel からのコピーはタブ区切りで入る。既存の取込パイプラインへ
-  // 仮想ファイルとして渡し、AI 仕分け・プレビュー・確定を同じ経路で通す
-  const job = await createIngestionJob(db, ctx, {
-    reportingPeriodId: shell.currentPeriod.id,
-    unitId: null,
-    idempotencyKey: contentHash(`paste|${ctx.userId}|${pasted}`),
-    files: [
-      {
-        name: 'クリップボード貼り付け.tsv',
-        type: 'text/tab-separated-values',
-        bytes: new TextEncoder().encode(pasted),
-      },
-    ],
+  await withUserFacingError('/enterprise/imports', async () => {
+    if (!pasted) throw new ValidationError('貼り付ける表データを入力してください。');
+    if (pasted.length > 500_000) {
+      throw new ValidationError('貼り付けデータが大きすぎます（500KB まで）。');
+    }
+    // Excel からのコピーはタブ区切りで入る。既存の取込パイプラインへ
+    // 仮想ファイルとして渡し、AI 仕分け・プレビュー・確定を同じ経路で通す
+    const job = await createIngestionJob(db, ctx, {
+      reportingPeriodId: shell.currentPeriod.id,
+      unitId: null,
+      idempotencyKey: contentHash(`paste|${ctx.userId}|${pasted}`),
+      files: [
+        {
+          name: 'クリップボード貼り付け.tsv',
+          type: 'text/tab-separated-values',
+          bytes: new TextEncoder().encode(pasted),
+        },
+      ],
+    });
+    revalidatePath('/enterprise/imports');
+    redirect(`/enterprise/imports/${job.id}`);
   });
-
-  revalidatePath('/enterprise/imports');
-  redirect(`/enterprise/imports/${job.id}`);
 }
 
 // ----------------------------------------------------------------------
@@ -1232,9 +1333,12 @@ export async function askCopilotAction(formData: FormData): Promise<{
 export async function createInvitationAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  await createInvitation(db, ctx, {
-    email: String(formData.get('email') ?? ''),
-    roleKeys: formData.getAll('roleKeys').map(String) as RoleKey[],
+  // 業務エラー（形式・役割の誤り）は「招待」タブの作成欄へ戻す
+  await withUserFacingError('/enterprise/settings?tab=invitations&new=1', async () => {
+    await createInvitation(db, ctx, {
+      email: String(formData.get('email') ?? ''),
+      roleKeys: formData.getAll('roleKeys').map(String) as RoleKey[],
+    });
   });
   revalidatePath('/enterprise/settings');
 }
@@ -1242,7 +1346,9 @@ export async function createInvitationAction(formData: FormData): Promise<void> 
 export async function revokeInvitationAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  await revokeInvitation(db, ctx, String(formData.get('invitationId') ?? ''));
+  await withUserFacingError('/enterprise/settings?tab=invitations', async () => {
+    await revokeInvitation(db, ctx, String(formData.get('invitationId') ?? ''));
+  });
   revalidatePath('/enterprise/settings');
 }
 
@@ -1253,7 +1359,10 @@ export async function issueResetLinkAction(formData: FormData): Promise<void> {
   const { headers } = await import('next/headers');
   const host = (await headers()).get('host') ?? 'localhost:3000';
   const origin = `${host.includes('localhost') || host.startsWith('127.') ? 'http' : 'https'}://${host}`;
-  const link = await issuePasswordResetLink(db, ctx, email, origin);
+  let link = '';
+  await withUserFacingError('/enterprise/settings?tab=security', async () => {
+    link = await issuePasswordResetLink(db, ctx, email, origin);
+  });
   // リンクは URL パラメータではなく一時 Cookie で受け渡す（履歴・ログへ残さない）
   const { cookies } = await import('next/headers');
   (await cookies()).set('t4d.reset-link', link, {
@@ -1643,7 +1752,8 @@ export async function updateSsbjActionPlanAction(formData: FormData): Promise<vo
 export async function createSsbjDataCollectionAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
-  await withUserFacingError('/enterprise/disclosures/ssbj/plans', async () => {
+  // 業務エラーは作成欄を開いたまま（?new=1）理由を出す（欄が閉じて、どこで失敗したか分からなくならない）
+  await withUserFacingError('/enterprise/disclosures/ssbj/plans?new=1', async () => {
     await createDataCollectionItem(db, ctx, {
       planId: String(formData.get('planId') ?? ''),
       metricCode: String(formData.get('metricCode') ?? ''),
@@ -1669,7 +1779,11 @@ export async function carryOverSsbjAction(formData: FormData): Promise<void> {
   const db = await getDb();
   const periodId = String(formData.get('reportingPeriodId') ?? '');
 
-  await withUserFacingError('/enterprise/disclosures/ssbj', async () => {
+  // 引継ぎは SSBJ 要求事項の「その他」から呼ぶ。結果・理由とも同じ画面に出す（成功しても何も出ないと
+  // 押したかどうか分からない。handoff B2 §2-5）
+  const back = '/enterprise/disclosures/ssbj/requirements';
+  let result = { copied: 0, recheck: 0 };
+  await withUserFacingError(back, async () => {
     const periods = await db.select('periods', {
       where: { organizationId: ctx.workspace.organizationId },
     });
@@ -1681,7 +1795,8 @@ export async function carryOverSsbjAction(formData: FormData): Promise<void> {
     if (!previous) {
       throw new ValidationError('前年度の報告期間がないため、引き継ぐ評価がありません。');
     }
-    await carryOverSsbjAssessments(db, ctx, current, previous);
+    result = await carryOverSsbjAssessments(db, ctx, current, previous);
   });
   revalidateSsbj(null);
+  redirect(`${back}?flash=ssbjCarriedOver&copied=${result.copied}&recheck=${result.recheck}`);
 }

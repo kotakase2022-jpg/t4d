@@ -24,11 +24,11 @@ export function MoreInfo({
 }) {
   return (
     <details open={defaultOpen} data-collapsible="" className={cn('min-w-0', className)}>
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-t4d text-[11px] text-ink-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-t4d text-caption text-ink-muted hover:text-ink [&::-webkit-details-marker]:hidden">
         <Info aria-hidden="true" className="size-3.5 shrink-0" />
         <span data-collapsible-summary="">{label}</span>
       </summary>
-      <div className="mt-1 space-y-1 border-l-2 border-line pl-2 text-[12px] leading-relaxed text-ink-muted">
+      <div className="mt-1 space-y-1 border-l-2 border-line pl-2 text-small leading-relaxed text-ink-muted">
         {children}
       </div>
     </details>

@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { buildSupplierDemoFiles } from '../../src/lib/fixtures/supplier-demo-files';
-import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
+import { DEMO_USERS, loginAs, openCollapsible, openMoreMenu } from './helpers';
 
 /**
  * Scope3 Cat.1 のサプライヤー内訳の可視化と、一次データ（素データ）取込。
@@ -11,7 +11,20 @@ import { DEMO_USERS, loginAs, openCollapsible } from './helpers';
  * 他のテストが触らない未提出サプライヤー（SUP-06/07、SUP-23/24/27/28/29）に限定する。
  * このファイル内の順序に依存する（可視化 → テンプレート → 旧形式取込 →
  * 素データ取込と原単位の紐づけ → 再紐づけ）。合計値はファイル内で積み上がる。
+ *
+ * plan §2 S5: CSV テンプレート・デモ用の ZIP・デモのリセットは見出しの「その他」へ、提出状況の表は
+ * 既定で「未提出」の社を出す（提出済みは絞り込みを切り替えて確かめる）、原単位の紐づけ直しは
+ * 変更前後を並べた確認ダイアログを通る。
  */
+
+/** 提出状況の表を「提出済み」に切り替える（既定は未提出の社がある限り「未提出」） */
+async function showSubmittedSuppliers(page: Page): Promise<void> {
+  await page
+    .getByRole('navigation', { name: '提出状況で絞り込む' })
+    .getByRole('link', { name: /^提出済み/ })
+    .click();
+  await page.waitForURL(/status=submitted/);
+}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -63,7 +76,8 @@ test('CSV テンプレートがダウンロードでき、未提出の社と 3 �
   );
 
   const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('link', { name: 'CSV テンプレート' }).click();
+  const menu = await openMoreMenu(page.locator('#t4d-main'));
+  await menu.getByRole('menuitem', { name: 'CSV テンプレート' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toContain('サプライヤーデータ取込テンプレート');
   expect(download.suggestedFilename()).toContain('.csv');
@@ -110,7 +124,8 @@ test('旧形式（金額のみ）の CSV を取り込むと、未提出の社が
   await page.waitForURL(/flash=supplierImported/);
   await expect(page.getByText(/サプライヤーデータを取り込み/)).toBeVisible();
 
-  // 提出状況が更新される
+  // 提出状況が更新される（未提出の一覧から外れ、提出済みに並ぶ）
+  await showSubmittedSuppliers(page);
   await expect(
     page.locator('tr', { hasText: '若草金属工業' }).first().getByText('提出済み'),
   ).toBeVisible();
@@ -165,6 +180,7 @@ test('素データ（独式・物理量/金額混在）を自動仕訳し、原�
   await page.getByRole('button', { name: 'チェックした行を確定する' }).click();
   await page.waitForURL(/flash=supplierImported/);
   await expect(page.getByText('184.4').first()).toBeVisible();
+  await showSubmittedSuppliers(page);
   await expect(
     page.locator('tr', { hasText: 'ひなた包装' }).first().getByText('提出済み'),
   ).toBeVisible();
@@ -197,8 +213,16 @@ test('確定済みの素データ行は「原単位の紐づけ状況」から�
   await expect(row.getByRole('cell', { name: '鋼材（重量ベース）EF-STEEL-KG' })).toBeVisible();
 
   // アルミ係数へ紐づけ直す（1,480 kg × 0.009 = 13.3 ／ 合計 184.4 − 3.1 + 13.3 = 194.6）
-  await row.getByRole('combobox').selectOption('EF-ALU-KG');
-  await row.getByRole('button', { name: '更新' }).click();
+  // 行の「原単位を変更…」→ 変更前後を並べた確認ダイアログ（plan §1.16 区分 2）
+  await row.getByRole('button', { name: '原単位を変更' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('[data-confirm-scope]')).toContainText('ひなた包装');
+  await dialog.getByRole('combobox').selectOption('EF-ALU-KG');
+  const beforeAfter = dialog.getByRole('table', { name: '変更前と変更後' });
+  await expect(beforeAfter).toContainText('鋼材（重量ベース）（EF-STEEL-KG）');
+  await expect(beforeAfter).toContainText('アルミ材（重量ベース）（EF-ALU-KG）');
+  await expect(beforeAfter).toContainText('13.3（見込み）');
+  await dialog.getByRole('button', { name: '更新', exact: true }).click();
   await page.waitForURL(/flash=factorRelinked/);
   await expect(page.getByText(/排出量原単位を紐づけ直し/)).toBeVisible();
   await expect(page.getByText('194.6').first()).toBeVisible();

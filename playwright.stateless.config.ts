@@ -38,7 +38,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,
-  reporter: [['list']],
+  reporter: [['list'], ['./tests/support/skip-guard-reporter.ts', { configName: 'stateless' }]],
   timeout: 90_000,
   expect: { timeout: 15_000 },
   use: {

@@ -4,7 +4,6 @@ import { MiniBars } from '@/components/charts/mini-bars';
 import { FilterBar, type FilterGroup } from '@/components/shared/filter-bar';
 import { PageHeader } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
-import { Card } from '@/components/ui/card';
 import { Collapsible } from '@/components/ui/collapsible';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
@@ -44,7 +43,7 @@ export const metadata = { title: '自社経年比較' };
 const BASE_PATH = '/enterprise/analysis/trends';
 
 /** 1 列目（指標）を横スクロールしても見えるように固定する（背景を塗って下の列を隠す） */
-const STICKY_FIRST_COLUMN = 'sticky left-0 z-[1] bg-surface';
+const STICKY_FIRST_COLUMN = 'sticky left-0 z-(--z-sticky-col) bg-surface';
 
 const FILTER_GROUPS: FilterGroup[] = [
   {
@@ -104,7 +103,7 @@ function TrendRow({
         <th
           scope="row"
           className={cn(
-            'min-w-[240px] max-w-[320px] px-2 pt-2 pb-0.5 text-left align-top text-[12px]',
+            'min-w-[240px] max-w-[320px] px-2 pt-2 pb-0.5 text-left align-top text-small',
             STICKY_FIRST_COLUMN,
           )}
         >
@@ -130,7 +129,7 @@ function TrendRow({
         ))}
       </TR>
       <tr className="border-b border-line last:border-b-0" data-trend-detail={metric.code}>
-        <td colSpan={columnCount} className="px-0 pb-1.5 pt-0 text-[12px]">
+        <td colSpan={columnCount} className="px-0 pb-1.5 pt-0 text-small">
           {/* 横にスクロールしても内訳の開閉が左端に見えるように固定する */}
           <div className="sticky left-0 w-fit max-w-[340px] px-2">
             <Collapsible
@@ -157,19 +156,23 @@ function TrendRow({
 function TrendEmptyState({
   reason,
   windowLabel,
+  resetHref,
 }: {
   reason: TrendEmptyReason;
   windowLabel: string;
+  /** 絞り込み（区分・前年比・検索）を外した行き先 */
+  resetHref: string;
 }) {
   if (reason === 'no_metrics') {
     return (
       <EmptyState
+        kind="no-data"
         title="数値の指標が登録されていません"
         description="指標マスターに数値の指標を登録すると、年度ごとの確定値を並べます。"
         action={
           <Link
-            href="/enterprise/organizations"
-            className="text-[12px] text-brand-700 underline underline-offset-2"
+            href="/enterprise/organizations?tab=metrics"
+            className="text-small text-brand-700 underline underline-offset-2"
           >
             組織・拠点（指標マスター）
           </Link>
@@ -180,12 +183,13 @@ function TrendEmptyState({
   if (reason === 'no_data') {
     return (
       <EmptyState
+        kind="no-data"
         title="比較できるデータがまだありません"
         description={`${windowLabel} のどの年度にも、指標のデータが登録されていません（0 ではありません）。データを登録すると、確定値を年度ごとに並べます。`}
         action={
           <Link
             href="/enterprise/imports"
-            className="text-[12px] text-brand-700 underline underline-offset-2"
+            className="text-small text-brand-700 underline underline-offset-2"
           >
             データ取込
           </Link>
@@ -193,10 +197,13 @@ function TrendEmptyState({
       />
     );
   }
+  // 絞り込みの結果が 0 件のときだけ、条件を外すリンクを付ける（年度・表示の条件は保つ）
   return (
     <EmptyState
+      kind="filtered"
       title="該当する指標がありません"
       description="絞り込みの条件を変えるか、「絞り込み解除」を押してください。"
+      resetHref={resetHref}
     />
   );
 }
@@ -261,7 +268,7 @@ export default async function TrendsPage({
         {view.windowNote && (
           <p
             role="note"
-            className="flex items-start gap-1.5 rounded-t4d border border-line bg-surface-muted px-3 py-2 text-[12px] text-ink"
+            className="flex items-start gap-1.5 rounded-t4d border border-line bg-surface-muted px-3 py-2 text-small text-ink"
           >
             <Info className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
             {view.windowNote}
@@ -313,7 +320,7 @@ export default async function TrendsPage({
         />
 
         {view.summary.emptyCount > 0 && (
-          <p className="text-[12px] text-ink-muted">
+          <p className="text-small text-ink-muted">
             データが 1 年もない指標 {view.summary.emptyCount} 件（0 ではありません）
             {filters.empty ? '。表に含めています' : '。表では隠しています'}{' '}
             <Link
@@ -327,19 +334,20 @@ export default async function TrendsPage({
         )}
 
         {filtered.length === 0 ? (
-          <Card>
+          <div className="rounded-t4d-lg border border-line bg-surface">
             <TrendEmptyState
               reason={trendEmptyReason(filters, {
                 rowCount: view.rows.length,
                 dataMetricCount: view.summary.dataMetricCount,
               })}
               windowLabel={firstCode === lastCode ? firstCode : `${firstCode}〜${lastCode}`}
+              resetHref={hrefWith(filters, { group: null, change: null, q: '' })}
             />
-          </Card>
+          </div>
         ) : (
           <div className="t4d-scroll-x rounded-t4d-lg border border-line bg-surface">
             <Table className="min-w-[960px]">
-              <caption className="px-3 py-2 text-left text-[13px] font-semibold text-ink">
+              <caption className="px-3 py-2 text-left text-body font-semibold text-ink">
                 指標ごとの確定値（{firstCode === lastCode ? firstCode : `${firstCode}〜${lastCode}`}
                 ・{filtered.length} 指標）
               </caption>
@@ -368,7 +376,7 @@ export default async function TrendsPage({
                       <th
                         scope="rowgroup"
                         colSpan={columnCount}
-                        className="px-2 py-1 text-left text-[12px] font-semibold text-ink"
+                        className="px-2 py-1 text-left text-small font-semibold text-ink"
                       >
                         <span className="sticky left-2">
                           {TREND_GROUP_LABEL[group]}（{rows.length} 指標）

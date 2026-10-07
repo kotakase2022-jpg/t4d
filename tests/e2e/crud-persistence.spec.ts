@@ -12,21 +12,21 @@ test.describe.configure({ mode: 'serial' });
 
 test('指標マスター: 作成 → 一覧反映 → リロード後も保持 → 編集 → 反映', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/organizations');
+  await page.goto('/enterprise/organizations?tab=metrics');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
   const code = `audit_${Date.now().toString(36)}`;
   const name = `監査用指標 ${code}`;
 
-  // Create（ダイアログで入力する）
-  await page.getByRole('button', { name: '指標を追加' }).click();
-  const dialog = page.getByRole('dialog', { name: '指標マスターを追加' });
+  // Create（専用ページで入力する。plan §2 S10: モーダルをやめた）
+  await page.getByRole('link', { name: '指標を追加', exact: true }).click();
+  const dialog = page.getByRole('form', { name: '指標を追加' });
   await expect(dialog).toBeVisible();
   await dialog.locator('input[name="code"]').fill(code);
   await dialog.locator('input[name="name"]').fill(name);
   await dialog.locator('input[name="unit"]').fill('件');
   await dialog.getByRole('button', { name: '追加する' }).click();
-  await page.waitForLoadState('networkidle');
+  await page.waitForURL(/flash=masterMetricCreated/);
 
   // 一覧へ反映
   await expect(page.getByText(name).first()).toBeVisible();
@@ -35,13 +35,13 @@ test('指標マスター: 作成 → 一覧反映 → リロード後も保持 �
   await page.reload();
   await expect(page.getByText(name).first()).toBeVisible();
 
-  // Update: 名称を変更して保存
-  await page.getByRole('button', { name: `${name} を編集` }).click();
-  const editDialog = page.getByRole('dialog', { name: '指標マスターを編集' });
+  // Update: 名称を変更して保存（行の「編集」から編集ページへ）
+  await page.locator('tr', { hasText: name }).getByRole('link', { name: '編集' }).click();
+  const editDialog = page.getByRole('form', { name: '指標を編集' });
   await expect(editDialog).toBeVisible();
   await editDialog.locator('input[name="name"]').fill(`${name}（更新後）`);
   await editDialog.getByRole('button', { name: '更新する' }).click();
-  await page.waitForLoadState('networkidle');
+  await page.waitForURL(/flash=masterMetricUpdated/);
 
   await expect(page.getByText(`${name}（更新後）`).first()).toBeVisible();
   await page.reload();
@@ -50,10 +50,10 @@ test('指標マスター: 作成 → 一覧反映 → リロード後も保持 �
 
 test('指標マスター: 必須項目と重複コードが弾かれる（不正値でDBを汚さない）', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
-  await page.goto('/enterprise/organizations');
+  await page.goto('/enterprise/organizations?tab=metrics');
 
-  await page.getByRole('button', { name: '指標を追加' }).click();
-  const dialog = page.getByRole('dialog', { name: '指標マスターを追加' });
+  await page.getByRole('link', { name: '指標を追加', exact: true }).click();
+  const dialog = page.getByRole('form', { name: '指標を追加' });
   await expect(dialog).toBeVisible();
 
   // 必須項目が空なら送信できない（ブラウザの必須検証）
@@ -62,15 +62,17 @@ test('指標マスター: 必須項目と重複コードが弾かれる（不正
   const invalid = await codeInput.evaluate((el: HTMLInputElement) => !el.checkValidity());
   expect(invalid, '必須項目が空でも送信できてしまう').toBe(true);
 
-  // 既存コードと重複させるとサーバー側で拒否される
+  // 既存コードと重複させるとサーバー側で拒否される（理由を示し、入力は残す）
   await codeInput.fill('scope1');
   await dialog.locator('input[name="name"]').fill('重複コード検証');
   await dialog.locator('input[name="unit"]').fill('t');
   await dialog.getByRole('button', { name: '追加する' }).click();
-  await page.waitForLoadState('networkidle');
+  await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('既に存在します');
 
   // 一覧に重複レコードが増えていない
-  await page.goto('/enterprise/organizations');
+  await page.goto(
+    '/enterprise/organizations?tab=metrics&q=' + encodeURIComponent('重複コード検証'),
+  );
   await expect(page.getByText('重複コード検証')).toHaveCount(0);
 });
 
@@ -79,7 +81,8 @@ test('Data Point: 値の編集がDBへ反映され、リロード後も保持さ
   await page.goto('/enterprise/data?status=draft');
   await expect(page.locator('#t4d-main')).toBeVisible();
 
-  const detail = page.getByRole('link', { name: '詳細' }).first();
+  // 行の指標名のリンクから詳細へ（同じ行から同じ行き先へのリンクを 2 つ置かない。plan §1.12-7）
+  const detail = page.locator('tbody tr[data-t4d-record] a[href^="/enterprise/data/"]').first();
   test.skip((await detail.count()) === 0, '編集可能な Data Point が無い');
   await detail.click();
   await expect(page).toHaveURL(/\/enterprise\/data\/[0-9a-f-]+/);
@@ -170,8 +173,9 @@ test('マテリアリティ: 追加 → 評価 → 編集 → 削除が永続化
   // Delete: 確認を挟んで削除し、リロード後も消えたまま
   const target = page.locator('li', { hasText: renamed });
   await target.getByRole('button', { name: /を削除/ }).click();
-  await expect(target.getByText('削除しますか？')).toBeVisible();
-  await target.getByRole('button', { name: '削除する' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText(/削除しますか？/)).toBeVisible();
+  await dialog.getByRole('button', { name: '削除する' }).click();
   await expect(page.locator('li', { hasText: renamed })).toHaveCount(0);
   await page.reload();
   await expect(page.locator('li', { hasText: renamed })).toHaveCount(0);

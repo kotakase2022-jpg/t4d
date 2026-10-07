@@ -15,7 +15,11 @@ import {
   processIngestionJob,
 } from '@/lib/imports/service';
 import { decideApprovalStep, loadApprovalProgress } from '@/lib/services/approval-route';
-import { transitionDataPoint, updateDataPointValue } from '@/lib/services/data-point-workflow';
+import {
+  bulkTransition,
+  transitionDataPoint,
+  updateDataPointValue,
+} from '@/lib/services/data-point-workflow';
 import {
   generateDisclosureDraft,
   saveDisclosureResponse,
@@ -288,6 +292,31 @@ describe('Submit → Review → Approve', () => {
       where: { targetType: 'data_point', targetId: target },
     });
     expect(approvals.some((a) => a.decision === 'returned')).toBe(true);
+  });
+
+  it('一括の差戻しでも理由がコメントと承認の記録に残る（理由を捨てない。plan §1.16 区分 2）', async () => {
+    await transitionDataPoint(db, siteUser(), { dataPointId: target, to: 'submitted' });
+    const result = await bulkTransition(db, reviewer(), [target], 'returned', {
+      comment: '一括: 検針票の対象期間を確認してください。',
+    });
+    expect(result).toEqual({ succeeded: 1, failures: [] });
+
+    const comments = await db.select('comments', {
+      where: { targetType: 'data_point', targetId: target },
+    });
+    expect(comments.some((c) => c.body.includes('一括: 検針票'))).toBe(true);
+    const approvals = await db.select('approvals', {
+      where: { targetType: 'data_point', targetId: target },
+    });
+    expect(
+      approvals.some((a) => a.decision === 'returned' && a.comment?.includes('一括: 検針票')),
+    ).toBe(true);
+  });
+
+  it('一括の状態遷移は理由を省略できる（サービスの規則は任意のまま。plan Q7）', async () => {
+    await transitionDataPoint(db, siteUser(), { dataPointId: target, to: 'submitted' });
+    const result = await bulkTransition(db, reviewer(), [target], 'returned');
+    expect(result.succeeded).toBe(1);
   });
 
   it('承認の道筋を通さずに一足飛びで承認はできない', async () => {

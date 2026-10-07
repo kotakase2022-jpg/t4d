@@ -26,7 +26,7 @@ export const REVISED_ESRS_NOT_IN_FORCE = '改正 ESRS（2026-07-03 採択）は�
 export function SsbjDifferenceLine() {
   return (
     <div className="space-y-0.5">
-      <p className="flex items-start gap-1.5 text-[12px] text-ink">
+      <p className="flex items-start gap-1.5 text-small text-ink">
         <Info className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
         {SSBJ_VS_CSRD_SHORT}
       </p>
@@ -42,7 +42,7 @@ export function DoubleMaterialityNote({ compact = false }: { compact?: boolean }
     return (
       <div
         role="note"
-        className="space-y-0.5 rounded-t4d border border-line bg-surface px-3 py-1.5 text-[12px]"
+        className="space-y-0.5 rounded-t4d border border-line bg-surface px-3 py-1.5 text-small"
       >
         <p className="flex items-start gap-1.5 text-ink">
           <Info className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
@@ -61,10 +61,10 @@ export function DoubleMaterialityNote({ compact = false }: { compact?: boolean }
     <Card className="overflow-hidden">
       <div className="grid grid-cols-[1fr_1.4fr] divide-x divide-line">
         <section aria-labelledby="ssbj-single-title" className="space-y-1 p-3">
-          <h2 id="ssbj-single-title" className="text-[12px] font-semibold text-ink">
+          <h2 id="ssbj-single-title" className="text-small font-semibold text-ink">
             SSBJ: シングル・マテリアリティ
           </h2>
-          <p className="flex items-center gap-1 text-[12px] text-ink">
+          <p className="flex items-center gap-1 text-small text-ink">
             <Banknote className="size-3.5 text-ink-muted" aria-hidden="true" />
             財務的重要性のみ
           </p>
@@ -72,12 +72,12 @@ export function DoubleMaterialityNote({ compact = false }: { compact?: boolean }
         <section aria-labelledby="csrd-double-title" className="space-y-1 p-3">
           <h2
             id="csrd-double-title"
-            className="flex items-center gap-1 text-[12px] font-semibold text-ink"
+            className="flex items-center gap-1 text-small font-semibold text-ink"
           >
             <Scale className="size-3.5 text-brand-700" aria-hidden="true" />
             CSRD: ダブル・マテリアリティ
           </h2>
-          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-ink">
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-small text-ink">
             <span className="inline-flex items-center gap-1">
               <Globe className="size-3.5 text-ink-muted" aria-hidden="true" />
               インパクト重要性

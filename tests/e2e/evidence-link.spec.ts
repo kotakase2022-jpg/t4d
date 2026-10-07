@@ -21,7 +21,7 @@ test('同じファイル・同じページでも、別のセルなら紐付け�
 
   const form = page.locator('form', { hasText: '紐付ける' });
   const countBefore = Number(
-    (await page.getByRole('heading', { name: /^Evidence（\d+）/ }).innerText()).replace(/\D/g, ''),
+    (await page.getByRole('heading', { name: /^根拠資料（\d+）/ }).innerText()).replace(/\D/g, ''),
   );
 
   for (const cell of ['Sheet1!C12', 'Sheet1!C13']) {
@@ -34,7 +34,7 @@ test('同じファイル・同じページでも、別のセルなら紐付け�
 
   // 反映は再検証のあとに来るので、件数の表示そのものを待つ
   await expect(
-    page.getByRole('heading', { name: `Evidence（${countBefore + 2}）` }),
+    page.getByRole('heading', { name: `根拠資料（${countBefore + 2}）` }),
     'セル違いの 2 件が両方とも登録されるべき',
   ).toBeVisible();
 });

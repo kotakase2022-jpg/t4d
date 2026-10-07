@@ -1,0 +1,40 @@
+{
+  "measuredAt": "2026-10-07T05:38:21.463Z",
+  "root": "git HEAD（3bc1cee。Stage A の変更前）",
+  "labels": {
+    "arbitraryTextSize": "任意値の文字サイズ（text-[Npx]）",
+    "hexColorClass": "クラスの中の hex 直書き（-[#…]）",
+    "numericZIndex": "数値の z-index（z-10・z-[1] など）",
+    "arbitraryShadow": "任意値の影（shadow-[…]）",
+    "tailwindRounded": "Tailwind 既定の角丸（rounded-sm/md/lg/xl）",
+    "variantOutline": "Button の旧 variant=\"outline\"",
+    "rawDetails": "素の <details>（Collapsible・MoreInfo・FormSection を通らない）",
+    "rawSelect": "素の <select>（NativeSelect を通らない）",
+    "rawCheckbox": "素の checkbox（NativeCheckbox を通らない）",
+    "card": "Card（装飾の枠。Section へ寄せる）",
+    "buttonTypeSubmit": "Button type=\"submit\"（SubmitButton を使う）",
+    "buttonVariantsDirect": "buttonVariants( の直使用",
+    "localToneType": "画面ローカルの type Tone（状態登録簿へ寄せる）",
+    "titleAttribute": "title= の補足説明（Hint・sr-only へ）",
+    "dialogWithManyInputs": "入力が 7 つ以上ある Dialog（専用ページ・CreatePanel へ）",
+    "legacyEmptyState": "種類（kind）の無い EmptyState"
+  },
+  "totals": {
+    "arbitraryTextSize": 1952,
+    "hexColorClass": 118,
+    "numericZIndex": 27,
+    "arbitraryShadow": 1,
+    "tailwindRounded": 3,
+    "variantOutline": 159,
+    "rawDetails": 19,
+    "rawSelect": 100,
+    "rawCheckbox": 29,
+    "card": 269,
+    "buttonTypeSubmit": 70,
+    "buttonVariantsDirect": 0,
+    "localToneType": 5,
+    "titleAttribute": 30,
+    "dialogWithManyInputs": 4,
+    "legacyEmptyState": 97
+  }
+}

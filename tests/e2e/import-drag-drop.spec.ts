@@ -100,7 +100,7 @@ test('取り込めないファイルをドロップしたら、理由とファ�
   // エラー画面へ飛ばさず、フォームの中で理由を伝える
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('写真.png');
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('拡張子');
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
   // 取込画面に留まる（プレビューへ進まない）
   await expect(page).toHaveURL(/\/enterprise\/imports$/);
 });
@@ -126,7 +126,7 @@ test('取り込めるファイルと取り込めないファイルが混ざっ�
   await expect(alert, '取り込めるファイルまで拒否されたように書かない').not.toContainText(
     '実績.csv',
   );
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });
 
 test('タブ区切りの .txt は表として取り込まれる', async ({ page }) => {
@@ -171,7 +171,7 @@ test('自由記述の .txt は資料として取り込み、数値の行には�
   await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 90_000 });
   // エラーにはせず、資料として扱った旨を伝える
   await expect(page.getByText(/資料として取り込みました/).first()).toBeVisible();
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });
 
 test('自由記述の .txt は根拠資料の画面で中身を読める', async ({ page }) => {

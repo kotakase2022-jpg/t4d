@@ -46,7 +46,7 @@ const STATE = {
 
 function StepNumber({ index }: { index: number }) {
   return (
-    <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-[11px] font-semibold text-ink-muted">
+    <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-caption font-semibold text-ink-muted">
       {index + 1}
     </span>
   );
@@ -66,7 +66,7 @@ export function SsbjFlow({ steps }: { steps: SsbjFlowStep[] }) {
             <>
               <div className="flex items-center gap-1.5">
                 <StepNumber index={index} />
-                <span className="min-w-0 break-words text-[12px] font-semibold text-ink">
+                <span className="min-w-0 break-words text-small font-semibold text-ink">
                   {step.title}
                 </span>
               </div>
@@ -75,7 +75,7 @@ export function SsbjFlow({ steps }: { steps: SsbjFlowStep[] }) {
                   <s.Icon className="size-3" aria-hidden="true" />
                   {s.label}
                 </Badge>
-                {step.detail && <span className="text-[11px] text-ink">{step.detail}</span>}
+                {step.detail && <span className="text-caption text-ink">{step.detail}</span>}
               </div>
             </>
           );

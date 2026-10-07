@@ -314,13 +314,17 @@ describe('選択した根拠から下書き（Mock）', () => {
   });
 
   it('AI 実行の権限が無い人（レビュー担当）は下書きを生成できない', async () => {
-    await expect(
-      generateBlockDraft(db, reviewerOnly(), {
-        blockId: RISK,
-        operation: 'draft_from_sources',
-        sources: [{ kind: 'source_anchor', id: A.riskPhysical }],
-      }),
-    ).rejects.toThrow('enterprise.ai.run');
+    // 権限キーは画面の文に出さず（plan §1.17）、エラーの属性で確かめる。文は権限の名前を含む
+    const attempt = generateBlockDraft(db, reviewerOnly(), {
+      blockId: RISK,
+      operation: 'draft_from_sources',
+      sources: [{ kind: 'source_anchor', id: A.riskPhysical }],
+    });
+    await expect(attempt).rejects.toMatchObject({
+      name: 'AuthorizationError',
+      permission: 'enterprise.ai.run',
+    });
+    await expect(attempt).rejects.toThrow('「AI の実行」の権限');
   });
 });
 

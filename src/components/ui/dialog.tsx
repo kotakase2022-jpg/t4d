@@ -17,7 +17,7 @@ export const DialogOverlay = React.forwardRef<
   return (
     <DialogPrimitive.Overlay
       ref={ref}
-      className={cn('fixed inset-0 z-50 bg-[#0b1b34]/35 backdrop-blur-[1px]', className)}
+      className={cn('fixed inset-0 z-(--z-modal) bg-overlay/35 backdrop-blur-[1px]', className)}
       {...props}
     />
   );
@@ -33,8 +33,8 @@ export const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
-          'rounded-t4d-lg border border-line bg-surface shadow-lg focus:outline-none',
+          'fixed left-1/2 top-1/2 z-(--z-modal) w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
+          'rounded-t4d-lg border border-line bg-surface shadow-overlay focus:outline-none',
           // 画面が低いとき・ブラウザの拡大表示のときに、
           // 下端の送信ボタンへ到達できなくなるのを防ぐ（内側だけスクロールさせる）。
           'flex max-h-[90dvh] flex-col overflow-y-auto',
@@ -79,7 +79,7 @@ export const DialogTitle = React.forwardRef<
   return (
     <DialogPrimitive.Title
       ref={ref}
-      className={cn('text-[14px] font-semibold text-ink', className)}
+      className={cn('text-title-sm font-semibold text-ink', className)}
       {...props}
     />
   );
@@ -92,7 +92,7 @@ export const DialogDescription = React.forwardRef<
   return (
     <DialogPrimitive.Description
       ref={ref}
-      className={cn('mt-0.5 text-[12px] text-ink-muted', className)}
+      className={cn('mt-0.5 text-small text-ink-muted', className)}
       {...props}
     />
   );

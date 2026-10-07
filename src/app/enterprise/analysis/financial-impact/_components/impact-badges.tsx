@@ -100,7 +100,7 @@ export function ImpactValue({
 }) {
   if (value === null) {
     return (
-      <span className={cn('inline-flex items-center gap-1 text-[12px] text-ink-muted', className)}>
+      <span className={cn('inline-flex items-center gap-1 text-small text-ink-muted', className)}>
         <CircleDashed className="size-3.5 shrink-0" aria-hidden="true" />
         {unquantifiedLabel}
       </span>
@@ -114,14 +114,11 @@ export function ImpactValue({
         aria-hidden="true"
       />
       <span
-        className={cn(
-          'tnum font-semibold',
-          size === 'lg' ? 'text-[20px] leading-7' : 'text-[13px]',
-        )}
+        className={cn('tnum font-semibold', size === 'lg' ? 'text-figure leading-7' : 'text-body')}
       >
         {formatMillionYen(value)}
       </span>
-      <span className="text-[11px] text-ink-muted">百万円（{directionWord(value)}）</span>
+      <span className="text-caption text-ink-muted">百万円（{directionWord(value)}）</span>
     </span>
   );
 }
@@ -129,7 +126,7 @@ export function ImpactValue({
 /** 「定量化できた経路のみ（n / N 経路）」。合計には必ず添える */
 export function QuantifiedCount({ quantified, enabled }: { quantified: number; enabled: number }) {
   return (
-    <span className="block text-[11px] text-ink-muted">
+    <span className="block text-caption text-ink-muted">
       定量化できた経路のみ（
       <span className="tnum font-semibold text-ink">
         {quantified} / {enabled}
@@ -154,9 +151,9 @@ export function ImpactNotices({
     <div
       role="note"
       aria-label="試算についての注記"
-      className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-[12px] text-ink"
+      className="flex items-start gap-2 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-2 text-small text-ink"
     >
-      <FlaskConical className="mt-0.5 size-4 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+      <FlaskConical className="mt-0.5 size-4 shrink-0 text-warning-ink" aria-hidden="true" />
       <ul className="space-y-0.5">
         <li className="font-semibold">{FINANCIAL_IMPACT_NOTICE}</li>
         <li>{source === 'demo' ? DEMO_BASELINE_NOTICE : NO_ASSUMPTIONS_NOTICE}</li>
@@ -172,7 +169,7 @@ export function ParamNotices({ notices }: { notices: readonly string[] }) {
   return (
     <div
       role="status"
-      className="flex items-start gap-2 rounded-t4d border border-line bg-surface px-3 py-2 text-[12px] text-ink"
+      className="flex items-start gap-2 rounded-t4d border border-line bg-surface px-3 py-2 text-small text-ink"
     >
       <TriangleAlert className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       <div>
@@ -192,7 +189,7 @@ export function HiddenAreaNote({ note, areas }: { note: string; areas: string })
   return (
     <p
       role="note"
-      className="flex items-center gap-1.5 rounded-t4d border border-line bg-surface-muted px-3 py-1.5 text-[12px] text-ink-muted"
+      className="flex items-center gap-1.5 rounded-t4d border border-line bg-surface-muted px-3 py-1.5 text-small text-ink-muted"
     >
       <EyeOff className="size-3.5 shrink-0" aria-hidden="true" />
       {note}（{areas}）

@@ -117,23 +117,39 @@ describe('UX-R3-07 ウイルススキャンの状態をラベルとアイコン�
 
 describe('UX-R3-09 長い一覧の列見出しを固定する', () => {
   it('資料・プロジェクト一覧・KPI の内訳・出力の表は縦にスクロールする枠の中で見出しを固定する', () => {
+    // 共通の一覧（DataTable）へ移した画面は、見出しの固定を表の既定（stickyHeader）で持つ
+    // （plan §1.12-1: 見出しの固定は Table の既定にした。2 方式を 1 つに。下のテストで部品の側を確かめる）
+    const stickyInScroll = (text: string) =>
+      text.includes('max-h-[70vh] overflow-auto') &&
+      // 重なりの順は役割のトークン（z-(--z-sticky) = 10。plan §3.3 の codemod で z-10 から置換。値は同じ）
+      text.includes('<THead className="sticky top-0 z-(--z-sticky) bg-surface">');
     for (const file of [
       'src/app/enterprise/evidence/page.tsx',
-      'src/app/enterprise/disclosure-projects/page.tsx',
       'src/app/enterprise/esg/[kpiKey]/page.tsx',
-      'src/app/enterprise/disclosure-projects/[projectId]/_tabs/outputs.tsx',
     ]) {
       const text = read(file);
-      expect(text, file).toContain('max-h-[70vh] overflow-auto');
-      expect(text, file).toContain('<THead className="sticky top-0 z-10 bg-surface">');
+      expect(stickyInScroll(text) || text.includes('<DataTable'), file).toBe(true);
     }
+    // 出力タブ: スナップショットの表は縦にスクロールする枠の中で見出しを固定し、出力の記録は DataTable
+    const outputs = read('src/app/enterprise/disclosure-projects/[projectId]/_tabs/outputs.tsx');
+    expect(stickyInScroll(outputs)).toBe(true);
+    expect(outputs).toContain('<DataTable');
+  });
+
+  it('プロジェクト一覧は共通の一覧（DataTable）で描き、見出しの固定は表の既定（stickyHeader）で持つ', () => {
+    expect(read('src/app/enterprise/disclosure-projects/page.tsx')).toContain('<DataTable');
+    const dataTable = read('src/components/shared/data-table/data-table.tsx');
+    expect(dataTable).toContain('<Table>');
+    expect(dataTable).not.toContain('stickyHeader={false}');
+    expect(read('src/components/ui/table.tsx')).toContain('stickyHeader = true');
   });
 });
 
 describe('UX-R3-13 / UX-R3-14 標準 CSV の画面', () => {
   it('検証の後は「登録を確定」だけを主要な操作にし、値の有無の記号に意味を添える', () => {
+    // Button の variant の改名（plan §3.4: 旧 outline → secondary、既定の primary は明示）。意味は同じ
     expect(read('src/app/enterprise/imports/standard/standard-import.tsx')).toContain(
-      "variant={preview && !committed ? 'outline' : undefined}",
+      "variant={preview && !committed ? 'secondary' : 'primary'}",
     );
     const page = read('src/app/enterprise/imports/standard/page.tsx');
     expect(page).toContain('AVAILABILITY_STATUS_LABELS');

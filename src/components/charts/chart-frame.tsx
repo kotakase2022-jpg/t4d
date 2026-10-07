@@ -65,8 +65,8 @@ export function ChartFrame({
   return (
     <figure className={cn('min-w-0 space-y-1.5', className)}>
       <figcaption className="space-y-0.5">
-        <span className="block text-[12px] font-semibold text-ink">{title}</span>
-        {note && <span className="block text-[11px] text-ink-muted">{note}</span>}
+        <span className="block text-small font-semibold text-ink">{title}</span>
+        {note && <span className="block text-caption text-ink-muted">{note}</span>}
       </figcaption>
       <svg
         viewBox={`0 0 ${width} ${height}`}
@@ -100,8 +100,8 @@ export function ChartDataTable({ table, open }: { table: ChartTable; open?: bool
   return (
     <Collapsible variant="plain" summary="数値を表で見る" open={open}>
       <div className="t4d-scroll-x">
-        <table className="w-full text-[12px]">
-          <caption className="pb-1 text-left text-[11px] text-ink-muted">{table.caption}</caption>
+        <table className="w-full text-small">
+          <caption className="pb-1 text-left text-caption text-ink-muted">{table.caption}</caption>
           <thead>
             <tr>
               {table.columns.map((column, index) => (
@@ -109,7 +109,7 @@ export function ChartDataTable({ table, open }: { table: ChartTable; open?: bool
                   key={`${column.label}-${index}`}
                   scope="col"
                   className={cn(
-                    'border-b border-line px-2 py-1 text-[11px] font-semibold text-ink-muted',
+                    'border-b border-line px-2 py-1 text-caption font-semibold text-ink-muted',
                     alignOf(index) === 'right' ? 'whitespace-nowrap text-right' : 'text-left',
                   )}
                 >

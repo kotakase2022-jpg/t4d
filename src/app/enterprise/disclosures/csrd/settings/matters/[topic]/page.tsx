@@ -14,17 +14,19 @@ import {
   TriangleAlert,
   UserCheck,
 } from 'lucide-react';
+import { CreatePanel, createPanelHref } from '@/components/shared/create-panel';
+import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
 import { PreservingForm } from '@/components/shared/preserving-form';
-import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
+import { Section } from '@/components/shared/section';
+import { PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
 import { Textarea } from '@/components/ui/input';
 import { MoreInfo } from '@/components/ui/more-info';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { DMA_AXIS_ASSESSMENT_LABEL, ESRS_TOPIC_LABEL } from '@/lib/domain/csrd';
 import {
@@ -34,8 +36,9 @@ import {
   type DmaAxisResult,
 } from '@/lib/domain/dma';
 import { formatJst } from '@/lib/format/datetime';
-import { loadCsrdMatterDetail } from '@/lib/services/csrd/settings';
+import { loadCsrdMatterDetail, type CsrdIroScoreView } from '@/lib/services/csrd/settings';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import type { MenuActionSpec } from '@/lib/ui/actions';
 import { DMA_AXIS_ASSESSMENTS, type DmaAxisAssessment, type IroType } from '@/types/domain';
 import { DmaOutcomeBadge, ProvisionalBadge } from '../../../_components/csrd-badges';
 import { IroForm } from '../../_components/iro-form';
@@ -50,6 +53,7 @@ import { EMPTY_IRO_FORM, iroFormValuesOf } from '../../iro-form-values';
 export const metadata = { title: 'CSRD サステナビリティ事項の評価' };
 
 const BASE = '/enterprise/disclosures/csrd';
+const IRO_CREATE_ID = 'csrd-iro-create';
 
 const IRO_TYPE_ICON: Record<IroType, typeof Globe> = {
   impact: Globe,
@@ -75,12 +79,12 @@ function AxisProposal({
       aria-label={`${title}の算定結果`}
       className="space-y-1 rounded-t4d border border-line p-2.5"
     >
-      <h3 className="flex items-center gap-1.5 text-[12px] font-semibold text-ink">
+      <h3 className="flex items-center gap-1.5 text-small font-semibold text-ink">
         <Icon className="size-3.5 text-ink-muted" aria-hidden="true" />
         {title}
       </h3>
-      <p className="text-[18px] font-semibold tabular-nums text-ink">{axisProposalText(axis)}</p>
-      <p className="text-[11px] text-ink-muted">
+      <p className="text-figure-sm font-semibold tabular-nums text-ink">{axisProposalText(axis)}</p>
+      <p className="text-caption text-ink-muted">
         {label === '評価材料なし'
           ? emptyNote
           : `提案: ${label}（最大スコア。IRO ${axis.iroCount} 件から算定）`}
@@ -89,11 +93,113 @@ function AxisProposal({
   );
 }
 
+/** IRO の行の名前（行の操作の読み上げ名・確認ダイアログの題に使う） */
+const iroName = (row: CsrdIroScoreView) => `IRO「${row.iro.description}」`;
+
+const IRO_COLUMNS: DataTableColumn<CsrdIroScoreView>[] = [
+  {
+    key: 'type',
+    header: '種類',
+    importance: 'primary',
+    cell: ({ iro }) => {
+      const Icon = IRO_TYPE_ICON[iro.iroType];
+      return (
+        <Badge tone={iro.iroType === 'impact' ? 'brand' : 'outline'}>
+          <Icon className="size-3" aria-hidden="true" />
+          {IRO_TYPE_LABEL[iro.iroType]}
+        </Badge>
+      );
+    },
+  },
+  {
+    key: 'description',
+    header: '内容',
+    importance: 'primary',
+    lockVisible: true,
+    cell: ({ iro }) => (
+      <span className="block max-w-[280px] text-small text-ink">
+        {iro.description}
+        {iro.subTopic && (
+          <span className="block text-caption text-ink-muted">サブトピック: {iro.subTopic}</span>
+        )}
+      </span>
+    ),
+  },
+  {
+    key: 'stage',
+    header: '段階・期間',
+    importance: 'secondary',
+    cell: ({ iro }) => (
+      <span className="whitespace-nowrap text-caption">
+        {VALUE_CHAIN_STAGE_LABEL[iro.valueChainStage]}
+        <span className="block text-ink-muted">
+          {iro.timeHorizon ? TIME_HORIZON_LABEL[iro.timeHorizon] : '期間 未設定'}
+        </span>
+      </span>
+    ),
+  },
+  {
+    key: 'input',
+    header: '入力',
+    importance: 'secondary',
+    cell: ({ iro }) => (
+      <span className="whitespace-nowrap text-caption">
+        {iroInputSummary(iro)}
+        {iro.humanRights && (
+          <span className="mt-0.5 flex items-center gap-1 text-ink-muted">
+            <HandHeart className="size-3" aria-hidden="true" />
+            人権（深刻度で評価）
+          </span>
+        )}
+      </span>
+    ),
+  },
+  {
+    key: 'severity',
+    header: '深刻度',
+    importance: 'secondary',
+    align: 'right',
+    cell: ({ severity }) => (
+      <span className="tabular-nums text-small">{formatScore(severity)}</span>
+    ),
+  },
+  {
+    key: 'score',
+    header: 'スコア',
+    importance: 'primary',
+    align: 'right',
+    cell: ({ iro, impactScore, financialScore }) => (
+      <span className="tabular-nums text-small font-semibold">
+        {formatScore(impactScore ?? financialScore)}
+        <span className="block text-caption font-normal text-ink-muted">
+          {iro.iroType === 'impact' ? 'インパクト' : '財務'}
+        </span>
+      </span>
+    ),
+  },
+  {
+    key: 'stakeholders',
+    header: '影響を受ける人・関連',
+    importance: 'detail',
+    cell: ({ iro, relatedImpactDescription }) => (
+      <span className="block max-w-[200px] text-caption text-ink-muted">
+        {iro.affectedStakeholders || '—'}
+        {relatedImpactDescription && (
+          <span className="block">関連: {relatedImpactDescription}</span>
+        )}
+      </span>
+    ),
+  },
+];
+
 /**
- * サステナビリティ事項 1 件のダブル・マテリアリティ評価（docs/disclosure-first.md §9.4）。
+ * サステナビリティ事項 1 件のダブル・マテリアリティ評価（docs/disclosure-first.md §9.4・plan S12）。
  * IRO（影響・リスク・機会）の一覧・追加・編集・削除（論理削除）と、観点ごとの人の判断。
  * 算定結果は自社の方法・閾値による提案で、重要性を決めるのは人（根拠が必須）。AI は書き込まない。
  * `[topic]` が ESRS のテーマでなければ 404。
+ *
+ * 主操作は「判断を保存」1 つ（人の判断がこの画面の仕事）。IRO の追加は secondary で CreatePanel（?new=1）、
+ * 行の「操作 ▾」に 編集（?edit= で行の編集欄を開く）・削除…（論理削除。確認ダイアログを通す。plan §1.16）。
  */
 export default async function CsrdMatterPage({
   params,
@@ -106,20 +212,26 @@ export default async function CsrdMatterPage({
   const query = await searchParams;
   const shell = await loadEnterpriseShell();
   const { db, ctx } = shell;
-  const backButton = (
-    <Button variant="outline" size="sm" asChild>
-      <Link href={`${BASE}/settings`}>
-        <ArrowLeft aria-hidden="true" />
-        設定へ戻る
-      </Link>
-    </Button>
-  );
+  const backLink = {
+    kind: 'link' as const,
+    id: 'back',
+    label: '設定へ戻る',
+    href: `${BASE}/settings?step=dma`,
+    icon: <ArrowLeft aria-hidden="true" />,
+  };
 
   if (!can(ctx, 'enterprise.disclosure.read') && !can(ctx, 'enterprise.disclosure.write')) {
     return (
       <>
-        <PageHeader title="CSRD サステナビリティ事項" actions={backButton} />
-        <PermissionDeniedState description="CSRD の設定は、開示の閲覧権限を持つ利用者のみ閲覧できます。" />
+        <PageHeader
+          title="CSRD サステナビリティ事項"
+          autoBreadcrumbs
+          actions={<PageActions secondary={[backLink]} />}
+        />
+        <PermissionDeniedState
+          description="CSRD の設定は、開示の閲覧権限を持つ利用者のみ閲覧できます。"
+          permission="enterprise.disclosure.read"
+        />
       </>
     );
   }
@@ -130,6 +242,40 @@ export default async function CsrdMatterPage({
   const { state, thresholds } = detail;
   const matter = state.matter;
   const topicName = `${state.topic} ${ESRS_TOPIC_LABEL[state.topic]}`;
+  const matterPath = `${BASE}/settings/matters/${state.topic}`;
+  const editing = typeof query.edit === 'string' ? query.edit : null;
+  const rowActionsOf = (row: CsrdIroScoreView) => {
+    const items: MenuActionSpec[] = [
+      {
+        kind: 'link',
+        id: `edit-${row.iro.id}`,
+        label: '編集',
+        href: `${matterPath}?edit=${row.iro.id}#iro-edit-${row.iro.id}`,
+        icon: <Pencil aria-hidden="true" />,
+      },
+      {
+        kind: 'confirm',
+        id: `delete-${row.iro.id}`,
+        label: '削除',
+        destructive: true,
+        icon: <Trash2 aria-hidden="true" />,
+        action: deleteCsrdDmaIroAction,
+        fields: { iroId: row.iro.id, topic: state.topic },
+        confirm: {
+          tier: 'irreversible',
+          title: `${iroName(row)}を削除しますか`,
+          scope: `${topicName} の${IRO_TYPE_LABEL[row.iro.iroType]}「${row.iro.description}」`,
+          consequences: [
+            '論理削除です（履歴は残り、算定からは外れます）。',
+            'DMA を確定していた場合は、確定を取り消します。人の判断は変わりません。',
+          ],
+          confirmLabel: '削除する',
+          destructive: true,
+        },
+      },
+    ];
+    return { rowLabel: iroName(row), items };
+  };
 
   return (
     <>
@@ -154,30 +300,41 @@ export default async function CsrdMatterPage({
             )}
           </span>
         }
-        breadcrumbs={[
-          { label: '企業ワークスペース' },
-          { label: '開示対応' },
-          { label: 'CSRD', href: BASE },
-          { label: '設定（報告範囲・DMA）', href: `${BASE}/settings` },
+        breadcrumbsTail={[
+          { label: '設定（報告範囲・DMA）', href: `${BASE}/settings?step=dma` },
           { label: state.topic },
         ]}
-        actions={backButton}
+        actions={
+          <PageActions
+            secondary={[
+              {
+                kind: 'link',
+                id: 'add-iro',
+                label: 'IRO を追加',
+                href: `${createPanelHref(matterPath, query, { open: true })}#${IRO_CREATE_ID}`,
+                icon: <Plus aria-hidden="true" />,
+                hidden: !detail.canEdit,
+              },
+              backLink,
+            ]}
+          />
+        }
       />
 
       <div className="space-y-3 p-4">
         <FlashMessage searchParams={query} />
 
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title="算定結果（提案・自社の方法と閾値）"
-            action={
-              <span className="flex items-center gap-1 text-[11px] text-ink-muted">
-                提案
-                <DmaOutcomeBadge outcome={state.proposedOutcome} />
-              </span>
-            }
-          />
-          <div className="grid grid-cols-2 gap-2 px-3 pb-2">
+        <Section
+          title="算定結果（提案・自社の方法と閾値）"
+          actions={
+            <span className="flex items-center gap-1 text-caption text-ink-muted">
+              提案
+              <DmaOutcomeBadge outcome={state.proposedOutcome} />
+            </span>
+          }
+          bodyClassName="space-y-2"
+        >
+          <div className="grid grid-cols-2 gap-2">
             <AxisProposal
               title="インパクト重要性"
               icon={Globe}
@@ -191,179 +348,114 @@ export default async function CsrdMatterPage({
               emptyNote="リスク・機会の IRO がありません（評価材料なし）。"
             />
           </div>
-          <p className="border-t border-line px-3 py-1.5 text-[11px] text-ink-muted">
+          <p className="text-caption text-ink-muted">
             閾値はインパクト {formatScore(thresholds.impactThreshold)}・財務{' '}
             {formatScore(thresholds.financialThreshold)}（自社の評価方法・デモ既定。ESRS
             は数値の閾値を定めていません）。算定結果は提案で、重要性は下の「人の判断」で決めます。
           </p>
-        </Card>
+        </Section>
 
-        <Card className="overflow-hidden">
-          <SectionTitle title={`IRO（影響・リスク・機会）（${detail.iros.length} 件）`} />
-          {detail.iros.length === 0 ? (
-            <EmptyState
-              title="IRO が登録されていません"
-              description="インパクトとリスク・機会を登録すると、算定結果（提案）が出ます。"
-            />
-          ) : (
-            <div className="t4d-scroll-x">
-              <Table aria-label={`${topicName} の IRO`}>
-                <THead>
-                  <TR>
-                    <TH>種類</TH>
-                    <TH>内容</TH>
-                    <TH>段階・期間</TH>
-                    <TH>入力</TH>
-                    <TH align="right">深刻度</TH>
-                    <TH align="right">スコア</TH>
-                    <TH>影響を受ける人・関連</TH>
-                    {detail.canEdit && <TH>操作</TH>}
-                  </TR>
-                </THead>
-                <TBody>
-                  {detail.iros.map(
-                    ({ iro, severity, impactScore, financialScore, relatedImpactDescription }) => {
-                      const Icon = IRO_TYPE_ICON[iro.iroType];
-                      return (
-                        <TR key={iro.id}>
-                          <TD>
-                            <Badge tone={iro.iroType === 'impact' ? 'brand' : 'outline'}>
-                              <Icon className="size-3" aria-hidden="true" />
-                              {IRO_TYPE_LABEL[iro.iroType]}
-                            </Badge>
-                          </TD>
-                          <TD className="max-w-[280px] text-[12px] text-ink">
-                            {iro.description}
-                            {iro.subTopic && (
-                              <span className="block text-[11px] text-ink-muted">
-                                サブトピック: {iro.subTopic}
-                              </span>
-                            )}
-                          </TD>
-                          <TD className="whitespace-nowrap text-[11px]">
-                            {VALUE_CHAIN_STAGE_LABEL[iro.valueChainStage]}
-                            <span className="block text-ink-muted">
-                              {iro.timeHorizon
-                                ? TIME_HORIZON_LABEL[iro.timeHorizon]
-                                : '期間 未設定'}
-                            </span>
-                          </TD>
-                          <TD className="whitespace-nowrap text-[11px]">
-                            {iroInputSummary(iro)}
-                            {iro.humanRights && (
-                              <span className="mt-0.5 flex items-center gap-1 text-ink-muted">
-                                <HandHeart className="size-3" aria-hidden="true" />
-                                人権（深刻度で評価）
-                              </span>
-                            )}
-                          </TD>
-                          <TD align="right" className="tabular-nums text-[12px]">
-                            {formatScore(severity)}
-                          </TD>
-                          <TD align="right" className="tabular-nums text-[12px] font-semibold">
-                            {formatScore(impactScore ?? financialScore)}
-                            <span className="block text-[10px] font-normal text-ink-muted">
-                              {iro.iroType === 'impact' ? 'インパクト' : '財務'}
-                            </span>
-                          </TD>
-                          <TD className="max-w-[200px] text-[11px] text-ink-muted">
-                            {iro.affectedStakeholders || '—'}
-                            {relatedImpactDescription && (
-                              <span className="block">関連: {relatedImpactDescription}</span>
-                            )}
-                          </TD>
-                          {detail.canEdit && (
-                            <TD>
-                              <form action={deleteCsrdDmaIroAction}>
-                                <input type="hidden" name="iroId" value={iro.id} />
-                                <input type="hidden" name="topic" value={state.topic} />
-                                <SubmitButton
-                                  size="xs"
-                                  variant="outline"
-                                  icon={<Trash2 aria-hidden="true" />}
-                                  pendingLabel="削除中…"
-                                  aria-label={`IRO「${iro.description}」を削除`}
-                                >
-                                  削除
-                                </SubmitButton>
-                              </form>
-                            </TD>
-                          )}
-                        </TR>
-                      );
-                    },
-                  )}
-                </TBody>
-              </Table>
-            </div>
+        <Section
+          id="csrd-matter-iros"
+          title={`IRO（影響・リスク・機会）（${detail.iros.length} 件）`}
+          bodyClassName="space-y-2"
+        >
+          {detail.canEdit && (
+            <CreatePanel
+              id={IRO_CREATE_ID}
+              title="IRO を追加する"
+              searchParams={query}
+              closeHref={createPanelHref(matterPath, query, { open: false })}
+              description="先に種類（インパクト／リスク・機会）を選ぶと、その種類で必要な欄だけが出ます。"
+            >
+              <IroForm
+                action={upsertCsrdDmaIroAction}
+                reportingPeriodId={shell.currentPeriod.id}
+                topic={state.topic}
+                initial={EMPTY_IRO_FORM}
+                impactIroOptions={detail.impactIroOptions}
+                submitLabel="IRO を追加"
+              />
+            </CreatePanel>
           )}
-          {/* 編集フォームは表の外に置く（行の中で開くと表の幅が崩れる）。summary は Card（overflow-hidden）の
-              端まで広がるため、フォーカスリングは内側に描く（外側に描くと切れて見えない） */}
+          <DataTable<CsrdIroScoreView>
+            id="csrd-matter-iros"
+            caption={`${topicName} の IRO`}
+            columns={IRO_COLUMNS}
+            rows={detail.iros}
+            getRowId={(row) => row.iro.id}
+            getRowLabel={iroName}
+            searchParams={query}
+            basePath={matterPath}
+            search={false}
+            rowActions={detail.canEdit ? rowActionsOf : undefined}
+            empty={{
+              noData: {
+                title: 'IRO が登録されていません',
+                description: 'インパクトとリスク・機会を登録すると、算定結果（提案）が出ます。',
+                action: detail.canEdit ? (
+                  <Link
+                    href={`${createPanelHref(matterPath, query, { open: true })}#${IRO_CREATE_ID}`}
+                    className="text-small text-brand-700 underline"
+                  >
+                    最初の IRO を追加する
+                  </Link>
+                ) : (
+                  <span className="text-small text-ink-muted">
+                    IRO の登録には開示対応の編集権限が必要です。
+                  </span>
+                ),
+              },
+            }}
+          />
+          {/* 編集欄は表の外に置く（行の中で開くと表の幅が崩れる）。行の「操作 ▾ → 編集」で開いて描く */}
           {detail.canEdit &&
             detail.iros.map(({ iro }) => (
-              <details key={`edit-${iro.id}`} className="border-t border-line">
-                <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-[12px] text-brand-700 hover:underline focus-visible:outline-offset-[-2px]">
-                  <Pencil className="size-3.5" aria-hidden="true" />
-                  {IRO_TYPE_LABEL[iro.iroType]}「{iro.description}」を編集
-                </summary>
-                <div className="px-3 pb-3">
-                  <IroForm
-                    action={upsertCsrdDmaIroAction}
-                    reportingPeriodId={shell.currentPeriod.id}
-                    topic={state.topic}
-                    initial={iroFormValuesOf(iro)}
-                    impactIroOptions={detail.impactIroOptions.filter(
-                      (option) => option.id !== iro.id,
-                    )}
-                    submitLabel="IRO を更新"
-                  />
-                </div>
-              </details>
-            ))}
-          {detail.canEdit && (
-            <details className="border-t border-line">
-              <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-[12px] font-medium text-brand-700 hover:underline focus-visible:outline-offset-[-2px]">
-                <Plus className="size-3.5" aria-hidden="true" />
-                IRO を追加する
-              </summary>
-              <div className="px-3 pb-3">
+              <Collapsible
+                key={`edit-${iro.id}`}
+                id={`iro-edit-${iro.id}`}
+                variant="plain"
+                open={editing === iro.id ? true : undefined}
+                summary={`${IRO_TYPE_LABEL[iro.iroType]}「${iro.description}」を編集`}
+              >
                 <IroForm
                   action={upsertCsrdDmaIroAction}
                   reportingPeriodId={shell.currentPeriod.id}
                   topic={state.topic}
-                  initial={EMPTY_IRO_FORM}
-                  impactIroOptions={detail.impactIroOptions}
-                  submitLabel="IRO を追加"
+                  initial={iroFormValuesOf(iro)}
+                  impactIroOptions={detail.impactIroOptions.filter(
+                    (option) => option.id !== iro.id,
+                  )}
+                  submitLabel="IRO を更新"
                 />
-              </div>
-            </details>
-          )}
+              </Collapsible>
+            ))}
           {detail.canEdit && (
-            <MoreInfo label="削除の扱い" className="border-t border-line px-3 py-1.5">
+            <MoreInfo label="削除の扱い">
               <p>削除は論理削除です（履歴は残り、算定からは外れます）。</p>
             </MoreInfo>
           )}
-        </Card>
+        </Section>
 
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title="人の判断"
-            action={
-              matter.decidedAt ? (
-                <span className="flex items-center gap-1 text-[11px] text-ink-muted">
-                  <UserCheck className="size-3" aria-hidden="true" />
-                  {detail.decidedByName ?? '担当者'} ・ {formatJst(matter.decidedAt)}
-                </span>
-              ) : (
-                <Badge tone="warning">
-                  <CircleDashed className="size-3" aria-hidden="true" />
-                  未判断
-                </Badge>
-              )
-            }
-          />
+        <Section
+          id="csrd-matter-decision"
+          title="人の判断"
+          actions={
+            matter.decidedAt ? (
+              <span className="flex items-center gap-1 text-caption text-ink-muted">
+                <UserCheck className="size-3" aria-hidden="true" />
+                {detail.decidedByName ?? '担当者'} ・ {formatJst(matter.decidedAt)}
+              </span>
+            ) : (
+              <Badge tone="warning">
+                <CircleDashed className="size-3" aria-hidden="true" />
+                未判断
+              </Badge>
+            )
+          }
+        >
           {detail.canEdit ? (
-            <PreservingForm action={decideCsrdDmaMatterAction} className="space-y-3 p-3">
+            <PreservingForm action={decideCsrdDmaMatterAction} className="space-y-3">
               <input type="hidden" name="reportingPeriodId" value={shell.currentPeriod.id} />
               <input type="hidden" name="topic" value={state.topic} />
               <div className="grid grid-cols-2 gap-3">
@@ -384,12 +476,13 @@ export default async function CsrdMatterPage({
                   proposal={`${axisProposalText(state.axes.financial)}（${axisProposalLabel(state.axes.financial)}）`}
                 />
               </div>
-              <label className="block space-y-1 text-[12px] text-ink">
+              <label className="block space-y-1 text-small text-ink">
                 <span className="block font-medium">ステークホルダーの意見（任意）</span>
                 <Textarea name="stakeholderNote" rows={2} defaultValue={matter.stakeholderNote} />
               </label>
               <div className="flex flex-wrap items-center gap-2">
                 <SubmitButton
+                  variant="primary"
                   size="sm"
                   icon={<UserCheck aria-hidden="true" />}
                   pendingLabel="保存中…"
@@ -397,7 +490,7 @@ export default async function CsrdMatterPage({
                   判断を保存
                 </SubmitButton>
                 {/* AI は判断しないことは常に見せる。確定の取り消しは、取り消す確定があるときだけ書く */}
-                <span className="text-[11px] text-ink-muted">
+                <span className="text-caption text-ink-muted">
                   AI は判断しません。
                   {detail.dmaConfirmed && '保存すると DMA の確定は取り消されます。'}
                 </span>
@@ -410,37 +503,37 @@ export default async function CsrdMatterPage({
               </MoreInfo>
             </PreservingForm>
           ) : (
-            <div className="space-y-2 p-3">
-              <dl className="grid grid-cols-2 gap-3 text-[12px]">
+            <div className="space-y-2">
+              <dl className="grid grid-cols-2 gap-3 text-small">
                 <div>
-                  <dt className="text-[11px] text-ink-muted">インパクト重要性</dt>
+                  <dt className="text-caption text-ink-muted">インパクト重要性</dt>
                   <dd className="text-ink">
                     {DMA_AXIS_ASSESSMENT_LABEL[matter.impactAssessment]}
                     {matter.impactRationale && (
-                      <span className="block text-[11px] text-ink-muted">
+                      <span className="block text-caption text-ink-muted">
                         {matter.impactRationale}
                       </span>
                     )}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] text-ink-muted">財務的重要性</dt>
+                  <dt className="text-caption text-ink-muted">財務的重要性</dt>
                   <dd className="text-ink">
                     {DMA_AXIS_ASSESSMENT_LABEL[matter.financialAssessment]}
                     {matter.financialRationale && (
-                      <span className="block text-[11px] text-ink-muted">
+                      <span className="block text-caption text-ink-muted">
                         {matter.financialRationale}
                       </span>
                     )}
                   </dd>
                 </div>
               </dl>
-              <p className="text-[11px] text-ink-muted">
+              <p className="text-caption text-ink-muted">
                 判断を変えるには開示対応の編集権限が必要です。
               </p>
             </div>
           )}
-        </Card>
+        </Section>
       </div>
     </>
   );
@@ -464,26 +557,26 @@ function AxisDecision({
 }) {
   return (
     <fieldset className="space-y-1.5 rounded-t4d border border-line p-2.5">
-      <legend className="flex items-center gap-1.5 px-1 text-[12px] font-semibold text-ink">
+      <legend className="flex items-center gap-1.5 px-1 text-small font-semibold text-ink">
         <Icon className="size-3.5 text-ink-muted" aria-hidden="true" />
         {title}
       </legend>
-      <p className="text-[11px] text-ink-muted">算定結果（提案）: {proposal}</p>
+      <p className="text-caption text-ink-muted">算定結果（提案）: {proposal}</p>
       <div className="flex flex-wrap gap-3">
         {DMA_AXIS_ASSESSMENTS.map((value) => (
-          <label key={value} className="flex items-center gap-1 text-[12px] text-ink">
+          <label key={value} className="flex items-center gap-1 text-small text-ink">
             <input
               type="radio"
               name={`${name}Assessment`}
               value={value}
               defaultChecked={current === value}
-              className="accent-[#0b57a4]"
+              className="accent-brand-700"
             />
             {DMA_AXIS_ASSESSMENT_LABEL[value]}
           </label>
         ))}
       </div>
-      <label className="block space-y-1 text-[11px] text-ink-muted">
+      <label className="block space-y-1 text-caption text-ink-muted">
         <span className="block">根拠（重要／重要でないを選んだときは必須）</span>
         {/* 「重要」「重要でない」を選んだときだけ必須にする（送る前にブラウザが止める。最終の検査はサーバー） */}
         <Textarea

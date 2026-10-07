@@ -47,6 +47,9 @@ const ENTERPRISE_PATHS = [
   // CSRD（ダブル・マテリアリティ。docs/disclosure-first.md §9.4）: 設定・事項・要求事項（絞込を含む）・
   // 詳細・回答画面・対応計画・データ収集・開示ドラフト
   '/enterprise/disclosures/csrd/settings',
+  // 設定は段階 UI（plan S11）。① 報告範囲・② 評価方法は ?step= で開く
+  '/enterprise/disclosures/csrd/settings?step=boundary',
+  '/enterprise/disclosures/csrd/settings?step=method',
   '/enterprise/disclosures/csrd/settings/matters/E1',
   '/enterprise/disclosures/csrd/requirements',
   '/enterprise/disclosures/csrd/requirements?review=awaiting',

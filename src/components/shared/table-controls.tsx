@@ -110,7 +110,7 @@ export function ColumnSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="inline-flex items-center gap-1 rounded-t4d border border-line px-2 py-1 text-[12px] text-ink hover:bg-brand-50"
+        className="inline-flex items-center gap-1 rounded-t4d border border-line px-2 py-1 text-small text-ink hover:bg-brand-50"
         aria-label="列表示の切替"
         data-t4d-column-selector
       >

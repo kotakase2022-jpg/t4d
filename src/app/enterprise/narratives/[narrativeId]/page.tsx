@@ -11,7 +11,7 @@ import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { CollapsibleSection } from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleSection } from '@/components/ui/collapsible';
 import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import { NARRATIVE_THEME_LABELS } from '@/lib/domain/disclosure-status';
 import { NARRATIVE_TEMPLATE_FIELDS } from '@/lib/domain/narrative-template';
@@ -56,11 +56,14 @@ export default async function NarrativeDetailPage({
           <PageHeader
             title="定性情報"
             breadcrumbs={[
-              { label: '企業ワークスペース' },
+              { label: 'ホーム', href: '/enterprise/dashboard' },
               { label: '定性情報', href: '/enterprise/narratives' },
             ]}
           />
-          <PermissionDeniedState description="定性情報を見るには、開示の閲覧権限が必要です。" />
+          <PermissionDeniedState
+            description="定性情報を見るには、開示の閲覧権限が必要です。"
+            permission="enterprise.disclosure.read"
+          />
         </>
       );
     }
@@ -94,7 +97,7 @@ export default async function NarrativeDetailPage({
       <PageHeader
         title={record.title}
         breadcrumbs={[
-          { label: '企業ワークスペース' },
+          { label: 'ホーム', href: '/enterprise/dashboard' },
           { label: '定性情報', href: '/enterprise/narratives' },
           { label: record.title },
         ]}
@@ -125,7 +128,7 @@ export default async function NarrativeDetailPage({
         {data.versionMissing && (
           <p
             role="alert"
-            className="flex items-center gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
+            className="flex items-center gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-small text-ink"
           >
             <AlertTriangle className="size-3.5 text-danger" aria-hidden="true" />
             現在の版が見つかりません（デモ環境では版の本文をこのブラウザの Cookie
@@ -206,7 +209,7 @@ export default async function NarrativeDetailPage({
         >
           <ol className="divide-y divide-line">
             {data.versions.map((v) => (
-              <li key={v.version.id} className="px-3 py-2 text-[12px]">
+              <li key={v.version.id} className="px-3 py-2 text-small">
                 <p className="flex flex-wrap items-center gap-1.5">
                   <History className="size-3.5 text-ink-muted" aria-hidden="true" />
                   <span className="font-medium">版 {v.version.versionNo}</span>
@@ -236,18 +239,15 @@ export default async function NarrativeDetailPage({
                 {v.version.changeReason && (
                   <p className="mt-0.5 text-ink-muted">変更の理由: {v.version.changeReason}</p>
                 )}
-                <details className="mt-0.5">
-                  <summary className="cursor-pointer text-[11px] text-brand-800">
-                    この版の本文
-                  </summary>
-                  <p className="mt-1 whitespace-pre-wrap rounded-t4d bg-surface-muted p-2">
+                <Collapsible variant="plain" summary="この版の本文" className="mt-0.5">
+                  <p className="whitespace-pre-wrap rounded-t4d bg-surface-muted p-2">
                     {v.version.body || '（本文なし）'}
                   </p>
-                </details>
+                </Collapsible>
               </li>
             ))}
             {data.versions.length === 0 && (
-              <li className="px-3 py-2 text-[12px] text-ink-muted">版がありません。</li>
+              <li className="px-3 py-2 text-small text-ink-muted">版がありません。</li>
             )}
           </ol>
         </CollapsibleSection>

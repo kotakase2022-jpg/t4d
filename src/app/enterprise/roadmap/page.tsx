@@ -1,6 +1,6 @@
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 
 export const metadata = { title: '今後対応' };
@@ -97,38 +97,39 @@ export default function EnterpriseRoadmapPage() {
       <PageHeader
         title="今後対応"
         description="Phase 1 では実装対象外の機能です。動作しないボタンを画面に置かない方針のため、ここに明示しています。"
-        breadcrumbs={[{ label: '企業ワークスペース' }, { label: '今後対応' }]}
+        autoBreadcrumbs
       />
       <div className="p-4">
-        <Card className="overflow-hidden">
-          <SectionTitle title={`Phase 1 実装対象外（${ROADMAP.length}）`} />
-          <Table>
-            <THead>
-              <TR>
-                <TH>領域</TH>
-                <TH>機能</TH>
-                <TH>Phase 1 で実装しない理由</TH>
-                <TH>想定フェーズ</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {ROADMAP.map((row) => (
-                <TR key={row.item}>
-                  <TD>
-                    <Badge tone="neutral">{row.area}</Badge>
-                  </TD>
-                  <TD className="font-medium">{row.item}</TD>
-                  <TD className="text-[12px] text-ink-muted">{row.reason}</TD>
-                  <TD>
-                    <Badge tone={row.phase === '実装しない' ? 'danger' : 'brand'}>
-                      {row.phase}
-                    </Badge>
-                  </TD>
+        <Section title={`Phase 1 実装対象外（${ROADMAP.length}）`} divider="none">
+          <div className="t4d-scroll-x rounded-t4d border border-line bg-surface">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>領域</TH>
+                  <TH>機能</TH>
+                  <TH>Phase 1 で実装しない理由</TH>
+                  <TH>想定フェーズ</TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
-        </Card>
+              </THead>
+              <TBody>
+                {ROADMAP.map((row) => (
+                  <TR key={row.item}>
+                    <TD>
+                      <Badge tone="neutral">{row.area}</Badge>
+                    </TD>
+                    <TD className="font-medium">{row.item}</TD>
+                    <TD className="text-small text-ink-muted">{row.reason}</TD>
+                    <TD>
+                      <Badge tone={row.phase === '実装しない' ? 'danger' : 'brand'}>
+                        {row.phase}
+                      </Badge>
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+        </Section>
       </div>
     </>
   );

@@ -62,7 +62,8 @@ const TOUR_STEPS: TourStep[] = [
     href: '/enterprise/organizations',
     title: '指標マスター — 基準が求める指標を取り込む',
     body: '指標マスターは自社都合の一覧ではなく、SSBJ・CDP・CSRD が求める指標の集合です。スコープ 3 の 15 カテゴリー、移行リスクに脆弱な資産の金額、内部炭素価格など、基準が求める指標を出所つきで持ちます。値が入っていない指標は、そのままデータギャップとして現れます。',
-    lookAt: '「開示基準からみた指標の充足状況」の 3 つの充足率と、指標ごとの「求めている基準」列。',
+    lookAt:
+      '「基準別の充足」タブの 3 つの充足率と、「指標マスター」タブの指標ごとの「求めている基準」列。',
     phase: '手順 1: マテリアリティ・分析条件の設定',
   },
   {
@@ -70,7 +71,7 @@ const TOUR_STEPS: TourStep[] = [
     title: 'SSBJ 要求事項の評価 — 対象判定から優先順位付けまでを 1 画面で',
     body: '正式基準（転載許可取得済み）から収録している 133 要求事項（一般開示基準 33・気候関連開示基準 96・実務対応基準第1号 4。ユニバーサル基準（適用）は未収録で、基準のすべての条項ではありません）について、対象判定・重要性判断、人工知能によるギャップ分析、担当者による確認、優先順位付けを 1 画面で進めます。「SSBJ 要求事項とのマッピング」の件数の流れ（マスター 133 項目 → 適用基準で絞り込み → 対象外・重要性なしを除外 → 評価対象）で件数を検算でき、登録したマテリアリティがどの基準・要求事項に対応するかは、その下の「マテリアリティ × 基準の対応表」を開くと確かめられます。',
     lookAt:
-      '4 つの工程チップの残件数と、件数の流れ・「取込資料・データとの紐づけ」の 4 分類。「未分析をまとめて分析」で人工知能の判定候補を一括で作れます。',
+      '4 つの工程チップの残件数と、件数の流れ・「取込資料・データとの紐づけ」の 4 分類。見出しの「その他」にある「未分析をまとめて分析」で、人工知能の判定候補を一括で作れます。',
     phase: '手順 3: 要求事項の評価（対象判定・重要性判断）',
   },
   {
@@ -137,7 +138,8 @@ const TOUR_STEPS: TourStep[] = [
     href: '/enterprise/disclosures/cdp',
     title: '他の開示にも使い回す — CDP・CSRD',
     body: 'SSBJ のために整えたデータと根拠は、そのまま CDP や CSRD の回答に使えます。CDP では前年からの新規・変更だけを絞り込み、承認済みデータから回答ドラフトを作成できます。',
-    lookAt: '「前年差分だけ回答」ビューと、整合チェック・適用判定。',
+    lookAt:
+      '「前年差分だけ回答」ビューと、見出しの「適用判定を実行」。整合チェックは見出しの「その他」にあります。',
     phase: null,
   },
   {
@@ -264,7 +266,7 @@ export function DemoTour({ collapsed }: { collapsed: boolean }) {
       onClick={start}
       aria-label={collapsed ? 'デモモードを開始' : undefined}
       className={cn(
-        'flex w-full items-center gap-2 rounded-t4d px-2 py-1.5 text-[13px] font-medium text-brand-800 transition-colors hover:bg-brand-50',
+        'flex w-full items-center gap-2 rounded-t4d px-2 py-1.5 text-body font-medium text-brand-800 transition-colors hover:bg-brand-50',
         collapsed && 'justify-center px-0',
       )}
     >
@@ -281,7 +283,7 @@ export function DemoTour({ collapsed }: { collapsed: boolean }) {
         <div
           role="dialog"
           aria-label={`デモモード ステップ ${step + 1}: ${current.title}`}
-          className="t4d-no-print fixed z-50 w-[380px] rounded-t4d border border-brand-200 bg-surface shadow-lg"
+          className="t4d-no-print fixed z-(--z-modal) w-[380px] rounded-t4d border border-brand-200 bg-surface shadow-overlay"
           style={{ right: offset.right, bottom: offset.bottom }}
         >
           <div
@@ -295,7 +297,7 @@ export function DemoTour({ collapsed }: { collapsed: boolean }) {
             onKeyDown={onHeaderKeyDown}
             className="flex touch-none cursor-grab items-center justify-between gap-2 border-b border-line px-3 py-2 select-none active:cursor-grabbing"
           >
-            <span className="flex items-center gap-1.5 text-[12px] font-medium text-brand-800">
+            <span className="flex items-center gap-1.5 text-small font-medium text-brand-800">
               <GripHorizontal className="size-3.5" aria-hidden="true" />
               デモモード（{step + 1} / {TOUR_STEPS.length}）
             </span>
@@ -313,13 +315,13 @@ export function DemoTour({ collapsed }: { collapsed: boolean }) {
           <div className="space-y-1.5 px-3 py-2.5">
             {/* SSBJ 対応の 8 段階のどこを見ているかを常に示す（機能の羅列にしない） */}
             {current.phase && (
-              <p className="inline-flex rounded-t4d border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-900">
+              <p className="inline-flex rounded-t4d border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-caption font-medium text-brand-900">
                 {current.phase}
               </p>
             )}
-            <h2 className="text-[13px] font-semibold text-ink">{current.title}</h2>
-            <p className="text-[12px] leading-relaxed text-ink">{current.body}</p>
-            <p className="rounded-t4d bg-surface-muted px-2 py-1.5 text-[12px] text-ink">
+            <h2 className="text-body font-semibold text-ink">{current.title}</h2>
+            <p className="text-small leading-relaxed text-ink">{current.body}</p>
+            <p className="rounded-t4d bg-surface-muted px-2 py-1.5 text-small text-ink">
               👀 見どころ: {current.lookAt}
             </p>
           </div>
@@ -341,16 +343,16 @@ export function DemoTour({ collapsed }: { collapsed: boolean }) {
             </div>
             <div className="flex gap-1.5">
               {step > 0 && (
-                <Button size="xs" variant="outline" onClick={() => go(step - 1)}>
+                <Button size="xs" variant="secondary" onClick={() => go(step - 1)}>
                   戻る
                 </Button>
               )}
               {step < TOUR_STEPS.length - 1 ? (
-                <Button size="xs" onClick={() => go(step + 1)}>
+                <Button variant="primary" size="xs" onClick={() => go(step + 1)}>
                   次へ
                 </Button>
               ) : (
-                <Button size="xs" onClick={stop}>
+                <Button variant="primary" size="xs" onClick={stop}>
                   ツアーを終了
                 </Button>
               )}

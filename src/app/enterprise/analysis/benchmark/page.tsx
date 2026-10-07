@@ -3,7 +3,6 @@ import Link from 'next/link';
 import { ArrowRight, Inbox } from 'lucide-react';
 import { PageHeader } from '@/components/shared/page-header';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
-import { Card } from '@/components/ui/card';
 import { Collapsible } from '@/components/ui/collapsible';
 import { MoreInfo } from '@/components/ui/more-info';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
@@ -46,13 +45,13 @@ function ValueWithUnit({ value, unit }: { value: number; unit: string }) {
   return (
     <>
       {formatNumber(value)}
-      <span className="ml-0.5 text-[11px] font-normal text-ink-muted">{unit}</span>
+      <span className="ml-0.5 text-caption font-normal text-ink-muted">{unit}</span>
     </>
   );
 }
 
 /** 1 列目（指標）を横スクロールしても見えるように固定する（背景を塗って下の列を隠す） */
-const STICKY_FIRST_COLUMN = 'sticky left-0 z-[1] bg-surface';
+const STICKY_FIRST_COLUMN = 'sticky left-0 z-(--z-sticky-col) bg-surface';
 
 function PeerCell({ cell }: { cell: BenchmarkPeerCell }) {
   if (!cell.disclosed || !cell.value || cell.value.value === null) {
@@ -61,15 +60,15 @@ function PeerCell({ cell }: { cell: BenchmarkPeerCell }) {
   const comparability = cell.comparability;
   return (
     <div className="space-y-0.5">
-      <span className="tnum block text-[13px] font-semibold text-ink">
+      <span className="tnum block text-body font-semibold text-ink">
         <ValueWithUnit value={cell.value.value} unit={cell.value.unit} />
       </span>
       {cell.value.method && (
-        <span className="block text-[11px] text-ink-muted">{cell.value.method}</span>
+        <span className="block text-caption text-ink-muted">{cell.value.method}</span>
       )}
       {comparability && <ComparabilityBadge comparable={comparability.comparable} />}
       {comparability && !comparability.comparable && (
-        <ul className="space-y-0.5 text-[11px] text-ink">
+        <ul className="space-y-0.5 text-caption text-ink">
           {comparability.reasons.map((reason) => (
             <li key={reason.factor}>
               <span className="font-medium">{reason.label}</span>
@@ -88,21 +87,21 @@ function OwnCell({ row }: { row: BenchmarkRow }) {
   return (
     <div className="space-y-0.5">
       {own.value !== null ? (
-        <span className="tnum block text-[13px] font-semibold text-ink">
+        <span className="tnum block text-body font-semibold text-ink">
           <ValueWithUnit value={own.value} unit={own.conditions.unit} />
         </span>
       ) : (
-        <span className="block text-[12px] font-semibold text-ink">{own.label}</span>
+        <span className="block text-small font-semibold text-ink">{own.label}</span>
       )}
-      {own.value !== null && <span className="block text-[11px] text-ink-muted">{own.label}</span>}
+      {own.value !== null && <span className="block text-caption text-ink-muted">{own.label}</span>}
       {own.conditions.boundary && (
-        <span className="block text-[11px] text-ink-muted">範囲: {own.conditions.boundary}</span>
+        <span className="block text-caption text-ink-muted">範囲: {own.conditions.boundary}</span>
       )}
-      {own.reason && <span className="block text-[11px] text-ink-muted">{own.reason}</span>}
+      {own.reason && <span className="block text-caption text-ink-muted">{own.reason}</span>}
       {own.fix && (
         <Link
           href={own.fix.href}
-          className="inline-flex items-center gap-1 text-[11px] text-brand-700 hover:underline"
+          className="inline-flex items-center gap-1 text-caption text-brand-700 hover:underline"
         >
           {own.fix.label}
           <ArrowRight className="size-3" aria-hidden="true" />
@@ -116,31 +115,31 @@ function StatsCells({ row }: { row: BenchmarkRow }) {
   const { stats } = row;
   return (
     <>
-      <TD align="right" className="py-2 align-top text-[12px]">
+      <TD align="right" className="py-2 align-top text-small">
         <span className="tnum font-semibold">
           {stats.n} / {row.peerTotal} 社
         </span>
-        <span className="block text-[11px] text-ink-muted">
+        <span className="block text-caption text-ink-muted">
           未開示 {row.undisclosedCount}・比較対象外 {row.notComparableCount}
         </span>
       </TD>
-      <TD align="right" className="py-2 align-top text-[12px]">
+      <TD align="right" className="py-2 align-top text-small">
         {stats.median !== null ? (
           <span className="tnum font-semibold">
             <ValueWithUnit value={stats.median} unit={row.metric.unit} />
           </span>
         ) : (
-          <span className="block text-[11px] text-ink-muted">
+          <span className="block text-caption text-ink-muted">
             出しません（{BENCHMARK_MEDIAN_MIN_PEERS} 社未満）
           </span>
         )}
       </TD>
-      <TD align="right" className="py-2 align-top text-[12px]">
+      <TD align="right" className="py-2 align-top text-small">
         {stats.min !== null && stats.max !== null ? (
           <>
             <span className="tnum">
               {formatNumber(stats.min)}〜{formatNumber(stats.max)}
-              <span className="ml-0.5 text-[11px] text-ink-muted">{row.metric.unit}</span>
+              <span className="ml-0.5 text-caption text-ink-muted">{row.metric.unit}</span>
             </span>
             <BenchmarkRange
               peerValues={comparablePeerValues(row)}
@@ -149,7 +148,7 @@ function StatsCells({ row }: { row: BenchmarkRow }) {
             />
           </>
         ) : (
-          <span className="text-[11px] text-ink-muted">—</span>
+          <span className="text-caption text-ink-muted">—</span>
         )}
       </TD>
     </>
@@ -193,13 +192,14 @@ export default async function BenchmarkPage() {
       <>
         {header}
         <div className="p-4">
-          <Card>
+          <div className="rounded-t4d-lg border border-line bg-surface">
             <EmptyState
+              kind="not-applicable"
               icon={<Inbox className="size-5" aria-hidden="true" />}
               title="比較データが登録されていません"
               description={`他社の開示値（比較データ）は登録されていません。デモ環境でのみ、${DEMO_BENCHMARK_NOTICE}を表示します。`}
             />
-          </Card>
+          </div>
         </div>
       </>
     );
@@ -246,7 +246,7 @@ export default async function BenchmarkPage() {
 
         <div className="t4d-scroll-x rounded-t4d-lg border border-line bg-surface">
           <Table className="min-w-[1280px]">
-            <caption className="px-3 py-2 text-left text-[13px] font-semibold text-ink">
+            <caption className="px-3 py-2 text-left text-body font-semibold text-ink">
               {DEMO_BENCHMARK_NOTICE}（{view.fiscalYear}・比較先 {view.peers.length} 社）
             </caption>
             <THead>
@@ -273,7 +273,7 @@ export default async function BenchmarkPage() {
                           表を読み上げで移動するたびに値より先に読まれるため、次の行に分ける */}
                       <th
                         scope="row"
-                        className={`max-w-[200px] px-2 py-2 text-left align-top text-[12px] ${STICKY_FIRST_COLUMN}`}
+                        className={`max-w-[200px] px-2 py-2 text-left align-top text-small ${STICKY_FIRST_COLUMN}`}
                       >
                         <span className="font-semibold text-ink">{row.metric.label}</span>
                         <span className="block font-normal text-ink-muted">
@@ -299,7 +299,7 @@ export default async function BenchmarkPage() {
                         className="border-b border-line last:border-b-0"
                         data-benchmark-notes={row.metric.key}
                       >
-                        <td colSpan={columnCount} className="px-0 pb-1.5 pt-0 text-[12px]">
+                        <td colSpan={columnCount} className="px-0 pb-1.5 pt-0 text-small">
                           <div className="sticky left-0 w-fit max-w-[480px] px-2">
                             <MoreInfo label={`${row.metric.label} の定義・注記`}>
                               {row.metric.ownMethod && <p>自社の定義: {row.metric.ownMethod}</p>}
@@ -321,7 +321,7 @@ export default async function BenchmarkPage() {
         <Collapsible summary={`比較先の会社（${view.peers.length} 社・すべて架空）`}>
           <div className="t4d-scroll-x">
             <Table>
-              <caption className="px-3 py-2 text-left text-[13px] font-semibold text-ink">
+              <caption className="px-3 py-2 text-left text-body font-semibold text-ink">
                 比較先の会社（{DEMO_BENCHMARK_NOTICE}）
               </caption>
               <THead>
@@ -334,11 +334,11 @@ export default async function BenchmarkPage() {
               <TBody>
                 {view.peers.map((peer) => (
                   <TR key={peer.id}>
-                    <th scope="row" className="px-2 text-left text-[12px] font-medium">
+                    <th scope="row" className="px-2 text-left text-small font-medium">
                       {peer.name}
                     </th>
-                    <TD className="text-[12px]">{peer.industry}</TD>
-                    <TD className="text-[12px]">{peer.sizeBand}</TD>
+                    <TD className="text-small">{peer.industry}</TD>
+                    <TD className="text-small">{peer.sizeBand}</TD>
                   </TR>
                 ))}
               </TBody>

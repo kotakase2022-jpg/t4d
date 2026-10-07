@@ -35,7 +35,7 @@ export function Pagination({
 
   const linkClass = (disabled: boolean) =>
     cn(
-      'inline-flex h-6 items-center gap-0.5 rounded-t4d border border-line px-1.5 text-[12px]',
+      'inline-flex h-6 items-center gap-0.5 rounded-t4d border border-line px-1.5 text-small',
       disabled
         ? 'pointer-events-none opacity-40'
         : 'text-ink hover:border-brand-300 hover:bg-brand-50',
@@ -46,7 +46,7 @@ export function Pagination({
       aria-label="ページ送り"
       className="flex items-center justify-between gap-3 border-t border-line bg-surface px-3 py-1.5"
     >
-      <p className="text-[12px] text-ink-muted">
+      <p className="text-small text-ink-muted">
         {total.toLocaleString('ja-JP')} 件中 {from.toLocaleString('ja-JP')}–
         {to.toLocaleString('ja-JP')} 件を表示
       </p>
@@ -60,7 +60,7 @@ export function Pagination({
           <ChevronLeft className="size-3.5" aria-hidden="true" />
           前へ
         </Link>
-        <span className="tnum px-1 text-[12px] text-ink-muted">
+        <span className="tnum px-1 text-small text-ink-muted">
           {page} / {totalPages}
         </span>
         <Link

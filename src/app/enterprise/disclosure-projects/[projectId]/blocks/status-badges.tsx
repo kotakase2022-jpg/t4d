@@ -1,51 +1,20 @@
 import type { ComponentType } from 'react';
-import {
-  AlertTriangle,
-  CheckCheck,
-  CheckCircle2,
-  FilePen,
-  FileQuestion,
-  Hourglass,
-  Send,
-  Undo2,
-  XCircle,
-} from 'lucide-react';
+import { AlertTriangle, CheckCheck, CheckCircle2, FileQuestion, XCircle } from 'lucide-react';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { Badge } from '@/components/ui/badge';
-import { BLOCK_STATUS_LABELS, REVIEW_REQUEST_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import type { BlockStatus, ReviewRequestStatus } from '@/types/domain';
 
 /**
  * 原稿・レビュー・参照の鮮度のバッジ。色だけで状態を表さず、必ずラベルとアイコンを併記する。
  * 企業内の承認であり、第三者保証を意味しない（「保証」と表示しない）。
+ *
+ * 原稿とレビュー依頼の状態は状態登録簿（src/lib/ui/status の block・review）から描く
+ * （同じ「差戻し」が画面ごとに別の色・アイコンにならないように。plan §3.2）。
  */
 
-const BLOCK_TONE: Record<BlockStatus, 'neutral' | 'brand' | 'danger' | 'warning' | 'success'> = {
-  draft: 'neutral',
-  review_requested: 'brand',
-  returned: 'danger',
-  approval_pending: 'warning',
-  approved: 'success',
-};
-
-const BLOCK_ICON: Record<BlockStatus, ComponentType<{ className?: string }>> = {
-  draft: FilePen,
-  review_requested: Send,
-  returned: Undo2,
-  approval_pending: Hourglass,
-  approved: CheckCircle2,
-};
-
+/** 承認済みには「社内承認。第三者保証ではありません」を添える（登録簿の description。読み上げと Hint） */
 export function BlockStatusBadge({ status }: { status: BlockStatus }) {
-  const Icon = BLOCK_ICON[status];
-  return (
-    <Badge tone={BLOCK_TONE[status]}>
-      <Icon className="size-3" aria-hidden="true" />
-      {BLOCK_STATUS_LABELS[status]}
-      {status === 'approved' && (
-        <span className="sr-only">（社内承認。第三者保証ではありません）</span>
-      )}
-    </Badge>
-  );
+  return <StatusBadge domain="block" value={status} />;
 }
 
 export type FreshnessBadgeStatus =
@@ -77,31 +46,6 @@ export function FreshnessBadge({ status }: { status: FreshnessBadgeStatus }) {
   );
 }
 
-const REQUEST_TONE: Record<
-  ReviewRequestStatus,
-  'neutral' | 'brand' | 'danger' | 'warning' | 'success'
-> = {
-  open: 'brand',
-  returned: 'danger',
-  reviewed: 'warning',
-  approved: 'success',
-  withdrawn: 'neutral',
-};
-
-const REQUEST_ICON: Record<ReviewRequestStatus, ComponentType<{ className?: string }>> = {
-  open: Send,
-  returned: Undo2,
-  reviewed: Hourglass,
-  approved: CheckCircle2,
-  withdrawn: XCircle,
-};
-
 export function ReviewRequestStatusBadge({ status }: { status: ReviewRequestStatus }) {
-  const Icon = REQUEST_ICON[status];
-  return (
-    <Badge tone={REQUEST_TONE[status]}>
-      <Icon className="size-3" aria-hidden="true" />
-      {REVIEW_REQUEST_STATUS_LABELS[status]}
-    </Badge>
-  );
+  return <StatusBadge domain="review" value={status} />;
 }

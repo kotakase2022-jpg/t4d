@@ -10,7 +10,7 @@ import { FlaskConical } from 'lucide-react';
  */
 export function DemoSimulationNotice() {
   return (
-    <p className="flex items-center gap-1.5 rounded-t4d border border-brand-200 bg-brand-50 px-3 py-1.5 text-[11px] text-brand-900">
+    <p className="flex items-center gap-1.5 rounded-t4d border border-brand-200 bg-brand-50 px-3 py-1.5 text-caption text-brand-900">
       <FlaskConical className="size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
       デモ環境｜サンプルデータ・表示スコアはシミュレーションです（実測の認識精度や算定の正確性を示す値ではありません）
     </p>

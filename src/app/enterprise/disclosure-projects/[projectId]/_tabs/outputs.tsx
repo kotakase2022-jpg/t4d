@@ -3,18 +3,19 @@ import {
   BadgeCheck,
   CheckCircle2,
   Download,
-  FileSpreadsheet,
   FileText,
-  History,
   Info,
   Lock,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
+import { PageActions } from '@/components/shared/page-actions';
+import { Section } from '@/components/shared/section';
+import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
 import { MoreInfo } from '@/components/ui/more-info';
-import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
@@ -33,16 +34,20 @@ import {
   listProjectSnapshots,
   type SnapshotListEntry,
 } from '@/lib/services/report-snapshot';
+import { DEFAULT_PAGE_SIZES, parsePage, parsePageSize } from '@/lib/table/columns';
 import type { ExportArtifactFormat, ExportAudience, ReportSnapshotKind } from '@/types/domain';
 import { confirmReportAction, createReviewDraftSnapshotAction } from '../outputs/actions';
 
 /**
- * 開示プロジェクトの「出力」タブ（指示書 §6.10、docs/disclosure-first.md §5「レポート確定」「出力」）。
+ * 開示プロジェクトの「出力」タブ（指示書 §6.10、docs/disclosure-first.md §5「レポート確定」「出力」、plan S1）。
  *
+ * - 主操作は「レポートを確定する」（最終承認の権限を持つ人だけ）。取り消せない操作なので確認ダイアログで
+ *   範囲（承認済みの版を不変のスナップショットとして固定）を示してから送る（plan §1.16 区分 1）。
+ *   「レビュー用草稿を作成」は副操作
  * - 出力する版を「レビュー用草稿」「社内承認済み版」から選ぶ。どちらもスナップショットを作ってから、
  *   そのスナップショットだけを元に DOCX / XLSX / CSV を生成する（ライブの値から組み立てない）。
- * - 確定ボタンは阻害条件があれば無効にし、理由を並べる。無効化は表示だけで、
- *   確定の操作でもサーバー（confirmReport）が同じ判定をやり直す。
+ * - 確定できない理由は常に並べる。押せない状態の表示は画面だけで、確定の操作でもサーバー（confirmReport）が
+ *   同じ判定をやり直す。
  * - ファイルの作成は提出ではない。社内承認は第三者保証ではない（どちらも画面に明記する）。
  * - スナップショット作成後に上流が変わった場合は注意として示すだけで、スナップショットは変えない（§10.3）。
  */
@@ -82,7 +87,7 @@ function SnapshotKindBadge({ kind }: { kind: ReportSnapshotKind }) {
 
 function DownloadLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Button asChild variant="outline" size="xs">
+    <Button asChild variant="secondary" size="xs">
       {/* download 属性は付けない（失敗時の出力タブへの戻りをファイルとして保存させない）。
           成功時は Content-Disposition: attachment でダウンロードになる */}
       <a href={href}>
@@ -93,11 +98,21 @@ function DownloadLink({ href, children }: { href: string; children: ReactNode })
   );
 }
 
+/** ハッシュの先頭 12 文字（全体は読み上げ用に添える。title= には入れない） */
+function ShortHash({ value }: { value: string }) {
+  return (
+    <code className="text-caption">
+      {value.slice(0, 12)}
+      <span className="sr-only">（全体: {value}）</span>
+    </code>
+  );
+}
+
 function SnapshotDownloads({ entry, canExport }: { entry: SnapshotListEntry; canExport: boolean }) {
   const { snapshot } = entry;
   if (!canExport) {
     return (
-      <p className="flex items-center gap-1 text-[11px] text-ink-muted">
+      <p className="flex items-center gap-1 text-caption text-ink-muted">
         <Lock className="size-3" aria-hidden="true" />
         出力の権限がありません
       </p>
@@ -115,7 +130,7 @@ function SnapshotDownloads({ entry, canExport }: { entry: SnapshotListEntry; can
     <div className="space-y-1">
       {snapshot.frameworkVersions.map((framework) => (
         <div key={framework.frameworkVersionId} className="flex flex-wrap items-center gap-1">
-          <span className="mr-1 text-[11px] text-ink-muted">DOCX 原稿（{framework.label}）</span>
+          <span className="mr-1 text-caption text-ink-muted">DOCX 原稿（{framework.label}）</span>
           <DownloadLink
             href={exportHref(snapshot, 'docx', 'internal', framework.frameworkVersionId)}
           >
@@ -129,7 +144,7 @@ function SnapshotDownloads({ entry, canExport }: { entry: SnapshotListEntry; can
         </div>
       ))}
       <div className="flex flex-wrap items-center gap-1">
-        <span className="mr-1 text-[11px] text-ink-muted">対応表・数値</span>
+        <span className="mr-1 text-caption text-ink-muted">対応表・数値</span>
         <DownloadLink href={exportHref(snapshot, 'xlsx', 'internal')}>
           XLSX 対応表（社内確認用）
         </DownloadLink>
@@ -144,6 +159,8 @@ function SnapshotDownloads({ entry, canExport }: { entry: SnapshotListEntry; can
   );
 }
 
+type ArtifactRow = Awaited<ReturnType<typeof listExportArtifacts>>[number];
+
 export async function OutputsTab({
   projectId,
   searchParams,
@@ -156,10 +173,10 @@ export async function OutputsTab({
 
   if (!can(ctx, 'enterprise.disclosure.read')) {
     return (
-      <p className="flex items-center gap-1.5 p-4 text-[12px] text-ink-muted">
-        <Lock className="size-3.5" aria-hidden="true" />
-        出力の確認には開示の閲覧権限が必要です。
-      </p>
+      <PermissionDeniedState
+        description="出力の確認には開示の閲覧権限が必要です。"
+        permission="enterprise.disclosure.read"
+      />
     );
   }
 
@@ -181,6 +198,7 @@ export async function OutputsTab({
 
   const canDraft = can(ctx, 'enterprise.disclosure.write') || can(ctx, 'enterprise.export.run');
   const canExport = can(ctx, 'enterprise.export.run');
+  const canApprove = can(ctx, 'enterprise.disclosure.approve');
   // 番号以外が載った URL（手で作られたもの）で「作成しました」と見せない
   const createdParam = param(searchParams, 'snapshotCreated');
   const created = createdParam && /^\d{1,6}$/.test(createdParam) ? createdParam : null;
@@ -193,15 +211,86 @@ export async function OutputsTab({
       (s) => s.snapshot.snapshotKind === createdKind && String(s.snapshot.snapshotNo) === created,
     );
   const outputError = param(searchParams, 'outputError');
-  const blockerListId = `report-blockers-${projectId}`;
   const MAX_BLOCKERS = 8;
+  const blockerCount = readiness.actorBlockers.length + readiness.blockers.length;
+  const projectPath = `/enterprise/disclosure-projects/${projectId}`;
+  const includedCount = readiness.frameworks.filter((f) => f.included).length;
+
+  const pageSize = parsePageSize(searchParams.size);
+  const page = Math.min(
+    parsePage(searchParams.page),
+    Math.max(1, Math.ceil(artifacts.length / pageSize)),
+  );
+  const artifactColumns: DataTableColumn<ArtifactRow>[] = [
+    {
+      key: 'generatedAt',
+      header: '出力日時',
+      importance: 'primary',
+      lockVisible: true,
+      cell: (a) => <span className="whitespace-nowrap text-small">{formatJst(a.generatedAt)}</span>,
+    },
+    {
+      key: 'format',
+      header: '形式',
+      importance: 'primary',
+      cell: (a) => <span className="text-small">{EXPORT_ARTIFACT_FORMAT_LABELS[a.format]}</span>,
+    },
+    {
+      key: 'fileName',
+      header: 'ファイル名',
+      importance: 'primary',
+      width: 'lg',
+      cell: (a) => <span className="break-all text-small">{a.fileName}</span>,
+    },
+    {
+      key: 'generatedBy',
+      header: '出力者',
+      importance: 'primary',
+      cell: (a) => <span className="text-small">{a.generatedByName}</span>,
+    },
+    {
+      key: 'snapshot',
+      header: 'スナップショット',
+      importance: 'detail',
+      cell: (a) => (
+        <span className="text-small">
+          {snapshotNoById.get(a.snapshotId) ?? '（このサーバーに無いスナップショット）'}
+        </span>
+      ),
+    },
+    {
+      key: 'audience',
+      header: '区分',
+      importance: 'detail',
+      cell: (a) => <span className="text-small">{AUDIENCE_DISPLAY[a.audience]}</span>,
+    },
+    {
+      key: 'size',
+      header: 'サイズ',
+      importance: 'detail',
+      align: 'right',
+      cell: (a) => <span className="text-small">{formatNumber(a.byteSize)} B</span>,
+    },
+    {
+      key: 'fileHash',
+      header: 'ファイルのハッシュ',
+      importance: 'detail',
+      cell: (a) => <ShortHash value={a.fileSha256} />,
+    },
+    {
+      key: 'contentHash',
+      header: '内容ハッシュ',
+      importance: 'detail',
+      cell: (a) => <ShortHash value={a.contentHash} />,
+    },
+  ];
 
   return (
     <div className="space-y-3">
       {outputError && (
         <p
           role="alert"
-          className="flex items-center gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-[12px] text-ink"
+          className="flex items-center gap-1.5 rounded-t4d border border-danger/40 bg-danger-soft px-3 py-1.5 text-small text-ink"
         >
           <AlertTriangle className="size-3.5 shrink-0 text-danger" aria-hidden="true" />
           {outputError}
@@ -211,7 +300,7 @@ export async function OutputsTab({
         <p
           role="status"
           aria-live="polite"
-          className="flex items-center gap-1.5 rounded-t4d border border-success/40 bg-success-soft px-3 py-1.5 text-[12px] text-ink"
+          className="flex items-center gap-1.5 rounded-t4d border border-success/40 bg-success-soft px-3 py-1.5 text-small text-ink"
         >
           <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden="true" />
           {SNAPSHOT_KIND_DISPLAY[createdKind]}
@@ -221,10 +310,10 @@ export async function OutputsTab({
       {created && !createdListed && (
         <p
           role="alert"
-          className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-[12px] text-ink"
+          className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-3 py-1.5 text-small text-ink"
           data-testid="snapshot-created-elsewhere"
         >
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[#8a5d00]" aria-hidden="true" />
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning-ink" aria-hidden="true" />
           <span>
             {SNAPSHOT_KIND_DISPLAY[createdKind]}のスナップショット No.{created}
             は作成しましたが、この画面を表示したサーバーの一覧にはありません
@@ -236,106 +325,117 @@ export async function OutputsTab({
         </p>
       )}
 
-      <div
-        role="note"
-        className="space-y-0.5 rounded-t4d border border-brand-200 bg-brand-50 px-3 py-2 text-[12px] text-brand-900"
-      >
-        <p className="flex items-start gap-1.5">
-          <Info className="mt-0.5 size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
-          <span>
-            ファイル作成は提出ではありません（開示先へ提出・公表したことにはなりません）。
-            {SNAPSHOT_KIND_DISPLAY.approved}
-            は社内の承認であり、第三者による保証ではありません。
-          </span>
-        </p>
-        {db.mode === 'demo' && (
-          <MoreInfo label="デモでのスナップショットの保存" className="pl-5">
-            <p>
-              デモではスナップショットの目録をこのブラウザの Cookie
-              で持ち回します。別のブラウザや、Cookie
-              の容量不足で古い操作が押し出された後は一覧から消えることがあります（本番は追記専用の表に保存します）。
-            </p>
-          </MoreInfo>
-        )}
-      </div>
-
-      {/* 出力する版を選ぶ */}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-1.5">
-              <FileText className="size-4 text-brand-600" aria-hidden="true" />
-              {SNAPSHOT_KIND_DISPLAY.review_draft}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <CardDescription>
-              保存済みの版を固定して出力します（未承認の箇所は出力に明示）。
-            </CardDescription>
-            <MoreInfo label="草稿に含めるもの">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div
+          role="note"
+          className="min-w-0 flex-1 space-y-0.5 rounded-t4d border border-brand-200 bg-brand-50 px-3 py-2 text-small text-brand-900"
+        >
+          <p className="flex items-start gap-1.5">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-brand-600" aria-hidden="true" />
+            <span>
+              ファイル作成は提出ではありません（開示先へ提出・公表したことにはなりません）。
+              {SNAPSHOT_KIND_DISPLAY.approved}
+              は社内の承認であり、第三者による保証ではありません。
+            </span>
+          </p>
+          {db.mode === 'demo' && (
+            <MoreInfo label="デモでのスナップショットの保存" className="pl-5">
               <p>
-                保存済みの版をそのまま固定します（自動保存中の本文は含めません）。未承認の節・不足情報は出力に「草稿・未承認箇所あり」として明示します。
+                デモではスナップショットの目録をこのブラウザの Cookie
+                で持ち回します。別のブラウザや、Cookie
+                の容量不足で古い操作が押し出された後は一覧から消えることがあります（本番は追記専用の表に保存します）。
               </p>
             </MoreInfo>
-            {canDraft ? (
-              <form action={createReviewDraftSnapshotAction}>
-                <input type="hidden" name="projectId" value={projectId} />
-                <SubmitButton
-                  size="sm"
-                  variant="outline"
-                  pendingLabel="作成中…"
-                  icon={<FileText aria-hidden="true" />}
-                >
-                  {SNAPSHOT_KIND_DISPLAY.review_draft}を作成
-                </SubmitButton>
-              </form>
-            ) : (
-              <p className="flex items-center gap-1 text-[11px] text-ink-muted">
+          )}
+        </div>
+        <PageActions
+          primary={{
+            kind: 'confirm',
+            id: 'confirm-report',
+            label: 'レポートを確定する',
+            icon: <BadgeCheck aria-hidden="true" />,
+            action: confirmReportAction,
+            fields: { projectId },
+            hidden: !canApprove,
+            disabledReason: readiness.canConfirm
+              ? undefined
+              : `確定できない理由が ${blockerCount} 件あります（下の「確定できない理由」を参照）`,
+            confirm: {
+              tier: 'irreversible',
+              title: 'レポートを確定しますか',
+              scope:
+                '承認済みの版を不変のスナップショットとして固定します。以後の変更は差分として検知されます。',
+              consequences: [
+                `確定すると「${SNAPSHOT_KIND_DISPLAY.approved}」のスナップショットができ、取り消せません。`,
+                'ファイル作成・確定は提出ではありません。社内の承認であり、第三者による保証ではありません。',
+                ...(readiness.draftStandardPrep
+                  ? ['草案の基準による準備を含みます。確定しても法定準拠の確定にはなりません。']
+                  : []),
+              ],
+              confirmLabel: '確定する',
+              destructive: false,
+            },
+          }}
+          secondary={[
+            {
+              kind: 'submit',
+              id: 'create-review-draft',
+              label: `${SNAPSHOT_KIND_DISPLAY.review_draft}を作成`,
+              icon: <FileText aria-hidden="true" />,
+              action: createReviewDraftSnapshotAction,
+              fields: { projectId },
+              pendingLabel: '作成中…',
+              hidden: !canDraft,
+            },
+          ]}
+        />
+      </div>
+
+      {/* 出力する版の違いと、確定の条件 */}
+      <div className="grid gap-x-4 gap-y-2 lg:grid-cols-2">
+        <Section
+          title={SNAPSHOT_KIND_DISPLAY.review_draft}
+          summary="保存済みの版を固定して出力します（未承認の箇所は出力に明示）"
+          divider="none"
+        >
+          <MoreInfo label="草稿に含めるもの">
+            <p>
+              保存済みの版をそのまま固定します（自動保存中の本文は含めません）。未承認の節・不足情報は出力に「草稿・未承認箇所あり」として明示します。
+            </p>
+          </MoreInfo>
+          {!canDraft && (
+            <p className="flex items-center gap-1 text-caption text-ink-muted">
+              <Lock className="size-3" aria-hidden="true" />
+              草稿の作成には開示の編集または出力の権限が必要です。
+            </p>
+          )}
+        </Section>
+
+        <Section title={`${SNAPSHOT_KIND_DISPLAY.approved}（レポートの確定）`} divider="none">
+          <div className="space-y-2 text-small">
+            <p className="text-ink-muted">
+              適用する基準の全節が承認済みで阻害条件が無いときだけ確定できます。確定の操作でも、サーバーで同じ条件を確かめ直します。
+            </p>
+            {!canApprove && (
+              <p className="flex items-center gap-1 text-caption text-ink-muted">
                 <Lock className="size-3" aria-hidden="true" />
-                草稿の作成には開示の編集または出力の権限が必要です。
+                レポートの確定は最終承認者（開示の承認の権限を持つ人）が行います。
               </p>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-1.5">
-              <BadgeCheck className="size-4 text-brand-600" aria-hidden="true" />
-              {SNAPSHOT_KIND_DISPLAY.approved}（レポートの確定）
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <CardDescription>
-              適用する基準の全節が承認済みで阻害条件が無いときだけ確定できます。確定の操作でも、サーバーで同じ条件を確かめ直します。
-            </CardDescription>
             {readiness.draftStandardPrep && (
-              <p className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1 text-[11px] text-ink">
+              <p className="flex items-start gap-1.5 rounded-t4d border border-warning/40 bg-warning-soft px-2 py-1 text-caption text-ink">
                 <AlertTriangle
-                  className="mt-0.5 size-3 shrink-0 text-[#8a5d00]"
+                  className="mt-0.5 size-3 shrink-0 text-warning-ink"
                   aria-hidden="true"
                 />
                 草案の基準による準備を含みます。確定しても「草案基準による準備」として扱い、法定準拠の確定にはなりません。
               </p>
             )}
-            <form action={confirmReportAction} className="space-y-2">
-              <input type="hidden" name="projectId" value={projectId} />
-              <SubmitButton
-                size="sm"
-                pendingLabel="確定中…"
-                icon={<BadgeCheck aria-hidden="true" />}
-                disabled={!readiness.canConfirm}
-                aria-describedby={readiness.canConfirm ? undefined : blockerListId}
-              >
-                レポートを確定する
-              </SubmitButton>
-            </form>
             {!readiness.canConfirm && (
-              <div id={blockerListId} className="text-[12px]">
+              <div>
                 <p className="flex items-center gap-1 font-medium text-ink">
-                  <AlertTriangle className="size-3.5 text-[#8a5d00]" aria-hidden="true" />
-                  確定できない理由（
-                  {readiness.actorBlockers.length + readiness.blockers.length} 件）
+                  <AlertTriangle className="size-3.5 text-warning-ink" aria-hidden="true" />
+                  確定できない理由（{blockerCount} 件）
                 </p>
                 <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-muted">
                   {readiness.actorBlockers.map((reason) => (
@@ -346,21 +446,23 @@ export async function OutputsTab({
                   ))}
                 </ul>
                 {readiness.blockers.length > MAX_BLOCKERS && (
-                  <p className="mt-0.5 text-[11px] text-ink-muted">
+                  <p className="mt-0.5 text-caption text-ink-muted">
                     ほか {readiness.blockers.length - MAX_BLOCKERS} 件
                   </p>
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Section>
       </div>
 
-      {/* 基準ごとの出力対象 */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>基準ごとの出力対象</CardTitle>
-        </CardHeader>
+      {/* 基準ごとの出力対象（補助表。既定で閉じる） */}
+      <Section
+        id="output-frameworks"
+        collapsible
+        title="基準ごとの出力対象"
+        summary={`基準 ${readiness.frameworks.length} 件（出力に含める ${includedCount} 件）`}
+      >
         <div className="t4d-scroll-x">
           <Table>
             <THead>
@@ -381,7 +483,7 @@ export async function OutputsTab({
                   <TD>
                     {APPLICABILITY_STATUS_LABELS[f.applicabilityStatus]}
                     {!f.decided && (
-                      <span className="ml-1 text-[11px] text-ink-muted">（判断未確定）</span>
+                      <span className="ml-1 text-caption text-ink-muted">（判断未確定）</span>
                     )}
                   </TD>
                   <TD>{f.draftStandardPrep ? '草案基準による準備' : '—'}</TD>
@@ -392,25 +494,28 @@ export async function OutputsTab({
             </TBody>
           </Table>
         </div>
-      </Card>
+      </Section>
 
       {/* スナップショット一覧 */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-1.5">
-            <History className="size-4 text-brand-600" aria-hidden="true" />
-            スナップショット
-          </CardTitle>
-          <span className="text-[11px] text-ink-muted">{snapshots.length} 件（新しい順）</span>
-        </CardHeader>
+      <Section title="スナップショット" summary={`${snapshots.length} 件（新しい順）`}>
         {snapshots.length === 0 ? (
-          <p className="px-3 py-4 text-[12px] text-ink-muted">
-            まだスナップショットがありません。上のどちらかの版を作成すると、ここから出力できます。
-          </p>
+          <EmptyState
+            kind="no-data"
+            size="compact"
+            title="まだスナップショットがありません"
+            description="上の「レビュー用草稿を作成」か「レポートを確定する」で版を固定すると、ここから出力できます。"
+            action={
+              <span className="text-small text-ink-muted">
+                {canDraft || canApprove
+                  ? '見出しの右の操作から作成できます'
+                  : '作成担当・最終承認者が作成します'}
+              </span>
+            }
+          />
         ) : (
-          <div className="max-h-[70vh] overflow-auto">
+          <div className="max-h-[70vh] overflow-auto rounded-t4d border border-line">
             <Table>
-              <THead className="sticky top-0 z-10 bg-surface">
+              <THead className="sticky top-0 z-(--z-sticky) bg-surface">
                 <TR>
                   <TH>No.</TH>
                   <TH>種別</TH>
@@ -426,41 +531,40 @@ export async function OutputsTab({
                     <TD className="tnum align-top">{entry.snapshot.snapshotNo}</TD>
                     <TD className="align-top">
                       <SnapshotKindBadge kind={entry.snapshot.snapshotKind} />
-                      <p className="mt-0.5 text-[11px] text-ink-muted">{entry.snapshot.label}</p>
+                      <p className="mt-0.5 text-caption text-ink-muted">{entry.snapshot.label}</p>
                     </TD>
-                    <TD className="align-top text-[12px]">
+                    <TD className="align-top text-small">
                       {entry.createdByName}
                       <br />
                       <span className="text-ink-muted">{formatJst(entry.snapshot.createdAt)}</span>
                     </TD>
                     <TD className="align-top">
-                      <code className="text-[11px]" title={entry.snapshot.contentHash}>
-                        {entry.snapshot.contentHash.slice(0, 12)}
-                      </code>
+                      <ShortHash value={entry.snapshot.contentHash} />
                     </TD>
-                    <TD className="align-top text-[12px]">
+                    <TD className="align-top text-small">
                       {entry.upstreamChanges.length === 0 ? (
                         <span className="text-ink-muted">なし</span>
                       ) : (
-                        <details>
-                          <summary className="cursor-pointer text-[#8a5d00]">
-                            <AlertTriangle
-                              className="mr-1 inline size-3 align-[-2px]"
-                              aria-hidden="true"
-                            />
-                            作成後に上流が更新（{entry.upstreamChanges.length} 件）
-                          </summary>
-                          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-ink-muted">
+                        <Collapsible
+                          variant="plain"
+                          summary={
+                            <span className="inline-flex items-center gap-1 text-warning-ink">
+                              <AlertTriangle className="size-3" aria-hidden="true" />
+                              作成後に上流が更新（{entry.upstreamChanges.length} 件）
+                            </span>
+                          }
+                        >
+                          <ul className="list-disc space-y-0.5 pl-4 text-caption text-ink-muted">
                             {entry.upstreamChanges.map((change, index) => (
                               <li key={index}>
                                 {change.label}: {change.detail}
                               </li>
                             ))}
                           </ul>
-                          <p className="mt-1 text-[11px] text-ink-muted">
+                          <p className="mt-1 text-caption text-ink-muted">
                             このスナップショットの内容は変わりません。最新の内容で出力するには新しいスナップショットを作成してください。
                           </p>
-                        </details>
+                        </Collapsible>
                       )}
                     </TD>
                     <TD className="align-top">
@@ -472,76 +576,46 @@ export async function OutputsTab({
             </Table>
           </div>
         )}
-      </Card>
+      </Section>
 
       {/* 出力の記録 */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-1.5">
-            <FileSpreadsheet className="size-4 text-brand-600" aria-hidden="true" />
-            出力の記録
-          </CardTitle>
-        </CardHeader>
-        <MoreInfo label="ハッシュの見方" className="px-3 pt-2">
+      <Section title="出力の記録" summary={`${artifacts.length} 件`}>
+        <MoreInfo label="ハッシュの見方" className="pb-1">
           <p>
             同じスナップショットから再出力すると、内容ハッシュ（本文・数値・参照）は一致します。ファイルのハッシュは生成日時を含むため、DOCX・XLSX
-            では出力ごとに変わります。
+            では出力ごとに変わります。区分（対外用・社内確認用）・サイズ・ハッシュは「列」から表示できます。
           </p>
         </MoreInfo>
-        {artifacts.length === 0 ? (
-          <p className="px-3 py-3 text-[12px] text-ink-muted">まだ出力していません。</p>
-        ) : (
-          <div className="max-h-[70vh] overflow-auto">
-            <Table>
-              <THead className="sticky top-0 z-10 bg-surface">
-                <TR>
-                  <TH>出力日時</TH>
-                  <TH>スナップショット</TH>
-                  <TH>形式</TH>
-                  <TH>区分</TH>
-                  <TH>ファイル名</TH>
-                  <TH>出力者</TH>
-                  <TH align="right">サイズ</TH>
-                  <TH>ファイルのハッシュ</TH>
-                  <TH>内容ハッシュ</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {artifacts.map((artifact) => (
-                  <TR key={artifact.id}>
-                    <TD className="text-[12px]">{formatJst(artifact.generatedAt)}</TD>
-                    <TD className="text-[12px]">
-                      {snapshotNoById.get(artifact.snapshotId) ??
-                        '（このサーバーに無いスナップショット）'}
-                    </TD>
-                    <TD className="text-[12px]">
-                      {EXPORT_ARTIFACT_FORMAT_LABELS[artifact.format]}
-                    </TD>
-                    <TD className="text-[12px]">{AUDIENCE_DISPLAY[artifact.audience]}</TD>
-                    <TD className="max-w-[280px] truncate text-[12px]" title={artifact.fileName}>
-                      {artifact.fileName}
-                    </TD>
-                    <TD className="text-[12px]">{artifact.generatedByName}</TD>
-                    <TD align="right" className="text-[12px]">
-                      {formatNumber(artifact.byteSize)} B
-                    </TD>
-                    <TD>
-                      <code className="text-[11px]" title={artifact.fileSha256}>
-                        {artifact.fileSha256.slice(0, 12)}
-                      </code>
-                    </TD>
-                    <TD>
-                      <code className="text-[11px]" title={artifact.contentHash}>
-                        {artifact.contentHash.slice(0, 12)}
-                      </code>
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          </div>
-        )}
-      </Card>
+        <DataTable
+          id="export-artifacts"
+          caption="出力の記録"
+          columns={artifactColumns}
+          rows={artifacts.slice((page - 1) * pageSize, page * pageSize)}
+          getRowId={(a) => a.id}
+          getRowLabel={(a) => a.fileName}
+          searchParams={searchParams}
+          basePath={projectPath}
+          search={false}
+          page={{ page, pageSize, total: artifacts.length, sizes: DEFAULT_PAGE_SIZES }}
+          className="rounded-t4d-lg border border-line bg-surface"
+          empty={{
+            noData: {
+              title: 'まだ出力していません',
+              description:
+                'スナップショットの「出力」から DOCX・XLSX・CSV を作ると、記録が残ります。',
+              action: canExport ? (
+                <span className="text-small text-ink-muted">
+                  上のスナップショットの一覧から出力できます
+                </span>
+              ) : (
+                <span className="text-small text-ink-muted">
+                  出力には出力の権限が必要です。管理者・作成担当・最終承認者に依頼してください。
+                </span>
+              ),
+            },
+          }}
+        />
+      </Section>
     </div>
   );
 }

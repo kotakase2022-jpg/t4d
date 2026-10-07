@@ -54,7 +54,7 @@ function DisclosureMarker({ placement }: { placement: 'chevron' | 'text' }) {
     );
   }
   return (
-    <span className="shrink-0 text-[11px] font-normal text-ink-muted">
+    <span className="shrink-0 text-caption font-normal text-ink-muted">
       <span className="[details[open]>summary_&]:hidden">開く</span>
       <span className="hidden [details[open]>summary_&]:inline">閉じる</span>
     </span>
@@ -91,8 +91,8 @@ export function Collapsible({
           // card の summary は details の枠いっぱいに広がるため、外側に描くフォーカスリングは
           // 祖先の overflow で切れうる。内側に描いて、どこに置いても見えるようにする
           card
-            ? 'px-3 py-2 text-[13px] font-semibold text-ink hover:bg-brand-50 focus-visible:outline-offset-[-2px]'
-            : 'py-1 text-[12px] text-ink-muted hover:text-ink',
+            ? 'px-3 py-2 text-body font-semibold text-ink hover:bg-brand-50 focus-visible:outline-offset-[-2px]'
+            : 'py-1 text-small text-ink-muted hover:text-ink',
         )}
       >
         <DisclosureMarker placement="chevron" />
@@ -100,14 +100,14 @@ export function Collapsible({
           {summary}
         </span>
         {meta !== undefined && meta !== null && (
-          <span className="shrink-0 text-[12px] font-normal text-ink-muted">{meta}</span>
+          <span className="shrink-0 text-small font-normal text-ink-muted">{meta}</span>
         )}
         <DisclosureMarker placement="text" />
       </summary>
       <div
         className={cn(
           card ? 'border-t border-line px-3 py-2.5' : 'pt-1 pb-1 pl-5',
-          'text-[12px] text-ink',
+          'text-small text-ink',
           bodyClassName,
         )}
       >
@@ -156,7 +156,7 @@ export function CollapsibleSection({
       className={cn('rounded-t4d-lg border border-line bg-surface', className)}
     >
       <div className="flex items-center justify-between gap-2 px-3 pt-2">
-        <h2 id={titleId} className="text-[13px] font-semibold text-ink">
+        <h2 id={titleId} className="text-body font-semibold text-ink">
           {title}
         </h2>
         {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}

@@ -24,7 +24,7 @@ export function Tornado({ result }: { result: SensitivityResult }) {
   const percent = Math.round(result.ratio * 100);
   if (result.rows.length === 0 || result.baseCumulative === null) {
     return (
-      <p className="text-[12px] text-ink-muted">
+      <p className="text-small text-ink-muted">
         感度を示せる仮定がありません（定量化できた経路が無いか、動かしても 10
         年累計が変わりません）。
       </p>
@@ -72,7 +72,7 @@ export function Tornado({ result }: { result: SensitivityResult }) {
   };
 
   const legend = (
-    <ul aria-label="感度の凡例" className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink">
+    <ul aria-label="感度の凡例" className="flex flex-wrap gap-x-3 gap-y-1 text-caption text-ink">
       <li className="flex items-center gap-1">
         <SeriesSwatch index={LOW_SERIES} />
         <span>仮定を −{percent}% にしたとき</span>

@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import {
-  ArrowLeft,
   Bot,
   CircleAlert,
   ClipboardList,
+  Copy,
   Database,
   Download,
   FileText,
@@ -12,27 +12,28 @@ import {
   Target,
   UserCheck,
 } from 'lucide-react';
-import { runSsbjGapAnalysisBulkAction } from '@/app/enterprise/actions';
+import { carryOverSsbjAction, runSsbjGapAnalysisBulkAction } from '@/app/enterprise/actions';
 import { FractionBar } from '@/components/charts/fraction-bar';
 import { FunnelSteps } from '@/components/charts/funnel-steps';
 import { DataCoverageBadge } from '@/components/shared/badges';
-import { FilterBar, type FilterGroup } from '@/components/shared/filter-bar';
+import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
+import type { FilterGroup } from '@/components/shared/filter-bar';
 import { FlashMessage } from '@/components/shared/flash';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageActions } from '@/components/shared/page-actions';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Collapsible } from '@/components/ui/collapsible';
 import { MoreInfo } from '@/components/ui/more-info';
-import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import {
   APPLICABILITY_LABEL,
   AREA_LABEL,
   COVERAGE_LABEL,
-  COVERAGE_TONE,
   MATERIALITY_LABEL,
   PRIORITY_LABEL,
 } from '@/lib/domain/ssbj';
@@ -47,10 +48,14 @@ import {
   loadSsbjRequirementViews,
   loadSsbjScopeMapping,
   OPEN_HIGH_PRIORITY_QUERY,
+  type SsbjRequirementView,
 } from '@/lib/services/ssbj-gap';
+import { DEFAULT_PAGE_SIZES, parsePage, parsePageSize } from '@/lib/table/columns';
 import { mappingFunnelSteps } from '../_components/breakdown-items';
 
 export const metadata = { title: 'SSBJ 要求事項の評価' };
+
+const BASE_PATH = '/enterprise/disclosures/ssbj/requirements';
 
 /** クエリを配列にする（FilterBar は同じキーを複数回付ける） */
 function toList(value: string | string[] | undefined): string[] {
@@ -68,6 +73,14 @@ function MappingCell({ active }: { active: boolean }) {
   );
 }
 
+/**
+ * SSBJ 要求事項の評価（plan §2 S19）。133 行の一覧を DataTable（25 件ずつ・検索・列の表示切替）にする。
+ *
+ * - 絞り込みのチップは「対応状況（最終判定）」「評価対象（適用区分）」の 2 群だけ。残りは「絞り込み ▾」
+ * - 既定の列: 要求事項・適用区分・最終判定・優先度・担当部署。領域・重要性・AI による判定・紐づけは「列」から
+ * - 見出しの操作は「その他」に: 未分析をまとめて分析（AI）・CSV 出力（出力の権限）・前年度の評価を引き継ぐ（F048）
+ * 件数の流れ・適用中の基準・紐づけの 4 分類・「AI は候補」の 1 行は閉じない（docs/disclosure-first.md §10.4）。
+ */
 export default async function SsbjRequirementsPage({
   searchParams,
 }: {
@@ -80,12 +93,13 @@ export default async function SsbjRequirementsPage({
   if (!loaded) {
     return (
       <>
-        <PageHeader
-          title="SSBJ 要求事項の評価"
-          breadcrumbs={[{ label: '企業ワークスペース' }, { label: '開示対応' }, { label: 'SSBJ' }]}
-        />
+        <PageHeader title="SSBJ 要求事項の評価" autoBreadcrumbs />
         <div className="p-4">
-          <EmptyState title="SSBJ の要求事項マスターが登録されていません" />
+          <EmptyState
+            kind="not-applicable"
+            title="SSBJ の要求事項マスターが登録されていません"
+            description="要求事項マスターは管理者が登録します。登録されると、ここで評価を進められます。"
+          />
         </div>
       </>
     );
@@ -97,8 +111,14 @@ export default async function SsbjRequirementsPage({
     shell.currentPeriod,
     loaded.views,
   );
+  const canWrite = can(shell.ctx, 'enterprise.disclosure.write');
   const canRunAi = can(shell.ctx, 'enterprise.ai.run');
   const canExport = can(shell.ctx, 'enterprise.export.run');
+
+  // 前年度の評価の引継ぎ（F048）の引継ぎ元＝当期より前の、いちばん新しい報告期間
+  const previousPeriod = shell.periods
+    .filter((p) => p.startDate < shell.currentPeriod.startDate)
+    .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
 
   // CSV は画面の絞り込みをそのまま引き継ぐ（見えている一覧と同じ行が出る）
   const exportParams = new URLSearchParams({ period: shell.currentPeriod.id });
@@ -125,6 +145,10 @@ export default async function SsbjRequirementsPage({
     scope: toList(query.scope),
     search: typeof query.q === 'string' ? query.q : undefined,
   });
+  const pageSize = parsePageSize(query.size);
+  const lastPage = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageNo = Math.min(parsePage(query.page), lastPage);
+  const pageRows = filtered.slice((pageNo - 1) * pageSize, pageNo * pageSize);
 
   // 工程チップの件数は、リンク先の絞り込みと同じ関数で数える（数字とリンク先がズレない）
   const stages = [
@@ -167,24 +191,15 @@ export default async function SsbjRequirementsPage({
       description: '重要性・期限・データの有無から着手順を決めます。',
     },
   ];
+  const unanalyzed = stages[1]?.count ?? 0;
 
   // 担当部署は自由入力なので、実際に使われている値から選択肢を作る
   const departments = [
     ...new Set(loaded.views.map((v) => v.assessment.ownerDepartment).filter((d) => d !== '')),
   ].sort();
 
-  const groups: FilterGroup[] = [
-    {
-      key: 'area',
-      label: '領域',
-      options: [
-        { value: 'governance', label: 'ガバナンス' },
-        { value: 'strategy', label: '戦略' },
-        { value: 'risk', label: 'リスク管理' },
-        { value: 'metrics', label: '指標及び目標' },
-        { value: 'other', label: 'その他' },
-      ],
-    },
+  // よく使う 2 群だけをチップに（plan §1.12-4）。残りは「絞り込み ▾」
+  const filters: FilterGroup[] = [
     {
       key: 'coverage',
       label: '対応状況',
@@ -194,6 +209,24 @@ export default async function SsbjRequirementsPage({
         { value: 'partial', label: '一部対応' },
         { value: 'not_covered', label: '未対応' },
         { value: 'unconfirmed', label: '未確認' },
+      ],
+    },
+    {
+      key: 'scope',
+      label: '評価対象',
+      options: [{ value: 'in_scope', label: '評価対象のみ（対象外・重要性なしを除く）' }],
+    },
+  ];
+  const overflowFilters: FilterGroup[] = [
+    {
+      key: 'area',
+      label: '領域',
+      options: [
+        { value: 'governance', label: 'ガバナンス' },
+        { value: 'strategy', label: '戦略' },
+        { value: 'risk', label: 'リスク管理' },
+        { value: 'metrics', label: '指標及び目標' },
+        { value: 'other', label: 'その他' },
       ],
     },
     {
@@ -224,11 +257,6 @@ export default async function SsbjRequirementsPage({
         { value: 'none', label: '紐づけできず' },
       ],
     },
-    {
-      key: 'scope',
-      label: '評価対象',
-      options: [{ value: 'in_scope', label: '評価対象のみ（対象外・重要性なしを除く）' }],
-    },
     ...(departments.length > 0
       ? [
           {
@@ -238,6 +266,144 @@ export default async function SsbjRequirementsPage({
           },
         ]
       : []),
+  ];
+
+  const columns: DataTableColumn<SsbjRequirementView>[] = [
+    {
+      key: 'requirement',
+      header: '要求事項',
+      importance: 'primary',
+      lockVisible: true,
+      cell: (view) => (
+        <div className="max-w-col-lg">
+          <Link
+            href={`${BASE_PATH}/${view.item.id}`}
+            className="font-medium text-brand-700 underline-offset-2 hover:underline"
+          >
+            <span className="font-mono text-caption">{view.item.code}</span>{' '}
+            {view.item.questionText}
+          </Link>
+          {view.plans.length > 0 && (
+            <span className="mt-0.5 flex items-center gap-1 text-caption text-ink-muted">
+              <ClipboardList className="size-3" aria-hidden="true" />
+              対応計画 {view.plans.length} 件
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'area',
+      header: '領域',
+      importance: 'detail',
+      cell: (view) => AREA_LABEL[view.area],
+    },
+    {
+      key: 'applicability',
+      header: '適用区分',
+      importance: 'primary',
+      cell: (view) => (
+        <Badge tone={view.assessment.applicability === 'applicable' ? 'neutral' : 'outline'}>
+          {APPLICABILITY_LABEL[view.assessment.applicability]}
+        </Badge>
+      ),
+    },
+    {
+      key: 'materiality',
+      header: '重要性',
+      importance: 'detail',
+      cell: (view) => (
+        <Badge tone={view.assessment.materiality === 'material' ? 'brand' : 'neutral'}>
+          {MATERIALITY_LABEL[view.assessment.materiality]}
+        </Badge>
+      ),
+    },
+    {
+      key: 'ai',
+      header: '人工知能による判定',
+      importance: 'detail',
+      cell: (view) =>
+        view.assessment.aiStatus === null ? (
+          <span className="text-caption text-ink-muted">未実施</span>
+        ) : (
+          <span className="flex items-center gap-1">
+            <Bot className="size-3 text-ink-muted" aria-hidden="true" />
+            <span className="text-small">{COVERAGE_LABEL[view.assessment.aiStatus]}</span>
+          </span>
+        ),
+    },
+    {
+      key: 'linkage',
+      header: '紐づけ',
+      importance: 'detail',
+      cell: (view) =>
+        !view.analyzed ? (
+          <span className="text-caption text-ink-muted">未分析</span>
+        ) : (
+          <span className="flex flex-wrap gap-1">
+            {view.hasDocumentLink && (
+              <Badge tone="neutral">
+                <FileText className="size-3" aria-hidden="true" />
+                資料
+              </Badge>
+            )}
+            {/* 指標を求める要求事項は、全指標の値が揃って初めて「データあり」。
+                一部だけなら不足する指標を名指しする（W0 O7。CSRD と同じ表記） */}
+            {view.dataCoverage !== 'not_mapped' && (
+              <DataCoverageBadge
+                coverage={view.dataCoverage}
+                missingNames={view.missingMetrics.map((m) => m.name)}
+              />
+            )}
+            {!view.hasDocumentLink && view.dataCoverage === 'not_mapped' && (
+              <Badge tone="warning">
+                <CircleAlert className="size-3" aria-hidden="true" />
+                なし
+              </Badge>
+            )}
+          </span>
+        ),
+    },
+    {
+      key: 'final',
+      header: '最終判定',
+      importance: 'primary',
+      cell: (view) =>
+        view.assessment.finalStatus === null ? (
+          <Badge tone="warning">
+            <CircleAlert className="size-3" aria-hidden="true" />
+            確認待ち
+          </Badge>
+        ) : (
+          <StatusBadge domain="ssbjCoverage" value={view.assessment.finalStatus} />
+        ),
+    },
+    {
+      key: 'priority',
+      header: '優先度',
+      importance: 'secondary',
+      cell: (view) => (
+        <Badge
+          tone={
+            view.priority.priority === 'high'
+              ? 'danger'
+              : view.priority.priority === 'medium'
+                ? 'warning'
+                : 'neutral'
+          }
+        >
+          {PRIORITY_LABEL[view.priority.priority]}
+        </Badge>
+      ),
+    },
+    {
+      key: 'department',
+      header: '担当部署',
+      importance: 'secondary',
+      cell: (view) => (
+        <span className="text-caption">{view.assessment.ownerDepartment || '未設定'}</span>
+      ),
+    },
   ];
 
   const appliedStandards = [
@@ -284,30 +450,54 @@ export default async function SsbjRequirementsPage({
       <PageHeader
         title="SSBJ 要求事項の評価"
         description={`${loaded.versionLabel} ／ ${shell.currentPeriod.label} ／ 対象判定から優先順位付けまでをこの画面で進めます`}
-        breadcrumbs={[
-          { label: '企業ワークスペース' },
-          { label: '開示対応' },
-          { label: 'SSBJ', href: '/enterprise/disclosures/ssbj' },
-          { label: '要求事項の評価' },
-        ]}
+        autoBreadcrumbs
         actions={
-          <div className="flex items-center gap-1.5">
-            {/* 133 項目を 1 件ずつ分析するのは現実的でないため、まとめ実行を用意する。
-                判定はあくまで候補。最終判定は工程 3 の担当者確認で入る */}
-            {canRunAi && stages[1] && stages[1].count > 0 && (
-              <form action={runSsbjGapAnalysisBulkAction}>
-                <SubmitButton size="sm" icon={<Bot aria-hidden="true" />} pendingLabel="分析中…">
-                  未分析をまとめて分析（最大 20 件）
-                </SubmitButton>
-              </form>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/enterprise/disclosures/ssbj">
-                <ArrowLeft aria-hidden="true" />
-                対応状況へ戻る
-              </Link>
-            </Button>
-          </div>
+          <PageActions
+            more={[
+              {
+                // 133 項目を 1 件ずつ分析するのは現実的でないため、まとめ実行を用意する。
+                // 判定はあくまで候補。最終判定は工程 3 の担当者確認で入る
+                kind: 'submit',
+                id: 'bulk-analyze',
+                group: 'advanced',
+                label: '未分析をまとめて分析（最大 20 件）',
+                icon: <Bot aria-hidden="true" />,
+                action: runSsbjGapAnalysisBulkAction,
+                hidden: !canRunAi || unanalyzed === 0,
+              },
+              {
+                kind: 'link',
+                id: 'export-csv',
+                group: 'export',
+                label: 'CSV を書き出す（絞り込みを反映）',
+                icon: <Download aria-hidden="true" />,
+                href: `/api/exports/ssbj-requirements?${exportParams.toString()}`,
+                download: true,
+                hidden: !canExport,
+              },
+              {
+                // 前年度の評価の引継ぎ（F048）。担当者が確認済みの要求事項は変えない（サービスの規則）
+                kind: 'confirm',
+                id: 'carry-over',
+                label: '前年度の評価を引き継ぐ',
+                icon: <Copy aria-hidden="true" />,
+                action: carryOverSsbjAction,
+                fields: { reportingPeriodId: shell.currentPeriod.id },
+                hidden: !canWrite || !previousPeriod,
+                confirm: {
+                  tier: 'bulk',
+                  title: '前年度の評価を引き継ぎますか',
+                  scope: `${previousPeriod?.label ?? '前年度'} の評価を ${shell.currentPeriod.label} の要求事項へ引き継ぎます。`,
+                  consequences: [
+                    '適用区分・重要性・3 観点の対応状況を前年度の評価で上書きします。',
+                    '今年度に担当者の確認（最終判定）が済んだ要求事項は変更しません。',
+                    '基準の改正で追加・変更された要求事項や、前年度に完了していない要求事項には「再評価が必要」の印を付けます。',
+                  ],
+                  confirmLabel: '引き継ぐ',
+                },
+              },
+            ]}
+          />
         }
       />
 
@@ -322,15 +512,15 @@ export default async function SsbjRequirementsPage({
             {stages.map((stage) => (
               <li key={stage.title}>
                 <Link
-                  href={`/enterprise/disclosures/ssbj/requirements?${stage.query}`}
-                  className="block h-full rounded-t4d-lg border border-line bg-surface p-3 shadow-[0_1px_2px_rgba(23,32,51,0.04)] transition-colors hover:border-brand-300 hover:bg-brand-50"
+                  href={`${BASE_PATH}?${stage.query}`}
+                  className="block h-full rounded-t4d-lg border border-line bg-surface p-3 shadow-raised transition-colors hover:border-brand-300 hover:bg-brand-50"
                 >
-                  <p className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+                  <p className="flex items-center gap-1.5 text-caption text-ink-muted">
                     <stage.icon className="size-3.5" aria-hidden="true" />
                     {stage.step}
                   </p>
-                  <p className="mt-1 text-[13px] font-semibold text-ink">{stage.title}</p>
-                  <p className="mt-1.5 text-[12px]">
+                  <p className="mt-1 text-body font-semibold text-ink">{stage.title}</p>
+                  <p className="mt-1.5 text-small">
                     <span
                       className={`font-semibold tabular-nums ${stage.count > 0 ? 'text-brand-700' : 'text-ink-muted'}`}
                     >
@@ -343,7 +533,7 @@ export default async function SsbjRequirementsPage({
           </ul>
           {/* 工程の説明は閉じるが、「AI は候補・確定は人」は誠実さの注記なので 1 行だけ外に見せる
               （docs/disclosure-first.md §10.4 の「閉じない」） */}
-          <p className="flex items-center gap-1 text-[11px] text-ink-muted">
+          <p className="flex items-center gap-1 text-caption text-ink-muted">
             <Bot className="size-3.5 shrink-0" aria-hidden="true" />
             人工知能の判定は候補です。最終判定は担当者が確認して入れます。
           </p>
@@ -359,30 +549,28 @@ export default async function SsbjRequirementsPage({
           </MoreInfo>
         </div>
 
-        {/* ③ 必要な要求項目のみが正しく表示されているか（SSBJ 要求事項とのマッピング） */}
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title="SSBJ 要求事項とのマッピング"
-            action={
-              <Button variant="outline" size="xs" asChild>
-                <Link href="/enterprise/disclosures/ssbj/settings">
-                  <Settings2 aria-hidden="true" />
-                  マテリアリティ・分析条件を変更する
-                </Link>
-              </Button>
-            }
-          />
-
+        {/* 必要な要求項目のみが正しく表示されているか（SSBJ 要求事項とのマッピング） */}
+        <Section
+          title="SSBJ 要求事項とのマッピング"
+          actions={
+            <Button variant="secondary" size="xs" asChild>
+              <Link href="/enterprise/disclosures/ssbj/settings">
+                <Settings2 aria-hidden="true" />
+                マテリアリティ・分析条件を変更する
+              </Link>
+            </Button>
+          }
+        >
           {/* 件数の流れ。「なぜこの件数なのか」を画面上で検算できるようにする（各段の件数は文字で書く） */}
-          <div className="space-y-1 border-b border-line px-3 py-2">
+          <div className="space-y-1 border-b border-line pb-2">
             <FunnelSteps label="要求事項の件数の流れ" steps={mappingFunnelSteps(mapping.counts)} />
             {/* 「正式基準マスター n 項目」が基準の全条項に見えないよう、収録範囲を閉じずに添える */}
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-caption text-ink-muted">
               {loaded.coverageNote
                 ? `収録範囲: ${loaded.coverageNote}。基準のすべての条項ではありません。`
                 : '収録範囲が一部の場合、基準のすべての条項ではありません。'}
             </p>
-            <p className="text-[11px] text-ink-muted">
+            <p className="text-caption text-ink-muted">
               除外した件数: 対象外{' '}
               <span className="tabular-nums text-ink">{mapping.counts.notApplicable}</span>{' '}
               件・重要性なし{' '}
@@ -390,8 +578,8 @@ export default async function SsbjRequirementsPage({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-            <span className="text-[11px] text-ink-muted">適用中の基準:</span>
+          <div className="flex flex-wrap items-center gap-2 border-b border-line py-2">
+            <span className="text-caption text-ink-muted">適用中の基準:</span>
             {appliedStandards.map((s) => (
               <Badge key={s.label} tone={s.applied ? 'brand' : 'outline'}>
                 {s.label} {s.applied ? '適用' : '適用外'}
@@ -407,10 +595,11 @@ export default async function SsbjRequirementsPage({
 
           {mapping.rows.length === 0 ? (
             <EmptyState
+              kind="no-data"
               title="マテリアリティが未登録です"
               description="「①マテリアリティ・分析条件の設定」で自社の重要課題を登録すると、要求事項との対応がここに表示されます。"
               action={
-                <Button size="sm" asChild>
+                <Button variant="secondary" size="sm" asChild>
                   <Link href="/enterprise/disclosures/ssbj/settings">
                     <Target aria-hidden="true" />
                     登録しに行く
@@ -424,7 +613,7 @@ export default async function SsbjRequirementsPage({
             <Collapsible
               variant="plain"
               summary={`マテリアリティ × 基準の対応表（${mapping.rows.length} 件）`}
-              className="px-3 py-1"
+              className="py-1"
               bodyClassName="pl-0"
             >
               <div className="t4d-scroll-x">
@@ -478,32 +667,31 @@ export default async function SsbjRequirementsPage({
                   </TBody>
                 </Table>
               </div>
-              <p className="pt-2 text-[11px] leading-relaxed text-ink-muted">
+              <p className="pt-2 text-caption leading-relaxed text-ink-muted">
                 ● = 開示対象になりやすい基準／— = 対象になりにくい基準。区分の判定は登録時と同じ規則
                 （名前・内容・リスク・機会の記述に含まれる語）で行っています。「紐づく要求事項」は、
                 マテリアリティの項目（対象指標）を要求する評価対象の要求事項の数です。
               </p>
             </Collapsible>
           )}
-        </Card>
+        </Section>
 
-        {/* ③ 必要な要求項目のうち、取込資料・データによって紐づけ可能／不可 */}
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title="取込資料・データとの紐づけ"
-            action={
-              <span className="text-[11px] text-ink-muted">
-                対象外を除く {linkageBase} 件で集計。選ぶと一覧を絞り込みます
-              </span>
-            }
-          />
+        {/* 必要な要求項目のうち、取込資料・データによって紐づけ可能／不可 */}
+        <Section
+          title="取込資料・データとの紐づけ"
+          summary={
+            <span className="text-caption text-ink-muted">
+              対象外を除く {linkageBase} 件で集計。選ぶと一覧を絞り込みます
+            </span>
+          }
+        >
           {/* 4 分類は重なりうる（資料とデータの両方に紐づく要求事項は両方に数える）ため、
               1 本の積み上げにせず、分類ごとに「n / 集計対象 件」の帯で示す（帯の幅が嘘にならないように） */}
-          <ul className="grid grid-cols-4 gap-2 px-3 pt-3 pb-1">
+          <ul className="grid grid-cols-4 gap-2 pb-1">
             {linkageTiles.map((tile) => (
               <li key={tile.label}>
                 <Link
-                  href={`/enterprise/disclosures/ssbj/requirements?${tile.query}`}
+                  href={`${BASE_PATH}?${tile.query}`}
                   aria-label={`${tile.label} ${tile.count} / ${linkageBase} 件（一覧を絞り込む）`}
                   className="flex h-full items-start gap-1.5 rounded-t4d border border-line p-2.5 transition-colors hover:border-brand-300 hover:bg-brand-50"
                 >
@@ -521,7 +709,7 @@ export default async function SsbjRequirementsPage({
               </li>
             ))}
           </ul>
-          <MoreInfo label="紐づけの数え方" className="px-3 pb-2">
+          <MoreInfo label="紐づけの数え方" className="pb-2">
             <ul className="space-y-0.5">
               {linkageTiles.map((tile) => (
                 <li key={tile.label}>
@@ -531,177 +719,77 @@ export default async function SsbjRequirementsPage({
               <li>資料とデータの両方に紐づく要求事項は、両方に数えています。</li>
             </ul>
           </MoreInfo>
-        </Card>
+        </Section>
 
-        <FilterBar
-          groups={groups}
-          searchPlaceholder="要求事項番号・見出し・担当部署で検索"
-          total={filtered.length}
-          savedViews={[
-            {
-              label: '未対応のみ',
-              query: 'coverage=not_covered',
-              description: '対応できていない要求事項',
-            },
-            {
-              label: '優先度「高」（評価対象・未対応）',
-              query: OPEN_HIGH_PRIORITY_QUERY,
-              description: '初年度対応を優先する項目（対象外・重要性なし・対応済みを除く）',
-            },
-            {
-              label: '確認待ち',
-              query: 'coverage=unconfirmed',
-              description: '担当者の確認が済んでいない項目',
-            },
-            {
-              label: '紐づけできず',
-              query: 'linkage=none',
-              description: '資料にもデータにも紐づかない項目',
-            },
-          ]}
-        />
-
-        <Card className="overflow-hidden">
-          <SectionTitle
-            title={`要求事項（${filtered.length} 件）`}
-            action={
-              <span className="flex items-center gap-2">
-                <span className="text-[11px] text-ink-muted">
-                  行を選ぶと、要求事項と現在の開示内容を並べて確認できます
-                </span>
-                {canExport && (
-                  <Button variant="outline" size="xs" asChild>
-                    <a href={`/api/exports/ssbj-requirements?${exportParams.toString()}`} download>
-                      <Download aria-hidden="true" />
-                      CSV を書き出す（絞り込みを反映）
-                    </a>
-                  </Button>
-                )}
-              </span>
-            }
+        <Section
+          title={`要求事項（${filtered.length} 件）`}
+          summary={
+            <span className="text-caption text-ink-muted">
+              要求事項を選ぶと、要求事項と現在の開示内容を並べて確認できます
+            </span>
+          }
+        >
+          <DataTable
+            id="ssbj-requirements"
+            caption="SSBJ 要求事項"
+            columns={columns}
+            rows={pageRows}
+            getRowId={(view) => view.item.id}
+            getRowLabel={(view) => view.item.code}
+            searchParams={query}
+            basePath={BASE_PATH}
+            filters={filters}
+            overflowFilters={overflowFilters}
+            search={{ placeholder: '要求事項番号・見出し・担当部署で検索' }}
+            savedViews={[
+              {
+                label: '未対応のみ',
+                query: 'coverage=not_covered',
+                description: '対応できていない要求事項',
+              },
+              {
+                label: '優先度「高」（評価対象・未対応）',
+                query: OPEN_HIGH_PRIORITY_QUERY,
+                description: '初年度対応を優先する項目（対象外・重要性なし・対応済みを除く）',
+              },
+              {
+                label: '確認待ち',
+                query: 'coverage=unconfirmed',
+                description: '担当者の確認が済んでいない項目',
+              },
+              {
+                label: '紐づけできず',
+                query: 'linkage=none',
+                description: '資料にもデータにも紐づかない項目',
+              },
+            ]}
+            userViews
+            page={{
+              page: pageNo,
+              pageSize,
+              total: filtered.length,
+              sizes: DEFAULT_PAGE_SIZES,
+            }}
+            empty={{
+              noData: {
+                title: '評価する要求事項がありません',
+                description: '分析条件で適用する基準を選ぶと、その基準の要求事項がここに並びます。',
+                action: (
+                  <Link
+                    href="/enterprise/disclosures/ssbj/settings"
+                    className="text-small text-brand-700 hover:underline"
+                  >
+                    分析条件を開く
+                  </Link>
+                ),
+              },
+              filtered: {
+                title: '該当する要求事項がありません',
+                description: '絞り込み条件を変更してください。',
+              },
+            }}
           />
-          {filtered.length === 0 ? (
-            <EmptyState
-              title="該当する要求事項がありません"
-              description="絞り込み条件を変更してください。"
-            />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>要求事項</TH>
-                  <TH>領域</TH>
-                  <TH>適用区分</TH>
-                  <TH>重要性</TH>
-                  <TH>人工知能による判定</TH>
-                  <TH>紐づけ</TH>
-                  <TH>最終判定</TH>
-                  <TH>優先度</TH>
-                  <TH>担当部署</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {filtered.map((view) => {
-                  const a = view.assessment;
-                  return (
-                    <TR key={view.item.id}>
-                      <TD className="max-w-[360px]">
-                        <Link
-                          href={`/enterprise/disclosures/ssbj/requirements/${view.item.id}`}
-                          className="font-medium text-brand-700 underline-offset-2 hover:underline"
-                        >
-                          <span className="font-mono text-[11px]">{view.item.code}</span>{' '}
-                          {view.item.questionText}
-                        </Link>
-                        {view.plans.length > 0 && (
-                          <span className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-muted">
-                            <ClipboardList className="size-3" aria-hidden="true" />
-                            対応計画 {view.plans.length} 件
-                          </span>
-                        )}
-                      </TD>
-                      <TD>{AREA_LABEL[view.area]}</TD>
-                      <TD>
-                        <Badge tone={a.applicability === 'applicable' ? 'neutral' : 'outline'}>
-                          {APPLICABILITY_LABEL[a.applicability]}
-                        </Badge>
-                      </TD>
-                      <TD>
-                        <Badge tone={a.materiality === 'material' ? 'brand' : 'neutral'}>
-                          {MATERIALITY_LABEL[a.materiality]}
-                        </Badge>
-                      </TD>
-                      <TD>
-                        {a.aiStatus === null ? (
-                          <span className="text-[11px] text-ink-muted">未実施</span>
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <Bot className="size-3 text-ink-muted" aria-hidden="true" />
-                            <span className="text-[12px]">{COVERAGE_LABEL[a.aiStatus]}</span>
-                          </span>
-                        )}
-                      </TD>
-                      <TD>
-                        {!view.analyzed ? (
-                          <span className="text-[11px] text-ink-muted">未分析</span>
-                        ) : (
-                          <span className="flex flex-wrap gap-1">
-                            {view.hasDocumentLink && (
-                              <Badge tone="neutral">
-                                <FileText className="size-3" aria-hidden="true" />
-                                資料
-                              </Badge>
-                            )}
-                            {/* 指標を求める要求事項は、全指標の値が揃って初めて「データあり」。
-                                一部だけなら不足する指標を名指しする（W0 O7。CSRD と同じ表記） */}
-                            {view.dataCoverage !== 'not_mapped' && (
-                              <DataCoverageBadge
-                                coverage={view.dataCoverage}
-                                missingNames={view.missingMetrics.map((m) => m.name)}
-                              />
-                            )}
-                            {!view.hasDocumentLink && view.dataCoverage === 'not_mapped' && (
-                              <Badge tone="warning">
-                                <CircleAlert className="size-3" aria-hidden="true" />
-                                なし
-                              </Badge>
-                            )}
-                          </span>
-                        )}
-                      </TD>
-                      <TD>
-                        {a.finalStatus === null ? (
-                          <Badge tone="warning">
-                            <CircleAlert className="size-3" aria-hidden="true" />
-                            確認待ち
-                          </Badge>
-                        ) : (
-                          <Badge tone={COVERAGE_TONE[a.finalStatus]}>
-                            {COVERAGE_LABEL[a.finalStatus]}
-                          </Badge>
-                        )}
-                      </TD>
-                      <TD>
-                        <Badge
-                          tone={
-                            view.priority.priority === 'high'
-                              ? 'danger'
-                              : view.priority.priority === 'medium'
-                                ? 'warning'
-                                : 'neutral'
-                          }
-                        >
-                          {PRIORITY_LABEL[view.priority.priority]}
-                        </Badge>
-                      </TD>
-                      <TD className="text-[11px]">{a.ownerDepartment || '未設定'}</TD>
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
-          )}
-        </Card>
+        </Section>
       </div>
     </>
   );

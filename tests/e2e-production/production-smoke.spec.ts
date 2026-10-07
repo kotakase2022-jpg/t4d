@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { buildHeterogeneousDataset } from '../../scripts/hetero-dataset';
-import { openCollapsible } from '../e2e/helpers';
+import { openCollapsible, openMoreMenu } from '../e2e/helpers';
 
 /**
  * 本番スモークテスト（自己検証ミッション用）。
@@ -211,7 +211,8 @@ test('本番: SSBJ のマテリアリティ登録が永続化される', async (
   // 片付け: 追加した課題を削除し、削除も永続化されることを確認する
   const added = page.locator('li', { hasText: name });
   await added.getByRole('button', { name: /を削除/ }).click();
-  await added.getByRole('button', { name: '削除する' }).click();
+  // 削除の確認は行の中からダイアログへ（ConfirmDialog。plan §1.16。名前「削除する」は同じ）
+  await page.getByRole('dialog').getByRole('button', { name: '削除する' }).click();
   await expect(page.locator('li', { hasText: name })).toHaveCount(0);
   await page.reload();
   await expect(page.locator('li', { hasText: name })).toHaveCount(0);
@@ -288,7 +289,8 @@ test('本番: 多言語・多形式のファイルを一括取込して AI が�
 
 test('本番: 企業が監査法人へアクセス許諾を新規付与できる', async ({ page }) => {
   await prodLogin(page, '青海 太郎');
-  await page.goto(`${BASE}/enterprise/settings`);
+  // 許諾は設定の「アクセス許諾」タブ。追加の欄は ?new=1 で開く（plan S17 CreatePanel）
+  await page.goto(`${BASE}/enterprise/settings?tab=grants&new=1`);
 
   const form = page.locator('form', { hasText: '許諾する' });
   await expect(form, '許諾を新規付与するフォームが無い').toBeVisible();
@@ -316,7 +318,7 @@ test('本番: 通知を既読にできる', async ({ page }) => {
 
 test('本番: 入力の誤りが理由付きで画面に出る（digest だけにならない）', async ({ page }) => {
   await prodLogin(page, '青海 太郎');
-  await page.goto(`${BASE}/enterprise/settings`);
+  await page.goto(`${BASE}/enterprise/settings?tab=grants&new=1`);
 
   const form = page.locator('form', { hasText: '許諾する' });
   await form.locator('select[name="subjectType"]').selectOption('reporting_period');
@@ -329,7 +331,8 @@ test('本番: 入力の誤りが理由付きで画面に出る（digest だけ�
 
 test('本番: 監査法人が新しい案件を起票できる', async ({ page }) => {
   await prodLogin(page, '青葉 健');
-  await page.goto(`${BASE}/assurance/engagements`);
+  // 起票の欄は一覧の上に常設しない（plan S14 CreatePanel。?new=1 で開く）
+  await page.goto(`${BASE}/assurance/engagements?new=1`);
 
   const form = page.locator('form', { hasText: '起票' });
   await expect(form, '案件を起票するフォームが無い').toBeVisible();
@@ -376,7 +379,8 @@ test('本番: AI に異常値の原因を説明させられる（値は変わら
   await page.goto(`${BASE}${href}`);
 
   const valueBefore = await page.locator('input[name="value"]').inputValue();
-  await page.getByRole('button', { name: 'AI に原因を説明させる' }).click();
+  // AI の補助は見出しの「その他」（L2。plan S3）
+  await (await openMoreMenu(page)).getByRole('menuitem', { name: 'AI に原因を説明させる' }).click();
   await page.waitForURL(/explain=/);
 
   await expect(page.getByText('考えられる原因:').first()).toBeVisible();
@@ -385,7 +389,8 @@ test('本番: AI に異常値の原因を説明させられる（値は変わら
 
 test('本番: 報告年度を追加できる', async ({ page }) => {
   await prodLogin(page, '青海 太郎');
-  await page.goto(`${BASE}/enterprise/organizations`);
+  // 組織・拠点はタブ（?tab=）に分かれた（plan §2 S10）
+  await page.goto(`${BASE}/enterprise/organizations?tab=periods`);
 
   await expect(page.getByRole('heading', { name: /報告年度（/ })).toBeVisible();
   await page.getByRole('button', { name: '報告年度を追加' }).click();
@@ -492,12 +497,25 @@ test('本番: SSBJ の 5 画面が動く（対応状況・要求事項・詳細�
   await expect(main.getByText('SSBJ 要求事項とのマッピング')).toBeVisible();
   await expect(main.getByText(/正式基準マスター\s*133\s*項目/)).toBeVisible();
   await expect(main.getByText('取込資料・データとの紐づけ')).toBeVisible();
-  await expect(main.getByRole('columnheader', { name: '人工知能による判定' })).toBeVisible();
-  await expect(main.getByRole('columnheader', { name: '紐づけ' })).toBeVisible();
+  // 「人工知能による判定」「紐づけ」は既定で隠す列（plan S19）。「列」から出してから見出しを確かめる
+  for (const header of ['人工知能による判定', '紐づけ']) {
+    await main.locator('[data-t4d-column-selector]').click();
+    await page.getByRole('menuitemcheckbox', { name: new RegExp(`^${header}`) }).click();
+    await page.keyboard.press('Escape');
+    await expect(main.getByRole('columnheader', { name: header })).toBeVisible();
+  }
   await expect(main.getByRole('columnheader', { name: '最終判定' })).toBeVisible();
-  expect(await page.locator('tbody tr').count()).toBeGreaterThan(100);
-  // 一覧の CSV 出力（会議の指摘「ギャップ分析の結果を CSV 出力」）
-  await expect(main.getByRole('link', { name: /CSV を書き出す/ })).toBeVisible();
+  // 133 項目は 25 件ずつのページ送り（plan §1.12-5）。表示件数 100 で 2 ページを合わせて数える
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/requirements?size=100`);
+  const firstPage = await page.locator('tbody tr').count();
+  await page.goto(`${BASE}/enterprise/disclosures/ssbj/requirements?size=100&page=2`);
+  const secondPage = await page.locator('tbody tr').count();
+  expect(firstPage + secondPage).toBeGreaterThan(100);
+  // 一覧の CSV 出力（会議の指摘「ギャップ分析の結果を CSV 出力」）は見出しの「その他」（L2）
+  await expect(
+    (await openMoreMenu(main)).getByRole('menuitem', { name: /CSV を書き出す/ }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
 
   // ③ 詳細: 3 種類のギャップと優先順位の根拠
   await page.locator('tbody tr a').first().click();
@@ -569,7 +587,6 @@ test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({
   await page.goto(`${BASE}/enterprise/ghg/suppliers`);
   await expect(page.getByRole('heading', { name: 'サプライヤーデータ取込' }).first()).toBeVisible();
   await expect(main.getByText(/サプライヤー別の提出状況/)).toBeVisible();
-  await expect(main.getByRole('link', { name: 'CSV テンプレート' })).toBeVisible();
   await expect(main.getByText(/排出量原単位（排出係数）マスター/)).toBeVisible();
   await expect(main.getByText(/排出量原単位の紐づけ状況/)).toBeVisible();
   await expect(main.getByText(/デモ用サンプルファイル/)).toBeVisible();
@@ -579,8 +596,12 @@ test('本番: GHG のサプライヤー内訳と取込画面が出る', async ({
   await expect(
     main.getByText('デモ環境｜サンプルデータ・表示スコアはシミュレーション').first(),
   ).toBeVisible();
-  await expect(main.getByRole('link', { name: /投入用 ZIP（20 ファイルのみ）/ })).toBeVisible();
-  await expect(main.getByText('デモのリセット（Demo Mode 専用）')).toBeVisible();
+  // CSV テンプレート・データセットの ZIP・デモのリセットは見出しの「その他」（plan §2 S5）
+  const menu = await openMoreMenu(main);
+  await expect(menu.getByRole('menuitem', { name: 'CSV テンプレート' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /投入用 ZIP（20 ファイルのみ）/ })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /^デモを初期状態に戻す/ })).toBeVisible();
+  await page.keyboard.press('Escape');
   const zipResponse = await page.request.get(`${BASE}/demo/murata-scope3-cat1-upload.zip`);
   expect(zipResponse.status()).toBe(200);
   expect((await zipResponse.body()).length).toBeGreaterThan(50_000);
@@ -663,10 +684,10 @@ test('本番: 取り込めないファイルはエラー画面に落とさず、
   await zone.dispatchEvent('dragover', { dataTransfer });
   await zone.dispatchEvent('drop', { dataTransfer });
 
-  // 「データを取得できませんでした」ではなく、どのファイルがなぜ駄目かを画面で伝える
+  // 「処理を完了できませんでした」（想定外のエラーの画面）ではなく、どのファイルがなぜ駄目かを画面で伝える
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('写真.png');
   await expect(page.locator('#t4d-main').getByRole('alert')).toContainText('拡張子');
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });
 
 test('本番: .txt は中身で振り分けて取り込む（表は行に、自由記述は資料に）', async ({ page }) => {
@@ -714,12 +735,13 @@ test('本番: .txt は中身で振り分けて取り込む（表は行に、自�
 
   await page.waitForURL(/\/enterprise\/imports\/[0-9a-f-]+/, { timeout: 120_000 });
   await expect(page.getByText(/資料として取り込みました/).first()).toBeVisible();
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });
 
 test('本番: 指標マスターに開示基準の出所と充足状況が出る', async ({ page }) => {
   await prodLogin(page, '青海 太郎');
-  await page.goto(`${BASE}/enterprise/organizations`);
+  // 組織・拠点はタブ（?tab=）に分かれた（plan §2 S10）。充足状況は「基準別の充足」のタブ
+  await page.goto(`${BASE}/enterprise/organizations?tab=coverage`);
   const main = page.locator('#t4d-main');
   await expect(main).toBeVisible();
 
@@ -728,9 +750,11 @@ test('本番: 指標マスターに開示基準の出所と充足状況が出る
   await expect(main.getByText('CDP が求める指標')).toBeVisible();
   await expect(main.getByText('CSRD が求める指標')).toBeVisible();
 
-  // SSBJ 第2号 第55項のスコープ 3 カテゴリー別指標が取り込まれている
+  // SSBJ 第2号 第55項のスコープ 3 カテゴリー別指標が取り込まれている（指標マスターは 25 件ずつ。コードで探す）
+  await page.goto(`${BASE}/enterprise/organizations?tab=metrics&q=scope3_cat11`);
   await expect(main.locator('tr', { hasText: 'scope3_cat11' })).toHaveCount(1);
   // 第79項の移行リスク資産（気候関連の財務影響）も入っている
+  await page.goto(`${BASE}/enterprise/organizations?tab=metrics&q=transition_risk_assets`);
   await expect(main.locator('tr', { hasText: 'transition_risk_assets' })).toHaveCount(1);
 });
 
@@ -816,7 +840,7 @@ test('本番: 開示ドラフトを人工知能に書かせられる', async ({ 
   expect((await body.inputValue()).length).toBeGreaterThan(20);
   // 草案であることと、書けなかった箇所を必ず示す
   await expect(page.getByText(/そのまま開示せず/).first()).toBeVisible();
-  await expect(page.getByText('データを取得できませんでした')).toHaveCount(0);
+  await expect(page.getByText('処理を完了できませんでした')).toHaveCount(0);
 });
 
 /**
@@ -881,12 +905,14 @@ test('本番: 開示優先モードを ON にするとメニューとホーム�
   test.setTimeout(180_000);
   await prodLogin(page, '青海 太郎');
   const setMode = async (label: '有効にする' | '無効にする（従来の構成）') => {
-    await page.goto(`${BASE}/enterprise/settings`);
+    // 設定の「機能設定」タブ。保存は確認ダイアログを通る（plan S17・§1.16）
+    await page.goto(`${BASE}/enterprise/settings?tab=features`);
     await page.getByText(label, { exact: true }).click();
     await page
       .locator('form', { hasText: '有効にする' })
       .getByRole('button', { name: '保存' })
       .click();
+    await page.getByRole('dialog').getByRole('button', { name: '切り替える' }).click();
     await page.waitForURL(/flash=disclosureFirstChanged/);
   };
 
@@ -946,7 +972,15 @@ test('本番: CSRD の 6 画面と分析の 5 画面が開き、サンプル・�
   // CSRD は架空のサンプル・マスター。設定ではダブル・マテリアリティと SSBJ との違いを示す
   await page.goto(`${BASE}/enterprise/disclosures/csrd`);
   await expect(main.getByText('サンプル（架空）').first()).toBeVisible();
-  await expect(page.getByRole('table', { name: 'ESRS 要求事項とデータの対応' })).toBeVisible();
+  // 対応状況のギャップ表は要求事項の画面への絞り込みリンクに置き換えた（同じデータの表を 2 つ置かない。plan T8）。
+  // 対応状況には表を置かず、同じ内容（データの有無）は要求事項の表の列で確かめる
+  await expect(page.locator('#t4d-main table')).toHaveCount(0);
+  await page.goto(
+    `${BASE}/enterprise/disclosures/csrd/requirements?cols=applicability%2Ccombined%2Creview%2Crequired%2Cavailability%2Cmetrics%2Ccurrent%2Cresponse`,
+  );
+  const csrdRequirements = page.getByRole('table', { name: 'CSRD 要求事項の評価' });
+  await expect(csrdRequirements).toBeVisible();
+  await expect(csrdRequirements.getByText('データあり').first()).toBeVisible();
   await page.goto(`${BASE}/enterprise/disclosures/csrd/settings`);
   await expect(main.getByText('CSRD: ダブル・マテリアリティ')).toBeVisible();
   await expect(main.getByText('SSBJ: シングル・マテリアリティ')).toBeVisible();

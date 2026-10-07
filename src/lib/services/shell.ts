@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { getSelectedPeriodId } from '@/lib/auth/preferences';
+import { getSelectedPeriodId } from '@/lib/auth/selected-period';
 import {
   requireAssuranceSession,
   requireEnterpriseSession,

@@ -10,9 +10,17 @@ import { DEMO_USERS, gotoEnterprise, loginAs } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
-/** 「値」列の数値をページ全体から拾う。 */
+/**
+ * 「値」列の数値をページ全体から拾う。列の位置は見出しから求める（選択の列・既定で隠す列があるため、
+ * 番号を決め打ちにしない。plan §1.12・S16 で「期間」を既定で隠す列にした）
+ */
 async function valueColumn(page: import('@playwright/test').Page): Promise<number[]> {
-  const cells = await page.locator('tbody tr td:nth-child(5)').allInnerTexts();
+  const headers = await page
+    .locator('thead th')
+    .evaluateAll((ths) => ths.map((th) => th.getAttribute('data-column-key')));
+  const index = headers.indexOf('value');
+  expect(index, '値の列が無い').toBeGreaterThanOrEqual(0);
+  const cells = await page.locator(`tbody tr td:nth-child(${index + 1})`).allInnerTexts();
   return cells.map((t) => Number(t.replace(/[,\s]/g, ''))).filter((n) => Number.isFinite(n));
 }
 
@@ -43,6 +51,14 @@ test('並べ替えると 1 ページ目へ戻る', async ({ page }) => {
   await loginAs(page, DEMO_USERS.enterpriseAdmin);
   await page.goto('/enterprise/data?page=2');
   await expect(page.locator('#t4d-main')).toBeVisible();
+
+  // 「更新日時」は既定で隠す列（plan §1.12・S16）。「列」から出してから並べ替える
+  await page.locator('[data-t4d-column-selector]').click();
+  await page.getByRole('menuitemcheckbox', { name: /更新日時/ }).click();
+  await page.keyboard.press('Escape');
+  await page.waitForURL(/[?&]cols=[^&]*updated/, { timeout: 12_000 });
+  // 列を出してもページは保たれる
+  await expect(page).toHaveURL(/[?&]page=2/);
 
   await page.getByRole('link', { name: /更新日時で並べ替え/ }).click();
   await page.waitForURL(/[?&]sort=updated/, { timeout: 12_000 });

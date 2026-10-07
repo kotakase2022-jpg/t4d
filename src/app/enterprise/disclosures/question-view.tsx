@@ -1,45 +1,69 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, Bot, Check, Send, Undo2 } from 'lucide-react';
+import { ArrowLeft, Bot, Check, CircleX, Send } from 'lucide-react';
 import {
   AiGeneratedBadge,
   DataCoverageBadge,
   ResponseStatusBadge,
 } from '@/components/shared/badges';
 import { CommentBox } from '@/components/shared/comment-box';
+import { HonestyBadge } from '@/components/shared/honesty-badge';
 import { MentionText } from '@/components/shared/mention-text';
-import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { PageActions } from '@/components/shared/page-actions';
+import { ActionButton } from '@/components/shared/action-button';
+import { PageHeader } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { SubmitButton } from '@/components/ui/submit-button';
-import { Card } from '@/components/ui/card';
+import { Collapsible } from '@/components/ui/collapsible';
 import { Input, Textarea } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import { loadDisclosureWorkspace } from '@/lib/services/disclosure';
 import { listMentionCandidates } from '@/lib/services/comments';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import type { FrameworkKey } from '@/types/domain';
+import type { ActionSpec, MenuActionSpec } from '@/lib/ui/actions';
+import { responseStateActions, type StateAction } from '@/lib/ui/state-actions';
+import type { AnswerType, FrameworkKey } from '@/types/domain';
 import {
   generateCdpDraftAction,
   rejectAiDraftAction,
   saveCdpResponseAction,
   transitionCdpResponseAction,
 } from '../actions';
+import { QuestionList } from './_components/question-list';
+import { ReturnResponseDialog } from './_components/return-response-dialog';
 
 /** 指標 1 つ分の値の表示。値の行が無いときは 0 ではなく「値なし」と書く（W0 O4） */
 function metricValueLabel(value: number | null, unit: string): string {
   return value === null ? '値なし' : `${formatNumber(value)} ${unit}`;
 }
 
+/** 回答の形（生の enum を画面に出さない。plan §1.17） */
+const ANSWER_TYPE_LABEL: Record<AnswerType, string> = {
+  text: '文章',
+  numeric: '数値',
+  single_choice: '単一選択',
+  multi_choice: '複数選択',
+  table: '表',
+};
+
 /**
- * 開示質問の詳細（三ペイン）。CDP と CSRD で共有する。
+ * 開示質問の詳細（三ペイン）。CDP と CSRD で共有する（plan §2 S6）。
  * フレームワーク固有なのはキー・ラベル・リンク先だけなので Props で受ける。
  *
+ * 操作は「状態 × 権限」で決める（src/lib/ui/state-actions.ts の responseStateActions。plan §1.15）:
+ *  - primary は 1 つ（下書き・差戻しは「保存（下書き）」、レビュー中は承認者の「承認」）
+ *  - 作成と承認を兼ねる利用者が下書きのときは、承認を「その他」へ（作る人と承認する人の仕事を重ねない）
+ *  - 差戻しは理由必須の確認ダイアログ。AI の生成・不採用は「その他」
+ * 補助の情報（前年との差分・対応するデータ・版の履歴・コメント）は既定で閉じた節にし、要点を summary に書く。
+ * 「AI は確定しない・候補である」の注記は閉じた節の外に置く。
+ *
  * `backLink` は任意。CSRD は要求事項の評価（適用・3 観点）から回答へ来るため、
- * 「要求事項の評価へ戻る」を出す（docs/disclosure-first.md §9.4）。CDP は渡さず表示は変わらない。
+ * 「要求事項の評価へ戻る」を出す（docs/disclosure-first.md §9.4）。CDP は渡さない。
  */
 export async function QuestionDetailView({
   frameworkKey,
@@ -100,14 +124,110 @@ export async function QuestionDetailView({
 
   const status = row.response?.status ?? 'not_started';
   const canWrite = can(ctx, 'enterprise.disclosure.write');
-  const canApprove = can(ctx, 'enterprise.disclosure.approve');
+  const canRunAi = can(ctx, 'enterprise.ai.run');
   const isAiDraft = Boolean(currentVersion?.originatedFromAiRunId);
+  const hasPendingAiDraft = aiRun !== null && aiRun.status !== 'rejected';
+  const pagePath = `${basePath}/${row.item.id}`;
+
+  const plan = responseStateActions({
+    status,
+    can: (permission) => can(ctx, permission),
+    hasResponse: Boolean(row.response?.currentVersionId),
+    isAiDraft,
+    hasPendingAiDraft,
+  });
+
+  /** 状態の操作を画面の操作（ActionSpec）へ写す。回答が無い質問では何も出さない */
+  const toSpec = (action: StateAction): MenuActionSpec | null => {
+    const response = row.response;
+    if (!response) return null;
+    const base = {
+      id: action.id,
+      label: action.label,
+      ...(action.disabledReason ? { disabledReason: action.disabledReason } : {}),
+    };
+    switch (action.id) {
+      case 'request-review':
+        return {
+          ...base,
+          kind: 'submit',
+          icon: <Send aria-hidden="true" />,
+          action: transitionCdpResponseAction,
+          fields: { responseId: response.id, to: 'in_review' },
+          pendingLabel: '依頼中…',
+        };
+      case 'approve':
+        return {
+          ...base,
+          kind: 'submit',
+          icon: <Check aria-hidden="true" />,
+          action: transitionCdpResponseAction,
+          fields: { responseId: response.id, to: 'approved' },
+          pendingLabel: '承認中…',
+        };
+      case 'generate-ai-draft':
+        return {
+          ...base,
+          kind: 'submit',
+          group: 'advanced',
+          icon: <Bot aria-hidden="true" />,
+          action: generateCdpDraftAction,
+          fields: { responseId: response.id },
+          pendingLabel: '生成中…',
+        };
+      case 'reject-ai-draft':
+        if (!aiRun) return null;
+        return {
+          ...base,
+          kind: 'confirm',
+          group: 'advanced',
+          icon: <CircleX aria-hidden="true" />,
+          action: rejectAiDraftAction,
+          fields: { aiRunId: aiRun.id, itemId: row.item.id },
+          confirm: {
+            tier: 'irreversible',
+            title: 'この AI 下書きを不採用にしますか',
+            scope: `${row.item.code} の AI 回答ドラフト（${formatJst(aiRun.createdAt)} 生成）`,
+            consequences: [
+              '採用しないことを AI の実行記録に残します。取り消せません。',
+              '回答の本文は変わりません。直す場合は回答を編集して保存してください。',
+            ],
+            reason: { name: 'comment', label: '不採用の理由', required: false },
+            confirmLabel: '不採用にする',
+            destructive: false,
+          },
+        };
+      default:
+        return null;
+    }
+  };
+
+  const saveIsPrimary = plan.primary?.id === 'save-draft';
+  const footerPrimary =
+    plan.primary && plan.primary.id !== 'save-draft' ? toSpec(plan.primary) : null;
+  const footerSecondary = plan.secondary.filter((a) => a.id !== 'return');
+  const canReturn = plan.secondary.some((a) => a.id === 'return') && row.response !== null;
+  const moreItems = plan.more.map(toSpec).filter((spec): spec is MenuActionSpec => spec !== null);
 
   const isMultiMetric = row.metricValues.length > 1;
   const delta =
     row.currentValue !== null && row.previousValue !== null && row.previousValue !== 0
       ? ((row.currentValue - row.previousValue) / row.previousValue) * 100
       : null;
+  const changed = row.item.changeType === 'new' || row.item.changeType === 'changed';
+  // 前年との差分（数値）。前年の回答文は回答欄の下に参照として出す（plan D7）ので、ここでは数えない
+  const hasPrevious = row.currentValue !== null || row.previousValue !== null || isMultiMetric;
+  const previousAnswer = row.previousResponse?.answerText ?? null;
+
+  const backAction: ActionSpec | undefined = backLink
+    ? {
+        kind: 'link',
+        id: 'back',
+        label: backLink.label,
+        href: backLink.href,
+        icon: <ArrowLeft aria-hidden="true" />,
+      }
+    : undefined;
 
   return (
     <>
@@ -127,97 +247,315 @@ export async function QuestionDetailView({
             {isAiDraft && aiRun && <AiGeneratedBadge provider={aiRun.provider} />}
           </span>
         }
-        breadcrumbs={[
-          { label: '企業ワークスペース' },
-          { label: frameworkLabel, href: basePath },
-          { label: row.item.code },
-        ]}
-        actions={
-          <>
-            {backLink && (
-              <Button variant="outline" size="sm" asChild>
-                <Link href={backLink.href}>
-                  <ArrowLeft aria-hidden="true" />
-                  {backLink.label}
-                </Link>
-              </Button>
-            )}
+        context={
+          // 前・次は 1 つのページャにまとめる（左の一覧では j/k で移動できる）
+          <nav aria-label="質問の移動" className="flex flex-wrap items-center gap-2 text-small">
+            <span className="text-ink-muted">
+              {frameworkLabel} の質問 {index + 1} / {workspace.rows.length}
+            </span>
             {previousRow && (
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`${basePath}/${previousRow.item.id}`}>← 前の質問</Link>
-              </Button>
+              <Link
+                href={`${basePath}/${previousRow.item.id}`}
+                className="text-brand-700 hover:underline"
+              >
+                ← 前の質問
+              </Link>
             )}
             {nextRow && (
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`${basePath}/${nextRow.item.id}`}>次の質問 →</Link>
-              </Button>
+              <Link
+                href={`${basePath}/${nextRow.item.id}`}
+                className="text-brand-700 hover:underline"
+              >
+                次の質問 →
+              </Link>
             )}
-          </>
+          </nav>
         }
+        breadcrumbsTail={[{ label: row.item.code }]}
+        actions={<PageActions secondary={backAction ? [backAction] : undefined} more={moreItems} />}
       />
 
       {/* 三ペイン（指示書 15.4） */}
       <div className="grid grid-cols-[260px_1fr_360px] gap-3 p-4">
-        {/* 左: 質問ツリー */}
-        <Card className="h-fit max-h-[calc(100vh-160px)] overflow-y-auto">
-          <SectionTitle title="質問一覧" />
-          <ul className="divide-y divide-line">
-            {workspace.rows.map((r) => (
-              <li key={r.item.id}>
-                <Link
-                  href={`${basePath}/${r.item.id}`}
-                  aria-current={r.item.id === row.item.id ? 'page' : undefined}
-                  className={`block px-3 py-1.5 text-[12px] transition-colors ${
-                    r.item.id === row.item.id
-                      ? 'bg-brand-100 font-medium text-brand-900'
-                      : 'text-ink hover:bg-brand-50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="font-mono">{r.item.code}</span>
-                    <span className="flex items-center gap-1">
-                      {r.item.changeType === 'new' && <Badge tone="warning">新</Badge>}
-                      {r.item.changeType === 'changed' && <Badge tone="brand">変</Badge>}
-                      {(r.response?.status ?? 'not_started') === 'approved' && (
-                        <Check className="size-3 text-success" aria-label="承認済み" />
-                      )}
-                    </span>
-                  </div>
-                  <div className="truncate text-[11px] text-ink-muted">{r.item.questionText}</div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Card>
+        {/* 左: 質問一覧（絞り込み付き。折りたためる） */}
+        <Collapsible
+          summary={`質問一覧（${workspace.rows.length} 件）`}
+          defaultOpen
+          className="h-fit"
+          bodyClassName="px-2 pb-2"
+        >
+          <QuestionList
+            currentId={row.item.id}
+            items={workspace.rows.map((r) => ({
+              id: r.item.id,
+              code: r.item.code,
+              text: r.item.questionText,
+              href: `${basePath}/${r.item.id}`,
+              change:
+                r.item.changeType === 'new'
+                  ? 'new'
+                  : r.item.changeType === 'changed'
+                    ? 'changed'
+                    : null,
+              approved: (r.response?.status ?? 'not_started') === 'approved',
+            }))}
+          />
+        </Collapsible>
 
-        {/* 中央: 質問と回答エディタ */}
-        <div className="space-y-3">
-          <Card>
-            <SectionTitle title="質問" />
-            <div className="space-y-2 px-3 pb-3">
-              <p className="text-[13px] text-ink">{row.item.questionText}</p>
+        {/* 中央: 質問と回答 */}
+        <div className="min-w-0 space-y-3">
+          <Section title="質問" divider="none">
+            <div className="space-y-2">
+              <p className="text-body text-ink">{row.item.questionText}</p>
               {row.item.guidance && (
-                <p className="rounded-t4d bg-surface-muted p-2 text-[12px] text-ink-muted">
-                  Guidance: {row.item.guidance}
+                <p className="rounded-t4d bg-surface-muted p-2 text-small text-ink-muted">
+                  記入の手引き: {row.item.guidance}
                 </p>
               )}
-              <p className="text-[11px] text-ink-muted">
-                回答型: {row.item.answerType}
+              <p className="text-caption text-ink-muted">
+                回答の形: {ANSWER_TYPE_LABEL[row.item.answerType]}
                 {row.item.options.length > 0 && ` ／ 選択肢: ${row.item.options.join(' / ')}`}
               </p>
             </div>
-          </Card>
+          </Section>
 
-          {(row.currentValue !== null ||
-            row.previousValue !== null ||
-            row.previousResponse ||
-            isMultiMetric) && (
-            <Card>
-              <SectionTitle title="前年差分（YoY Diff）" />
+          <Section
+            title="回答"
+            actions={
+              isAiDraft ? (
+                <Badge tone="warning">
+                  AI 下書きのままでは承認できません（編集して保存してください）
+                </Badge>
+              ) : undefined
+            }
+          >
+            {canWrite && row.response ? (
+              <form action={saveCdpResponseAction} className="space-y-2">
+                <input type="hidden" name="responseId" value={row.response.id} />
+                {aiRun && <input type="hidden" name="aiRunId" value={aiRun.id} />}
+                <input type="hidden" name="editedFromAi" value={isAiDraft ? 'true' : 'false'} />
+
+                {row.item.answerType === 'numeric' && (
+                  <label className="block text-small text-ink-muted">
+                    数値
+                    <Input
+                      name="answerNumeric"
+                      defaultValue={row.response.answerNumeric ?? row.currentValue ?? ''}
+                      inputMode="decimal"
+                      className="mt-0.5 w-48"
+                    />
+                  </label>
+                )}
+
+                {row.item.answerType === 'single_choice' && (
+                  <fieldset className="text-small text-ink-muted">
+                    <legend>選択</legend>
+                    <div className="mt-0.5 flex flex-wrap gap-2">
+                      {row.item.options.map((option) => (
+                        <label key={option} className="flex items-center gap-1 text-body text-ink">
+                          <input
+                            type="radio"
+                            name="answerChoice"
+                            value={option}
+                            defaultChecked={row.response?.answerChoice.includes(option)}
+                            className="accent-brand-700"
+                          />
+                          {option}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+
+                <label className="block text-small text-ink-muted">
+                  回答本文
+                  <Textarea
+                    name="answerText"
+                    rows={10}
+                    defaultValue={row.response.answerText ?? ''}
+                    placeholder="承認済みデータと根拠資料をもとに記載してください。"
+                    className="mt-0.5"
+                  />
+                </label>
+
+                <label className="block text-small text-ink-muted">
+                  前年からの扱い
+                  <NativeSelect
+                    name="carryForwardDecision"
+                    defaultValue={row.response.carryForwardDecision ?? ''}
+                    className="mt-0.5 block w-48"
+                  >
+                    <option value="">未設定</option>
+                    <option value="reuse">前年をそのまま継続</option>
+                    <option value="update">前年を更新</option>
+                    <option value="new">新規作成</option>
+                  </NativeSelect>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {/* 状態で主操作が変わる: 下書き・差戻しのときだけ保存が主操作（レビュー中・承認済みでも
+                      直して保存はできる。版が増える） */}
+                  <SubmitButton
+                    variant={saveIsPrimary ? 'primary' : 'secondary'}
+                    size="sm"
+                    data-t4d-shortcut="save"
+                    pendingLabel="保存中…"
+                  >
+                    保存（下書き）
+                  </SubmitButton>
+                </div>
+              </form>
+            ) : (
+              <p className="whitespace-pre-wrap text-body text-ink">
+                {row.response?.answerText ?? '（未回答）'}
+              </p>
+            )}
+
+            {previousAnswer && (
+              // 前年の回答を入力欄のそばに参照として出す（入力はしない。plan D7）
+              <div
+                className="mt-2 rounded-t4d border border-line bg-surface-muted px-2 py-1.5"
+                data-previous-answer=""
+              >
+                <p className="text-caption font-medium text-ink-muted">
+                  前年回答（{workspace.previousPeriod?.label ?? '前年'}・参照のみ）
+                </p>
+                <p className="whitespace-pre-wrap text-small text-ink-muted">{previousAnswer}</p>
+              </div>
+            )}
+
+            {(footerPrimary || footerSecondary.length > 0 || canReturn || isAiDraft) && (
+              <div
+                className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2"
+                data-response-actions=""
+              >
+                {footerSecondary.map((action) => {
+                  const spec = toSpec(action);
+                  return spec ? <ActionButton key={spec.id} action={spec} /> : null;
+                })}
+                {canReturn && row.response && (
+                  <ReturnResponseDialog
+                    responseId={row.response.id}
+                    href={pagePath}
+                    scope={`${frameworkLabel} ${row.item.code} の回答（${workspace.period.label}）`}
+                  />
+                )}
+                {footerPrimary && <ActionButton action={footerPrimary} variant="primary" />}
+                {isAiDraft && (
+                  <span className="text-caption text-warning-ink">
+                    AI 生成のままでは承認できません（DB 側でも禁止されています）。
+                  </span>
+                )}
+              </div>
+            )}
+          </Section>
+        </div>
+
+        {/* 右: AI 回答ドラフト（候補）・補助の情報 */}
+        <div className="min-w-0 space-y-3">
+          <Section title="AI 回答ドラフト" divider="none">
+            <div className="space-y-2">
+              {/* AI は確定しない。候補であることは閉じずに見せる（誠実さの注記） */}
+              <p className="flex flex-wrap items-center gap-1.5 text-caption text-ink-muted">
+                <HonestyBadge kind="ai-candidate" />
+                承認済みデータ・前年回答・根拠資料をもとに下書きを作ります。AI
+                は確定しません。人が編集・承認してください。
+              </p>
+              {!aiRun && canRunAi && row.response && (
+                <p className="text-caption text-ink-muted">
+                  まだ AI
+                  回答ドラフトはありません。見出しの「その他」の「ドラフトを生成（AI）」で作れます。
+                </p>
+              )}
+
+              {aiRun && (
+                <div className="space-y-1.5 rounded-t4d border border-line bg-surface-muted p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <AiGeneratedBadge provider={aiRun.provider} />
+                    <span className="text-caption text-ink-muted">
+                      確信度 {Math.round(aiRun.confidence * 100)}%
+                    </span>
+                  </div>
+                  <dl className="space-y-0.5 text-caption text-ink-muted">
+                    <div className="flex justify-between gap-2">
+                      <dt>モデル</dt>
+                      <dd className="truncate text-ink">{aiRun.model}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt>プロンプトの版</dt>
+                      <dd className="truncate text-ink">{aiRun.promptVersion}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt>対象年度</dt>
+                      <dd className="text-ink">{workspace.period.code}</dd>
+                    </div>
+                  </dl>
+
+                  {aiRun.sourceReferences.length > 0 && (
+                    <div>
+                      <div className="text-caption font-medium text-ink">参照元</div>
+                      <ul className="space-y-0.5">
+                        {aiRun.sourceReferences.map((s, i) => (
+                          <li key={i} className="text-caption text-ink-muted">
+                            ・{s.label}
+                            {s.periodLabel ? `（${s.periodLabel}）` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {aiRun.warnings.length > 0 && (
+                    <ul className="space-y-0.5">
+                      {aiRun.warnings.map((w, i) => (
+                        <li key={i} className="text-caption text-warning-ink">
+                          ⚠ {w}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {aiRun.status === 'rejected' ? (
+                    // 不採用の結果が画面に出ないと「押しても何も起きない」操作になる。
+                    // 採否は ai_runs に残る監査証跡なので、ここでも状態を明示する。
+                    <div className="flex items-center gap-1.5">
+                      <Badge tone="danger">
+                        <CircleX className="size-3" aria-hidden="true" />
+                        不採用
+                      </Badge>
+                      <span className="text-caption text-ink-muted">
+                        この AI 下書きは採用しないと記録しました。
+                      </span>
+                    </div>
+                  ) : (
+                    canRunAi && (
+                      <p className="text-caption text-ink-muted">
+                        採用しない場合は「その他」の「この下書きを不採用にする…」で記録します。
+                      </p>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </Section>
+
+          {hasPrevious && (
+            <Section
+              id="question-previous"
+              collapsible
+              title="前年との差分"
+              summary={
+                delta === null
+                  ? `前年（${workspace.previousPeriod?.code ?? '—'}）と比べる`
+                  : `増減 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`
+              }
+              // 新規・変更のあった質問は開いて描く（継続の質問は要点だけ）
+              defaultOpen={changed}
+            >
               {isMultiMetric ? (
                 // 複数の指標を求める項目（例: ESRS E1-6）は、異なる指標を足した値に意味が無いため
-                // 合計の YoY を出さず、指標ごとに当年・前年を並べる（W0 O7）
-                <div className="t4d-scroll-x px-3 pb-3">
+                // 合計の増減を出さず、指標ごとに当年・前年を並べる（W0 O7）
+                <div className="t4d-scroll-x">
                   <Table>
                     <THead>
                       <TR>
@@ -242,280 +580,67 @@ export async function QuestionDetailView({
                   </Table>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-3 px-3 pb-3 text-[12px]">
+                <dl className="grid grid-cols-3 gap-2 text-small">
                   <div>
-                    <div className="text-ink-muted">当年（承認済みデータ）</div>
-                    <div className="tnum text-[16px] font-semibold text-ink">
+                    <dt className="text-ink-muted">当年（承認済みデータ）</dt>
+                    <dd className="tnum text-title font-semibold text-ink">
                       {formatNumber(row.currentValue)}
-                    </div>
+                    </dd>
                   </div>
                   <div>
-                    <div className="text-ink-muted">
+                    <dt className="text-ink-muted">
                       前年（{workspace.previousPeriod?.code ?? '—'}）
-                    </div>
-                    <div className="tnum text-[16px] font-semibold text-ink-muted">
+                    </dt>
+                    <dd className="tnum text-title font-semibold text-ink-muted">
                       {formatNumber(row.previousValue)}
-                    </div>
+                    </dd>
                   </div>
                   <div>
-                    <div className="text-ink-muted">増減</div>
-                    <div
-                      className={`tnum text-[16px] font-semibold ${
-                        delta === null
-                          ? 'text-ink-muted'
-                          : delta >= 0
-                            ? 'text-danger'
-                            : 'text-success'
-                      }`}
-                    >
+                    <dt className="text-ink-muted">増減</dt>
+                    <dd className="tnum text-title font-semibold text-ink">
                       {delta === null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`}
-                    </div>
+                    </dd>
                   </div>
-                </div>
+                </dl>
               )}
-              {row.previousResponse?.answerText && (
-                <div className="border-t border-line px-3 py-2">
-                  <div className="text-[11px] font-medium text-ink-muted">前年回答</div>
-                  <p className="whitespace-pre-wrap text-[12px] text-ink-muted">
-                    {row.previousResponse.answerText}
-                  </p>
-                </div>
-              )}
-            </Card>
+            </Section>
           )}
 
-          <Card>
-            <SectionTitle
-              title="回答"
-              action={
-                isAiDraft ? (
-                  <Badge tone="warning">
-                    AI 下書きのままでは承認できません（編集して保存してください）
-                  </Badge>
-                ) : undefined
-              }
-            />
-            {canWrite && row.response ? (
-              <form action={saveCdpResponseAction} className="space-y-2 p-3">
-                <input type="hidden" name="responseId" value={row.response.id} />
-                {aiRun && <input type="hidden" name="aiRunId" value={aiRun.id} />}
-                <input type="hidden" name="editedFromAi" value={isAiDraft ? 'true' : 'false'} />
-
-                {row.item.answerType === 'numeric' && (
-                  <label className="block text-[12px] text-ink-muted">
-                    数値
-                    <Input
-                      name="answerNumeric"
-                      defaultValue={row.response.answerNumeric ?? row.currentValue ?? ''}
-                      inputMode="decimal"
-                      className="mt-0.5 w-48"
-                    />
-                  </label>
-                )}
-
-                {row.item.answerType === 'single_choice' && (
-                  <fieldset className="text-[12px] text-ink-muted">
-                    <legend>選択</legend>
-                    <div className="mt-0.5 flex flex-wrap gap-2">
-                      {row.item.options.map((option) => (
-                        <label
-                          key={option}
-                          className="flex items-center gap-1 text-[13px] text-ink"
-                        >
-                          <input
-                            type="radio"
-                            name="answerChoice"
-                            value={option}
-                            defaultChecked={row.response?.answerChoice.includes(option)}
-                            className="accent-[#0b57a4]"
-                          />
-                          {option}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
-
-                <label className="block text-[12px] text-ink-muted">
-                  回答本文
-                  <Textarea
-                    name="answerText"
-                    rows={10}
-                    defaultValue={row.response.answerText ?? ''}
-                    placeholder="承認済みデータと Evidence を根拠に記載してください。"
-                    className="mt-0.5"
-                  />
-                </label>
-
-                <label className="block text-[12px] text-ink-muted">
-                  前年からの扱い
-                  <select
-                    name="carryForwardDecision"
-                    defaultValue={row.response.carryForwardDecision ?? ''}
-                    className="mt-0.5 block h-7 w-48 rounded-t4d border border-line bg-surface px-2 text-[13px]"
-                  >
-                    <option value="">未設定</option>
-                    <option value="reuse">前年をそのまま継続</option>
-                    <option value="update">前年を更新</option>
-                    <option value="new">新規作成</option>
-                  </select>
-                </label>
-
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <SubmitButton size="sm" data-t4d-shortcut="save" pendingLabel="保存中…">
-                    保存（下書き）
-                  </SubmitButton>
-                </div>
-              </form>
-            ) : (
-              <div className="p-3">
-                <p className="whitespace-pre-wrap text-[13px] text-ink">
-                  {row.response?.answerText ?? '（未回答）'}
-                </p>
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
-              {canWrite && row.response && status === 'draft' && (
-                <form action={transitionCdpResponseAction}>
-                  <input type="hidden" name="responseId" value={row.response.id} />
-                  <input type="hidden" name="to" value="in_review" />
-                  <Button type="submit" size="sm" variant="outline">
-                    <Send aria-hidden="true" />
-                    レビュー依頼
-                  </Button>
-                </form>
-              )}
-              {canWrite && row.response && status === 'in_review' && (
-                <form action={transitionCdpResponseAction}>
-                  <input type="hidden" name="responseId" value={row.response.id} />
-                  <input type="hidden" name="to" value="returned" />
-                  <Button type="submit" size="sm" variant="outline">
-                    <Undo2 aria-hidden="true" />
-                    差戻し
-                  </Button>
-                </form>
-              )}
-              {canApprove && row.response && (status === 'in_review' || status === 'draft') && (
-                <form action={transitionCdpResponseAction}>
-                  <input type="hidden" name="responseId" value={row.response.id} />
-                  <input type="hidden" name="to" value="approved" />
-                  <Button type="submit" size="sm" disabled={isAiDraft}>
-                    <Check aria-hidden="true" />
-                    承認
-                  </Button>
-                </form>
-              )}
-              {isAiDraft && (
-                <span className="text-[11px] text-[#8a5d00]">
-                  AI 生成のままでは承認できません（DB 側でも禁止されています）。
-                </span>
-              )}
-            </div>
-          </Card>
-        </div>
-
-        {/* 右: AI / マッピング / Evidence / 履歴 */}
-        <div className="space-y-3">
-          <Card>
-            <SectionTitle title="AI 回答ドラフト" />
-            <div className="space-y-2 p-3">
-              <p className="text-[11px] text-ink-muted">
-                承認済みデータ・前年回答・Evidence を根拠に下書きを生成します。AI
-                は確定しません。人が編集・承認してください。
-              </p>
-              {can(ctx, 'enterprise.ai.run') && row.response && (
-                <form action={generateCdpDraftAction}>
-                  <input type="hidden" name="responseId" value={row.response.id} />
-                  <SubmitButton
-                    size="sm"
-                    variant="secondary"
-                    icon={<Bot aria-hidden="true" />}
-                    pendingLabel="生成中…"
-                  >
-                    ドラフトを生成
-                  </SubmitButton>
-                </form>
-              )}
-
-              {aiRun && (
-                <div className="space-y-1.5 rounded-t4d border border-line bg-surface-muted p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <AiGeneratedBadge provider={aiRun.provider} />
-                    <span className="text-[11px] text-ink-muted">
-                      確信度 {Math.round(aiRun.confidence * 100)}%
-                    </span>
-                  </div>
-                  <dl className="space-y-0.5 text-[11px] text-ink-muted">
-                    <div className="flex justify-between gap-2">
-                      <dt>Model</dt>
-                      <dd className="truncate text-ink">{aiRun.model}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt>Prompt</dt>
-                      <dd className="truncate text-ink">{aiRun.promptVersion}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt>対象年度</dt>
-                      <dd className="text-ink">{workspace.period.code}</dd>
-                    </div>
-                  </dl>
-
-                  {aiRun.sourceReferences.length > 0 && (
-                    <div>
-                      <div className="text-[11px] font-medium text-ink">参照元</div>
-                      <ul className="space-y-0.5">
-                        {aiRun.sourceReferences.map((s, i) => (
-                          <li key={i} className="text-[11px] text-ink-muted">
-                            ・{s.label}
-                            {s.periodLabel ? `（${s.periodLabel}）` : ''}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {aiRun.warnings.length > 0 && (
-                    <ul className="space-y-0.5">
-                      {aiRun.warnings.map((w, i) => (
-                        <li key={i} className="text-[11px] text-[#8a5d00]">
-                          ⚠ {w}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {aiRun.status === 'rejected' ? (
-                    // Reject の結果が画面に出ないと「押しても何も起きない」ボタンになる。
-                    // 採否は ai_runs に残る監査証跡なので、ここでも状態を明示する。
-                    <div className="flex items-center gap-1.5">
-                      <Badge tone="danger">Reject 済み</Badge>
-                      <span className="text-[11px] text-ink-muted">
-                        この AI 下書きは採用しないと記録しました。
-                      </span>
-                    </div>
-                  ) : (
-                    <form action={rejectAiDraftAction}>
-                      <input type="hidden" name="aiRunId" value={aiRun.id} />
-                      <input type="hidden" name="itemId" value={row.item.id} />
-                      <Button type="submit" size="xs" variant="outline">
-                        この下書きを Reject
-                      </Button>
-                    </form>
-                  )}
-                </div>
-              )}
-            </div>
-          </Card>
-
-          <Card>
-            <SectionTitle title="Data Mapping" />
+          <Section
+            id="question-data"
+            collapsible
+            title="対応するデータ"
+            summary={
+              row.mappedMetrics.length === 0
+                ? '対応付けた指標はありません'
+                : `指標 ${row.mappedMetrics.length} 件`
+            }
+          >
             {row.mappedMetrics.length === 0 ? (
-              <EmptyState title="マッピングされた指標がありません" />
+              frameworkKey === 'cdp' ? (
+                <EmptyState
+                  kind="no-data"
+                  size="compact"
+                  title="対応付けた指標がありません"
+                  description="対応付けは CDP 開示対応の「その他」にある「質問マッピングを実行（AI）」で候補を作り、人が確認します。"
+                  action={
+                    <Link href={basePath} className="text-small text-brand-700 hover:underline">
+                      CDP 開示対応を開く
+                    </Link>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  kind="not-applicable"
+                  size="compact"
+                  title="対応付けた指標がありません"
+                  description="数値を求めない（定性的な）開示項目です。回答本文で記載してください。"
+                />
+              )
             ) : (
               <>
                 {row.dataCoverage !== 'not_mapped' && (
-                  <div className="px-3 pb-1.5">
+                  <div className="pb-1.5">
                     {/* 値は承認済みだけを数えるため、無い場合は「承認済みデータなし」と書く */}
                     <DataCoverageBadge
                       coverage={row.dataCoverage}
@@ -528,22 +653,22 @@ export async function QuestionDetailView({
                   {/* 指標ごとに自分の値を出す。項目全体の値（currentValue）を各行に繰り返すと、
                       複数の指標を求める項目で Scope1 の値が Scope2 の行にも出てしまう（W0 O7） */}
                   {row.metricValues.map((value) => (
-                    <li key={value.metric.id} className="px-3 py-1.5">
+                    <li key={value.metric.id} className="py-1.5">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] text-ink">{value.metric.name}</span>
-                        <span className="tnum text-[12px] text-ink-muted">
+                        <span className="text-small text-ink">{value.metric.name}</span>
+                        <span className="tnum text-small text-ink-muted">
                           {metricValueLabel(value.currentValue, value.metric.unit)}
                         </span>
                       </div>
                       {value.currentEstimate !== null && (
-                        <div className="tnum text-[11px] text-ink-muted">
+                        <div className="tnum text-caption text-ink-muted">
                           推計（実績と別）: {formatNumber(value.currentEstimate)}{' '}
                           {value.metric.unit}
                         </div>
                       )}
                       <Link
                         href={`/enterprise/data?q=${encodeURIComponent(value.metric.name)}&status=approved`}
-                        className="text-[11px] text-brand-700 hover:underline"
+                        className="text-caption text-brand-700 hover:underline"
                       >
                         承認済みデータを見る
                       </Link>
@@ -552,55 +677,66 @@ export async function QuestionDetailView({
                 </ul>
               </>
             )}
-          </Card>
+          </Section>
 
-          <Card>
-            <SectionTitle title={`コメント（${comments.length}）`} />
+          <Section id="question-comments" title={`コメント（${comments.length}）`}>
+            {/* 入力欄は閉じない: ショートカット「c」（コメント入力へ移る）が閉じた節の中では効かず、
+                レビューの依頼・差戻し理由のやり取りがこの欄に集まるため（plan S6 の「1 件以上で開く」より
+                熟練者の操作を優先した。件数は見出しに出している） */}
             {canWrite && row.response && (
               <CommentBox
                 targetType="disclosure_response"
                 targetId={row.response.id}
-                href={`${basePath}/${row.item.id}`}
+                href={pagePath}
                 members={mentionCandidates}
               />
             )}
-            {comments.length === 0 ? (
-              <EmptyState title="コメントはありません" />
-            ) : (
+            {comments.length === 0 && !(canWrite && row.response) && (
+              <p className="text-small text-ink-muted">まだコメントはありません。</p>
+            )}
+            {comments.length > 0 && (
               <ul className="divide-y divide-line">
                 {comments.map((c) => (
-                  <li key={c.id} className="px-3 py-1.5">
-                    <p className="text-[12px] text-ink">
+                  <li key={c.id} className="py-1.5">
+                    <p className="text-small text-ink">
                       <MentionText body={c.body} />
                     </p>
-                    <span className="text-[11px] text-ink-muted">
+                    <span className="text-caption text-ink-muted">
                       {authorNameById.get(c.authorUserId) ?? '—'} ・ {formatJst(c.createdAt)}
                     </span>
                   </li>
                 ))}
               </ul>
             )}
-          </Card>
+          </Section>
 
-          <Card>
-            <SectionTitle title={`Version 履歴（${versions.length}）`} />
+          <Section
+            id="question-versions"
+            collapsible
+            title={`版の履歴（${versions.length}）`}
+            summary={
+              versions[0]
+                ? `最新 v${versions[0].versionNo}（${formatJst(versions[0].createdAt)}）`
+                : 'まだ版はありません'
+            }
+          >
             {versions.length === 0 ? (
-              <EmptyState title="履歴はありません" />
+              <p className="text-small text-ink-muted">回答を保存すると、ここに版が残ります。</p>
             ) : (
               <ul className="divide-y divide-line">
                 {versions.map((v) => (
-                  <li key={v.id} className="px-3 py-1.5">
+                  <li key={v.id} className="py-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px] text-ink">v{v.versionNo}</span>
+                      <span className="text-small text-ink">v{v.versionNo}</span>
                       {v.originatedFromAiRunId && <Badge tone="warning">AI 由来</Badge>}
                     </div>
-                    <div className="text-[11px] text-ink-muted">{v.changeReason ?? '—'}</div>
-                    <div className="text-[11px] text-ink-muted">{formatJst(v.createdAt)}</div>
+                    <div className="text-caption text-ink-muted">{v.changeReason ?? '—'}</div>
+                    <div className="text-caption text-ink-muted">{formatJst(v.createdAt)}</div>
                   </li>
                 ))}
               </ul>
             )}
-          </Card>
+          </Section>
         </div>
       </div>
     </>

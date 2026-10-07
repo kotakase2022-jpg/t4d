@@ -9,7 +9,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : [['list']],
+  // skip-guard: 基準に無い skip があれば実行を失敗にする（操作を L2 へ移して黙って skip になるのを防ぐ。
+  // docs/ui-redesign/plan.md §5.2）
+  reporter: [
+    ['list'],
+    ...(process.env.CI ? [['html', { open: 'never' }] as const] : []),
+    ['./tests/support/skip-guard-reporter.ts', { configName: 'e2e' }],
+  ],
   timeout: 90_000,
   expect: { timeout: 15_000 },
   use: {

@@ -179,7 +179,7 @@ export function DmaMatrix({
         ))}
       </svg>
 
-      <figcaption className="space-y-1 text-[11px] leading-relaxed text-ink-muted">
+      <figcaption className="space-y-1 text-caption leading-relaxed text-ink-muted">
         <ul aria-label="マトリクスの凡例" className="flex flex-wrap gap-x-3 gap-y-0.5">
           <li className="flex items-center gap-1">
             <svg viewBox="0 0 10 10" className="size-2.5" aria-hidden="true">

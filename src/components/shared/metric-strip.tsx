@@ -69,7 +69,8 @@ export function MetricTile({
         </span>
       )}
       {delta && <span className="mt-0.5 text-caption text-ink-muted">{delta}</span>}
-      {hint && <span className="mt-0.5 truncate text-caption text-ink-muted">{hint}</span>}
+      {/* 補足は折り返して全文を出す（何を数えたかの定義のことがある。省略記号で切ると読めない） */}
+      {hint && <span className="mt-0.5 text-caption text-ink-muted">{hint}</span>}
     </>
   );
   const base = cn(

@@ -1,7 +1,15 @@
 import 'server-only';
 
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
+import {
+  newUserErrorToken,
+  USER_ERROR_PARAM,
+  USER_ERROR_TOKEN_COOKIE,
+  USER_ERROR_TOKEN_MAX_AGE,
+  USER_ERROR_TOKEN_PARAM,
+} from './user-error-token';
 
 /**
  * 利用者に見せてよいエラーを、画面へ届ける。
@@ -48,6 +56,35 @@ export function isUserFacingError(error: unknown): error is Error {
 }
 
 /**
+ * 利用者向けの理由を `?error=` に載せて元の画面へ戻す（Server Action の中だけで呼ぶ）。
+ *
+ * 文と一緒に使い捨ての合言葉を Cookie と URL（`et`）に置く。middleware は合言葉の合わない
+ * `?error=` を外す（外から作ったリンクの文を、本物の画面の警告として出さない。./user-error-token.ts）。
+ * `?error=` を手で組み立てず、必ずここを通す（通さないと middleware に外されて理由が出ない）。
+ *
+ * @param backTo 戻す画面のパス（アプリ内のパスのみ）
+ */
+export async function redirectWithUserError(backTo: string, message: string): Promise<never> {
+  const token = newUserErrorToken();
+  try {
+    (await cookies()).set(USER_ERROR_TOKEN_COOKIE, token, {
+      // ブラウザの URL に残る ?error= を、クライアントの GlobalErrorNotice も同じ合言葉で確かめるため
+      // JavaScript から読める必要がある（秘密ではない。外のサイトから書けないことだけが要る）
+      httpOnly: false,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: USER_ERROR_TOKEN_MAX_AGE,
+    });
+  } catch {
+    // リクエストの外（Server Action を直接呼ぶテスト）では Cookie を書けない。戻り先はそのまま返す
+  }
+  const separator = backTo.includes('?') ? '&' : '?';
+  const text = encodeURIComponent(message.slice(0, MAX_MESSAGE_LENGTH));
+  redirect(`${backTo}${separator}${USER_ERROR_PARAM}=${text}&${USER_ERROR_TOKEN_PARAM}=${token}`);
+}
+
+/**
  * Server Action を包み、利用者向けエラーを `?error=` として戻す。
  *
  * @param backTo エラー時に戻す画面のパス（アプリ内のパスのみ）
@@ -57,8 +94,6 @@ export async function withUserFacingError(backTo: string, run: () => Promise<voi
     await run();
   } catch (error) {
     if (isControlFlowError(error) || !isUserFacingError(error)) throw error;
-    const message = error.message.slice(0, MAX_MESSAGE_LENGTH);
-    const separator = backTo.includes('?') ? '&' : '?';
-    redirect(`${backTo}${separator}error=${encodeURIComponent(message)}`);
+    await redirectWithUserError(backTo, error.message);
   }
 }

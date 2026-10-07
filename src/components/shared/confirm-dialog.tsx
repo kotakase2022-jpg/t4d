@@ -146,6 +146,7 @@ export function ConfirmDialog({
               id={reasonId}
               name={reason.name}
               required={reason.required}
+              maxLength={reason.maxLength}
               placeholder={reason.placeholder}
               rows={3}
               {...formAttr}

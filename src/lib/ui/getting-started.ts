@@ -83,3 +83,27 @@ export function gettingStartedSteps(
   }
   return out.slice(0, GETTING_STARTED_MAX);
 }
+
+/**
+ * 「はじめに」を閉じた利用者の印（Cookie）。値は閉じた viewerKey（利用者:組織）を `.` で並べたもの。
+ *
+ * 端末の localStorage だけに置くと、サーバーは閉じたかどうかを知らず、読み込んだあとに帯を差し込む
+ * ことになり、ホームの本文が下へずれる（plan §1.18「読み込み後に画面がずれない」）。Cookie にも置いて
+ * サーバーが最初から出し分ける（閉じた人には描かない・閉じていない人には最初から描く）。
+ */
+export const GETTING_STARTED_DISMISSED_COOKIE = 't4d_gs_dismissed';
+/** Cookie に残す利用者の数（古いものから捨てる） */
+const DISMISSED_COOKIE_LIMIT = 20;
+const VIEWER_KEY_PATTERN = /^[0-9A-Za-z-]+:[0-9A-Za-z-]+$/;
+
+export function parseDismissedViewers(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw.split('.').filter((key) => VIEWER_KEY_PATTERN.test(key));
+}
+
+/** viewerKey を足した Cookie の値（同じ利用者は 1 つにまとめ、上限で古いものを捨てる） */
+export function addDismissedViewer(raw: string | null | undefined, viewerKey: string): string {
+  const keys = parseDismissedViewers(raw).filter((key) => key !== viewerKey);
+  if (VIEWER_KEY_PATTERN.test(viewerKey)) keys.push(viewerKey);
+  return keys.slice(-DISMISSED_COOKIE_LIMIT).join('.');
+}

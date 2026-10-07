@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { orderMenuItems, type MenuActionSpec } from '@/lib/ui/actions';
+import { OPEN_CONFIRM_EVENT, orderMenuItems, type MenuActionSpec } from '@/lib/ui/actions';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from './confirm-dialog';
 
@@ -47,6 +47,26 @@ export function MoreMenu({
   const ordered = React.useMemo(() => orderMenuItems(items), [items]);
   const formRefs = React.useRef(new Map<string, HTMLFormElement>());
   const [openConfirm, setOpenConfirm] = React.useState<string | null>(openConfirmId ?? null);
+  // ?confirm= が後から変わったときも開く。Next は検索条件だけが変わる遷移（同じ画面のまま
+  // パレットから ?confirm= へ移る）では部品を作り直さないため、初期値だけでは開かなかった
+  const [syncedConfirmId, setSyncedConfirmId] = React.useState(openConfirmId);
+  if (openConfirmId !== syncedConfirmId) {
+    setSyncedConfirmId(openConfirmId);
+    if (openConfirmId) setOpenConfirm(openConfirmId);
+  }
+  // 同じ URL への遷移（一度閉じてから同じコマンドをもう一度選ぶ）は props も変わらないので、
+  // パレットからの依頼（OPEN_CONFIRM_EVENT）で開く
+  React.useEffect(() => {
+    function onRequest(event: Event) {
+      const id = (event as CustomEvent<unknown>).detail;
+      const target = ordered.find((item) => item.id === id);
+      if (target && target.kind === 'confirm' && !target.hidden && !target.disabledReason) {
+        setOpenConfirm(target.id);
+      }
+    }
+    window.addEventListener(OPEN_CONFIRM_EVENT, onRequest);
+    return () => window.removeEventListener(OPEN_CONFIRM_EVENT, onRequest);
+  }, [ordered]);
 
   if (ordered.length === 0) return null;
 

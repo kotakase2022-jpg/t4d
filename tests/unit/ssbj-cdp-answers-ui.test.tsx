@@ -37,6 +37,7 @@ vi.mock('@/app/enterprise/actions', () => ({
   generateCdpDraftAction: vi.fn(),
   generateSsbjDraftAction: vi.fn(),
   rejectAiDraftAction: vi.fn(),
+  returnCdpResponseAction: vi.fn(),
   runSsbjGapAnalysisAction: vi.fn(),
   runSsbjGapAnalysisBulkAction: vi.fn(),
   saveCdpResponseAction: vi.fn(),

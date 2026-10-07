@@ -206,6 +206,9 @@ test('F121: 案件の概要の「チームを変更」でメンバーを加え�
   });
   await expect(memberRow).toBeVisible();
   await memberRow.getByRole('button', { name: 'チームから外す' }).click();
+  // 外すとこの案件のデータへ届かなくなるので、範囲（氏名・役割・案件）を確かめてから送る
+  await expect(page.getByRole('dialog').locator('[data-confirm-scope]')).toContainText(candidate);
+  await confirmInDialog(page);
   await settle(page);
   await page.goto(`${overview}?team=1#engagement-info`);
   await expect(

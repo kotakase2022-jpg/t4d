@@ -39,6 +39,7 @@ import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
+import { COMMENT_MAX_LENGTH } from '@/lib/domain/comment-limits';
 import { AGGREGATION_METHOD_LABEL, METRIC_CATEGORY_LABEL } from '@/lib/domain/metrics';
 import { formatJst, formatJstDate, formatNumber } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
@@ -369,6 +370,7 @@ export default async function DataPointDetailPage({
               name: 'comment',
               label: '差戻し理由',
               required: true,
+              maxLength: COMMENT_MAX_LENGTH,
               placeholder: '例: 検針票の対象期間を確認してください。',
             },
             confirmLabel: '差し戻す',

@@ -203,6 +203,18 @@ Cookie ヘッダー全体の最大 **8,788B**（上限の目安 13KB・Vercel �
   作成日時はプロジェクトの作成と各節の最終承認の後・未来でないこと。ID を変えながら新しい行を足し続ける偽の Cookie で
   共有のメモリが増えること自体は、ほかの持ち回す表（コメント・通知など）と同じく残る（デモのアカウントは誰でも使える前提。D-4）。
 
+#### 報告年度・収集キャンペーンも Cookie で持ち回す（2026-10-07・UI 再設計の検証 F1）
+
+組織・拠点の「報告年度」「収集キャンペーン」の作成は、保存のあと結果の通知付きの画面へ移る（Server Action の redirect。
+移った先の描画は別のリクエスト）。`periods`・`campaigns`・`campaign_scopes` を持ち回していなかったため、移った先が別の
+インスタンスに届くと「追加しました」と出るのに一覧に行が無かった。3 表を Cookie の対象に加えた（年度・キャンペーンは
+1 回の操作で 1 行。収集スコープは組織 × 指標の行で、同じ ID の繰り返しが多く圧縮が効く）。
+`tests/e2e/zzzz-master-create.stateless.ts`（stateless の構成だけ）と `tests/integration/ui-redesign-review-actions.test.ts` が確かめる。
+
+- キャンペーンが起こすタスク（`tasks`）は持ち回さない（従来どおり、別インスタンスではワークフローのタスクに出ない）。
+- 組織 × 指標の多いキャンペーン（例: 全拠点 × 数十指標）は Cookie の容量を多く使い、古い操作から押し出す
+  （押し出しはヘッダーの印で示す。ほかの大きな操作と同じ）。
+
 #### CSRD の編集も Cookie に依存する（2026-10-01・docs/disclosure-first.md §9.3）
 
 CSRD の 6 表（`csrd_analysis_settings`・`csrd_dma_matters`・`csrd_dma_iros`・`csrd_assessments`・`csrd_action_plans`・

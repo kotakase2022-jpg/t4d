@@ -92,17 +92,38 @@ export function EvidenceUploadForm({
   }>({ title: '', documentType: '', issuedOn: '' });
   const typeRef = React.useRef<HTMLInputElement>(null);
   const issuedRef = React.useRef<HTMLInputElement>(null);
+  // 推定で入れた値（欄ごと）。人が書き換えていない（まだ推定のままの）欄は、別のファイルを選び直したら
+  // 新しい推定に置き換える（推定が無ければ空に戻す）。以前は空の欄にだけ入れていたため、
+  // 1 つ目のファイルの推定（請求書・2026-06-30）が 2 つ目のファイルにそのまま残り、人が入れた値として登録された
+  const autoFilled = React.useRef<{ documentType: string | null; issuedOn: string | null }>({
+    documentType: null,
+    issuedOn: null,
+  });
+  // 推定を入れたら属性の節を開く（閉じたままだと、推定の値を確かめずに登録してしまう）
+  const [guessApplied, setGuessApplied] = React.useState(false);
 
   const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const name = event.target.files?.[0]?.name;
     if (!name) return;
     const guess = inferEvidenceAttributes(name);
     setInferred(guess);
-    const fill = (input: HTMLInputElement | null, value: string) => {
-      if (input && input.value === '' && value) input.value = value;
+    let applied = false;
+    const fill = (
+      key: 'documentType' | 'issuedOn',
+      input: HTMLInputElement | null,
+      value: string,
+    ) => {
+      if (!input) return;
+      const previous = autoFilled.current[key];
+      const untouched = input.value === '' || (previous !== null && input.value === previous);
+      if (!untouched) return;
+      input.value = value;
+      autoFilled.current[key] = value || null;
+      if (value) applied = true;
     };
-    fill(typeRef.current, guess.documentType);
-    fill(issuedRef.current, guess.issuedOn);
+    fill('documentType', typeRef.current, guess.documentType);
+    fill('issuedOn', issuedRef.current, guess.issuedOn);
+    if (applied) setGuessApplied(true);
   };
   const hasInferred = Boolean(inferred.documentType || inferred.issuedOn);
   // 前回の値（失敗して戻ったとき）があれば属性の節を開いて描く。従来の画面は項目が 2 つだけなので開いておく
@@ -187,7 +208,7 @@ export function EvidenceUploadForm({
       <FormSection
         title={full ? '② 資料の属性（ファイル名から推定した値が入ります）' : '② 資料の属性'}
         kind="optional"
-        open={attributesOpen}
+        open={attributesOpen || guessApplied}
       >
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {full && (
@@ -299,7 +320,7 @@ export function EvidenceUploadForm({
         </div>
         {hasInferred && (
           <p className="text-caption text-ink-muted" aria-live="polite">
-            ファイル名から推定して空欄に入れました（推定です。違っていれば直してください）。
+            ファイル名から推定した値を入れました（推定です。違っていれば直してください。選び直すと、直していない欄は新しいファイルの推定に置き換わります）。
           </p>
         )}
       </FormSection>

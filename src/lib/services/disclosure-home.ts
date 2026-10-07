@@ -280,6 +280,12 @@ export interface DisclosureHome {
   /** 最大 5 件 */
   myTasks: MyTaskRow[];
   myTaskTotal: number;
+  /**
+   * 絞る前の全件（myTasks と同じ並び）。役割別ホームの「自分の作業」は役割の並びで
+   * 並べ替えてから絞るため、5 件に絞った myTasks では足りない（最終承認が 6 件目以降に
+   * 落ちて消える・件数が少なく出る）
+   */
+  allTasks: MyTaskRow[];
   progress: HomeProgress | null;
   /** 拠点の未提出（補助表示）。未提出がある拠点だけ */
   unitSubmissions: UnitSubmissionRow[];
@@ -469,6 +475,7 @@ export async function loadDisclosureHome(
     cards: null,
     myTasks: [],
     myTaskTotal: 0,
+    allTasks: [],
     progress: null,
     unitSubmissions,
   };
@@ -1023,6 +1030,7 @@ export async function loadDisclosureHome(
     cards,
     myTasks: tasks.slice(0, MY_TASK_LIMIT),
     myTaskTotal: tasks.length,
+    allTasks: tasks,
     progress,
     unitSubmissions,
   };

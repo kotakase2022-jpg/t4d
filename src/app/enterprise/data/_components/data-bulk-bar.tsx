@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Check, Send, Undo2 } from 'lucide-react';
 import { BulkActionBar, type BulkActionSpec } from '@/components/shared/bulk-action-bar';
 import { Notice } from '@/components/shared/notice';
+import { COMMENT_MAX_LENGTH } from '@/lib/domain/comment-limits';
 import { bulkTransitionAction, type BulkTransitionState } from '../../actions';
 
 /**
@@ -61,7 +62,12 @@ export function DataBulkBar({
           '提出済み・レビュー中の行だけが差戻しになります。それ以外の行は変更できなかった理由を表示します。',
           '理由は差し戻した各行のコメントと承認の記録に残ります。',
         ],
-        reason: { name: 'comment', label: '差戻し理由', required: true },
+        reason: {
+          name: 'comment',
+          label: '差戻し理由',
+          required: true,
+          maxLength: COMMENT_MAX_LENGTH,
+        },
         confirmLabel: '差し戻す',
       },
     },
@@ -89,7 +95,7 @@ export function DataBulkBar({
     <BulkActionBar formId={formId} action={formAction} actions={actions} pending={pending}>
       {state && (
         <Notice
-          tone={state.failures.length > 0 ? 'warning' : 'success'}
+          tone={state.failures.length > 0 || state.rejected ? 'warning' : 'success'}
           role="status"
           className="mt-1.5"
         >

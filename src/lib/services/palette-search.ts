@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { can } from '@/lib/authorization/can';
+import { frameworkLegalLabel } from '@/lib/domain/disclosure-status';
 import { normalizePaletteText, type PaletteEntry } from '@/lib/ui/palette';
 import type { DbClient } from '@/lib/repositories/types';
 import type { AuthorizationContext, FrameworkKey, Uuid } from '@/types/domain';
@@ -33,21 +34,31 @@ function entry(kind: string, id: string, label: string, href: string): PaletteEn
   return { id: `data:${kind}:${id}`, group: 'data', label, href, hint: kind };
 }
 
-async function frameworkItems(db: DbClient, key: FrameworkKey) {
+/**
+ * 基準の現行版の要求事項と、種類の表示名。架空の縮小マスター（サンプル）は表示名に必ず
+ * 「（サンプル・架空）」を添える。一覧・詳細の画面はマスターの位置付けを示しているが、検索の候補だけ
+ * 種類しか出さず、架空の設問が正式な ESRS・CDP の要求事項に見えていた（指示書 §8.1・§14.3）
+ */
+async function frameworkItems(db: DbClient, key: FrameworkKey, kind: string) {
   const frameworks = await db.select('frameworks', { where: { key }, limit: 1 });
   const framework = frameworks[0];
-  if (!framework) return [];
+  if (!framework) return { kind, items: [] };
   const versions = await db.select('frameworkVersions', {
     where: { frameworkId: framework.id },
     orderBy: { column: 'year', dir: 'desc' },
   });
   const current = versions.find((v) => v.status === 'published') ?? versions[0];
-  if (!current) return [];
-  return db.select('disclosureItems', {
+  if (!current) return { kind, items: [] };
+  const items = await db.select('disclosureItems', {
     where: { frameworkVersionId: current.id },
     orderBy: { column: 'sortOrder' },
   });
+  const sample = frameworkLegalLabel(current) === SAMPLE_LEGAL_LABEL;
+  return { kind: sample ? `${kind}（サンプル・架空）` : kind, items };
 }
+
+/** frameworkLegalLabel が架空の縮小マスターに返す表示 */
+const SAMPLE_LEGAL_LABEL = frameworkLegalLabel({ legalStatus: 'sample' });
 
 export async function searchPalette(
   db: DbClient,
@@ -99,13 +110,13 @@ export async function searchPalette(
     );
     tasks.push(
       (async () => {
-        const items = await frameworkItems(db, 'ssbj');
+        const { kind, items } = await frameworkItems(db, 'ssbj', 'SSBJ 要求事項');
         for (const item of items
           .filter((i) => matches(query, i.code, i.questionText))
           .slice(0, limit)) {
           out.push(
             entry(
-              'SSBJ 要求事項',
+              kind,
               item.id,
               `${item.code} ${item.questionText}`,
               `/enterprise/disclosures/ssbj/requirements/${item.id}`,
@@ -116,13 +127,13 @@ export async function searchPalette(
     );
     tasks.push(
       (async () => {
-        const items = await frameworkItems(db, 'cdp');
+        const { kind, items } = await frameworkItems(db, 'cdp', 'CDP 質問');
         for (const item of items
           .filter((i) => matches(query, i.code, i.questionText))
           .slice(0, limit)) {
           out.push(
             entry(
-              'CDP 質問',
+              kind,
               item.id,
               `${item.code} ${item.questionText}`,
               `/enterprise/disclosures/cdp/${item.id}`,
@@ -136,13 +147,13 @@ export async function searchPalette(
   if (can(ctx, 'enterprise.disclosure.read')) {
     tasks.push(
       (async () => {
-        const items = await frameworkItems(db, 'csrd');
+        const { kind, items } = await frameworkItems(db, 'csrd', 'CSRD 要求事項');
         for (const item of items
           .filter((i) => matches(query, i.code, i.questionText))
           .slice(0, limit)) {
           out.push(
             entry(
-              'CSRD 要求事項',
+              kind,
               item.id,
               `${item.code} ${item.questionText}`,
               `/enterprise/disclosures/csrd/requirements/${item.id}`,

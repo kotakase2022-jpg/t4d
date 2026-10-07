@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { OPEN_CONFIRM_EVENT, sameScreenConfirmId } from '@/lib/ui/actions';
 import { LOCAL_KEYS, readLocal } from '@/lib/ui/local-store';
 import {
   PALETTE_GROUP_LABELS,
@@ -247,11 +248,27 @@ export function CommandPalette({
 
   React.useEffect(() => setActiveIndex(0), [query, open]);
 
+  // 閉じたら入力とデータの検索結果を捨てる。残すと、役割・ワークスペースを切り替えたあとに開いたとき、
+  // 前の利用者・組織の検索結果（管理者だけが見られるメンバーなど）が再検索の間だけ並び、Enter で開けた
+  React.useEffect(() => {
+    if (open) return;
+    setQuery('');
+    setData(null);
+  }, [open]);
+
   const go = (href: string) => {
     setOpen(false);
     setQuery('');
     // 一覧に利用者の既定ビューがあれば条件を付けて移る（条件付きの行き先はそのまま）
     listNavigation.navigate(href);
+    // 今の画面の確認ダイアログ（?confirm=）なら、その画面の「その他」に開くよう頼む。
+    // パレットが閉じてから開く（2 つのダイアログのフォーカスの受け渡しを競合させない）
+    const confirmId = sameScreenConfirmId(href, pathname);
+    if (confirmId) {
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent(OPEN_CONFIRM_EVENT, { detail: confirmId }));
+      }, 0);
+    }
   };
 
   const grouped = groupEntries(filtered);

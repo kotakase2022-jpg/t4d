@@ -105,6 +105,8 @@
 :root {
   --z-sticky-col: 1;
   --z-sticky: 10;
+  /* 固定した見出しのうち、左に固定した列の見出し（横に流れる他の見出しの上に重ねる） */
+  --z-sticky-corner: 11;
   --z-pane: 20;
   --z-pane-overlay: 30;
   --z-header: 35;

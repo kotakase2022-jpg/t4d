@@ -27,9 +27,18 @@ export function SubmitButton({
   icon?: React.ReactNode;
 }) {
   const { pending } = useFormStatus();
+  // 呼び出し側の aria-busy（onSubmit で自前に送るフォームの「検証中」など）を上書きしない。
+  // form action を持たないフォームでは useFormStatus の pending が常に false のため
+  const callerBusy = props['aria-busy'] === true || props['aria-busy'] === 'true';
+  const busy = pending || callerBusy;
 
   return (
-    <Button {...props} type="submit" disabled={pending || props.disabled} aria-busy={pending}>
+    <Button
+      {...props}
+      type="submit"
+      disabled={pending || props.disabled}
+      aria-busy={busy || undefined}
+    >
       {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : icon}
       {pending ? (pendingLabel ?? children) : children}
     </Button>

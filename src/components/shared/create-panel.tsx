@@ -2,6 +2,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CreatePanelFocus } from './create-panel-focus';
 
 /**
  * 作成フォームの置き場所（plan §1.13・§3.1 CreatePanel）。一覧の上に作成フォームを常設しない。
@@ -27,8 +28,16 @@ export function createPanelHref(
 ): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(searchParams)) {
-    // 開閉の引数と、結果・エラーの通知は引き継がない
-    if (key === openParam || key === 'flash' || key === 'error' || value === undefined) continue;
+    // 開閉の引数と、結果・エラーの通知（と合言葉）は引き継がない
+    if (
+      key === openParam ||
+      key === 'flash' ||
+      key === 'error' ||
+      key === 'et' ||
+      value === undefined
+    ) {
+      continue;
+    }
     if (Array.isArray(value)) for (const v of value) params.append(key, v);
     else params.set(key, value);
   }
@@ -67,9 +76,11 @@ export function CreatePanel({
       className={cn('rounded-t4d-lg border border-brand-200 bg-surface', className)}
     >
       <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
-        <h2 id={titleId} className="text-body font-semibold text-ink">
+        {/* tabIndex=-1: 開いたときにフォーカスを受ける（CreatePanelFocus）。Tab の順には入れない */}
+        <h2 id={titleId} tabIndex={-1} className="text-body font-semibold text-ink">
           {title}
         </h2>
+        <CreatePanelFocus headingId={titleId} />
         <Link
           href={closeHref}
           scroll={false}

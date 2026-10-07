@@ -33,6 +33,8 @@ export default defineConfig({
     'editor-draft-restore.stateless.ts',
     'zz-disclosure-project.spec.ts',
     'zzz-csrd-chain.spec.ts',
+    // 報告年度・収集キャンペーンの作成（結果の画面が別のサーバーに届いても行が出る）
+    'zzzz-master-create.stateless.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

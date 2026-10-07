@@ -65,13 +65,41 @@ export function BulkActionBar({
 }) {
   const [statuses, setStatuses] = React.useState<string[]>([]);
 
-  React.useEffect(() => {
-    const update = () =>
-      setStatuses(selectedBoxes(formId, name).map((box) => box.dataset.rowStatus ?? '状態不明'));
-    update();
-    document.addEventListener('change', update);
-    return () => document.removeEventListener('change', update);
+  // 選んだ行を数え直す。同じ内容なら状態を変えない（数え直しのたびに描き直さない）
+  const update = React.useCallback(() => {
+    const next = selectedBoxes(formId, name).map((box) => box.dataset.rowStatus ?? '状態不明');
+    setStatuses((current) =>
+      current.length === next.length && current.every((s, i) => s === next[i]) ? current : next,
+    );
   }, [formId, name]);
+
+  React.useEffect(() => {
+    update();
+    // 利用者がチェックを付け外したとき
+    document.addEventListener('change', update);
+    // 一括操作のあとに React がフォームを戻す（チェックが外れる）。change は出ず、reset の後に値が変わる
+    const onReset = () => window.setTimeout(update, 0);
+    document.addEventListener('reset', onReset, true);
+    // 再検証で行が絞り込みから外れて消えた・行の状態（data-row-status）が変わったとき。どちらも change を
+    // 出さないため、以前は消えた行の件数と古い内訳のまま残り、確認の範囲にも古い件数が出ていた
+    const observer = new MutationObserver(update);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-row-status', 'checked'],
+    });
+    return () => {
+      document.removeEventListener('change', update);
+      document.removeEventListener('reset', onReset, true);
+      observer.disconnect();
+    };
+  }, [update]);
+
+  // 送信が終わったとき（結果の表示と一緒に、選択の件数も今の画面に合わせる）
+  React.useEffect(() => {
+    if (!pending) update();
+  }, [pending, update]);
 
   const count = statuses.length;
   const breakdown = selectionBreakdown(statuses);

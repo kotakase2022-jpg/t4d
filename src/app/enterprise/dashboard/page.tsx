@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { ArrowRight, ChartLine } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
@@ -15,7 +16,11 @@ import { loadDisclosureHome, loadHeaderProjects } from '@/lib/services/disclosur
 import { getFeatureSettings } from '@/lib/services/feature-settings';
 import { loadMyWork } from '@/lib/services/my-work';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import { gettingStartedSteps } from '@/lib/ui/getting-started';
+import {
+  GETTING_STARTED_DISMISSED_COOKIE,
+  gettingStartedSteps,
+  parseDismissedViewers,
+} from '@/lib/ui/getting-started';
 import {
   HOME_PROFILE_LABELS,
   canFor,
@@ -23,6 +28,7 @@ import {
   resolveHomeTab,
   type HomeTab,
 } from '@/lib/ui/home-profile';
+import { viewerKeyOf } from '@/lib/ui/local-store';
 import { defaultProjectId } from '@/lib/ui/task-verbs';
 import { DEMO_RESET_ID, demoResetMenuItem } from './demo-reset';
 import { DisclosureHomeView } from './disclosure-home-view';
@@ -49,8 +55,13 @@ export default async function EnterpriseDashboardPage({
   // 「はじめに」の 3 手順（役割別。行き先はパレット・ホームと同じタスク動詞）
   const profile = homeProfileOf(shell.ctx);
   const headerProjects = await loadHeaderProjects(shell.db, shell.ctx);
+  // 閉じた印（Cookie）をサーバーで読み、最初の描画から出し分ける（読み込み後に帯を差し込んで本文をずらさない）
+  const gettingStartedDismissed = parseDismissedViewers(
+    (await cookies()).get(GETTING_STARTED_DISMISSED_COOKIE)?.value,
+  ).includes(viewerKeyOf(shell.ctx));
   const gettingStarted = (
     <GettingStarted
+      initiallyDismissed={gettingStartedDismissed}
       profileLabel={HOME_PROFILE_LABELS[profile]}
       steps={gettingStartedSteps(profile, userCan, {
         unitScopeIds: shell.ctx.workspace.unitScopeIds,

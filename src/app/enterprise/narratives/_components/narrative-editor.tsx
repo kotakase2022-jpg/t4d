@@ -151,6 +151,16 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
 
   const templateFields = props.templateFieldsByTheme[theme] ?? [];
   const detailFields = props.detailFieldsByTheme[theme] ?? [];
+  // 「詳細項目」を開いて描くかは、画面を開いたとき・テーマを切り替えたときの値で 1 度だけ決める。
+  // 入力中の値から毎回決めると、最後の値を消した瞬間に open が外れ、入力中の欄ごと節が閉じて
+  // フォーカスを失っていた
+  const hasDetailValue = (forTheme: string) =>
+    (props.detailFieldsByTheme[forTheme] ?? []).some((f) => (fields[f.key] ?? '').trim() !== '');
+  const [detailsOpen, setDetailsOpen] = React.useState(() => ({
+    theme,
+    open: hasDetailValue(theme),
+  }));
+  if (detailsOpen.theme !== theme) setDetailsOpen({ theme, open: hasDetailValue(theme) });
   const snapshot = JSON.stringify({
     theme,
     title,
@@ -385,9 +395,10 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
           </div>
           {detailFields.length > 0 && (
             <FormSection
+              key={theme}
               kind="optional"
               title={`詳細項目（${detailFields.filter((f) => (fields[f.key] ?? '').trim()).length}/${detailFields.length} 記入）`}
-              open={detailFields.some((f) => (fields[f.key] ?? '').trim() !== '') || undefined}
+              open={detailsOpen.open || undefined}
             >
               <div className="grid gap-2 md:grid-cols-2">
                 {detailFields.map((field) => (

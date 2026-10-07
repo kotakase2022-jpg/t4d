@@ -436,7 +436,6 @@ export async function QuestionDetailView({
                 {canReturn && row.response && (
                   <ReturnResponseDialog
                     responseId={row.response.id}
-                    href={pagePath}
                     scope={`${frameworkLabel} ${row.item.code} の回答（${workspace.period.label}）`}
                   />
                 )}

@@ -36,6 +36,20 @@ export interface ActionBase {
  */
 export type ConfirmTier = 'irreversible' | 'bulk' | 'reversible';
 
+/**
+ * 「その他」の確認ダイアログを開く依頼（detail は項目の id）。Command Palette が同じ画面の
+ * `?confirm=` へ移るときに送る。Next は検索条件だけが変わる遷移では部品を作り直さず、
+ * 同じ URL への遷移では props も変わらないため、URL だけでは 2 回目以降のダイアログが開かない
+ */
+export const OPEN_CONFIRM_EVENT = 't4d:open-confirm';
+
+/** 移り先が今の画面の `?confirm=` なら、その項目の id（別の画面なら null。移った先が初期値で開く） */
+export function sameScreenConfirmId(href: string, currentPathname: string | null): string | null {
+  const [path, query = ''] = href.split('#')[0]!.split('?');
+  if (!currentPathname || path !== currentPathname) return null;
+  return new URLSearchParams(query).get('confirm');
+}
+
 export interface ConfirmSpec {
   tier: ConfirmTier;
   /** 問いかけの題（例: このデータを差し戻しますか） */
@@ -46,8 +60,17 @@ export interface ConfirmSpec {
   consequences?: string[];
   /** 必須のチェック（リセット）。name はサーバーが検査する既存の名前 */
   acknowledge?: { name: string; label: string };
-  /** 理由の入力（差戻しは required） */
-  reason?: { name: string; label: string; required: boolean; placeholder?: string };
+  /**
+   * 理由の入力（差戻しは required）。maxLength はサーバーの検証と同じ上限を渡す（ブラウザが入力の時点で止める。
+   * 長すぎる理由を書いてから断られて入力が無駄にならないように）
+   */
+  reason?: {
+    name: string;
+    label: string;
+    required: boolean;
+    placeholder?: string;
+    maxLength?: number;
+  };
   /** 件数・状態の内訳・前後の値 */
   preview?: React.ReactNode;
   /** 確定ボタンの文言（ダイアログの中の唯一の primary／danger） */

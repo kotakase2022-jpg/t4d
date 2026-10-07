@@ -1,4 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import {
+  isIssuedUserError,
+  USER_ERROR_PARAM,
+  USER_ERROR_TOKEN_COOKIE,
+  USER_ERROR_TOKEN_PARAM,
+} from '@/lib/errors/user-error-token';
 
 /**
  * Route Guard ＋ Content Security Policy。
@@ -126,7 +132,24 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  // サーバーが載せていない `?error=`（外から作ったリンク）は、サーバーの描画から外す。画面は `?error=` の文を
+  // システムの警告として出すため、そのままだとログイン画面などに任意の文を出せてしまう
+  // （src/lib/errors/user-error-token.ts）。リダイレクトではなく内部の書き換えにする: middleware からの
+  // リダイレクトは Next が 127.0.0.1 を localhost に直すため、ローカルでは Cookie の無い origin へ移ってしまう。
+  // ブラウザの URL に残る `?error=` は、クライアントで読む GlobalErrorNotice が同じ合言葉で確かめる
+  const issued = isIssuedUserError(
+    request.nextUrl.searchParams,
+    request.cookies.get(USER_ERROR_TOKEN_COOKIE)?.value,
+  );
+  let response: NextResponse;
+  if (issued) {
+    response = NextResponse.next({ request: { headers: requestHeaders } });
+  } else {
+    const url = request.nextUrl.clone();
+    url.searchParams.delete(USER_ERROR_PARAM);
+    url.searchParams.delete(USER_ERROR_TOKEN_PARAM);
+    response = NextResponse.rewrite(url, { request: { headers: requestHeaders } });
+  }
   response.headers.set('content-security-policy', csp);
   await refreshSupabaseSession(request, response);
   return response;

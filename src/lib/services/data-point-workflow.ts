@@ -115,6 +115,14 @@ export async function transitionDataPoint(
     throw new AuthorizationError(`${dp.status} から ${input.to} への遷移は許可されていません。`);
   }
 
+  // コメントの検証は**書き込みより前**に行う。リポジトリにトランザクションが無いため、
+  // 状態の更新・承認の記録を書いたあとで長すぎるコメントを断ると、状態だけが変わり、
+  // 監査ログ（data_returned 等）もコメントも残らない（一括の差戻しで全行が「失敗」と
+  // 報告されながら、実際は差戻し済みになっていた）。
+  // 空白だけの入力は「コメント無し」として扱う（差戻しフォームで空欄のまま押しても例外にしない）。
+  const commentBody =
+    input.comment && input.comment.trim() ? assertValidCommentBody(input.comment) : null;
+
   if (input.to === 'approved') {
     // Evidence 不足を先に見る。承認の道筋より前に置くのは、
     // 「根拠資料が無い」ほうが提出者が直せる具体的な指摘だから。
@@ -167,16 +175,13 @@ export async function transitionDataPoint(
       stage: input.to === 'approved' ? 'final' : 'review',
       decision: input.to === 'approved' ? 'approved' : 'returned',
       actorUserId: ctx.userId,
-      comment: input.comment ?? null,
+      comment: commentBody,
       decidedAt: now,
     };
     await db.insert('approvals', [approval]);
   }
 
-  // 空白だけの入力は「コメント無し」として扱う（差戻しフォームで空欄のまま押しても
-  // 例外にしない）。中身がある場合だけ、通常コメントと同じ検証を通す。
-  if (input.comment && input.comment.trim()) {
-    const commentBody = assertValidCommentBody(input.comment);
+  if (commentBody) {
     // 遷移時コメントも @メンションを解決して本人へ通知する（WF-P0-002）
     const members = await listMentionCandidates(db, ctx);
     const mentions = resolveMentions(commentBody, members);
@@ -324,6 +329,10 @@ export async function bulkTransition(
   // （画面は理由を必須にする。サービスでは単票と同じく任意のまま。plan Q7）
   options: { comment?: string | null } = {},
 ): Promise<{ succeeded: number; failures: Array<{ id: Uuid; reason: string }> }> {
+  // 理由は全行で同じなので、1 行目を書き換える前に 1 度だけ検証する（ValidationError）。
+  // 行ごとの失敗として数えると「N 件は変更できませんでした（長すぎる）」と同じ理由を N 回数える
+  const comment =
+    options.comment && options.comment.trim() ? assertValidCommentBody(options.comment) : null;
   let succeeded = 0;
   const failures: Array<{ id: Uuid; reason: string }> = [];
   let last: DataPoint | null = null;
@@ -334,7 +343,7 @@ export async function bulkTransition(
       last = await transitionDataPoint(db, ctx, {
         dataPointId: id,
         to,
-        comment: options.comment ?? null,
+        comment,
         skipRevalidate: true,
       });
       succeeded += 1;

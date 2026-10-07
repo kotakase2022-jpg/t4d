@@ -21,6 +21,15 @@ export const B6_DANGEROUS_OPS: DangerousOp[] = [
     note: '設定の「アクセス許諾」タブ。行の「取消…」→ 確認ダイアログ（範囲と戻し方）。元に戻すは同じ行の「再付与」。結果の通知に「元に戻す」を置くには toggleGrantAction が ?flash= を返す必要がある（Stage C・handoff/B6.md）',
   },
   {
+    id: 'F121',
+    label: '案件のチームから外す（戻す＝チームに加え直す）',
+    tier: 'reversible',
+    action: 'src/app/assurance/actions.ts#assignEngagementMemberAction',
+    origins: ['src/app/assurance/engagements/[engagementId]/overview/page.tsx'],
+    status: 'done',
+    note: 'plan §1.16 の表の外。UI シンプル化の検証（BIZ-5）で追加: 外すとその人はこの案件のクライアントデータへ届かなくなる。アクセス許諾の取消（F118）と同じく範囲（氏名・役割・案件コード）を確かめてから送る',
+  },
+  {
     id: 'F113',
     label: '開示優先モードの切替（組織の全員のメニューが変わる）',
     tier: 'irreversible',

@@ -6,7 +6,12 @@ import { redirect } from 'next/navigation';
 import { recordAiDecision } from '@/lib/ai';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorization/can';
-import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
+import {
+  isUserFacingError,
+  redirectWithUserError,
+  ValidationError,
+  withUserFacingError,
+} from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { confirmIngestionJob, createIngestionJob, type RowDecision } from '@/lib/imports/service';
 import { withDisplayConfidence, withSupplierDisplayConfidence } from '@/lib/imports/demo-display';
@@ -45,6 +50,7 @@ import {
 } from '@/lib/services/data-point-workflow';
 import {
   generateDisclosureDraft,
+  returnDisclosureResponse,
   saveDisclosureResponse,
   transitionDisclosureResponse,
 } from '@/lib/services/disclosure-write';
@@ -73,6 +79,7 @@ import { loadEnterpriseShell } from '@/lib/services/shell';
 import { storeNewFile } from '@/lib/storage';
 import { GRANT_SUBJECT_TYPES } from '@/types/domain';
 import type {
+  AuthorizationContext,
   GrantSubjectType,
   DataPointStatus,
   FrameworkKey,
@@ -379,8 +386,9 @@ export async function resetSupplierDemoAction(formData: FormData): Promise<void>
 
   const reportingPeriodId = String(formData.get('reportingPeriodId') ?? '');
   if (formData.get('confirmScope') !== 'on') {
-    redirect(
-      `/enterprise/ghg/suppliers?error=${encodeURIComponent('削除範囲を確認のうえ、チェックを入れてから実行してください。')}`,
+    await redirectWithUserError(
+      '/enterprise/ghg/suppliers',
+      '削除範囲を確認のうえ、チェックを入れてから実行してください。',
     );
   }
 
@@ -473,6 +481,8 @@ export interface BulkTransitionState {
   succeeded: number;
   failures: Array<{ id: string; reason: string }>;
   message: string;
+  /** 1 行も書き換える前に断った（理由が長すぎる等）。画面は成功の色で出さない */
+  rejected?: boolean;
 }
 
 export async function bulkTransitionAction(
@@ -491,7 +501,16 @@ export async function bulkTransitionAction(
 
   // 一括操作は 1 件ずつ権限・状態遷移を検査するため、部分的に失敗する。
   // 結果を捨てると「押しても何も起きない」ように見えるので、必ず画面へ返す。
-  const result = await bulkTransition(db, ctx, ids, to, { comment });
+  let result: Awaited<ReturnType<typeof bulkTransition>>;
+  try {
+    result = await bulkTransition(db, ctx, ids, to, { comment });
+  } catch (error) {
+    // 理由の検証など、1 行も書き換える前に断ったもの。選択と入力を残したまま理由を見せる
+    if (isUserFacingError(error)) {
+      return { succeeded: 0, failures: [], message: error.message, rejected: true };
+    }
+    throw error;
+  }
   revalidatePath('/enterprise/data');
   revalidatePath('/enterprise/dashboard');
 
@@ -580,12 +599,19 @@ async function disclosureItemPath(
     : '/enterprise/disclosures/cdp';
 }
 
+/**
+ * 回答の戻り先。**自組織の回答だけ**を引く。サービスが認可する前に呼ぶため、ここで組織を
+ * 確かめないと、Demo Mode（行レベルの防御が無い）で他社の回答 ID を送ったときの戻り先の違い
+ * （他社の回答なら要求事項の画面、無い ID なら一覧）から、回答の有無と対象の項目が分かってしまう
+ */
 async function responsePath(
   db: Awaited<ReturnType<typeof getDb>>,
+  ctx: AuthorizationContext,
   responseId: string,
 ): Promise<string> {
   const response = responseId ? await db.findById('disclosureResponses', responseId) : null;
-  return disclosureItemPath(db, response?.itemId ?? null);
+  const owned = response && response.organizationId === ctx.workspace.organizationId;
+  return disclosureItemPath(db, owned ? response.itemId : null);
 }
 
 function revalidateDisclosure(itemId: string | null): void {
@@ -602,12 +628,13 @@ export async function generateCdpDraftAction(formData: FormData): Promise<void> 
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
   const responseId = String(formData.get('responseId') ?? '');
-  const response = await db.findById('disclosureResponses', responseId);
 
-  await withUserFacingError(await responsePath(db, responseId), async () => {
+  await withUserFacingError(await responsePath(db, ctx, responseId), async () => {
     await generateDisclosureDraft(db, ctx, responseId);
   });
 
+  // ここまで来たら、サービスが自組織の回答であることを確かめている
+  const response = await db.findById('disclosureResponses', responseId);
   revalidateDisclosure(response?.itemId ?? null);
 }
 
@@ -618,7 +645,7 @@ export async function saveCdpResponseAction(formData: FormData): Promise<void> {
   const numericRaw = String(formData.get('answerNumeric') ?? '').replace(/,/g, '');
   const answerNumeric = numericRaw === '' ? null : Number(numericRaw);
 
-  await withUserFacingError(await responsePath(db, responseId), async () => {
+  await withUserFacingError(await responsePath(db, ctx, responseId), async () => {
     // 数値として読めない入力を黙って null に落とすと、入力した値が消える。
     // 空欄（未入力）と「数値でない文字列」は区別して、後者は理由を返す。
     if (numericRaw !== '' && !Number.isFinite(answerNumeric)) {
@@ -724,6 +751,27 @@ export async function rejectAiDraftAction(formData: FormData): Promise<void> {
   revalidatePath('/enterprise/ai');
 }
 
+/** 回答の差戻し（理由必須）。状態の遷移と理由のコメントを 1 つの操作で行う（サービスが先に検証する） */
+export async function returnCdpResponseAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const responseId = String(formData.get('responseId') ?? '');
+  // 戻り先・通知の遷移先はサーバーで組み立てる（フォームの値を信じない）
+  const pagePath = await responsePath(db, ctx, responseId);
+
+  let itemId: string | null = null;
+  await withUserFacingError(pagePath, async () => {
+    const response = await returnDisclosureResponse(db, ctx, {
+      responseId,
+      reason: String(formData.get('reason') ?? ''),
+      href: pagePath,
+    });
+    itemId = response.itemId;
+  });
+
+  revalidateDisclosure(itemId);
+}
+
 export async function transitionCdpResponseAction(formData: FormData): Promise<void> {
   const ctx = await requireEnterpriseContext();
   const db = await getDb();
@@ -731,7 +779,7 @@ export async function transitionCdpResponseAction(formData: FormData): Promise<v
   const to = String(formData.get('to') ?? '') as ResponseStatus;
 
   let itemId: string | null = null;
-  await withUserFacingError(await responsePath(db, responseId), async () => {
+  await withUserFacingError(await responsePath(db, ctx, responseId), async () => {
     const response = await transitionDisclosureResponse(db, ctx, responseId, to);
     itemId = response.itemId;
   });

@@ -314,17 +314,30 @@ export default async function EngagementOverviewPage({
                       {nameOf(member.userId)}
                       <span className="text-ink-muted">（{roleLabel(member.roleKey)}）</span>
                     </span>
+                    {/* 外すと、その人はこの案件のクライアントデータと Sign-off の画面へ届かなくなる。
+                        アクセス許諾の取消（F118）と同じく、範囲と戻し方を確かめてから送る（plan §1.16） */}
                     <ActionButton
                       size="xs"
                       action={{
-                        kind: 'submit',
+                        kind: 'confirm',
                         id: `remove-${member.id}`,
-                        label: 'チームから外す',
+                        label: 'チームから外す…',
                         action: assignEngagementMemberAction,
                         fields: { engagementId, remove: 'true', memberId: member.id },
                         ...(member.userId === ctx.userId
                           ? { disabledReason: '自分自身をチームから外すことはできません。' }
                           : {}),
+                        confirm: {
+                          tier: 'reversible',
+                          title: 'チームから外しますか',
+                          scope: `${nameOf(member.userId)}（${roleLabel(member.roleKey)}）を ${context.engagement.code} のチームから外します。`,
+                          consequences: [
+                            'この人は、この案件のクライアントデータ・Sign-off の画面を開けなくなります。',
+                            '戻すときは、この欄の「チームに加える」で役割を選び直して加えます。',
+                          ],
+                          confirmLabel: 'チームから外す',
+                          destructive: true,
+                        },
                       }}
                     />
                   </li>

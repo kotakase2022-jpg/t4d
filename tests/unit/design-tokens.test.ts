@@ -43,6 +43,7 @@ describe('トークンの値', () => {
     const order = [
       '--z-sticky-col',
       '--z-sticky',
+      '--z-sticky-corner',
       '--z-pane',
       '--z-pane-overlay',
       '--z-header',

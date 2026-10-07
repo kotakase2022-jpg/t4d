@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
-import { withUserFacingError } from '@/lib/errors/user-facing';
+import { redirectWithUserError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
 import { resetDisclosureDemoData } from '@/lib/services/disclosure-demo-reset';
 
@@ -16,8 +16,9 @@ export async function resetDisclosureDemoAction(formData: FormData): Promise<voi
   const db = await getDb();
 
   if (formData.get('confirmScope') !== 'on') {
-    redirect(
-      `/enterprise/dashboard?error=${encodeURIComponent('リセットする範囲を確認のうえ、チェックを入れてから実行してください。')}`,
+    await redirectWithUserError(
+      '/enterprise/dashboard',
+      'リセットする範囲を確認のうえ、チェックを入れてから実行してください。',
     );
   }
 

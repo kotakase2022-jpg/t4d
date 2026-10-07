@@ -51,6 +51,8 @@ const PLAN_IDS = [
   'F053',
   'F035',
   'F048',
+  // plan の表の外で確認を足したもの（UI シンプル化の検証 BIZ-5。外すとデータへ届かなくなる）
+  'F121',
 ];
 
 const CONFIRM_PATTERNS = [/<ConfirmDialog\b/, /kind:\s*'confirm'/, /\bconfirm:\s*\{/];

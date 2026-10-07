@@ -2,6 +2,8 @@ import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
+import { COMMENT_MAX_LENGTH } from '@/lib/domain/comment-limits';
+import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import type { DbClient } from '@/lib/repositories/types';
 import type { AuthorizationContext, Comment, Profile, Uuid } from '@/types/domain';
@@ -56,14 +58,19 @@ export async function listMentionCandidates(
   return profiles.map((p: Profile) => ({ userId: p.id, displayName: p.displayName }));
 }
 
-/** コメント本文の共通検証。遷移コメントなど別経路からも必ずここを通す。 */
-export const COMMENT_MAX_LENGTH = 2000;
+export { COMMENT_MAX_LENGTH };
 
+/**
+ * コメント本文の共通検証。遷移コメントなど別経路からも必ずここを通す。
+ *
+ * ValidationError（利用者に見せてよいエラー）で投げる。素の Error だと本番では文が伏せられ、
+ * 「2000 文字以内で」という直せる指摘が error.tsx の識別子に化ける。
+ */
 export function assertValidCommentBody(raw: string): string {
   const body = raw.trim();
-  if (!body) throw new Error('コメントを入力してください。');
+  if (!body) throw new ValidationError('コメントを入力してください。');
   if (body.length > COMMENT_MAX_LENGTH) {
-    throw new Error(`コメントは ${COMMENT_MAX_LENGTH} 文字以内で入力してください。`);
+    throw new ValidationError(`コメントは ${COMMENT_MAX_LENGTH} 文字以内で入力してください。`);
   }
   return body;
 }

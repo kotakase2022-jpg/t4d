@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { assertEnterpriseWorkspace, can } from '@/lib/authorization/can';
-import { daysUntilJst } from '@/lib/format/datetime';
+import { daysUntilJst, isOverdue } from '@/lib/format/datetime';
 import { homeProfileOf } from '@/lib/ui/home-profile';
 import {
   orderMyWork,
@@ -204,10 +204,15 @@ export async function loadMyWork(
       where: { clientOrganizationId: organizationId, status: { in: [...PBC_AWAITING_CLIENT] } },
       orderBy: { column: 'dueDate' },
     });
-    const overdue = requests.filter((r) => r.status === 'overdue').length;
+    // 期限超過は「状態が overdue」だけでなく日付でも判定する。状態を overdue へ進めるサービスは
+    // 無く、送付・受領・差戻しのまま期限を過ぎた依頼が、超過にも「期限が近い」にも数えられずに
+    // ホームから消えていた（ワークフローの「期限超過」は日付で数えている）
+    const isOverdueRequest = (r: (typeof requests)[number]) =>
+      r.status === 'overdue' || isOverdue(r.dueDate, input.today);
+    const overdue = requests.filter(isOverdueRequest).length;
     const dueSoon = requests.filter((r) => {
       const days = daysUntilJst(r.dueDate, input.today);
-      return r.status !== 'overdue' && days !== null && days >= 0 && days <= DUE_SOON_DAYS;
+      return !isOverdueRequest(r) && days !== null && days >= 0 && days <= DUE_SOON_DAYS;
     }).length;
     if (overdue > 0) {
       attention.push({
@@ -248,14 +253,25 @@ export async function loadMyWork(
     const home =
       input.disclosureHome ??
       (await loadDisclosureHome(db, ctx, { period: input.period, today: input.today }));
-    for (const task of home.myTasks) {
+    // 5 件に絞った myTasks ではなく全件を使う。役割の並び（承認者なら最終承認が先頭）は
+    // 絞る前に決めないと、上位の作業が落ちて消え、見出しの件数も少なく出る
+    for (const task of home.allTasks) {
       const mapped = MANUSCRIPT_KIND[task.kind];
       items.push({
         key: `manuscript-${task.key}`,
         kind: mapped.kind,
         verb: mapped.verb,
         target: task.itemName,
-        context: [task.frameworkLabel, task.frameworkNote].filter(Boolean).join(' ・ ') || null,
+        // 担当（節の作成担当）を添える。レビュー・最終承認の行で「誰の原稿か」がホームで分かるように
+        // （開示ホームの表には「担当」の列があった）
+        context:
+          [
+            task.frameworkLabel,
+            task.frameworkNote,
+            task.ownerName ? `担当: ${task.ownerName}` : null,
+          ]
+            .filter(Boolean)
+            .join(' ・ ') || null,
         dueDate: task.dueDate,
         daysUntilDue: task.daysUntilDue,
         reason: task.blockerReason,

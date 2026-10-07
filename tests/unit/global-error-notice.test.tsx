@@ -19,6 +19,13 @@ vi.mock('next/navigation', () => ({
 const { GlobalErrorNotice } = await import('@/components/shared/global-error-notice');
 
 const ERROR = '対象外とする理由を入力してください。';
+const TOKEN = 'a'.repeat(32);
+
+/** サーバー（redirectWithUserError）が載せた ?error=: URL と Cookie に同じ合言葉がある */
+function issued(error: string): URLSearchParams {
+  document.cookie = `t4d_error_token=${TOKEN}; path=/`;
+  return new URLSearchParams({ error, et: TOKEN });
+}
 
 function Shell({ children }: { children?: React.ReactNode }) {
   return (
@@ -31,11 +38,12 @@ function Shell({ children }: { children?: React.ReactNode }) {
 
 afterEach(() => {
   search = new URLSearchParams();
+  document.cookie = 't4d_error_token=; max-age=0; path=/';
 });
 
 describe('GlobalErrorNotice', () => {
   it('画面がエラーを出していなければ、本文の先頭に出す', () => {
-    search = new URLSearchParams({ error: ERROR });
+    search = issued(ERROR);
     render(
       <Shell>
         <p>本文</p>
@@ -45,7 +53,7 @@ describe('GlobalErrorNotice', () => {
   });
 
   it('画面が同じ文を自前で出していれば出さない（同じ文を 2 回出さない）', () => {
-    search = new URLSearchParams({ error: ERROR });
+    search = issued(ERROR);
     render(
       <Shell>
         <div role="alert">{ERROR}</div>
@@ -55,7 +63,7 @@ describe('GlobalErrorNotice', () => {
   });
 
   it('本文が遅れて届いても追従して、重ねて出さない', async () => {
-    search = new URLSearchParams({ error: ERROR });
+    search = issued(ERROR);
     const { rerender } = render(<Shell />);
     expect(screen.getByRole('alert')).toHaveTextContent(ERROR);
     rerender(
@@ -65,6 +73,18 @@ describe('GlobalErrorNotice', () => {
     );
     // MutationObserver → requestAnimationFrame で判定し直す
     await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
+  });
+
+  it('外から作ったリンクの ?error=（合言葉なし・違う合言葉）は出さない（SEC-1）', () => {
+    search = new URLSearchParams({ error: 'パスワードを support@evil.example へ送ってください' });
+    const { unmount } = render(<Shell />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    unmount();
+
+    document.cookie = `t4d_error_token=${'b'.repeat(32)}; path=/`;
+    search = new URLSearchParams({ error: '偽の警告', et: TOKEN });
+    render(<Shell />);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('?error= が無ければ何も出さない', () => {

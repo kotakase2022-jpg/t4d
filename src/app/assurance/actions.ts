@@ -804,13 +804,14 @@ export async function assignEngagementMemberAction(formData: FormData): Promise<
       throw new AuthorizationError('担当者と役割を選んでください。');
     }
 
-    // 自法人のメンバーだけをアサインできる
+    // 自法人の**有効な**メンバーだけをアサインできる（画面の候補と同じ規則をサーバーでも守る）。
+    // 停止中・招待中の人を入れると、再開した瞬間に審査なしでクライアントのデータへ届いてしまう
     const memberships = await db.select('memberships', {
-      where: { organizationId: ctx.workspace.organizationId, userId },
+      where: { organizationId: ctx.workspace.organizationId, userId, status: 'active' },
       limit: 1,
     });
     if (memberships.length === 0) {
-      throw new AuthorizationError('自法人のメンバーだけをアサインできます。');
+      throw new AuthorizationError('自法人の有効なメンバーだけをアサインできます。');
     }
 
     const already = await db.select('engagementMembers', { where: { engagementId, userId } });

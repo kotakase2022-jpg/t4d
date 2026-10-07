@@ -2,6 +2,9 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
+import type { PermissionKey } from '@/types/domain';
+import { canOpenRoute, routeForPath } from './route-catalog';
+import { useShell } from './viewer-context';
 
 /**
  * 連続レビュー用のキーボードショートカット（指示書 5.4）。
@@ -89,6 +92,26 @@ export const GO_SHORTCUTS: Record<string, string> = {
   c: '/enterprise/disclosures/csrd',
 };
 
+/**
+ * その利用者が g で移れる行き先（キー → 行き先）。開けない画面（権限なし）へは移さない
+ * （メニュー・パレットと同じく、「権限なし」に着く操作を出さない。plan R3）。
+ * 監査法人ではホームだけ（他の行き先は企業の画面のため）。
+ * 権限が分からない（AppShell の外）ときは絞らない（検査はページのゲートが行う）
+ */
+export function goShortcutTargets(
+  homeHref: string,
+  can: ((permission: PermissionKey) => boolean) | null,
+): Record<string, string> {
+  const targets: Record<string, string> = { h: homeHref };
+  if (!homeHref.startsWith('/enterprise')) return targets;
+  for (const [key, href] of Object.entries(GO_SHORTCUTS)) {
+    if (key === 'h') continue;
+    const route = routeForPath(href);
+    if (!can || !route || canOpenRoute(route, can)) targets[key] = href;
+  }
+  return targets;
+}
+
 /** g を押してから次のキーを待つ時間 */
 const GO_PREFIX_TIMEOUT_MS = 1500;
 
@@ -105,17 +128,26 @@ function toggleFocusedRecordSelection(): boolean {
 
 export function RecordShortcuts({ homeHref = '/enterprise/dashboard' }: { homeHref?: string }) {
   const router = useRouter();
+  const shell = useShell();
+  const goTargets = React.useMemo(
+    () =>
+      goShortcutTargets(
+        homeHref,
+        shell ? (permission: PermissionKey) => shell.permissions.includes(permission) : null,
+      ),
+    [homeHref, shell],
+  );
   React.useEffect(() => {
     let goPrefixAt = 0;
     function onKeyDown(event: KeyboardEvent) {
       if (shouldIgnore(event)) return;
 
-      // g → キー（移動）。監査法人ではホームだけ（他の行き先は企業の画面のため）
+      // g → キー（移動）。開ける画面だけ（goShortcutTargets）
       if (goPrefixAt > 0 && Date.now() - goPrefixAt < GO_PREFIX_TIMEOUT_MS) {
         goPrefixAt = 0;
-        const isEnterprise = homeHref.startsWith('/enterprise');
-        const target =
-          event.key === 'h' ? homeHref : isEnterprise ? GO_SHORTCUTS[event.key] : undefined;
+        const target = Object.prototype.hasOwnProperty.call(goTargets, event.key)
+          ? goTargets[event.key]
+          : undefined;
         if (target) {
           event.preventDefault();
           router.push(target);
@@ -172,7 +204,7 @@ export function RecordShortcuts({ homeHref = '/enterprise/dashboard' }: { homeHr
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [homeHref, router]);
+  }, [goTargets, router]);
 
   return null;
 }

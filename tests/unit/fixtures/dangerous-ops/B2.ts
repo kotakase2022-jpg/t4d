@@ -24,10 +24,10 @@ export const B2_DANGEROUS_OPS: DangerousOp[] = [
     id: 'F074',
     label: '回答の差戻し（理由必須）',
     tier: 'bulk',
-    action: 'src/app/enterprise/actions.ts#transitionCdpResponseAction',
+    action: 'src/app/enterprise/actions.ts#returnCdpResponseAction',
     origins: ['src/app/enterprise/disclosures/_components/return-response-dialog.tsx'],
     status: 'done',
-    note: '「差戻し…」→ 理由必須の ConfirmDialog。理由は回答のコメントとして残す（サービスは理由を受け取らないため）',
+    note: '「差戻し…」→ 理由必須の ConfirmDialog。理由は回答のコメントとして残す。状態の遷移と理由のコメントは 1 つの Action（returnCdpResponseAction → returnDisclosureResponse）で、理由を検証してから状態を変える（UI 再設計の検証 BIZ-2。以前は 2 つの Action を順に呼び、2 つ目が失敗すると理由が残らなかった）',
   },
   {
     id: 'F048',

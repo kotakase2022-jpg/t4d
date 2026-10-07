@@ -2,6 +2,11 @@
 
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
+import {
+  isIssuedUserError,
+  USER_ERROR_PARAM,
+  userErrorTokenFromCookie,
+} from '@/lib/errors/user-error-token';
 import { Notice } from './notice';
 
 /** 本文（この通知の外）に同じエラーの文が既に出ているか */
@@ -24,11 +29,32 @@ const WATCH_MS = 5_000;
  *    描画の順に左右されず、一瞬だけ 2 つ並ぶこともない
  *  - 画面が自前で同じ文を出しているときは、本文の変化を見張って出さない
  * 本文に同じ文が無ければ必ず出す（エラーを隠さない）。
+ * ただし、サーバーが載せた `?error=` だけ（Cookie と URL の合言葉が一致するもの）。外から作ったリンクの文は
+ * 出さない（middleware はサーバーの描画から外すが、ブラウザの URL には残るため。src/lib/errors/user-error-token.ts）。
  */
 export function GlobalErrorNotice() {
   const searchParams = useSearchParams();
-  const error = searchParams?.get('error') ?? null;
+  const raw = searchParams?.get(USER_ERROR_PARAM) ?? null;
   const [shownByPage, setShownByPage] = React.useState(false);
+  // サーバーが載せた ?error= か（Cookie と URL の合言葉が一致する）。Cookie は読み込み後にしか読めないため、
+  // 確かめるまでは出さない（外から作ったリンクの文を一瞬でも警告として出さない。SEC-1）
+  const [issued, setIssued] = React.useState(false);
+  React.useEffect(() => {
+    let cookie = '';
+    try {
+      cookie = document.cookie;
+    } catch {
+      // 読めない環境では確かめられないので出さない
+    }
+    setIssued(
+      raw !== null &&
+        isIssuedUserError(
+          new URLSearchParams(searchParams?.toString() ?? ''),
+          userErrorTokenFromCookie(cookie),
+        ),
+    );
+  }, [raw, searchParams]);
+  const error = issued ? raw : null;
 
   React.useEffect(() => {
     setShownByPage(false);

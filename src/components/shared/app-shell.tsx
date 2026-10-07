@@ -10,6 +10,7 @@ import { can, permissionsFor } from '@/lib/authorization/can';
 import { describeReferenceDate } from '@/lib/clock';
 import { formatJstDate } from '@/lib/format/datetime';
 import { canFor, homeProfileOf } from '@/lib/ui/home-profile';
+import { viewerKeyOf } from '@/lib/ui/local-store';
 import { defaultProjectId } from '@/lib/ui/task-verbs';
 import type { AuthorizationContext, IsoDate } from '@/types/domain';
 import { BrandLogo } from './brand-logo';
@@ -160,7 +161,7 @@ export function AppShell({
   const currentProjectId = defaultProjectId(projects, currentPeriodId);
   // クライアントの部品（サイドバー・パレット・パンくず・保存ビュー）へ配る文脈（plan §1.9）
   const shellValue: ShellContextValue = {
-    viewerKey: `${ctx.userId}:${ctx.workspace.organizationId}`,
+    viewerKey: viewerKeyOf(ctx),
     variant,
     workspace: isEnterprise ? 'enterprise' : 'assurance',
     hiddenHrefs: hidden,
@@ -274,7 +275,14 @@ export function AppShell({
           </main>
         </div>
 
-        <CommandPalette variant={variant} hiddenHrefs={hidden} searchAction={searchPaletteAction} />
+        {/* 利用者・組織が変わったら作り直す（前の利用者・組織の入力や検索結果を持ち越さない）。
+            役割の切替・ワークスペースの切替は同じレイアウトの中の遷移で、部品が残るため */}
+        <CommandPalette
+          key={shellValue.viewerKey}
+          variant={variant}
+          hiddenHrefs={hidden}
+          searchAction={searchPaletteAction}
+        />
         <RecordShortcuts homeHref={homeHref} />
         <RecentTracker />
       </div>

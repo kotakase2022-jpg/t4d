@@ -9,7 +9,10 @@ import {
   sumValues,
 } from '@/lib/services/aggregation';
 import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorization/can';
+import { RETURN_REASON_MAX_LENGTH, RETURN_REASON_PREFIX } from '@/lib/domain/comment-limits';
+import { ValidationError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
+import { addComment, assertValidCommentBody } from '@/lib/services/comments';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AiSourceReference,
@@ -320,5 +323,40 @@ export async function transitionDisclosureResponse(
     afterSummary: `status=${to}`,
   });
 
+  return updated;
+}
+
+/**
+ * 回答の差戻し（理由必須）。状態を「差戻し」にし、理由をこの回答のコメントとして残す。
+ *
+ * 以前は画面が状態遷移とコメントの追加を別々の Server Action で順に呼んでいたため、
+ * 2 つ目（コメント）が失敗すると（理由が長すぎる・通信の切断など）、回答は差戻しなのに理由が
+ * どこにも残らなかった。理由の検証と権限の確認を**状態を書き換える前**に済ませ、1 つの操作にする。
+ *
+ * @param href コメントのメンション通知の遷移先（この回答の画面。呼び出し側がサーバーで組み立てる）
+ */
+export async function returnDisclosureResponse(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: { responseId: Uuid; reason: string; href: string },
+): Promise<DisclosureResponse> {
+  const reason = input.reason.trim();
+  if (!reason) throw new ValidationError('差戻し理由を入力してください。');
+  if (reason.length > RETURN_REASON_MAX_LENGTH) {
+    throw new ValidationError(
+      `差戻し理由は ${RETURN_REASON_MAX_LENGTH} 文字以内で入力してください。`,
+    );
+  }
+  const body = assertValidCommentBody(`${RETURN_REASON_PREFIX}${reason}`);
+  // コメントの追加が求める権限（開示の閲覧）も先に確かめる。遷移のあとで断られると理由が残らない
+  assertCan(ctx, 'enterprise.disclosure.read');
+
+  const updated = await transitionDisclosureResponse(db, ctx, input.responseId, 'returned');
+  await addComment(db, ctx, {
+    targetType: 'disclosure_response',
+    targetId: input.responseId,
+    body,
+    href: input.href,
+  });
   return updated;
 }

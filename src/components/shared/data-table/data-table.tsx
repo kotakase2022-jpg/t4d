@@ -121,7 +121,7 @@ export function resetFiltersHref(
   filterKeys: readonly string[],
 ): string {
   const params = new URLSearchParams();
-  const drop = new Set(['q', 'page', 'flash', 'error', ...filterKeys]);
+  const drop = new Set(['q', 'page', 'flash', 'error', 'et', ...filterKeys]);
   for (const [key, value] of Object.entries(searchParams)) {
     if (drop.has(key) || value === undefined) continue;
     if (Array.isArray(value)) for (const v of value) params.append(key, v);
@@ -236,7 +236,7 @@ export function DataTable<Row>({
               <tr>
                 {selection && (
                   <TH
-                    className={cn('w-8', firstPinned >= 0 && 'left-0 z-(--z-sticky)')}
+                    className={cn('w-8', firstPinned >= 0 && 'left-0 z-(--z-sticky-corner)')}
                     data-select-column=""
                   >
                     <SelectAllCheckbox formId={selection.formId} name={selectionName} />
@@ -253,7 +253,12 @@ export function DataTable<Row>({
                     align={column.align}
                     className={cn(
                       column.width && WIDTH[column.width],
-                      index === firstPinned && (selection ? 'left-8' : 'left-0'),
+                      // 左に固定した列の見出しは、横に流れてくる他の見出し（同じ z）より上に重ねる。
+                      // 同じ z だと DOM の後ろの見出しが上に描かれ、固定した見出しの文字が隠れる
+                      index === firstPinned &&
+                        (selection
+                          ? 'left-8 z-(--z-sticky-corner)'
+                          : 'left-0 z-(--z-sticky-corner)'),
                     )}
                     data-column-key={column.key}
                   >

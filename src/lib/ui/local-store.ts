@@ -7,6 +7,14 @@
  *   使えなくても画面の描画は同じになるようにする（呼び出し側は null を「保存なし」として扱う）
  */
 
+/** 端末の保存を利用者・組織ごとに分ける鍵（AppShell が配る viewerKey と同じ形） */
+export function viewerKeyOf(ctx: {
+  userId: string;
+  workspace: { organizationId: string };
+}): string {
+  return `${ctx.userId}:${ctx.workspace.organizationId}`;
+}
+
 export const LOCAL_KEYS = {
   nav: (viewerKey: string) => `t4d.nav.v1.${viewerKey}`,
   recent: (viewerKey: string) => `t4d.recent.v1.${viewerKey}`,

@@ -12,6 +12,9 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { PermissionKey } from '@/types/domain';
+import { goShortcutTargets } from './record-shortcuts';
+import { useShell } from './viewer-context';
 
 /**
  * ヘルプ（plan §1.11 Beginner／Expert）。ショートカットの一覧と用語集。
@@ -86,8 +89,27 @@ export const GLOSSARY: Array<{ term: string; meaning: string }> = [
   },
 ];
 
+/** 「g → x」の行で、その利用者が移れないもの（権限なしの画面）を外す */
+export function visibleShortcuts(goTargets: Record<string, string>): typeof SHORTCUTS {
+  return SHORTCUTS.filter((s) => {
+    const go = /^g → (\w)$/.exec(s.keys);
+    return !go || Object.prototype.hasOwnProperty.call(goTargets, go[1]!);
+  });
+}
+
 export function HelpDialog() {
   const [open, setOpen] = React.useState(false);
+  const shell = useShell();
+  const shortcuts = React.useMemo(
+    () =>
+      visibleShortcuts(
+        goShortcutTargets(
+          shell?.workspace === 'assurance' ? '/assurance/dashboard' : '/enterprise/dashboard',
+          shell ? (permission: PermissionKey) => shell.permissions.includes(permission) : null,
+        ),
+      ),
+    [shell],
+  );
 
   React.useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -132,7 +154,7 @@ export function HelpDialog() {
           </TabsList>
           <TabsContent value="shortcuts">
             <dl className="divide-y divide-line">
-              {SHORTCUTS.map((s) => (
+              {shortcuts.map((s) => (
                 <div key={s.keys} className="flex items-center justify-between gap-4 py-1.5">
                   <dt className="text-body text-ink">{s.description}</dt>
                   <dd>

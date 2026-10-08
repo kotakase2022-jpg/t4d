@@ -191,8 +191,13 @@ test('本番: SSBJ のマテリアリティ登録が永続化される', async (
   // リスク・機会を記入できる（③ SSBJ 一般-12(1)・一般-14 の識別）
   await row.getByRole('textbox', { name: /のリスク/ }).fill(`休業災害による操業停止 ${marker}`);
   await row.getByRole('textbox', { name: /の機会/ }).fill(`安全性を訴求した採用力の向上 ${marker}`);
-  await row.getByRole('button', { name: 'リスク・機会を保存' }).click();
-  await page.waitForLoadState('networkidle');
+  // 保存は画面遷移しない（useActionState）。networkidle は送信前に満たされうるため、Server Action の応答を待ってから再読込する
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.request().method() === 'POST' && r.url().includes('/ssbj/settings'),
+    ),
+    row.getByRole('button', { name: 'リスク・機会を保存' }).click(),
+  ]);
   await page.reload();
   await expect(
     page.locator('li', { hasText: name }).getByRole('textbox', { name: /のリスク/ }),
@@ -202,8 +207,12 @@ test('本番: SSBJ のマテリアリティ登録が永続化される', async (
   const reason = `本番スモーク理由 ${marker}`;
   await row.getByRole('combobox', { name: /の重要度/ }).selectOption('high');
   await row.getByRole('textbox', { name: /の評価理由/ }).fill(reason);
-  await row.getByRole('button', { name: '評価を保存' }).click();
-  await page.waitForLoadState('networkidle');
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.request().method() === 'POST' && r.url().includes('/ssbj/settings'),
+    ),
+    row.getByRole('button', { name: '評価を保存' }).click(),
+  ]);
 
   await page.reload();
   await expect(page.getByText(reason)).toBeVisible();

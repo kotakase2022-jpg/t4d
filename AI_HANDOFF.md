@@ -3195,3 +3195,5 @@ commit・push・deploy はしていない。`docs/ui-redesign/plan.md` は編集
 - 統括の判断: Stage C が入れた R1（設定の入口を節ごとに分け、作成担当を許諾の節へ）を取り消し、入口は企業管理者のままにした
   （指示書 §30。タスク動詞・パレット・ROUTE_CATALOG も管理者に揃え、permission-gates の R1 は pending、aa-task-paths C8 で固定）。
 - 最終: E2E 372/372（単独）・stateless 27/27・unit+integration 2,543・RLS 311・build 合格。本番（terrast-t4d）は旧 UI のまま。
+- 2026-10-08 本番反映: `vercel deploy --prod` → `vercel alias set … terrast-t4d.vercel.app` → 本番スモーク 32/32（1 件はテストの競合: リスク・機会の保存は画面遷移しないため、
+  networkidle 待ちでは送信前に再読込しうる。Server Action の応答を待つ形に直し、再試行なしで 4＋3 回合格）→ 本番で主デモ＋CSRD の流れ 17/17 → 同じコードを再デプロイして共有メモリを初期化。

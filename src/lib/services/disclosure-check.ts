@@ -12,7 +12,11 @@ import type {
   ReportingPeriod,
   Uuid,
 } from '@/types/domain';
-import { loadDisclosureWorkspace, type DisclosureWorkspace } from './disclosure';
+import {
+  assertFrameworkAvailable,
+  loadDisclosureWorkspace,
+  type DisclosureWorkspace,
+} from './disclosure';
 
 export type InconsistencyIssue = InconsistencyCheckOutput['issues'][number];
 
@@ -37,6 +41,8 @@ export async function runDisclosureConsistencyCheck(
   periods: ReportingPeriod[],
 ): Promise<ConsistencyCheckResult> {
   assertCan(ctx, 'enterprise.ai.run');
+  // 契約が要る基準（CDP）で契約が無ければ AI を呼ばない（NF-38）
+  await assertFrameworkAvailable(db, ctx, frameworkKey);
 
   const workspace = await loadDisclosureWorkspace(db, ctx, frameworkKey, period, periods, []);
   if (!workspace) throw new NotFoundError('開示フレームワークが見つかりません。');
@@ -83,6 +89,49 @@ export async function loadConsistencyCheck(
   }
   const issues = (run.outputJson.issues ?? []) as InconsistencyIssue[];
   return { run, issues };
+}
+
+/** 指摘の対象（subject）が質問コードを指すか（C1.1 は C1.1b に当てない） */
+export function issueTargetsCode(subject: string, code: string): boolean {
+  if (subject.trim() === code) return true;
+  const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^\\w.])${escaped}(?![\\w.])`).test(subject);
+}
+
+export interface LatestConsistencyIssues {
+  run: AiRun;
+  /** 質問 ID → その質問への指摘 */
+  byItemId: Map<Uuid, InconsistencyIssue[]>;
+}
+
+/**
+ * 一覧の質問に対する直近の整合チェックの指摘（NF-39 C-06。質問ごとに表示する）。
+ * 実行記録（?check=）はそのまま残し、ここでは「この一覧の回答を入力にした最後の実行」を選ぶ
+ */
+export async function loadLatestConsistencyIssues(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  workspace: Pick<DisclosureWorkspace, 'rows'>,
+): Promise<LatestConsistencyIssues | null> {
+  const responseIds = new Set(workspace.rows.flatMap((r) => (r.response ? [r.response.id] : [])));
+  if (responseIds.size === 0) return null;
+  const runs = await db.select('aiRuns', {
+    where: {
+      organizationId: ctx.workspace.organizationId,
+      featureType: 'inconsistencyCheck',
+      status: { in: ['succeeded', 'accepted'] },
+    },
+    orderBy: { column: 'createdAt', dir: 'desc' },
+  });
+  const run = runs.find((r) => r.inputReferenceIds.some((id) => responseIds.has(id)));
+  if (!run) return null;
+  const issues = (run.outputJson.issues ?? []) as InconsistencyIssue[];
+  const byItemId = new Map<Uuid, InconsistencyIssue[]>();
+  for (const row of workspace.rows) {
+    const matched = issues.filter((issue) => issueTargetsCode(issue.subject, row.item.code));
+    if (matched.length > 0) byItemId.set(row.item.id, matched);
+  }
+  return { run, byItemId };
 }
 
 interface CheckAnswer {

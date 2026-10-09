@@ -171,6 +171,9 @@ export const EXPORT_ARTIFACT_FORMAT_LABELS: Record<ExportArtifactFormat, string>
   docx: 'Word（DOCX）',
   xlsx: 'Excel（XLSX）',
   csv: 'CSV',
+  // XBRL は社内確認用（提出用ではない。公式タクソノミ・公式の検証を通していない）
+  xbrl_json: 'XBRL（xBRL-JSON・社内確認用）',
+  ixbrl_html: 'インライン XBRL プレビュー（社内確認用）',
 };
 
 export const EXPORT_AUDIENCE_LABELS: Record<ExportAudience, string> = {

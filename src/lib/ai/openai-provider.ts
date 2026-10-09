@@ -40,6 +40,8 @@ function estimateCost(model: string, input: number, output: number): number {
 export class OpenAIProvider implements AiProvider {
   readonly kind = 'openai' as const;
   readonly model: string;
+  /** 提供元に応答を保存させるか（既定は保存しない。config.ts の OPENAI_STORE） */
+  readonly store: boolean;
   private readonly client: OpenAI;
 
   constructor() {
@@ -51,6 +53,7 @@ export class OpenAIProvider implements AiProvider {
       );
     }
     this.model = config.model;
+    this.store = config.store;
     this.client = new OpenAI({
       apiKey: config.apiKey,
       timeout: config.timeoutMs,
@@ -87,6 +90,8 @@ export class OpenAIProvider implements AiProvider {
           { role: 'user', content: userContent },
         ],
         text: { format: zodTextFormat(schema, invocation.feature) },
+        // 提供元での保存を明示する（既定は保存しない。データ取扱条件の合意で変える。NF-28）
+        store: this.store,
       });
 
       const parsed = response.output_parsed;

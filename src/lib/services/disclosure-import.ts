@@ -5,6 +5,7 @@ import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
 import { fid } from '@/lib/fixtures/ids';
 import { parseUploadedFile, validateUpload } from '@/lib/imports/parsers';
+import { assertFrameworkAvailable, assertItemAvailable } from '@/lib/services/disclosure';
 import type { DbClient } from '@/lib/repositories/types';
 import type { AuthorizationContext, DisclosureItem, FrameworkKey, Uuid } from '@/types/domain';
 
@@ -162,6 +163,8 @@ export async function buildImportPreview(
   if (!period || period.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('報告期間が見つかりません。');
   }
+  // 契約が要る基準（CDP）で契約が無ければ解析しない（NF-38）。他組織の期間は契約より先に「見つかりません」
+  await assertFrameworkAvailable(db, ctx, input.frameworkKey);
 
   const parsed = await parseUploadedFile(validation.safeName, input.mimeType, input.bytes);
   let answers: ExtractedAnswer[];
@@ -293,13 +296,26 @@ export async function confirmDisclosureImport(
   });
   const currentByItemId = new Map(currentResponses.map((r) => [r.itemId, r]));
 
+  // 取り込む質問の基準ごとに契約を確かめる（CDP の質問は CDP 対応オプションが要る。NF-38）。
+  // 書き始める前に全部確かめる（途中まで取り込んで止めない）
+  const items = new Map<Uuid, DisclosureItem>();
+  const checkedVersions = new Set<Uuid>();
+  for (const sel of input.selections) {
+    const item = await db.findById('disclosureItems', sel.itemId);
+    if (!item) continue;
+    items.set(sel.itemId, item);
+    if (checkedVersions.has(item.frameworkVersionId)) continue;
+    await assertItemAvailable(db, ctx, item);
+    checkedVersions.add(item.frameworkVersionId);
+  }
+
   const now = new Date().toISOString();
   let created = 0;
   let updated = 0;
   let linkedToCurrent = 0;
 
   for (const sel of input.selections) {
-    const item = await db.findById('disclosureItems', sel.itemId);
+    const item = items.get(sel.itemId);
     if (!item) continue;
 
     const existing = targetByItemId.get(sel.itemId);

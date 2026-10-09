@@ -49,6 +49,17 @@ const JSONB_COLUMNS_BY_TABLE: Partial<Record<TableName, ReadonlySet<string>>> = 
   reviewRequests: new Set(['policy', 'referenced_versions']),
   reportSnapshots: new Set(['framework_versions', 'blocks', 'metric_values', 'anchors']),
   quantitativeImportBatches: new Set(['rows']),
+  // トライアル対応（0049〜0056）
+  exportArtifacts: new Set(['validation_summary']),
+  projectRequirementAssessmentEvents: new Set(['before', 'after']),
+  sharedReportCopies: new Set(['copy']),
+  exportReconciliations: new Set(['mismatches']),
+  xbrlConcepts: new Set(['concept_references']),
+  xbrlTagMappings: new Set(['dimensions']),
+  xbrlTagMappingEvents: new Set(['before', 'after']),
+  trialPrograms: new Set(['options', 'agreements']),
+  trialScenarioRuns: new Set(['evidence']),
+  organizationDataTerms: new Set(['subprocessors']),
 };
 
 /** Seed 生成で jsonb として書く列か（tests/unit/seed-sql.test.ts から migration と突合する）。 */
@@ -64,6 +75,10 @@ export function isJsonbColumn(table: TableName, column: string): boolean {
 export const SEED_ORDER: TableName[] = [
   'profiles',
   'organizations',
+  // 契約で開くオプション・提出者の識別子・データ取扱条件（組織だけを参照する）
+  'organizationOptions',
+  'organizationFilingIdentifiers',
+  'organizationDataTerms',
   'memberships',
   'membershipRoles',
   'invitations',
@@ -89,6 +104,11 @@ export const SEED_ORDER: TableName[] = [
   'frameworkVersions',
   'disclosureItems',
   'itemConditions',
+  // テナント横断のマスター（要求事項の横断対応・XBRL のタクソノミ）。要求事項の行が先に要る
+  'requirementCrosswalks',
+  'xbrlTaxonomyPackages',
+  'xbrlConcepts',
+  'xbrlConceptRequirements',
   'applicabilityResults',
   'materialityTopics',
   'disclosureResponses',
@@ -102,23 +122,30 @@ export const SEED_ORDER: TableName[] = [
   'ingestionJobs',
   'ingestionJobFiles',
   'aiRuns',
+  'aiFeedback',
   'ingestionRows',
-  // CSRD（docs/disclosure-first.md §9.3）。評価・節は ai_runs を (id, organization_id) で参照するため
-  // それより後に置く。IRO は事項を、計画は評価を参照する
-  'csrdAnalysisSettings',
-  'csrdDmaMatters',
-  'csrdDmaIros',
-  'csrdAssessments',
-  'csrdActionPlans',
-  'csrdDisclosureDrafts',
   // 開示優先モード。版・判断は ai_runs・file_versions・extracted_fragments を参照するため
   // それらより後に置く（current_* のポインタは遅延可能な外部キー）。
   'organizationFeatureSettings',
   'disclosureProjects',
   'projectFrameworks',
   'projectFrameworkDecisions',
+  // 要求事項の判断（0049）。基準の行と要求事項が先に要る。対象外の申請は SSBJ の評価・判断の行の後
+  'projectRequirementAssessments',
+  'projectRequirementAssessmentEvents',
+  'requirementExclusionEvents',
   'narrativeRecords',
+  'narrativeRequirementLinks',
   'sourceAnchors',
+  // CSRD（docs/disclosure-first.md §9.3）。評価・節は ai_runs を (id, organization_id) で参照するため
+  // それより後に置く。IRO は事項を、計画は評価を参照する。IRO の根拠（0052）は引用位置の後、
+  // 定性情報の版の IRO の参照（0052）は IRO の後
+  'csrdAnalysisSettings',
+  'csrdDmaMatters',
+  'csrdDmaIros',
+  'csrdAssessments',
+  'csrdActionPlans',
+  'csrdDisclosureDrafts',
   'narrativeVersions',
   'disclosureBlocks',
   'disclosureBlockVersions',
@@ -128,13 +155,28 @@ export const SEED_ORDER: TableName[] = [
   'recheckDecisions',
   'reportSnapshots',
   'exportArtifacts',
+  'exportReconciliations',
   'kpiTargets',
   'quantitativeImportBatches',
+  // XBRL の対応付け（0054）。プロジェクト・指標・拠点・マスター・AI の実行の後
+  'xbrlTagMappings',
+  'xbrlTagMappingEvents',
+  // トライアルの評価（0055）。プロジェクトの後
+  'trialPrograms',
+  'trialScenarios',
+  'trialScenarioRuns',
+  'trialScenarioJudgements',
+  'trialFeedbackItems',
+  'trialTaskTimings',
+  // CDP 等の回答と T4D の情報の対応付け（0057）。定性情報・節の後
+  'responseContentLinks',
   'engagements',
   'engagementMembers',
   'grants',
   'engagementScopes',
   'dataRoomItems',
+  // 保証側へ共有した写し（0050）。案件・許諾・スナップショットの後
+  'sharedReportCopies',
   'snapshots',
   'snapshotItems',
   'snapshotChanges',
@@ -150,6 +192,7 @@ export const SEED_ORDER: TableName[] = [
   'issues',
   'managementResponses',
   'reviewNotes',
+  'reviewNoteResponses',
   'signoffs',
   'tasks',
   'approvals',

@@ -2,11 +2,14 @@ import Link from 'next/link';
 import { Hourglass, Info } from 'lucide-react';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { SegmentedFilter } from '@/components/shared/nav-tabs';
+import { Section } from '@/components/shared/section';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { AuthorizationError } from '@/lib/authorization/can';
 import { REVIEW_REQUEST_STATUS_LABELS, reviewPolicyLabel } from '@/lib/domain/disclosure-status';
 import { formatJst } from '@/lib/format/datetime';
+import { loadProjectAssuranceComments, type ClientCommentRow } from '@/lib/services/assurance';
 import { listProjectReviews, type ReviewListItem } from '@/lib/services/disclosure-review';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { ReviewRequestStatus } from '@/types/domain';
@@ -53,6 +56,13 @@ export async function ReviewsTab({
     }
     throw error;
   }
+
+  // 保証側のコメント（このプロジェクトの承認済みレポートを共有した写しへのもの。NF-21）
+  const { rows: assuranceComments, canRespond } = await loadProjectAssuranceComments(
+    db,
+    ctx,
+    projectId,
+  );
 
   const counts = Object.fromEntries(
     STATUS_FILTERS.map((s) => [s, items.filter((i) => i.status === s).length]),
@@ -207,6 +217,93 @@ export async function ReviewsTab({
           }}
         />
       )}
+
+      <AssuranceCommentsSection
+        rows={assuranceComments}
+        projectId={projectId}
+        projectPath={projectPath}
+        canRespond={canRespond}
+      />
     </div>
+  );
+}
+
+/** 一覧に出す件数（残りは「保証側のコメント」の画面で見る） */
+const ASSURANCE_COMMENT_PREVIEW = 5;
+
+/**
+ * 保証側のコメント（このプロジェクトの共有レポートの段落・数値へのもの。NF-21）。
+ * 社内のレビューとは別の記録（監査法人の記録で、企業は回答だけを追記する）。回答は専用の画面で行う
+ */
+function AssuranceCommentsSection({
+  rows,
+  projectId,
+  projectPath,
+  canRespond,
+}: {
+  rows: ClientCommentRow[];
+  projectId: string;
+  projectPath: string;
+  canRespond: boolean;
+}) {
+  const unanswered = rows.filter((r) => r.state === 'unanswered').length;
+  const listHref = `/enterprise/assurance-comments?project=${encodeURIComponent(projectId)}`;
+  return (
+    <Section
+      id="assurance-comments"
+      title={`保証側のコメント（${rows.length}）`}
+      summary={unanswered > 0 ? `未回答 ${unanswered} 件` : undefined}
+      actions={
+        rows.length > 0 ? (
+          <Link href={listHref} className="text-small text-brand-700 hover:underline">
+            すべて見る
+          </Link>
+        ) : undefined
+      }
+    >
+      {rows.length === 0 ? (
+        <EmptyState
+          kind="not-applicable"
+          size="compact"
+          title="保証側からのコメントはありません"
+          description="承認済みレポートを出力タブから保証側へ共有すると、保証側が段落・数値にコメントできます（クライアントへ共有されたものだけがここに出ます）。"
+          action={
+            <Link
+              href={`${projectPath}?tab=outputs`}
+              className="text-small text-brand-800 underline"
+            >
+              出力タブを開く
+            </Link>
+          }
+        />
+      ) : (
+        <ul className="divide-y divide-line rounded-t4d border border-line">
+          {rows.slice(0, ASSURANCE_COMMENT_PREVIEW).map((row) => (
+            <li
+              key={row.note.id}
+              className="flex flex-wrap items-start gap-x-2 gap-y-0.5 px-3 py-1.5"
+              data-t4d-record=""
+            >
+              <StatusBadge domain="clientNote" value={row.state} />
+              <span className="text-caption text-ink-muted">
+                {row.engagement.code} ／{' '}
+                {row.target
+                  ? `${row.target.kind === 'report_paragraph' ? '段落' : '数値'}「${row.target.place}」${row.target.traceId ? `（${row.target.traceId}）` : ''}`
+                  : '案件全体'}
+              </span>
+              <span className="w-full truncate text-small text-ink">{row.note.body}</span>
+              {canRespond && row.state !== 'cleared' && (
+                <Link
+                  href={`/enterprise/assurance-comments?new=1&note=${encodeURIComponent(row.note.id)}#respond-note`}
+                  className="text-caption text-brand-700 hover:underline"
+                >
+                  {row.state === 'answered' ? '追加で回答する' : '回答する'}
+                </Link>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }

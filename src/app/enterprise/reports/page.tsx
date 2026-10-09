@@ -6,6 +6,7 @@ import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { PERMISSION_LABELS } from '@/lib/authorization/permission-labels';
 import { buildReportExportCards } from '@/lib/exports';
+import { hasOption } from '@/lib/services/organization-options';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 
 export const metadata = { title: 'レポート' };
@@ -26,7 +27,10 @@ export default async function ReportsPage() {
 
   // 出力物の一覧は 1 か所（src/lib/exports）で組み立てる。以前は CDP のカードが
   // SSBJ カードの links に入れ子になっており、CDP の出力が画面に出ていなかった（W0 棚卸し）
-  const exports = buildReportExportCards(period.id);
+  // CDP 対応オプションの無い組織には CDP の出力を出さない（plan NF-38。API も 403 で止める）
+  const exports = buildReportExportCards(period.id, {
+    cdpOption: await hasOption(shell.db, shell.ctx, 'cdp'),
+  });
 
   return (
     <>

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { contentHashOf } from '@/lib/domain/disclosure-block';
+import { RECONCILIATION_CHECKER_VERSION } from '@/lib/domain/export-reconciliation';
 import {
   computeSnapshotContentHash,
   snapshotCommentOf,
@@ -263,6 +264,7 @@ describe('定性情報の版（narrative_versions）と引用位置（source_anc
       carriedFromVersionId: null,
       changeReason: 'テスト',
       originatedFromAiRunId: null,
+      iroRefs: [],
       contentHash: 'ここは計算し直される',
       createdAt: '2026-09-30T00:00:00.000Z',
       createdBy: AUTHOR,
@@ -403,7 +405,13 @@ describe('スナップショット（report_snapshots）は目録だけを持ち
       [{ t: 'reportSnapshots', id: 'd4d4d4d4-0000-4000-8000-000000000004', v: forged }],
       target,
     );
-    expect(other.reportSnapshots).toHaveLength(0);
+    // Fixture にある FY2025 の社内承認済み版（トライアル対応）以外のスナップショットは増えない
+    expect(other.reportSnapshots.map((s) => s.id)).toEqual(
+      createFixtureDb().reportSnapshots.map((s) => s.id),
+    );
+    expect(other.reportSnapshots.some((s) => s.id === 'd4d4d4d4-0000-4000-8000-000000000004')).toBe(
+      false,
+    );
   });
 
   it('偽の Cookie: 承認の根拠の無い数値の版を「承認済み」と名乗る・権限の無い人の名義は戻さない', async () => {
@@ -469,6 +477,59 @@ describe('スナップショット（report_snapshots）は目録だけを持ち
       const other = replay([snapshotEdit, editOf('exportArtifacts', forged)]);
       expect(other.exportArtifacts.some((a) => a.id === artifact.id)).toBe(false);
     }
+  });
+
+  it('突合で一致した出力記録は、件数 3 つを 1 つの配列にまとめ、不一致 0・照合の版を省いて戻す（K8 の余裕）', async () => {
+    const snapshot = await draftSnapshot();
+    const artifact = {
+      id: 'f8f8f8f8-0000-4000-8000-000000000008',
+      organizationId: ORG_IDS.aomi,
+      snapshotId: snapshot.id,
+      format: 'docx',
+      audience: 'internal',
+      templateVersion: 'disclosure-report-v3',
+      fileName: 'report.docx',
+      byteSize: 100,
+      fileSha256: 'c'.repeat(64),
+      contentHash: snapshot.contentHash,
+      generatedAt: '2026-09-30T00:00:00.000Z',
+      generatedBy: APPROVER,
+      reconciledParagraphs: 4,
+      reconciledNumbers: 2,
+      reconciledRows: 0,
+      mismatchCount: 0,
+      checkerVersion: RECONCILIATION_CHECKER_VERSION,
+      taxonomyPackageId: null,
+      mappingSetHash: null,
+      validationSummary: null,
+    };
+    const compact = compactRow('exportArtifacts', artifact, createFixtureDb())!;
+    expect(compact.rc).toEqual([4, 2, 0]);
+    for (const key of [
+      'reconciledParagraphs',
+      'reconciledNumbers',
+      'reconciledRows',
+      'mismatchCount',
+      'checkerVersion',
+    ]) {
+      expect(compact, key).not.toHaveProperty(key);
+    }
+    const restored = replay([
+      editOf('reportSnapshots', snapshot),
+      editOf('exportArtifacts', artifact),
+    ]);
+    expect(restored.exportArtifacts.find((a) => a.id === artifact.id)).toMatchObject({
+      reconciledParagraphs: 4,
+      reconciledNumbers: 2,
+      reconciledRows: 0,
+      mismatchCount: 0,
+      checkerVersion: RECONCILIATION_CHECKER_VERSION,
+    });
+    // 件数の形が不正な配列は戻さない
+    const db = createFixtureDb();
+    db.reportSnapshots.push(snapshot as never);
+    expect(expandRow('exportArtifacts', { ...compact, rc: [4, -1, 0] }, db)).toBeNull();
+    expect(expandRow('exportArtifacts', { ...compact, rc: [4, 2] }, db)).toBeNull();
   });
 });
 

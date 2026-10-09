@@ -1,4 +1,12 @@
 import type { Page } from '@playwright/test';
+import { ORG_IDS } from '@/lib/fixtures/dataset';
+import { DISCLOSURE_FIRST_IDS } from '@/lib/fixtures/disclosure-first';
+import { fid } from '@/lib/fixtures/ids';
+import {
+  FY2025_APPROVED_SNAPSHOT_ID,
+  TRIAL_FICTIONAL_MEMBERS,
+  TRIAL_XBRL_MAPPING_IDS,
+} from '@/lib/fixtures/trial-case';
 
 /**
  * 画面を開いて検査する E2E（primary 監査・到達性）が使う、ルートごとの具体的な URL（plan §5.2）。
@@ -10,7 +18,9 @@ import type { Page } from '@playwright/test';
  *   作成パネルを開いている間は、見出しの「〜を作成」を隠し、パネルの送信が primary になる）
  */
 
-export type SliceOwner = 'B1' | 'B2' | 'B3' | 'B4' | 'B5' | 'B6';
+/** UI 再設計のスライス（B1〜B6）と、トライアル対応（2026-10）のスライス（T1〜T8） */
+export type SliceOwner =
+  'B1' | 'B2' | 'B3' | 'B4' | 'B5' | 'B6' | 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6' | 'T7' | 'T8';
 
 export interface RouteSample {
   key: string;
@@ -38,6 +48,156 @@ const CSRD = `${E}/disclosures/csrd`;
 const CDP = `${E}/disclosures/cdp`;
 const UUID = '[0-9a-f-]{36}';
 const PROJECT = new RegExp(`^${E}/disclosure-projects/${UUID}$`);
+/** トライアル対応の画面の標本に使う Fixture の ID（架空。定数を読むだけで、UUID を手で書かない） */
+const FY2025_PROJECT = `${E}/disclosure-projects/${DISCLOSURE_FIRST_IDS.projects.fy2025}`;
+const FY2026_PROJECT = `${E}/disclosure-projects/${DISCLOSURE_FIRST_IDS.projects.fy2026}`;
+const FICTIONAL_REVIEWER_MEMBERSHIP = fid(
+  'membership',
+  `${ORG_IDS.aomi}/${TRIAL_FICTIONAL_MEMBERS[1].email}`,
+);
+
+/**
+ * トライアル対応（2026-10。plan §4.3-4・付録 D）の新しい画面・タブ・状態。
+ * どの役割でも primary は 1 つ以下（作成・編集のパネルを開いた状態はパネルの送信が唯一の primary）
+ */
+const TRIAL_ENTERPRISE_SAMPLES: RouteSample[] = [
+  // ---- T1 要求事項・判断・対応表
+  {
+    key: `${E}/disclosure-projects/[projectId]/requirements/[itemId]`,
+    owner: 'T1',
+    workspace: 'enterprise',
+    // 40a の要求事項タブの題名のリンクから辿る
+    discover: {
+      from: `${FY2026_PROJECT}?tab=requirements&fw=${DISCLOSURE_FIRST_IDS.projectFrameworks.fy2026Esrs40a}`,
+      link: new RegExp(`^${E}/disclosure-projects/${UUID}/requirements/${UUID}$`),
+    },
+  },
+  ...(
+    [
+      'requirements&fw=all',
+      'requirements&coverage=undetermined',
+      'crosswalk',
+      'crosswalk&ai=1',
+    ] as const
+  ).map((tab): RouteSample => ({
+    key: `${E}/disclosure-projects/[projectId]?tab=${tab}`,
+    owner: 'T1',
+    workspace: 'enterprise',
+    url: `${FY2026_PROJECT}?tab=${tab}`,
+  })),
+  // ---- T2 トレース・出力・突合
+  {
+    key: `${E}/disclosure-projects/[projectId]/snapshots/[snapshotId]`,
+    owner: 'T2',
+    workspace: 'enterprise',
+    url: `${FY2025_PROJECT}/snapshots/${FY2025_APPROVED_SNAPSHOT_ID}`,
+  },
+  {
+    key: `${E}/disclosure-projects/[projectId]/snapshots/[snapshotId]?filter=untraceable`,
+    owner: 'T2',
+    workspace: 'enterprise',
+    url: `${FY2025_PROJECT}/snapshots/${FY2025_APPROVED_SNAPSHOT_ID}?filter=untraceable`,
+  },
+  {
+    key: `${E}/disclosure-projects/[projectId]?tab=outputs&reconcile=1`,
+    owner: 'T2',
+    workspace: 'enterprise',
+    url: `${FY2025_PROJECT}?tab=outputs&reconcile=1&rs=${FY2025_APPROVED_SNAPSHOT_ID}`,
+  },
+  // ---- T3 保証側のコメント（企業）
+  {
+    key: `${E}/assurance-comments`,
+    owner: 'T3',
+    workspace: 'enterprise',
+    url: `${E}/assurance-comments`,
+  },
+  {
+    key: `${E}/assurance-comments?state=unanswered`,
+    owner: 'T3',
+    workspace: 'enterprise',
+    url: `${E}/assurance-comments?state=unanswered`,
+  },
+  // ---- T4 トライアルの評価
+  ...(
+    [
+      '',
+      '?tab=overview',
+      '?tab=scenarios',
+      '?tab=feedback',
+      '?tab=timing',
+      '?tab=roi',
+      '?tab=overview&edit=1',
+      '?tab=scenarios&new=1',
+      '?tab=timing&new=1',
+    ] as const
+  ).map((suffix): RouteSample => ({
+    key: `${E}/trial${suffix}`,
+    owner: 'T4',
+    workspace: 'enterprise',
+    url: `${E}/trial${suffix}`,
+  })),
+  // ---- T5 監査ログ・設定の新しいタブ（設定は企業管理者だけ。他の役割は権限なしの画面）
+  { key: `${E}/audit-log`, owner: 'T5', workspace: 'enterprise', url: `${E}/audit-log` },
+  {
+    key: `${E}/audit-log?kind=data_approved`,
+    owner: 'T5',
+    workspace: 'enterprise',
+    url: `${E}/audit-log?kind=data_approved`,
+  },
+  ...[
+    'approval',
+    'approval&edit=new&template=three',
+    'roles',
+    'data-handling',
+    'data-handling&new=1',
+    'data-handling&confirm=tenant-export',
+    `members&edit=${FICTIONAL_REVIEWER_MEMBERSHIP}`,
+    `members&handover=${FICTIONAL_REVIEWER_MEMBERSHIP}`,
+  ].map((tab): RouteSample => ({
+    key: `${E}/settings?tab=${tab.replace(FICTIONAL_REVIEWER_MEMBERSHIP, '[membershipId]')}`,
+    owner: 'T5',
+    workspace: 'enterprise',
+    url: `${E}/settings?tab=${tab}`,
+  })),
+  // ---- T6 XBRL（FY2025＝スナップショットあり、FY2026＝空の状態）
+  {
+    key: `${E}/disclosure-projects/[projectId]?tab=xbrl（FY2025）`,
+    owner: 'T6',
+    workspace: 'enterprise',
+    url: `${FY2025_PROJECT}?tab=xbrl`,
+  },
+  {
+    key: `${E}/disclosure-projects/[projectId]?tab=xbrl（FY2026・空）`,
+    owner: 'T6',
+    workspace: 'enterprise',
+    url: `${FY2026_PROJECT}?tab=xbrl`,
+  },
+  {
+    key: `${E}/disclosure-projects/[projectId]?tab=xbrl&new=1`,
+    owner: 'T6',
+    workspace: 'enterprise',
+    url: `${FY2025_PROJECT}?tab=xbrl&new=1`,
+  },
+  {
+    key: `${E}/disclosure-projects/[projectId]?tab=xbrl&edit=1&mapping=[mappingId]`,
+    owner: 'T6',
+    workspace: 'enterprise',
+    url: `${FY2025_PROJECT}?tab=xbrl&edit=1&mapping=${TRIAL_XBRL_MAPPING_IDS.scope2Candidate}`,
+  },
+  // ---- T8 インパクト・リスク・機会の台帳
+  {
+    key: `${E}/disclosures/impacts`,
+    owner: 'T8',
+    workspace: 'enterprise',
+    url: `${E}/disclosures/impacts`,
+  },
+  {
+    key: `${E}/disclosures/impacts?type=impact`,
+    owner: 'T8',
+    workspace: 'enterprise',
+    url: `${E}/disclosures/impacts?type=impact`,
+  },
+];
 
 export const ENTERPRISE_SAMPLES: RouteSample[] = [
   // ---- B1 データ・取込・資料・業務キュー・ホーム
@@ -353,6 +513,7 @@ export const ENTERPRISE_SAMPLES: RouteSample[] = [
   })),
   { key: '/notifications', owner: 'B6', workspace: 'enterprise', url: '/notifications' },
   { key: '/profile', owner: 'B6', workspace: 'enterprise', url: '/profile' },
+  ...TRIAL_ENTERPRISE_SAMPLES,
 ];
 
 const ENG = '/assurance/engagements/[engagementId]';
@@ -404,6 +565,27 @@ export function assuranceSamples(engagementId: string): RouteSample[] {
       'sampling?new=1',
       'overview?team=1',
     ].map(page),
+    // トライアル対応（T3）: 開示レポートの一覧と、共有された写しの内容（共有した後にだけある。無ければ数えない）
+    { ...page('reports'), owner: 'T3' },
+    {
+      key: `${ENG}/reports/[copyId]`,
+      owner: 'T3',
+      workspace: 'assurance',
+      discover: {
+        from: `/assurance/engagements/${engagementId}/reports`,
+        link: new RegExp(`^/assurance/engagements/${UUID}/reports/${UUID}$`),
+      },
+    },
+    {
+      key: `${ENG}/reports/[copyId]?new=1`,
+      owner: 'T3',
+      workspace: 'assurance',
+      discover: {
+        from: `/assurance/engagements/${engagementId}/reports`,
+        link: new RegExp(`^/assurance/engagements/${UUID}/reports/${UUID}$`),
+        suffix: '?new=1',
+      },
+    },
   ];
 }
 

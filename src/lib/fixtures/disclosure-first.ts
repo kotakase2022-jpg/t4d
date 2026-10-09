@@ -8,7 +8,9 @@
  *    指標（承認済みだが、引用した Scope1 に承認後の新版があり「再確認が必要」）／
  *    ESRS-40a 準備のガバナンス（同じ定性情報の版を別の基準で再利用・下書き）
  *  - 根拠資料 3 点（disclosure-documents.ts）と、その段落を指す引用位置
- *  - ESRS-40a は公開草案（要求事項は未収録）、既存 CSRD 12 項目は架空サンプルと明示する
+ *  - ESRS-40a は公開草案（要求事項は未収録）の版をマスターに残し、FY2026 のプロジェクトは
+ *    「ESRS-40a 試行用サンプル（架空・条文ではない）」の版に固定する（トライアル対応 K5。版と要求事項は
+ *    trial-case.ts）。既存 CSRD 12 項目は架空サンプルと明示する
  *
  * 機能設定（disclosure_first）は false のまま置く（A01: 画面の切替は発表者・E2E が行う）。
  * 監査ログの行は作らない（既存の監査ログ一覧・件数の表示を変えないため）。
@@ -48,6 +50,11 @@ import {
 } from './disclosure-documents';
 import { contentHash, fid } from './ids';
 import type { FixtureDb } from './store';
+import {
+  ESRS_40A_SAMPLE_VERSION_ID,
+  XBRL_SAMPLE_PACKAGE_ID,
+  esrs40aSampleItemId,
+} from './trial-ids';
 import type {
   BlockBody,
   BlockInline,
@@ -189,7 +196,12 @@ export const SCOPE1_CORRECTION = {
 export const DISCLOSURE_FIRST_IDS = {
   featureSettings: fid('organization_feature_settings', 'AOMI'),
   esrs40aFramework: fid('framework', 'esrs_40a'),
-  esrs40aVersion: fid('framework_version', 'esrs_40a/2026-ed'),
+  /**
+   * FY2026 のプロジェクトが使う ESRS-40a の版（試行用サンプル。架空・条文ではない）。
+   * 公開草案の版（要求事項は未収録）は esrs40aDraftVersion としてマスターに残す
+   */
+  esrs40aVersion: ESRS_40A_SAMPLE_VERSION_ID,
+  esrs40aDraftVersion: fid('framework_version', 'esrs_40a/2026-ed'),
   documents: {
     priorSecuritiesReport: disclosureDocumentIds('fy2025-securities-report-excerpt'),
     committee: disclosureDocumentIds('fy2026-sustainability-committee-3'),
@@ -420,7 +432,7 @@ function seedEsrs40a(db: FixtureDb): void {
       'EU 会計指令 第40a条に基づく EU 域外企業向けの ESRS。公開草案の段階で、要求事項の本文は収録していません。',
   });
   db.frameworkVersions.push({
-    id: IDS.esrs40aVersion,
+    id: IDS.esrs40aDraftVersion,
     frameworkId: IDS.esrs40aFramework,
     year: 2026,
     label: 'ESRS-40a 公開草案（2026年7月）',
@@ -719,6 +731,7 @@ function seedNarratives(db: FixtureDb): void {
         carriedFromVersionId: previousId,
         changeReason: v.changeReason,
         originatedFromAiRunId: null,
+        iroRefs: [],
         contentHash: contentHash(
           canonicalJson({
             reportingPeriodId: v.periodId,
@@ -847,6 +860,8 @@ function seedProjects(db: FixtureDb): void {
       applicabilityStatus: 'voluntary',
       currentDecisionId: IDS.decisions.fy2025Ssbj,
       conditions: {},
+      // XBRL は SAMPLE（架空）のタクソノミで構造を確かめる（提出用ではない）
+      taxonomyPackageId: XBRL_SAMPLE_PACKAGE_ID,
       ...audit(at(170), at(148), AUTHOR, ADMIN),
     },
     {
@@ -858,11 +873,13 @@ function seedProjects(db: FixtureDb): void {
       applicabilityStatus: 'applicable',
       currentDecisionId: IDS.decisions.fy2026Ssbj,
       conditions: {},
+      taxonomyPackageId: XBRL_SAMPLE_PACKAGE_ID,
       ...audit(at(48), at(46), AUTHOR, ADMIN),
     },
     {
       // ESRS-40a は準備のために登録しただけで、適用判断は確定していない（草案のため判断材料が揃わない）。
-      // 適用条件（EU 域内売上など）も未入力のまま（未入力を 0 として扱わない）
+      // 適用条件（EU 域内売上など）も未入力のまま（未入力を 0 として扱わない）。
+      // 版は試行用サンプル（架空・条文ではない）に固定する（トライアル対応 K5）
       id: IDS.projectFrameworks.fy2026Esrs40a,
       organizationId: ORG,
       projectId: IDS.projects.fy2026,
@@ -871,6 +888,8 @@ function seedProjects(db: FixtureDb): void {
       applicabilityStatus: 'candidate',
       currentDecisionId: null,
       conditions: {},
+      // ESRS-40a の XBRL タクソノミは公表されていない（今後対応）
+      taxonomyPackageId: null,
       ...audit(at(19), at(19), AUTHOR),
     },
   );
@@ -1249,7 +1268,8 @@ function seedBlocks(db: FixtureDb): void {
   });
 
   // (d) ESRS-40a 準備のガバナンス: SSBJ のガバナンスと同じ定性情報の版を引用する（A20: 再利用しても
-  //     承認は基準ごとに独立）。適用判断は未確定（適用候補）で、要求事項も未収録のため紐付けない
+  //     承認は基準ごとに独立）。適用判断は未確定（適用候補）。要求事項は試行用サンプルのガバナンスの項目
+  //     （架空。trial-case.ts）に対応付ける
   pushBlock(db, {
     ids: B.fy2026Esrs40aGovernance,
     projectId: IDS.projects.fy2026,
@@ -1257,7 +1277,7 @@ function seedBlocks(db: FixtureDb): void {
     sectionKey: 'esrs40a_governance',
     title: 'ガバナンス（ESRS-40a 準備）',
     sortOrder: 110,
-    requirementItemIds: [],
+    requirementItemIds: [esrs40aSampleItemId('40A-S01')],
     dueDate: day(60),
     createdAt: at(19),
     versionCreatedAt: at(5, 3),

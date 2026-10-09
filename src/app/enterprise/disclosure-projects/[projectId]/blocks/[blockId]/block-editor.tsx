@@ -52,6 +52,7 @@ import {
   type RefInline,
 } from './editor-model';
 import { RightPane, type PaneTab } from './editor-right-pane';
+import type { AssuranceNoteView, RequirementMappingPaneData } from './requirement-mapping-panel';
 import { RefChip, type RefLookup } from './ref-chip';
 
 export interface BlockEditorProps {
@@ -61,6 +62,12 @@ export interface BlockEditorProps {
   aiMode: 'mock' | 'openai';
   /** 表示している利用者（このタブに残す作業本文の控えを、利用者ごとに分けるため） */
   viewerId: string;
+  /** 要求事項の対応付けの編集と AI の候補（トライアル対応 NF-05・NF-11） */
+  requirementMapping?: RequirementMappingPaneData;
+  /** 保証側のコメント（この節を指すもの。NF-21） */
+  assuranceNotes?: AssuranceNoteView[];
+  /** 根拠パネルを開いた状態で始めるタブ（?pane=。要求事項の詳細から対応付けを直しに来たとき） */
+  initialPaneTab?: PaneTab;
 }
 
 type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'conflict' | 'offline';
@@ -159,7 +166,16 @@ function rowsFor(text: string): number {
   return Math.min(14, Math.max(2, lines));
 }
 
-export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEditorProps) {
+export function BlockEditor({
+  projectId,
+  data,
+  runs,
+  aiMode,
+  viewerId,
+  requirementMapping,
+  assuranceNotes,
+  initialPaneTab,
+}: BlockEditorProps) {
   const router = useRouter();
   const blockId = data.block.id;
   const baseVersionId = data.block.currentVersionId;
@@ -195,7 +211,7 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
   const [paneDocked, setPaneDocked] = React.useState(true);
   const [wide, setWide] = React.useState(false);
   const [requestError, setRequestError] = React.useState<string | null>(null);
-  const [paneTab, setPaneTab] = React.useState<PaneTab>('evidence');
+  const [paneTab, setPaneTab] = React.useState<PaneTab>(initialPaneTab ?? 'evidence');
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [versionFormOpen, setVersionFormOpen] = React.useState(false);
   const [changeReason, setChangeReason] = React.useState('');
@@ -767,6 +783,14 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
     setPaneOpen(true);
   };
   const paneExpanded = wide ? paneDocked : paneOpen;
+
+  // ?pane= で来たとき（要求事項の詳細から対応付けを直しに来た等）は、狭い幅でも根拠パネルを開いて始める。
+  // 広い幅は最初から本文の横に並んでいるので開き直さない（フォーカスも奪わない）
+  React.useEffect(() => {
+    if (initialPaneTab && !window.matchMedia(WIDE_QUERY).matches) setPaneOpen(true);
+    // 最初の表示のときだけ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /** 狭い幅で根拠パネルをドロワーとして開いている（背面は操作させない） */
   const drawerOpen = paneOpen && !wide;
 
@@ -1493,6 +1517,8 @@ export function BlockEditor({ projectId, data, runs, aiMode, viewerId }: BlockEd
             tab={paneTab}
             onTabChange={setPaneTab}
             onAnnounce={announce}
+            requirementMapping={requirementMapping}
+            assuranceNotes={assuranceNotes}
           />
         </aside>
         {paneOpen && (

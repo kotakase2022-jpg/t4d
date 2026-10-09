@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,6 +13,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getBuildInfo } from '@/lib/build-info';
 import type { PermissionKey } from '@/types/domain';
 import { goShortcutTargets } from './record-shortcuts';
 import { useShell } from './viewer-context';
@@ -87,6 +89,68 @@ export const GLOSSARY: Array<{ term: string; meaning: string }> = [
     meaning:
       'デモ環境の表示は架空のデータです。AI 未接続のときは決定論的な Mock の出力を出します。',
   },
+  // ---- トライアル対応（2026-10）
+  {
+    term: '区分（5 区分）',
+    meaning:
+      '要求事項ごとの状況。充足確認済み・追加確認が必要・未対応・未判定・対象外。公開草案・サンプルの基準は「充足確認済み」にしません。',
+  },
+  {
+    term: '対象外の承認',
+    meaning:
+      '対象外・非重要は理由を付けて申請し、別の人（最終承認者）が承認します。理由を変えると承認し直しです。承認待ちは未判定として数えます。',
+  },
+  {
+    term: '横断対応表',
+    meaning:
+      'SSBJ の要求事項と ESRS・ESRS-40a の要求事項の対応（同等・一部・関連・対応なし）。デモの対応はサンプルです。',
+  },
+  {
+    term: '基準別の対応状況',
+    meaning: '定性情報 1 件を引用している原稿の節を通して、基準ごとの区分の件数を示したもの。',
+  },
+  {
+    term: 'インパクト・リスク・機会の台帳',
+    meaning:
+      'SSBJ の「企業への影響」と CSRD・ESRS-40a の「人・環境へのインパクト」を列で分けて並べた一覧。40a の列は参考表示です。',
+  },
+  {
+    term: '対象年度×基準版・公開草案（未収録）',
+    meaning:
+      'どの年度をどの版の基準で評価したかの表示。公開草案は要求事項を収録していない版で、充足の判定には使いません。',
+  },
+  {
+    term: '追跡率・追跡番号',
+    meaning:
+      '出力した本文の段落・数値のうち、要求事項・承認版・根拠まで遡れるものの割合（n / N）。追跡番号「T-節-段落」で出力物と画面を対応させます。',
+  },
+  {
+    term: '選定ケース',
+    meaning:
+      'トライアルで追跡率を測る要求事項の集まり。トライアルの評価の計画で選びます（無ければ全件）。',
+  },
+  {
+    term: '突合',
+    meaning:
+      'T4D が作った DOCX・XLSX・CSV を読み戻し、承認版の本文・数値と照合すること。不一致が 1 件でもあればファイルを渡しません。社内承認であり第三者保証ではありません。',
+  },
+  {
+    term: '転記・再利用の点検',
+    meaning:
+      '参照でない手書きの数値・同じ文の重複・定性情報の再利用を数えたもの（分母付き。総合点は出しません）。',
+  },
+  {
+    term: 'SAMPLE タクソノミ・XBRL の簡易検査',
+    meaning:
+      'XBRL の構造を確かめるための架空の概念リストと、T4D の簡易検査（公式の検証ではありません）。出力は社内確認用で、提出用ではありません。',
+  },
+];
+
+/**
+ * ヘルプから開く画面（企業のワークスペースだけ）。トライアルの評価はメニュー木に無い（plan K2・§5 D22）
+ */
+const ENTERPRISE_HELP_LINKS: ReadonlyArray<{ label: string; href: string }> = [
+  { label: 'トライアルの評価（検証シナリオ・改善管理表）', href: '/enterprise/trial' },
 ];
 
 /** 「g → x」の行で、その利用者が移れないもの（権限なしの画面）を外す */
@@ -100,6 +164,7 @@ export function visibleShortcuts(goTargets: Record<string, string>): typeof SHOR
 export function HelpDialog() {
   const [open, setOpen] = React.useState(false);
   const shell = useShell();
+  const build = React.useMemo(() => getBuildInfo(), []);
   const shortcuts = React.useMemo(
     () =>
       visibleShortcuts(
@@ -177,6 +242,25 @@ export function HelpDialog() {
             </dl>
           </TabsContent>
         </Tabs>
+        <div className="space-y-1 border-t border-line px-4 py-2 text-small text-ink-muted">
+          {shell?.workspace === 'enterprise' && (
+            <ul aria-label="ヘルプから開く画面">
+              {ENTERPRISE_HELP_LINKS.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="text-brand-700 underline underline-offset-2"
+                    onClick={() => setOpen(false)}
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          {/* 改善の記録（ご意見・評価）にも同じ版を自動で添える（NF-31） */}
+          <p data-testid="build-info">この環境の版: {build.label}</p>
+        </div>
       </DialogContent>
     </Dialog>
   );

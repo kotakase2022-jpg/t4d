@@ -6,6 +6,7 @@ import { ORG_IDS, PERIOD_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import {
+  CDP_OPTION_NOT_CONTRACTED_REASON,
   CSRD_BREAKDOWN_NOTE,
   SSBJ_BREAKDOWN_AI_NOTE,
   loadRegulatoryCoverage,
@@ -227,6 +228,7 @@ describe('SSBJ（ssbj_assessments を読むだけ）', () => {
       valueChainNote: '',
       confirmedAt: null,
       confirmedBy: null,
+      frameworkVersionId: null,
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-08-01T00:00:00.000Z',
       createdBy: null,
@@ -334,7 +336,10 @@ describe('権限・テナント・書込', () => {
     expect(rows.ssbj.breakdown!.aiOnly).toBe(0);
     expect(rows.csrd.breakdown!.humanConfirmed).toBe(0);
     expect(rows.csrd.breakdown!.aiOnly).toBe(0);
-    expect(rows.cdp.responses!.approved).toBe(0);
+    // 越権テスト用の組織は CDP 対応オプションが無効（NF-38）。CDP 行は算定せず理由を出す
+    // （他テナントの回答を数えないことは、契約のある組織の行と cdp-option.test.ts で確かめている）
+    expect(rows.cdp.responses).toBeNull();
+    expect(rows.cdp.notCalculatedReason).toBe(CDP_OPTION_NOT_CONTRACTED_REASON);
   });
 
   it('書込検知ラッパーで包んでも例外が出ない（SSBJ・CSRD の読込を含む）', async () => {

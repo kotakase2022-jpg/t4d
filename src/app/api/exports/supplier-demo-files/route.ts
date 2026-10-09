@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { accessDeniedResponse } from '@/lib/errors/access-denied';
+import { getDb } from '@/lib/repositories';
 import { can } from '@/lib/authorization/can';
 import { getSession } from '@/lib/auth/session';
 import { contentDisposition } from '@/lib/exports';
@@ -15,7 +17,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
   if (!can(ctx, 'enterprise.import.run')) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    return accessDeniedResponse(await getDb(), ctx, {
+      permission: 'enterprise.import.run',
+      request,
+    });
   }
 
   const key = new URL(request.url).searchParams.get('file');

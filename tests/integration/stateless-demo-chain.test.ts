@@ -77,6 +77,9 @@ async function fresh(): Promise<{ db: DemoDbClient; fixture: FixtureDb }> {
   return { db: new DemoDbClient(fixture), fixture };
 }
 
+/** 実演＋CSRD の流れの Cookie の上限（トライアル対応 plan K8。3×3,800B より狭い回帰の上限） */
+const MAIN_AND_CSRD_BUDGET_BYTES = 11_200;
+
 function editsBytes(): number {
   return [...jar.entries()]
     .filter(([name]) => name.startsWith('t4d.demo-edits'))
@@ -156,6 +159,8 @@ describe('実演の流れ（§14.1）は、すべてのリクエストが別イ�
       `[stateless-chain+csrd] Cookie（操作の記録）: ${sizes.map((s) => `${s.step}=${s.bytes}B`).join(' / ')}（最大 ${peak}B・上限 ${COOKIE_CHUNKS}×${MAX_BYTES_PER_COOKIE}B）`,
     );
     expect(peak).toBeLessThanOrEqual(COOKIE_CHUNKS * MAX_BYTES_PER_COOKIE);
+    // トライアル対応の回帰の上限（plan K8）: 実演＋CSRD の流れは 11,200B 以下（試行の流れの余裕を残す）
+    expect(peak).toBeLessThanOrEqual(MAIN_AND_CSRD_BUDGET_BYTES);
   });
 
   it('CSRD の流れを先に行い、その後に実演の流れを続けても押し出しが起きない（逆の順）', async () => {

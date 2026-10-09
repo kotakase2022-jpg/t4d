@@ -13,8 +13,10 @@ import {
 import type { DemoEdit } from '@/lib/repositories/demo-edit-codec';
 import {
   DATA_DEMO_RESET_TABLES,
+  DISCLOSURE_CLIENT_RESET_TABLES,
   DISCLOSURE_DEMO_RESET_TABLES,
   DISCLOSURE_RESET_AI_FEATURES,
+  isClientCopyNote,
   isDataPointApproval,
   isDisclosureNotification,
   planCsrdCollectionReset,
@@ -232,6 +234,54 @@ export async function resetDisclosureDemoData(
   byTable.metrics = { removed: removedMetrics, restored: collectionReset.metricRestores.length };
   removedRows += removedAssignments + removedMetrics;
   restoredRows += collectionReset.metricRestores.length;
+
+  // 保証側へ共有した写し・企業の回答と、写しを指す保証側のコメント（トライアル対応 NF-20・NF-21）。
+  // 共有したスナップショットを消すため、デモ中に作った写し・回答・コメントも消す（Fixture の行は消さない）
+  const copies = await db.select('sharedReportCopies', {
+    where: { clientOrganizationId: organizationId },
+  });
+  const copyIds = new Set(
+    [...copies, ...pristine.sharedReportCopies]
+      .filter((c) => c.clientOrganizationId === organizationId)
+      .map((c) => c.id),
+  );
+  const clientScoped: Array<{
+    table: 'reviewNotes' | (typeof DISCLOSURE_CLIENT_RESET_TABLES)[number];
+    rows: Array<{ id: string }>;
+    fixture: Array<{ id: string }>;
+  }> = [
+    {
+      table: 'reviewNoteResponses',
+      rows: await db.select('reviewNoteResponses', {
+        where: { clientOrganizationId: organizationId },
+      }),
+      fixture: pristine.reviewNoteResponses.filter(
+        (r) => r.clientOrganizationId === organizationId,
+      ),
+    },
+    {
+      table: 'reviewNotes',
+      rows:
+        copyIds.size > 0
+          ? await db.select('reviewNotes', { where: { targetCopyId: { in: [...copyIds] } } })
+          : [],
+      fixture: pristine.reviewNotes.filter((n) => isClientCopyNote(n, copyIds)),
+    },
+    {
+      table: 'sharedReportCopies',
+      rows: copies,
+      fixture: pristine.sharedReportCopies.filter((c) => c.clientOrganizationId === organizationId),
+    },
+  ];
+  for (const { table, rows, fixture } of clientScoped) {
+    const fixtureIds = new Set(fixture.map((r) => r.id));
+    const created = new Set(rows.filter((r) => !fixtureIds.has(r.id)).map((r) => r.id));
+    const touched = new Set([...created, ...fixtureIds]);
+    await removeDemoEditsWhere((edit) => edit.t === table && touched.has(edit.id));
+    const removed = created.size > 0 ? await db.hardDeleteDemoRows(table, created) : 0;
+    byTable[table] = { removed, restored: 0 };
+    removedRows += removed;
+  }
 
   // 原稿の AI 下書きと CSRD のギャップ分析・草案（デモ中の実行分）。Fixture の実行記録は残す
   const fixtureAiRunIds = new Set(pristine.aiRuns.map((r) => r.id));

@@ -286,7 +286,20 @@ export async function generateCsrdDraft(
   }));
   const matterState =
     section === 'ESRS2' ? undefined : context.matters.find((m) => m.topic === section);
-  const iros = topicIros(matterState);
+  // ESRS 2（SBM-3 の重要な IRO の記載を含む）は、人が重要と判断した事項の IRO を入力・出典に渡す
+  // （トライアル対応 NF-10 の P1。事項あたり 2 件・全体で 8 件まで。重要でない・未評価の事項は渡さない）
+  const materialMatters =
+    section === 'ESRS2'
+      ? context.matters.filter(
+          (m) =>
+            m.persisted &&
+            (m.outcome === 'both' || m.outcome === 'impact_only' || m.outcome === 'financial_only'),
+        )
+      : [];
+  const iros =
+    section === 'ESRS2'
+      ? materialMatters.flatMap((m) => topicIros(m).slice(0, 2)).slice(0, 8)
+      : topicIros(matterState);
 
   const sources: AiSourceReference[] = [
     ...values.map((dp) => ({
@@ -307,6 +320,15 @@ export async function generateCsrdDraft(
           },
         ]
       : []),
+    ...materialMatters
+      .filter((m) => iros.some((iro) => m.iros.some((own) => own.id === iro.id)))
+      .map((m) => ({
+        kind: 'dma_matter' as const,
+        id: m.matter.id,
+        label: CSRD_SECTION_LABEL[m.topic],
+        locator: null,
+        periodLabel: ownPeriod.label,
+      })),
     ...iros.map((iro) => ({
       kind: 'dma_iro' as const,
       id: iro.id,
@@ -330,6 +352,7 @@ export async function generateCsrdDraft(
       inputReferenceIds: [
         ...sectionItems.map((i) => i.id),
         ...(matterState ? [matterState.matter.id] : []),
+        ...iros.map((iro) => iro.id),
       ],
       input: {
         section,
@@ -339,15 +362,16 @@ export async function generateCsrdDraft(
         applicabilityKind: applicability.kind,
         perspectives: applicability.perspectives,
         provisional: applicability.provisional,
-        topic: matterState
-          ? {
-              iros: iros.map(({ typeLabel, description, score }) => ({
-                typeLabel,
-                description,
-                score,
-              })),
-            }
-          : null,
+        topic:
+          matterState || iros.length > 0
+            ? {
+                iros: iros.map(({ typeLabel, description, score }) => ({
+                  typeLabel,
+                  description,
+                  score,
+                })),
+              }
+            : null,
         requirements,
         metricValues,
         sources,

@@ -356,6 +356,20 @@ describe('SSBJ の詳細・設定: primary は 1 つ', () => {
     );
   });
 
+  it('要求事項の詳細: 開示の閲覧権限の無い拠点担当でも開ける（対象外の申請・承認の操作は出さない）', async () => {
+    // SSBJ の画面は開示の閲覧権限を求めない。対象外の申請の状態を読みにいって権限の例外で画面ごと落ちていた
+    shellState.shell = shellFor('site');
+    render(
+      await SsbjRequirementDetailPage({
+        params: Promise.resolve({ itemId: undecidedSsbjItemId() }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(screen.getAllByRole('heading', { level: 1 }).length).toBe(1);
+    expect(screen.queryByRole('button', { name: '対象外として申請' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '対象外を承認' })).toBeNull();
+  });
+
   it('要求事項の詳細: 作成欄（?new=1）を開くと、主操作は作成欄の「対応計画に追加」だけ（期限は提出期限）', async () => {
     shellState.shell = shellFor('preparer');
     render(

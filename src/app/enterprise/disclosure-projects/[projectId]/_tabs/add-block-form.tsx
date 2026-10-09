@@ -1,7 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { AlertTriangle, Plus } from 'lucide-react';
+import { AlertTriangle, ListChecks, Plus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -9,9 +10,14 @@ import { SubmitButton } from '@/components/ui/submit-button';
 import { withNetworkFallback } from '@/lib/errors/safe-form-action';
 import {
   createBlockFormAction,
+  listBlockRequirementOptionsAction,
   type CreateBlockFormState,
   type CreateBlockFormValues,
 } from '../blocks/actions';
+import {
+  RequirementPicker,
+  type RequirementPickerOption,
+} from '../requirements/_components/requirement-picker';
 
 const INITIAL: CreateBlockFormState = { status: 'idle', message: null, values: null };
 
@@ -26,6 +32,9 @@ function valuesOf(formData: FormData): CreateBlockFormValues {
     title: get('title'),
     sectionKey: get('sectionKey'),
     translationOfBlockId: get('translationOfBlockId'),
+    requirementItemIds: formData
+      .getAll('requirementItemIds')
+      .filter((v): v is string => typeof v === 'string'),
   };
 }
 
@@ -44,12 +53,20 @@ export interface AddBlockFormProps {
   rows: Array<{ id: string; title: string; languageLabel: string }>;
 }
 
+type OptionsState =
+  | { status: 'idle' }
+  | { status: 'loading'; versionId: string }
+  | { status: 'ok'; versionId: string; options: RequirementPickerOption[] }
+  | { status: 'error'; versionId: string; message: string };
+
 /**
  * 節を追加するフォーム（新しい節・翻訳版）。原稿タブの CreatePanel（?new=1）の中に置く
  * （一覧の上に作成フォームを常設しない。plan §1.13）。
- * 必須（基準の版・題名・節のキー）を先に、任意（言語・翻訳元）を後に並べる。言語は日本語が既定。
- * サーバーが断ったとき（キーの重複など）・通信に失敗したときも、題名・キー・言語・翻訳元の入力を残し、
- * 理由を示す。送信中はボタンを止める
+ * 必須（基準の版・題名・節のキー）を先に、任意（言語・翻訳元・対応する要求事項）を後に並べる。言語は日本語が既定。
+ * 対応する要求事項（トライアル対応 NF-05）は「要求事項を選ぶ」を押したときに、選んでいる基準の版の一覧を読む
+ * （一覧を開かない人の表示を重くしない）。基準の版を変えると選択は外れる（別の版の要求事項は対応付けられない）。
+ * サーバーが断ったとき（キーの重複など）・通信に失敗したときも、題名・キー・言語・翻訳元・選んだ要求事項の
+ * 入力を残し、理由を示す。送信中はボタンを止める
  */
 export function AddBlockForm({ projectId, frameworks, rows }: AddBlockFormProps) {
   const [state, formAction] = React.useActionState(action, INITIAL);
@@ -59,6 +76,52 @@ export function AddBlockForm({ projectId, frameworks, rows }: AddBlockFormProps)
   }, [state]);
   const values = state.status === 'error' ? state.values : null;
   const errorId = 'new-block-error';
+
+  const [versionId, setVersionId] = React.useState(
+    values?.frameworkVersionId || frameworks[0]?.versionId || '',
+  );
+  const [pickerOpen, setPickerOpen] = React.useState((values?.requirementItemIds?.length ?? 0) > 0);
+  const [options, setOptions] = React.useState<OptionsState>({ status: 'idle' });
+  const pickerRef = React.useRef<HTMLDivElement>(null);
+
+  // 断られて戻ったときは、送った基準の版と選択を戻す
+  React.useEffect(() => {
+    if (values?.frameworkVersionId) setVersionId(values.frameworkVersionId);
+    if ((values?.requirementItemIds?.length ?? 0) > 0) setPickerOpen(true);
+  }, [values]);
+
+  React.useEffect(() => {
+    if (!pickerOpen || !versionId) return;
+    if (options.status !== 'idle' && options.versionId === versionId) return;
+    let cancelled = false;
+    setOptions({ status: 'loading', versionId });
+    listBlockRequirementOptionsAction({ projectId, frameworkVersionId: versionId })
+      .then((result) => {
+        if (cancelled) return;
+        setOptions(
+          result.status === 'ok'
+            ? { status: 'ok', versionId, options: result.options }
+            : { status: 'error', versionId, message: result.message },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOptions({
+            status: 'error',
+            versionId,
+            message: '要求事項の一覧を読み込めませんでした。通信を確認して開き直してください。',
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // options は読み込みの結果を入れるだけ（依存に入れると読み込みを繰り返す）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerOpen, versionId, projectId]);
+
+  const restoredSelection =
+    values && values.frameworkVersionId === versionId ? (values.requirementItemIds ?? []) : [];
 
   return (
     <form
@@ -84,6 +147,7 @@ export function AddBlockForm({ projectId, frameworks, rows }: AddBlockFormProps)
             {...control}
             name="frameworkVersionId"
             defaultValue={values?.frameworkVersionId || frameworks[0]?.versionId}
+            onChange={(event) => setVersionId(event.target.value)}
           >
             {frameworks.map((f) => (
               <option key={f.versionId} value={f.versionId}>
@@ -141,6 +205,56 @@ export function AddBlockForm({ projectId, frameworks, rows }: AddBlockFormProps)
           </NativeSelect>
         )}
       </Field>
+      <div className="space-y-1.5 min-[900px]:col-span-2" data-field="">
+        <p className="flex items-center gap-1.5 text-small font-medium text-ink">
+          対応する要求事項
+          <span className="rounded-t4d bg-surface-muted px-1 text-caption font-normal text-ink-muted">
+            任意
+          </span>
+        </p>
+        {!pickerOpen ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            aria-expanded="false"
+            aria-controls="new-block-requirements"
+            onClick={() => {
+              setPickerOpen(true);
+              // 押したボタンは消えるため、開いた選択欄へフォーカスを移す
+              requestAnimationFrame(() => pickerRef.current?.focus());
+            }}
+          >
+            <ListChecks aria-hidden="true" />
+            要求事項を選ぶ
+          </Button>
+        ) : (
+          <div
+            id="new-block-requirements"
+            ref={pickerRef}
+            tabIndex={-1}
+            className="rounded-t4d focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+          >
+            {options.status === 'ok' && options.versionId === versionId ? (
+              <RequirementPicker
+                key={versionId}
+                options={options.options}
+                defaultSelected={restoredSelection}
+                idPrefix="new-block-req"
+                legend="選んだ基準の版の要求事項（翻訳版は空のままにすると翻訳元の対応付けを引き継ぎます）"
+              />
+            ) : options.status === 'error' && options.versionId === versionId ? (
+              <p role="alert" className="text-small text-danger">
+                {options.message}
+              </p>
+            ) : (
+              <p className="text-small text-ink-muted" aria-live="polite">
+                要求事項の一覧を読み込んでいます…
+              </p>
+            )}
+          </div>
+        )}
+      </div>
       <div className="min-[900px]:col-span-2">
         <SubmitButton
           size="sm"

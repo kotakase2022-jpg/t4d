@@ -10,6 +10,7 @@ vi.mock('next/navigation', () => ({
 
 const { PageActions } = await import('@/components/shared/page-actions');
 const { RowActions } = await import('@/components/shared/row-actions');
+const { MoreMenu } = await import('@/components/shared/more-menu');
 const { MAX_SECONDARY_ACTIONS, orderMenuItems, splitPageActions } =
   await import('@/lib/ui/actions');
 
@@ -154,5 +155,40 @@ describe('RowActions', () => {
     expect(screen.getByRole('link', { name: '直す' })).toHaveAttribute('data-size', 'xs');
     const trigger = screen.getByRole('button', { name: '東日本工場 電力使用量 の操作' });
     expect(within(trigger).getByText('操作')).toBeInTheDocument();
+  });
+});
+
+describe('MoreMenu の確認ダイアログ', () => {
+  function exclude(hidden: boolean) {
+    return {
+      kind: 'confirm' as const,
+      id: 'exclude-1',
+      label: '対象外にする…',
+      action: noop,
+      hidden,
+      confirm: {
+        tier: 'bulk' as const,
+        title: 'この対応付けを対象外にしますか',
+        scope: '節 ⇄ 概念',
+        confirmLabel: '対象外にする',
+      },
+    };
+  }
+
+  it('確定の後に項目が隠れて（状態が変わって）から再び出ても、前に開いたダイアログを開き直さない', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <MoreMenu label="操作" items={[link('edit', '編集'), exclude(false)]} />,
+    );
+    await user.click(screen.getByRole('button', { name: /操作/ }));
+    await user.click(await screen.findByRole('menuitem', { name: '対象外にする…' }));
+    expect(screen.getByRole('dialog', { name: 'この対応付けを対象外にしますか' })).toBeVisible();
+
+    // 送信のリダイレクトで行が「対象外」になり、項目が隠れる（ダイアログは閉じる前に消える）
+    rerender(<MoreMenu label="操作" items={[link('edit', '編集'), exclude(true)]} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // 「対象外を取り消す」で候補に戻り、項目が再び出る。ダイアログは開かない
+    rerender(<MoreMenu label="操作" items={[link('edit', '編集'), exclude(false)]} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

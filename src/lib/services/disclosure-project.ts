@@ -12,10 +12,25 @@ import {
   frameworkLegalLabel,
   MATERIALITY_BASIS_LABELS,
 } from '@/lib/domain/disclosure-status';
-import { COVERAGE_LABEL } from '@/lib/domain/ssbj';
+import { diffFrameworkItems } from '@/lib/domain/framework-diff';
+import { assessNarrativeFields } from '@/lib/domain/narrative-template';
+import {
+  classifyRequirement,
+  countByCategory,
+  resolveOwnerDue,
+  type OwnerDueResult,
+  type RequirementCoverageCategory,
+  type RequirementCoverageResult,
+} from '@/lib/domain/requirement-coverage';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { formatNumber } from '@/lib/format/datetime';
 import { listMembers, type MemberEntry } from '@/lib/services/identity';
+import {
+  requirementDecisionsFor,
+  ssbjDecisionOf,
+  type ContentEvaluation,
+  type RequirementDecision,
+} from '@/lib/services/requirement-decisions';
 import { isUuid } from '@/lib/validation/uuid';
 import type { DbClient } from '@/lib/repositories/types';
 import {
@@ -43,8 +58,8 @@ import {
   type ProjectFramework,
   type ProjectFrameworkDecision,
   type ReportingPeriod,
+  type RequirementExclusionEvent,
   type SsbjAssessment,
-  type SsbjCoverageStatus,
   type Uuid,
 } from '@/types/domain';
 
@@ -767,6 +782,7 @@ export async function createProject(
     applicabilityStatus: input.preparationStatus,
     currentDecisionId: null,
     conditions: {},
+    taxonomyPackageId: null,
     createdAt: now,
     updatedAt: now,
     createdBy: ctx.userId,
@@ -1326,10 +1342,16 @@ export interface VersionDiff {
   added: Array<{ code: string; title: string }>;
   removed: Array<{ code: string; title: string }>;
   changed: Array<{ code: string; title: string }>;
+  /** 改番（前の版の項番 previous_item_code で対応が取れた、項番の変わった要求事項）。NF-08 */
+  renumbered: Array<{ fromCode: string; code: string; title: string; textChanged: boolean }>;
   unchangedCount: number;
 }
 
-/** 2 つの版の要求事項を項番で突き合わせる（公式条項と内部タスクが 1 対 1 とは限らないため、差は人が確認する） */
+/**
+ * 2 つの版の要求事項を突き合わせる（公式条項と内部タスクが 1 対 1 とは限らないため、差は人が確認する）。
+ * 前の版の項番（previous_item_code）で対応が取れる要求事項は、削除＋追加ではなく改番として区別する
+ * （domain/framework-diff.ts。トライアル対応 NF-08）
+ */
 export async function compareFrameworkVersions(
   db: DbClient,
   fromVersionId: Uuid,
@@ -1339,20 +1361,23 @@ export async function compareFrameworkVersions(
     db.select('disclosureItems', { where: { frameworkVersionId: fromVersionId } }),
     db.select('disclosureItems', { where: { frameworkVersionId: toVersionId } }),
   ]);
-  const fromByCode = new Map(fromItems.map((i) => [i.code, i]));
-  const toByCode = new Map(toItems.map((i) => [i.code, i]));
-  const diff: VersionDiff = { added: [], removed: [], changed: [], unchangedCount: 0 };
-  for (const item of toItems) {
-    const before = fromByCode.get(item.code);
-    if (!before) diff.added.push({ code: item.code, title: item.questionText });
-    else if (before.questionText !== item.questionText || before.guidance !== item.guidance) {
-      diff.changed.push({ code: item.code, title: item.questionText });
-    } else diff.unchangedCount += 1;
-  }
-  for (const item of fromItems) {
-    if (!toByCode.has(item.code)) diff.removed.push({ code: item.code, title: item.questionText });
-  }
-  return diff;
+  const diff = diffFrameworkItems(fromItems, toItems);
+  const plain = (e: { toCode: string | null; fromCode: string | null; title: string }) => ({
+    code: e.toCode ?? e.fromCode ?? '',
+    title: e.title,
+  });
+  return {
+    added: diff.added.map(plain),
+    removed: diff.removed.map(plain),
+    changed: diff.changed.map(plain),
+    renumbered: diff.renumbered.map((e) => ({
+      fromCode: e.fromCode ?? '',
+      code: e.toCode ?? '',
+      title: e.title,
+      textChanged: e.textChanged,
+    })),
+    unchangedCount: diff.unchangedCount,
+  };
 }
 
 /**
@@ -1392,6 +1417,8 @@ export async function attachFrameworkVersion(
     applicabilityStatus: 'candidate',
     currentDecisionId: null,
     conditions: { ...pf.conditions },
+    // XBRL のプロファイルは版ごとに選び直す（旧版のプロファイルを黙って引き継がない）
+    taxonomyPackageId: null,
     createdAt: now,
     updatedAt: now,
     createdBy: ctx.userId,
@@ -1527,133 +1554,28 @@ export const REQUIREMENT_FILTER_LABELS: Readonly<Record<RequirementFilter, strin
   recheck: '要再確認',
 };
 
-/** 要求事項の適用判断（内容評価・原稿状態とは別の属性） */
-export type RequirementDecisionKind =
-  'material' | 'not_applicable' | 'not_material' | 'not_assessed';
-
-export interface RequirementDecision {
-  kind: RequirementDecisionKind;
-  label: string;
-  reason: string | null;
-  decidedBy: Uuid | null;
-  decidedByName: string | null;
-  /** 対象外・非重要のように、分母から外す確定判断か */
-  excluded: boolean;
-  note: string | null;
-}
+// 要求事項の判断の型と、基準ごとの読み分け（SSBJ の評価・CSRD の DMA・プロジェクトの判断）は
+// requirement-decisions.ts に置く（トライアル対応 NF-01）。画面・テストはこれまでどおりここから読める
+export type {
+  ContentEvaluation,
+  RequirementDecision,
+  RequirementDecisionKind,
+  RequirementDecisionSource,
+} from '@/lib/services/requirement-decisions';
+export { REQUIREMENT_DECISION_SOURCE_LABELS } from '@/lib/services/requirement-decisions';
 
 /**
  * 既存の SSBJ 評価（ssbj_assessments）から、要求事項の適用判断を読む。
  * 既定値（適用・重要性未判定）は人の判断ではないので「未判定」として扱う。
- * 対象外・非重要は理由がある場合だけ「判断済み」にする（理由の無い除外で分母を減らさない）。
+ * 対象外・非重要は理由があり、別の人が承認した（requirement_exclusion_events）ときだけ「判断済み」にする
+ * （理由の無い除外・承認待ちの除外で分母を減らさない。トライアル対応 NF-02）
  */
 export function requirementDecisionOf(
   assessment: SsbjAssessment | undefined,
   members: readonly MemberEntry[],
+  exclusionEvents: readonly RequirementExclusionEvent[] = [],
 ): RequirementDecision {
-  if (!assessment) {
-    return {
-      kind: 'not_assessed',
-      label: '未判定',
-      reason: null,
-      decidedBy: null,
-      decidedByName: null,
-      excluded: false,
-      note: '評価の行がありません。',
-    };
-  }
-  const decider = assessment.updatedBy ?? assessment.createdBy;
-  if (assessment.applicability === 'not_applicable') {
-    const reason = clean(assessment.applicabilityReason);
-    if (!reason) {
-      return {
-        kind: 'not_assessed',
-        label: '未判定',
-        reason: null,
-        decidedBy: null,
-        decidedByName: null,
-        excluded: false,
-        note: '対象外の理由が記録されていないため、判断済みとして扱いません。',
-      };
-    }
-    return {
-      kind: 'not_applicable',
-      label: '対象外と判断',
-      reason,
-      decidedBy: decider,
-      decidedByName: nameOf(members, decider),
-      excluded: true,
-      note: null,
-    };
-  }
-  if (assessment.materiality === 'not_material') {
-    const reason = clean(assessment.materialityReason);
-    if (!reason) {
-      return {
-        kind: 'not_assessed',
-        label: '未判定',
-        reason: null,
-        decidedBy: null,
-        decidedByName: null,
-        excluded: false,
-        note: '非重要の理由が記録されていないため、判断済みとして扱いません。',
-      };
-    }
-    return {
-      kind: 'not_material',
-      label: '非重要と判断',
-      reason,
-      decidedBy: decider,
-      decidedByName: nameOf(members, decider),
-      excluded: true,
-      note: null,
-    };
-  }
-  if (assessment.materiality === 'material') {
-    return {
-      kind: 'material',
-      label: '適用（重要）',
-      reason: clean(assessment.materialityReason) || null,
-      decidedBy: decider,
-      decidedByName: nameOf(members, decider),
-      excluded: false,
-      note: null,
-    };
-  }
-  return {
-    kind: 'not_assessed',
-    label: '未判定',
-    reason: null,
-    decidedBy: null,
-    decidedByName: null,
-    excluded: false,
-    note: '重要性が未判定です（対象の既定値は判断として扱いません）。',
-  };
-}
-
-export interface ContentEvaluation {
-  /** human = 担当者の確認済み判定／ai_candidate = AI の候補（未確認）／none = 評価なし */
-  source: 'human' | 'ai_candidate' | 'none';
-  status: SsbjCoverageStatus | null;
-  label: string;
-}
-
-function contentEvaluationOf(assessment: SsbjAssessment | undefined): ContentEvaluation {
-  if (assessment?.finalStatus && assessment.reviewedAt) {
-    return {
-      source: 'human',
-      status: assessment.finalStatus,
-      label: COVERAGE_LABEL[assessment.finalStatus],
-    };
-  }
-  if (assessment?.aiStatus) {
-    return {
-      source: 'ai_candidate',
-      status: assessment.aiStatus,
-      label: `候補: ${COVERAGE_LABEL[assessment.aiStatus]}`,
-    };
-  }
-  return { source: 'none', status: null, label: '評価なし' };
+  return ssbjDecisionOf(assessment, exclusionEvents, members);
 }
 
 export type EvidenceKind = 'current' | 'prior_only' | 'none' | 'no_manuscript';
@@ -1679,6 +1601,14 @@ export interface RequirementRow {
   ownerLabel: string | null;
   dueDate: IsoDate | null;
   flags: Record<RequirementFilter, boolean>;
+  /** 5 区分と不足の種類（保存しない。classifyRequirement で毎回導く。トライアル対応 NF-03） */
+  coverage: RequirementCoverageResult;
+  /** 担当・期限とその出所（未完了の対応計画 → 節 → 評価 → プロジェクトの順。NF-03） */
+  ownerDue: OwnerDueResult;
+  /** 引用した定性情報に未記入の項目がある */
+  narrativeMissingFields: boolean;
+  /** 未完了の対応計画の題名 */
+  actionPlans: string[];
 }
 
 export interface RequirementSummary {
@@ -1697,6 +1627,8 @@ export interface RequirementSummary {
   /** 準備完了か（未判定 0、適用確定分がすべて承認済み、要求事項が収録済み） */
   readyForCompletion: boolean;
   notReadyReasons: string[];
+  /** 5 区分ごとの件数（分母は total。0 件の区分も持つ） */
+  coverageCounts: Record<RequirementCoverageCategory, number>;
 }
 
 export interface RequirementsResult {
@@ -1759,6 +1691,7 @@ export async function buildRequirementRows(
         notAssessed: 0,
         readyForCompletion: false,
         notReadyReasons: reasons,
+        coverageCounts: countByCategory([]),
       },
     };
   }
@@ -1767,13 +1700,15 @@ export async function buildRequirementRows(
   const blocks = detail.blocks.filter((b) => b.frameworkVersionId === framework.version.id);
   const versionIds = blocks.map((b) => b.currentVersionId).filter((id): id is Uuid => id !== null);
 
-  const [assessments, blockVersions, mappings] = await Promise.all([
-    db.select('ssbjAssessments', {
-      where: {
-        organizationId,
-        reportingPeriodId: project.reportingPeriodId,
-        itemId: { in: itemIds },
-      },
+  // 判断は基準ごとに読み分ける（SSBJ の評価・CSRD の DMA・プロジェクトの判断。NF-01）。
+  // 以前はどの基準でも SSBJ の評価を読み、CSRD を足したプロジェクトで全件「未判定」になっていた（B-5）
+  const [decisions, blockVersions, mappings] = await Promise.all([
+    requirementDecisionsFor(db, ctx, {
+      project,
+      projectFramework: framework.projectFramework,
+      frameworkKey: framework.frameworkKey,
+      items,
+      members: detail.members,
     }),
     versionIds.length > 0
       ? db.select('disclosureBlockVersions', { where: { id: { in: versionIds } } })
@@ -1831,6 +1766,31 @@ export async function buildRequirementRows(
   const files =
     fileIds.length > 0 ? await db.select('files', { where: { id: { in: fileIds } } }) : [];
 
+  // 資料の新版（引用位置の版より新しい版がある資料）と、失効した根拠（資料の削除・引用位置や数値の版が無い）。
+  // 概要の「上流の変更で再確認が必要な節」（detectFileUpdates・節の鮮度）と、要求事項タブの「要再確認」を揃える。
+  // 区分（5 区分）と承認の可否には使わない（資料の新版は recheck_decisions に記録できないため。Stage A の方針）
+  const allFileVersions =
+    fileIds.length > 0
+      ? await db.select('fileVersions', { where: { organizationId, fileId: { in: fileIds } } })
+      : [];
+  const latestVersionNoByFile = new Map<Uuid, number>();
+  for (const v of allFileVersions) {
+    latestVersionNoByFile.set(
+      v.fileId,
+      Math.max(latestVersionNoByFile.get(v.fileId) ?? 0, v.versionNo),
+    );
+  }
+  const citedFileOf = (anchorId: Uuid) => {
+    const anchor = anchors.find((a) => a.id === anchorId);
+    const fv = anchor ? fileVersions.find((v) => v.id === anchor.fileVersionId) : undefined;
+    const file = fv ? files.find((f) => f.id === fv.fileId && !f.deletedAt) : undefined;
+    return fv && file ? { fv, file } : null;
+  };
+  const anchorFileUpdated = (anchorId: Uuid) => {
+    const cited = citedFileOf(anchorId);
+    return cited !== null && (latestVersionNoByFile.get(cited.file.id) ?? 0) > cited.fv.versionNo;
+  };
+
   const purposeOfAnchor = (anchorId: Uuid) => {
     const anchor = anchors.find((a) => a.id === anchorId);
     const fv = anchor ? fileVersions.find((v) => v.id === anchor.fileVersionId) : undefined;
@@ -1841,12 +1801,30 @@ export async function buildRequirementRows(
   /** 節ごとの根拠・数値・再確認の状態 */
   const blockState = new Map<
     Uuid,
-    { anchorIds: Uuid[]; metric: MetricKind; stale: boolean; hasVersion: boolean }
+    {
+      anchorIds: Uuid[];
+      metric: MetricKind;
+      stale: boolean;
+      /** 引用した資料に新しい版がある（要再確認の絞り込みだけに使う） */
+      fileUpdated: boolean;
+      /** 根拠が失効した（資料の削除・引用位置や数値の版が無い。要再確認の絞り込みだけに使う） */
+      evidenceInvalid: boolean;
+      hasVersion: boolean;
+      narrativeMissingFields: boolean;
+    }
   >();
   for (const block of blocks) {
     const version = blockVersions.find((v) => v.id === block.currentVersionId);
     if (!version) {
-      blockState.set(block.id, { anchorIds: [], metric: 'none', stale: false, hasVersion: false });
+      blockState.set(block.id, {
+        anchorIds: [],
+        metric: 'none',
+        stale: false,
+        fileUpdated: false,
+        evidenceInvalid: false,
+        hasVersion: false,
+        narrativeMissingFields: false,
+      });
       continue;
     }
     const cited = narrativeVersions.filter((v) => version.narrativeRefs.includes(v.id));
@@ -1865,21 +1843,59 @@ export async function buildRequirementRows(
         metric = 'unapproved';
       }
     }
+    let narrativeMissingFields = false;
     for (const v of cited) {
       const record = narrativeRecords.find((r) => r.id === v.narrativeRecordId);
       if (record && record.currentVersionId !== null && record.currentVersionId !== v.id) {
         stale = true;
       }
+      if (record && assessNarrativeFields(record.theme, v.fields).missing.length > 0) {
+        narrativeMissingFields = true;
+      }
     }
-    blockState.set(block.id, { anchorIds: ownAnchors, metric, stale, hasVersion: true });
+    blockState.set(block.id, {
+      anchorIds: ownAnchors,
+      metric,
+      stale,
+      fileUpdated: version.anchorRefs.some(anchorFileUpdated),
+      evidenceInvalid:
+        version.anchorRefs.some((id) => citedFileOf(id) === null) ||
+        version.metricRefs.some((ref) => !dpVersions.some((v) => v.id === ref)),
+      hasVersion: true,
+      narrativeMissingFields,
+    });
   }
 
-  const assessmentByItem = new Map(assessments.map((a) => [a.itemId, a]));
   const isSample = framework.legal.isSample;
+  // 公表済み以降の版か（公開草案・サンプル・未確認の版は充足確認済みにしない: K6）
+  const frameworkPublished =
+    !framework.version.isFixture &&
+    (framework.version.legalStatus === 'promulgated' ||
+      framework.version.legalStatus === 'effective' ||
+      framework.version.legalStatus === 'adopted');
+  // 基準単位で対象外と判断した（判断の記録がある）基準の要求事項は対象外
+  const frameworkExcluded =
+    framework.projectFramework.applicabilityStatus === 'not_applicable' &&
+    framework.projectFramework.currentDecisionId !== null;
 
   const rows: RequirementRow[] = items.map((item) => {
-    const assessment = assessmentByItem.get(item.id);
-    const decision = requirementDecisionOf(assessment, detail.members);
+    const judged = decisions.get(item.id);
+    const decision: RequirementDecision = judged?.decision ?? {
+      kind: 'not_assessed',
+      label: '未判定',
+      reason: null,
+      decidedBy: null,
+      decidedByName: null,
+      excluded: false,
+      note: '判断の記録がありません。',
+      source: 'none',
+      exclusion: null,
+      exclusionDecision: null,
+      approvedBy: null,
+      approvedByName: null,
+      approvedAt: null,
+    };
+    const assessmentOwner = judged?.assessmentOwner ?? null;
     const own = blocks
       .filter((b) => b.requirementItemIds.includes(item.id))
       .sort(
@@ -1946,12 +1962,12 @@ export async function buildRequirementRows(
       }
     }
 
-    const ownerUserId = lead?.ownerUserId ?? assessment?.ownerUserId ?? null;
+    const ownerUserId = lead?.ownerUserId ?? assessmentOwner?.ownerUserId ?? null;
     const ownerLabel = lead?.ownerUserId
       ? nameOf(detail.members, lead.ownerUserId)
-      : assessment?.ownerDepartment
-        ? `${assessment.ownerDepartment}${assessment.ownerUserId ? `（${nameOf(detail.members, assessment.ownerUserId)}）` : ''}`
-        : nameOf(detail.members, assessment?.ownerUserId ?? null);
+      : assessmentOwner?.ownerDepartment
+        ? `${assessmentOwner.ownerDepartment}${assessmentOwner.ownerUserId ? `（${nameOf(detail.members, assessmentOwner.ownerUserId)}）` : ''}`
+        : nameOf(detail.members, assessmentOwner?.ownerUserId ?? null);
 
     const stale = states.some((s) => s.stale);
     const flags: Record<RequirementFilter, boolean> = {
@@ -1966,14 +1982,53 @@ export async function buildRequirementRows(
           metricKind === 'unapproved'),
       review: own.some((b) => b.status === 'review_requested' || b.status === 'approval_pending'),
       returned: own.some((b) => b.status === 'returned'),
-      recheck: stale,
+      // 数値・定性情報の新版に加え、資料の新版・根拠の失効（概要の「上流の変更」と同じ集合。NF-16）
+      recheck: stale || states.some((s) => s.fileUpdated || s.evidenceInvalid),
     };
+
+    const narrativeMissingFields = states.some((s) => s.narrativeMissingFields);
+    const coverage = classifyRequirement({
+      frameworkPublished,
+      frameworkExcluded,
+      decision: {
+        kind: decision.kind === 'material' ? 'applicable' : decision.kind,
+        reason: decision.reason,
+        exclusionApproved: decision.excluded,
+      },
+      blocks: own.map((b) => ({
+        status: b.status,
+        hasVersion: blockState.get(b.id)?.hasVersion ?? false,
+        recheck: blockState.get(b.id)?.stale ?? false,
+        translation: b.translationOfBlockId !== null,
+      })),
+      narrativeMissingFields,
+      evidence: evidence.kind,
+      metrics: metricKind,
+      human: judged?.human ?? null,
+      aiOnly: judged?.aiOnly ?? false,
+    });
+    // 承認待ち・未申請・差戻しの対象外は「未判定」。理由は判断の注記（承認待ちなど）を出す
+    if (decision.exclusion && !decision.excluded && decision.note) {
+      coverage.reasons.splice(0, coverage.reasons.length, decision.note);
+    }
+    const ownerDue = resolveOwnerDue({
+      plans: judged?.plans ?? [],
+      blocks: own
+        .filter((b) => b.translationOfBlockId === null)
+        .map((b) => ({ ownerUserId: b.ownerUserId, dueDate: b.dueDate })),
+      assessment: assessmentOwner,
+      projectDueDate: project.dueDate,
+    });
 
     return {
       item,
       isSample,
       decision,
-      contentEvaluation: contentEvaluationOf(assessment),
+      contentEvaluation: judged?.contentEvaluation ?? {
+        source: 'none',
+        status: null,
+        label: '評価なし',
+      },
       blocks: own.map((b) => ({
         id: b.id,
         title: b.title,
@@ -1988,6 +2043,10 @@ export async function buildRequirementRows(
       ownerLabel,
       dueDate: lead?.dueDate ?? project.dueDate,
       flags,
+      coverage,
+      ownerDue,
+      narrativeMissingFields,
+      actionPlans: (judged?.plans ?? []).filter((plan) => !plan.done).map((plan) => plan.title),
     };
   });
 
@@ -2027,6 +2086,7 @@ export function summarizeRequirements(rows: readonly RequirementRow[]): Requirem
     notAssessed,
     readyForCompletion: rows.length > 0 && reasons.length === 0,
     notReadyReasons: reasons,
+    coverageCounts: countByCategory(rows.map((r) => r.coverage.category)),
   };
 }
 

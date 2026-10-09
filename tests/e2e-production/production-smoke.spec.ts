@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
+import { FY2025_APPROVED_SNAPSHOT_ID } from '@/lib/fixtures/trial-case';
 import { buildHeterogeneousDataset } from '../../scripts/hetero-dataset';
 import { openCollapsible, openMoreMenu } from '../e2e/helpers';
 
@@ -16,9 +18,21 @@ const BASE = process.env.PROD_BASE_URL ?? 'https://terrast-t4d.vercel.app';
 
 test.describe.configure({ mode: 'serial' });
 
-/** 本番のデモログイン（パスワード不要） */
-async function prodLogin(page: import('@playwright/test').Page, displayName: string) {
+/**
+ * 本番のデモログイン（パスワード不要）。
+ * keepDemoState: 利用者を替えても Demo Mode の操作の記録（t4d.demo-* の Cookie）を残す。本番はリクエストごとに
+ * 別インスタンスへ届き得るため、前の利用者の操作（共有・ご意見など）は Cookie にしか残らない
+ */
+async function prodLogin(
+  page: import('@playwright/test').Page,
+  displayName: string,
+  options: { keepDemoState?: boolean } = {},
+) {
+  const keep = options.keepDemoState
+    ? (await page.context().cookies()).filter((c) => c.name.startsWith('t4d.demo-'))
+    : [];
   await page.context().clearCookies();
+  if (keep.length > 0) await page.context().addCookies(keep);
   await page.goto(`${BASE}/login`);
   await expect(page.getByRole('heading', { name: 'デモログイン' })).toBeVisible();
   // 別テナントのアカウントは折りたたみの中にあるので、必要なら開く
@@ -853,7 +867,7 @@ test('本番: 開示ドラフトを人工知能に書かせられる', async ({ 
 });
 
 /**
- * 開示優先モード（2026-09-29 顧客候補向け D0）。
+ * 開示優先モード（2026-09-29 の D0）。
  * 既定は OFF（従来メニュー）で、新しい画面は URL で開ける。ここでは読むだけにする。
  */
 test('本番: 開示優先モードの新画面が URL で開ける（既定は従来メニューのまま）', async ({
@@ -1071,4 +1085,150 @@ test('本番: CSRD の 6 画面と分析の 5 画面が開き、サンプル・�
   ).toHaveAttribute('href', '/enterprise/analysis/financial-impact');
 
   expect(problems.join('\n')).toBe('');
+});
+
+/**
+ * トライアル対応（2026-10）の本番スモーク。要求事項タブ「すべての基準」と 5 区分・横断対応表、トレース画面の追跡率、
+ * 出力の「不一致 0 件」、XBRL プレビューの「提出用ではありません」、トライアルの評価の架空の注記、
+ * ヘッダーから送ったご意見が別の利用者の改善管理表に出ること、共有後の保証側「開示レポート」。
+ * Fixture（架空）の値だけを見る。状態を変える操作（出力の記録・ご意見・共有）は Demo の一時的な操作に留め、
+ * 共有は最後に取り下げる
+ */
+const TRIAL_FY2026 = `/enterprise/disclosure-projects/${IDS.projects.fy2026}`;
+const TRIAL_FY2025 = `/enterprise/disclosure-projects/${IDS.projects.fy2025}`;
+
+test('本番: 要求事項タブの「すべての基準」に 5 区分の絞り込みがあり、横断対応表が出る（閲覧のみ）', async ({
+  page,
+}) => {
+  await prodLogin(page, '海野 みどり');
+  const main = page.locator('#t4d-main');
+  await page.goto(`${BASE}${TRIAL_FY2026}?tab=requirements&fw=all`);
+  await expect(
+    main.getByRole('table', { name: /^要求事項・情報対応表（全基準 \d+ 件）$/ }),
+  ).toBeVisible();
+  const coverage = main.getByRole('navigation', { name: '区分の絞り込み' });
+  // 「区分: すべて」と 5 区分（充足確認済み・要確認・未対応・未判定・対象外）
+  await expect(coverage.getByRole('link')).toHaveCount(6);
+  await coverage.getByRole('link', { name: /^未判定/ }).click();
+  await page.waitForURL(/coverage=undetermined/);
+  await expect(
+    main.getByRole('table', { name: /^要求事項・情報対応表（全基準 \d+ 件／未判定）$/ }),
+  ).toBeVisible();
+
+  await page.goto(`${BASE}${TRIAL_FY2026}?tab=crosswalk`);
+  await expect(main.getByRole('table', { name: '横断対応表（6 件）' })).toBeVisible();
+  await expect(main.getByText(/対応はトライアル用の架空の整理です/)).toBeVisible();
+});
+
+test('本番: トレース画面の追跡率・出力の「不一致 0 件」・XBRL プレビューの「提出用ではありません」', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await prodLogin(page, '承 花子');
+  await page.goto(`${BASE}${TRIAL_FY2025}/snapshots/${FY2025_APPROVED_SNAPSHOT_ID}`);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'スナップショットの内容とトレース' }),
+  ).toBeVisible();
+  // FY2025 の社内承認済みスナップショット（架空）の追跡率（分母付き）
+  await expect(page.getByTestId('trace-rate')).toHaveText('追跡率 2 / 5（段落 1 / 4・数値 1 / 1）');
+
+  // 社内確認用の DOCX を出力すると承認版と突合され、出力の記録に「不一致 0 件」が残る
+  await page.goto(`${BASE}${TRIAL_FY2025}?tab=outputs`);
+  const href = await page
+    .getByRole('row')
+    .filter({ has: page.getByText('社内承認済み版', { exact: true }) })
+    .first()
+    .locator('a[href*="format=docx"][href*="audience=internal"]')
+    .first()
+    .getAttribute('href');
+  expect(href, '社内確認用の DOCX のリンクが無い').toBeTruthy();
+  const status = await page.evaluate(async (url) => (await fetch(url)).status, href!);
+  expect(status).toBe(200);
+  await page.reload();
+  await expect(
+    page.getByRole('table', { name: '出力の記録' }).getByText('不一致 0 件').first(),
+  ).toBeVisible();
+
+  // XBRL のプレビュー（書き込みなし）の先頭に「提出用ではありません」
+  await page.goto(
+    `${BASE}/api/exports/xbrl/${FY2025_APPROVED_SNAPSHOT_ID}?format=ixbrl_html&audience=internal`,
+  );
+  await expect(page.locator('[data-t4d-not-filing-ready]')).toContainText('提出用ではありません');
+});
+
+test('本番: トライアルの評価に架空の注記があり、ヘッダーから送ったご意見が管理者の改善管理表に出る', async ({
+  page,
+}) => {
+  const title = `（本番スモーク）一覧の列を選びたい ${Date.now()}`;
+  await prodLogin(page, '海野 みどり');
+  await page.goto(`${BASE}/enterprise/dashboard`);
+  await page.locator('header [data-feedback-trigger]').click();
+  const dialog = page.getByRole('dialog', { name: 'ご意見・不具合を送る' });
+  await dialog.locator('select[name="kind"]').selectOption('request');
+  await dialog.locator('input[name="title"]').fill(title);
+  await dialog.getByRole('button', { name: '送る' }).click();
+  await expect(dialog.getByRole('status')).toContainText('改善管理表に登録しました');
+  await dialog.getByRole('button', { name: '完了' }).click();
+
+  // 別の利用者（別のインスタンスに届いてもよい）。操作の記録の Cookie は残す
+  await prodLogin(page, '青海 太郎', { keepDemoState: true });
+  await page.goto(`${BASE}/enterprise/trial`);
+  const main = page.locator('#t4d-main');
+  await expect(page.getByRole('heading', { level: 1, name: 'トライアルの評価' })).toBeVisible();
+  await expect(
+    main.getByText('架空のトライアル記録です。実測値・実際の効果ではありません。'),
+  ).toBeVisible();
+  await page.goto(`${BASE}/enterprise/trial?tab=feedback`);
+  await expect(
+    main.getByRole('table', { name: '改善管理表' }).getByRole('row').filter({ hasText: title }),
+  ).toContainText('要望');
+});
+
+test('本番: 社内承認済みレポートを共有すると保証側の「開示レポート」で閲覧でき、取り下げると消える', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const openShareMenu = async () => {
+    await page.goto(`${BASE}${TRIAL_FY2025}?tab=outputs`);
+    const row = page.locator('tr', { hasText: '社内承認済み版' }).first();
+    await row.getByRole('button', { name: '社内承認済み版 No.1 の操作' }).click();
+  };
+  const sharedReportLinks = async () => {
+    await page.goto(`${BASE}/assurance/engagements`);
+    await page.getByRole('link', { name: 'ENG-2026-001' }).first().click();
+    await page.waitForURL(/\/assurance\/engagements\/[^/]+\/overview/);
+    const engagementId = page.url().match(/engagements\/([^/]+)\//)?.[1] ?? '';
+    await page.goto(`${BASE}/assurance/engagements/${engagementId}/reports`);
+    await expect(page.getByRole('heading', { level: 1, name: '開示レポート' })).toBeVisible();
+    return page
+      .getByRole('table', { name: '共有された開示レポート' })
+      .getByRole('link', { name: /^No\.1 / });
+  };
+
+  await prodLogin(page, '青海 太郎');
+  await openShareMenu();
+  await page.getByRole('menuitem', { name: '保証側へ共有（ENG-2026-001）…' }).click();
+  await page.getByRole('dialog').locator('[data-confirm-submit]').click();
+  await expect(page.locator('#t4d-main')).toContainText('共有中');
+
+  try {
+    await prodLogin(page, '青葉 健', { keepDemoState: true });
+    await (await sharedReportLinks()).first().click();
+    await page.waitForURL(/\/reports\/[^/?]+/);
+    await expect(page.getByRole('heading', { level: 1, name: '開示レポートの内容' })).toBeVisible();
+    // 社内承認であり第三者保証ではない（常に見える）
+    const honesty = page.locator('[data-shared-report-honesty]').first();
+    await expect(honesty).toBeVisible();
+    await expect(honesty).toContainText('社内承認版');
+    await expect(page.locator('#t4d-main')).toContainText('第三者保証ではありません');
+  } finally {
+    // 共有のデモ状態を戻す（取り下げ。写しと共有の記録は追記専用で残る）
+    await prodLogin(page, '青海 太郎', { keepDemoState: true });
+    await openShareMenu();
+    await page.getByRole('menuitem', { name: '共有を取り下げる（ENG-2026-001）…' }).click();
+    await page.getByRole('dialog').locator('[data-confirm-submit]').click();
+    await expect(page.locator('#t4d-main')).toContainText('取り下げ済み');
+  }
+  await prodLogin(page, '青葉 健', { keepDemoState: true });
+  await expect(await sharedReportLinks()).toHaveCount(0);
 });

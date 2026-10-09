@@ -681,3 +681,75 @@ export async function decideRecheck(
   });
   return { decision, newVersionId };
 }
+
+// ======================================================================
+// 引用した資料の新版（トライアル対応 NF-16 の P1）
+// ======================================================================
+
+/** 引用位置の資料に新しい版がある節の表記 */
+export const FILE_UPDATE_LABEL = '上流に新版あり（資料）';
+
+/**
+ * 既定の判断（担当者へ差戻し）。資料の新版は引用位置（ページ・文言）が新しい版で同じとは限らないため、
+ * 採用・維持を自動で選ばず、引用位置を取り直す担当者へ戻す
+ */
+export const FILE_UPDATE_DEFAULT_DECISION: RecheckDecisionKind = 'return_to_owner';
+
+export interface FileUpdateItem {
+  anchorId: Uuid;
+  fileId: Uuid;
+  fileName: string;
+  citedFileVersionId: Uuid;
+  citedVersionNo: number;
+  latestFileVersionId: Uuid;
+  latestVersionNo: number;
+  paragraphIds: string[];
+}
+
+/**
+ * 節（または指定した本文）の出典印が指す資料の版より新しい版があるもの。
+ *
+ * 数値・定性情報の新版（computeBlockFreshness）と違い、判断の記録（recheck_decisions の ref_kind は
+ * 数値・定性情報だけ）を持たないため、節の鮮度・承認の可否は変えない。担当者が引用位置を取り直して
+ * 版を保存すれば消える（読み取り時に導出し、書き込まない）。
+ * 削除された資料・別組織の引用位置は根拠失効（computeBlockFreshness）の側で扱うのでここでは返さない。
+ */
+export async function detectFileUpdates(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  block: DisclosureBlock,
+  body?: BlockBody,
+): Promise<FileUpdateItem[]> {
+  const organizationId = ctx.workspace.organizationId;
+  const target = await freshnessBody(db, ctx, block, body);
+  if (target === null) return [];
+  const { anchorIds } = collectRefs(target);
+  const out: FileUpdateItem[] = [];
+  for (const anchorId of anchorIds) {
+    const anchor = await db.findById('sourceAnchors', anchorId);
+    if (!anchor || anchor.organizationId !== organizationId) continue;
+    const cited = await db.findById('fileVersions', anchor.fileVersionId);
+    if (!cited || cited.organizationId !== organizationId) continue;
+    const file = await db.findById('files', cited.fileId);
+    if (!file || file.organizationId !== organizationId || file.deletedAt) continue;
+    const versions = await db.select('fileVersions', {
+      where: { organizationId, fileId: file.id },
+    });
+    const latest = versions.reduce<(typeof versions)[number] | null>(
+      (a, v) => (!a || v.versionNo > a.versionNo ? v : a),
+      null,
+    );
+    if (!latest || latest.versionNo <= cited.versionNo) continue;
+    out.push({
+      anchorId,
+      fileId: file.id,
+      fileName: file.originalName,
+      citedFileVersionId: cited.id,
+      citedVersionNo: cited.versionNo,
+      latestFileVersionId: latest.id,
+      latestVersionNo: latest.versionNo,
+      paragraphIds: paragraphsWith(target, (i) => i.t === 'cite' && i.sourceAnchorId === anchorId),
+    });
+  }
+  return out;
+}

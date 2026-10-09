@@ -19,8 +19,14 @@ import {
   createSignoff,
   createSnapshot,
   detectSnapshotChanges,
+  listDataRoomDataPoints,
   loadEngagement,
 } from '@/lib/services/assurance';
+import {
+  createReportNote,
+  noteBodyLimit,
+  type ReportNoteTarget,
+} from '@/lib/services/assurance-notes';
 import { ASSURANCE_ROLES } from '@/types/domain';
 import type {
   AssuranceLevel,
@@ -316,15 +322,13 @@ export async function createPbcAction(formData: FormData): Promise<void> {
     const now = new Date().toISOString();
     const code = `PBC-${String(existing.length + 1).padStart(3, '0')}`;
 
-    // 対象は Data Room に共有済みの Data Point だけを許す（他社のデータを指させない）
+    // 対象は Data Room に共有済みの Data Point だけを許す（他社のデータを指させない）。
+    // 「共有済み」は Data Room の表示と同じ導出（許諾×承認済み。NF-22）で判定する
     const requestedTargetId = String(formData.get('targetId') ?? '');
     let targetId: string | null = null;
     if (requestedTargetId) {
-      const shared = await db.select('dataRoomItems', {
-        where: { engagementId, sourceType: 'data_point', sourceId: requestedTargetId },
-        limit: 1,
-      });
-      if (shared.length === 0) {
+      const shared = await listDataRoomDataPoints(db, engagementId);
+      if (!shared.some((row) => row.dataPoint.id === requestedTargetId)) {
         throw new AuthorizationError('対象は Data Room に共有済みのデータから選んでください。');
       }
       targetId = requestedTargetId;
@@ -514,6 +518,10 @@ export async function createReviewNoteAction(formData: FormData): Promise<void> 
 
     const { engagement } = await loadEngagement(db, ctx, engagementId);
     const now = new Date().toISOString();
+    // レビュー Note は Demo Mode で Cookie に載る（トライアル対応）。上限を超えた本文・案件外の担当者は
+    // 別のインスタンスで戻せないため、DB の検査と同じ条件で先に断る
+    const body = reviewNoteText(ctx, formData.get('body'), '内容');
+    const assignedTo = await engagementAssignee(db, engagementId, formData.get('assignedTo'));
 
     await db.insert('reviewNotes', [
       {
@@ -522,14 +530,19 @@ export async function createReviewNoteAction(formData: FormData): Promise<void> 
         assuranceFirmId: engagement.assuranceFirmId,
         targetType: 'engagement',
         targetId: engagementId,
-        body: String(formData.get('body') ?? '').trim(),
+        body,
         raisedBy: ctx.userId,
-        assignedTo: (formData.get('assignedTo') as string) || null,
+        assignedTo,
         status: 'open',
         // 既定は法人内部限定
         sharedWithClient: formData.get('sharedWithClient') === 'on',
         resolutionComment: null,
         resolvedAt: null,
+        // 案件全体へのコメント。共有レポートの段落・数値への起票は createReportNoteAction（0050）
+        targetCopyId: null,
+        targetBlockId: null,
+        targetParagraphId: null,
+        targetDataPointVersionId: null,
         createdAt: now,
         updatedAt: now,
         createdBy: ctx.userId,
@@ -562,17 +575,109 @@ export async function clearReviewNoteAction(formData: FormData): Promise<void> {
       throw new NotFoundError('レビュー Note が見つかりません。');
     }
 
+    const resolutionComment = reviewNoteText(ctx, formData.get('resolutionComment'), '対応内容');
     const now = new Date().toISOString();
     await db.update('reviewNotes', noteId, {
       status: 'cleared',
-      resolutionComment: String(formData.get('resolutionComment') ?? ''),
+      resolutionComment,
       resolvedAt: now,
       updatedAt: now,
       updatedBy: ctx.userId,
     });
 
     revalidatePath(`${base(engagementId)}/review-notes`);
+    if (note.targetCopyId) {
+      revalidatePath(`${base(engagementId)}/reports/${note.targetCopyId}`);
+      revalidatePath('/enterprise/assurance-comments');
+    }
   });
+}
+
+/** レビュー Note の本文・対応内容（空は不可。上限は Demo Mode で 400 字・Supabase Mode で 2,000 字） */
+function reviewNoteText(
+  ctx: Parameters<typeof noteBodyLimit>[0],
+  value: FormDataEntryValue | null,
+  label: string,
+): string {
+  const text = String(value ?? '').trim();
+  if (text === '') throw new ValidationError(`${label}を入力してください。`);
+  const limit = noteBodyLimit(ctx);
+  if (text.length > limit) {
+    throw new ValidationError(`${label}は ${limit} 字以内で入力してください。`);
+  }
+  return text;
+}
+
+/** 担当者は案件のメンバー（解除されていない）だけ。空は未割当 */
+async function engagementAssignee(
+  db: Awaited<ReturnType<typeof getDb>>,
+  engagementId: string,
+  value: FormDataEntryValue | null,
+): Promise<string | null> {
+  const userId = String(value ?? '').trim();
+  if (userId === '') return null;
+  const members = await db.select('engagementMembers', {
+    where: { engagementId, userId, removedAt: { isNull: true } },
+    limit: 1,
+  });
+  if (members.length === 0) throw new ValidationError('担当者は案件のメンバーから選んでください。');
+  return userId;
+}
+
+// ----------------------------------------------------------------------
+// 開示レポートへのコメント（トライアル対応 NF-21）
+// ----------------------------------------------------------------------
+
+/** 開示レポートの内容の画面（案件 ID・写しの ID はフォーム由来なので 1 セグメントとして符号化する） */
+function reportPath(engagementId: string, copyId: string): string {
+  return `/assurance/engagements/${encodeURIComponent(engagementId)}/reports/${encodeURIComponent(copyId)}`;
+}
+
+/** 選んでいた追跡番号（戻り先の URL に載せる。英数とハイフンだけ） */
+function traceParam(value: FormDataEntryValue | null): string | null {
+  const text = String(value ?? '');
+  return /^[A-Za-z0-9-]{1,40}$/.test(text) ? text : null;
+}
+
+/**
+ * 対象の選択肢の値（`paragraph|<節 ID>|<段落 ID>` または `metric|<数値の版 ID>`）を読む。
+ * 実在の確認はサービス（createReportNote）が写しに対して行う
+ */
+function reportNoteTargetOf(value: FormDataEntryValue | null): ReportNoteTarget {
+  const [kind, first = '', ...rest] = String(value ?? '').split('|');
+  if (kind === 'paragraph' && first !== '' && rest.length > 0) {
+    return { kind: 'report_paragraph', blockId: first, paragraphId: rest.join('|') };
+  }
+  if (kind === 'metric' && first !== '') {
+    return { kind: 'report_metric', dataPointVersionId: first };
+  }
+  throw new ValidationError('コメントの対象（段落・数値）を選んでください。');
+}
+
+/** 保証側: 共有された開示レポートの段落・数値にコメントを起票する（既定は法人内部限定） */
+export async function createReportNoteAction(formData: FormData): Promise<void> {
+  const engagementId = String(formData.get('engagementId') ?? '');
+  const copyId = String(formData.get('copyId') ?? '');
+  const unit = traceParam(formData.get('unit'));
+  const path = engagementId && copyId ? reportPath(engagementId, copyId) : '/assurance/engagements';
+  const unitQuery = unit ? `&unit=${unit}` : '';
+  await withUserFacingError(`${path}?new=1${unitQuery}`, async () => {
+    const ctx = await requireAssuranceContext();
+    const db = await getDb();
+    await createReportNote(db, ctx, {
+      engagementId,
+      copyId,
+      target: reportNoteTargetOf(formData.get('target')),
+      body: String(formData.get('body') ?? ''),
+      sharedWithClient: formData.get('sharedWithClient') === 'on',
+      assignedTo: String(formData.get('assignedTo') ?? '').trim() || null,
+    });
+    revalidatePath(path);
+    revalidatePath(`${base(engagementId)}/reports`);
+    revalidatePath(`${base(engagementId)}/review-notes`);
+    revalidatePath('/enterprise/assurance-comments');
+  });
+  redirect(`${path}?result=note-created${unitQuery}`);
 }
 
 // ----------------------------------------------------------------------
@@ -585,8 +690,13 @@ export async function createSignoffAction(formData: FormData): Promise<void> {
     const db = await getDb();
     const engagementId = String(formData.get('engagementId') ?? '');
     const stage = String(formData.get('stage') ?? 'prepared') as SignoffStage;
-    await createSignoff(db, ctx, engagementId, stage, (formData.get('comment') as string) || null);
+    // 対象とした開示レポートの写し（任意。NF-23）。空は「結び付けない」
+    const sharedReportCopyId = String(formData.get('sharedReportCopyId') ?? '').trim() || null;
+    await createSignoff(db, ctx, engagementId, stage, (formData.get('comment') as string) || null, {
+      sharedReportCopyId,
+    });
     revalidatePath(`${base(engagementId)}/signoffs`);
+    revalidatePath(`${base(engagementId)}/overview`);
     revalidatePath('/assurance/dashboard');
   });
 }

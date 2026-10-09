@@ -14,6 +14,7 @@ import {
   generateCsrdDraft,
   saveCsrdDraftBody,
 } from '@/lib/services/csrd/draft';
+import { importDraftToProject } from '@/lib/services/draft-import';
 import { CSRD_SECTIONS, type CsrdSection } from '@/types/domain';
 
 /**
@@ -125,4 +126,26 @@ export async function confirmCsrdDraftAction(formData: FormData): Promise<void> 
   });
   revalidateCsrd();
   redirect(`${BASE}?flash=csrdDraftConfirmed${sectionAnchor(formData.get('section'))}`);
+}
+
+/**
+ * 確定本文を開示プロジェクトの原稿の節へ取り込む（トライアル対応 NF-19）。新しい版は下書きで、
+ * 承認は原稿のレビュー・最終承認で行う。CSRD を基準に持つ同じ年度のプロジェクトだけ（40a には入れない）
+ */
+export async function importCsrdDraftToProjectAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const projectId = String(formData.get('projectId') ?? '');
+  let target = '';
+  await withUserFacingError(BASE, async () => {
+    const result = await importDraftToProject(db, ctx, {
+      source: 'csrd',
+      draftId: String(formData.get('draftId') ?? ''),
+      projectId,
+    });
+    target = `/enterprise/disclosure-projects/${result.block.projectId}/blocks/${result.block.id}?flash=draftImported&ai=${result.aiParagraphs}`;
+  });
+  revalidatePath(BASE);
+  revalidatePath(`/enterprise/disclosure-projects/${projectId}`);
+  redirect(target);
 }

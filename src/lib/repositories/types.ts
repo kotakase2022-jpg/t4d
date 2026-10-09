@@ -12,6 +12,30 @@
  */
 
 import type {
+  AiFeedback,
+  ExportReconciliation,
+  NarrativeRequirementLink,
+  OrganizationDataTerms,
+  OrganizationFilingIdentifier,
+  OrganizationOption,
+  ProjectRequirementAssessment,
+  ProjectRequirementAssessmentEvent,
+  RequirementCrosswalk,
+  RequirementExclusionEvent,
+  ResponseContentLink,
+  ReviewNoteResponse,
+  SharedReportCopy,
+  TrialFeedbackItem,
+  TrialProgram,
+  TrialScenario,
+  TrialScenarioJudgement,
+  TrialScenarioRun,
+  TrialTaskTiming,
+  XbrlConcept,
+  XbrlConceptRequirement,
+  XbrlTagMapping,
+  XbrlTagMappingEvent,
+  XbrlTaxonomyPackage,
   Alert,
   Approval,
   ApprovalRoute,
@@ -194,6 +218,32 @@ export interface TableMap {
   ingestionJobFiles: IngestionJobFile;
   ingestionRows: IngestionRow;
   aiRuns: AiRun;
+  aiFeedback: AiFeedback;
+
+  // トライアル対応（2026-10）
+  projectRequirementAssessments: ProjectRequirementAssessment;
+  projectRequirementAssessmentEvents: ProjectRequirementAssessmentEvent;
+  requirementExclusionEvents: RequirementExclusionEvent;
+  narrativeRequirementLinks: NarrativeRequirementLink;
+  requirementCrosswalks: RequirementCrosswalk;
+  sharedReportCopies: SharedReportCopy;
+  reviewNoteResponses: ReviewNoteResponse;
+  exportReconciliations: ExportReconciliation;
+  xbrlTaxonomyPackages: XbrlTaxonomyPackage;
+  xbrlConcepts: XbrlConcept;
+  xbrlConceptRequirements: XbrlConceptRequirement;
+  organizationFilingIdentifiers: OrganizationFilingIdentifier;
+  xbrlTagMappings: XbrlTagMapping;
+  xbrlTagMappingEvents: XbrlTagMappingEvent;
+  trialPrograms: TrialProgram;
+  trialScenarios: TrialScenario;
+  trialScenarioRuns: TrialScenarioRun;
+  trialScenarioJudgements: TrialScenarioJudgement;
+  trialFeedbackItems: TrialFeedbackItem;
+  trialTaskTimings: TrialTaskTiming;
+  organizationDataTerms: OrganizationDataTerms;
+  organizationOptions: OrganizationOption;
+  responseContentLinks: ResponseContentLink;
 
   engagements: Engagement;
   engagementMembers: EngagementMember;

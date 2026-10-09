@@ -176,6 +176,8 @@ export function StandardImport({
   const [mode, setMode] = React.useState<'all' | 'valid_only'>('all');
   const [confirmExcluded, setConfirmExcluded] = React.useState(false);
   const [reason, setReason] = React.useState('');
+  /** 過年度確定値として登録する（既定はオフ。過年度の行と経路があるときだけ選べる。NF-44） */
+  const [priorYearFinal, setPriorYearFinal] = React.useState(false);
   const [commitFeedback, setCommitFeedback] = React.useState<CommitFeedback>(null);
   const idempotencyKey = React.useRef<string | null>(null);
   /**
@@ -262,6 +264,7 @@ export function StandardImport({
           setDirty(false);
           setMode('all');
           setConfirmExcluded(false);
+          setPriorYearFinal(false);
           idempotencyKey.current = newKey();
           validatedSource.current = fd;
           const c = result.preview.counts;
@@ -290,6 +293,7 @@ export function StandardImport({
     fd.set('idempotencyKey', key);
     fd.set('mode', mode);
     fd.set('correctionReason', reason);
+    if (priorYearFinal) fd.set('priorYearFinal', 'on');
     // 確認した差分（競合のときに、どの行が変わったかを示すためだけに使う）
     fd.set(
       'confirmedRows',
@@ -334,6 +338,7 @@ export function StandardImport({
     setReason('');
     setMode('all');
     setConfirmExcluded(false);
+    setPriorYearFinal(false);
     setCommitFeedback(null);
     setValidateFeedback(null);
     setDirty(false);
@@ -644,6 +649,22 @@ export function StandardImport({
                   </label>
                 )}
 
+                {preview.priorYear.rowCount > 0 && preview.priorYear.routeName && (
+                  <div className="space-y-0.5 rounded-t4d border border-line bg-surface-muted px-3 py-2">
+                    <NativeCheckbox
+                      name="priorYearFinal"
+                      checked={priorYearFinal}
+                      onChange={(event) => setPriorYearFinal(event.target.checked)}
+                      label={`過年度確定値として登録（${preview.priorYear.routeName}）`}
+                    />
+                    <p className="pl-5 text-caption text-ink-muted">
+                      画面の報告期間より前の期間の値 {preview.priorYear.rowCount}{' '}
+                      行を、登録したあと過年度確定値の承認経路で提出します（承認は経路の承認者が行います）。
+                      当年度の値はこれまでどおり「入力中」で登録します。
+                    </p>
+                  </div>
+                )}
+
                 <p className="text-caption text-ink-muted">
                   取込で承認はしません。登録した値は「入力中」になり、承認済みの値を変えた場合は下書きへ戻して「承認後に変更」を記録します。
                 </p>
@@ -863,6 +884,12 @@ function CommitFeedbackView({
         {r.replayed && (
           <p>
             同じ確定操作の再送だったため、重ねて登録していません（最初の確定結果を表示しています）。
+          </p>
+        )}
+        {r.priorYearRouted && (
+          <p>
+            過年度の値 {r.priorYearRouted.count} 件を「{r.priorYearRouted.routeName}
+            」で提出しました（承認待ち）。
           </p>
         )}
         {r.excluded > 0 && (

@@ -189,14 +189,22 @@ export interface ReportExportCard {
  * 以前は画面側で配列を書いており、CDP のカードが SSBJ カードの links に入れ子になって
  * 画面に出ていなかった。CSRD の DOCX は経路（/api/exports/cdp?framework=csrd&format=docx）が
  * あるのにリンクが無かった（W0 棚卸し）。構造を 1 か所にしてテストで確かめる。
+ *
+ * CDP は組織ごとに契約するオプション（トライアル対応 NF-38）。契約が無い組織には CDP のカードを出さない
+ * （出すと押したときに 403 になるだけ）。呼び出し側が hasOption(db, ctx, 'cdp') の結果を渡す。
+ * 省略時は従来どおり出す（判定は出力 API でも行う）
  */
-export function buildReportExportCards(periodId: string): ReportExportCard[] {
+export function buildReportExportCards(
+  periodId: string,
+  options: { cdpOption?: boolean } = {},
+): ReportExportCard[] {
   const disclosure = (framework: 'ssbj' | 'cdp' | 'csrd', format: ExportFormat) =>
     framework === 'cdp'
       ? `/api/exports/cdp?period=${periodId}&format=${format}`
       : `/api/exports/cdp?framework=${framework}&period=${periodId}&format=${format}`;
+  const cdpOption = options.cdpOption ?? true;
 
-  return [
+  const cards: ReportExportCard[] = [
     {
       title: '非財務データ台帳',
       description: '組織 × 期間 × 指標 × 値 × 単位 × 状態 × 検証結果 × Evidence 件数を出力します。',
@@ -218,10 +226,11 @@ export function buildReportExportCards(periodId: string): ReportExportCard[] {
     {
       title: 'CDP 回答一覧',
       description:
-        '質問コード・質問文・前年差分区分・状態・回答本文・マッピング指標を出力します（一問一答転記用）。',
+        '質問コード・質問文・前年差分区分・状態・回答本文・マッピング指標・担当・承認者・承認日時・版を出力します（一問一答転記用）。承認済みだけの XLSX も出せます。CDP ポータルへの送信は含みません。',
       links: [
         { label: 'CSV', href: disclosure('cdp', 'csv') },
         { label: 'XLSX', href: disclosure('cdp', 'xlsx') },
+        { label: 'XLSX（承認済みだけ）', href: `${disclosure('cdp', 'xlsx')}&approvedOnly=1` },
         { label: 'DOCX（開示ドラフト）', href: disclosure('cdp', 'docx') },
       ],
     },
@@ -236,6 +245,7 @@ export function buildReportExportCards(periodId: string): ReportExportCard[] {
       ],
     },
   ];
+  return cdpOption ? cards : cards.filter((card) => card.title !== 'CDP 回答一覧');
 }
 
 // ----------------------------------------------------------------------

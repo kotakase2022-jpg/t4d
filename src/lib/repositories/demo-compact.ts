@@ -2,22 +2,30 @@ import { canonicalJson, collectRefs, plainTextOf } from '@/lib/domain/disclosure
 import { narrativeContentHash } from '@/lib/domain/narrative-hash';
 import { contentHash } from '@/lib/fixtures/ids';
 import {
+  asSnapshotDetail,
   computeSnapshotContentHash,
+  isSnapshotV2,
   snapshotAnchorOf,
+  snapshotApprovalOf,
   snapshotBlockOf,
   snapshotCommentOf,
   snapshotFrameworkOf,
   snapshotMetricValueOf,
+  snapshotRequirementStateOf,
   snapshotRequirementsOf,
   type SnapshotBlock,
   type SnapshotFramework,
   type SnapshotIssue,
   type SnapshotMetricValue,
+  type SnapshotRequirementState,
 } from '@/lib/domain/report-snapshot-content';
+import { RECONCILIATION_CHECKER_VERSION } from '@/lib/domain/export-reconciliation';
+import { buildSharedReportCopy, sharedReportCopyHash } from '@/lib/domain/report-copy';
 import type { FixtureDb } from '@/lib/fixtures/store';
 import {
   ANCHOR_ACQUIRED_BY,
   ANCHOR_KINDS,
+  EXPORT_ARTIFACT_FORMATS,
   QUANTITATIVE_IMPORT_DIFF_KINDS,
   type BlockBody,
   type BlockParagraph,
@@ -113,6 +121,8 @@ export const COMPACTED_TABLES: ReadonlySet<string> = new Set([
   'exportArtifacts',
   'quantitativeImportBatches',
   'approvals',
+  // 保証側へ共有した写し（トライアル対応 NF-20）。目録だけを載せ、写しはスナップショットから作り直す
+  'sharedReportCopies',
 ]);
 
 export function isCompactedTable(table: string): boolean {
@@ -381,6 +391,8 @@ const NARRATIVE_VERSION_DEFAULTS: Rec = {
   scopeNote: '',
   fields: {},
   sourceAnchorIds: [],
+  // 関連するインパクト・リスク・機会（0052）。以前の Cookie の行は持たないため空として戻す
+  iroRefs: [],
   carriedFromVersionId: null,
   changeReason: null,
   originatedFromAiRunId: null,
@@ -412,13 +424,14 @@ function expandNarrativeVersion(v: Rec): Rec | null {
     carriedFromVersionId: isStrOrNull,
     changeReason: isStrOrNull,
     originatedFromAiRunId: isStrOrNull,
+    iroRefs: (x) => isStrArray(x) && x.length <= 200,
     createdAt: isStr,
     createdBy: isStrOrNull,
   };
   if (!hasShape(row, shape)) return null;
   return {
     ...only(row, shape),
-    // ハッシュは持ち回さず、本文から計算し直す（narrative.ts と同じ規則）
+    // ハッシュは持ち回さず、本文から計算し直す（narrative.ts と同じ規則。IRO の参照はハッシュに含めない）
     contentHash: narrativeContentHash({
       reportingPeriodId: row.reportingPeriodId as string,
       scopeNote: row.scopeNote as string,
@@ -453,13 +466,80 @@ function expandAnchor(v: Rec): Rec | null {
   return hasShape(row, shape) ? only(row, shape) : null;
 }
 
+/**
+ * 出力記録の突合・XBRL の列（0051）の既定値。未突合の出力（この列を足す前の出力・突合しない形式）は
+ * null のまま Cookie に載せない（実演の流れの Cookie を増やさない）
+ */
+const EXPORT_ARTIFACT_DEFAULTS: Rec = {
+  reconciledParagraphs: null,
+  reconciledNumbers: null,
+  reconciledRows: null,
+  mismatchCount: null,
+  checkerVersion: null,
+  taxonomyPackageId: null,
+  mappingSetHash: null,
+  validationSummary: null,
+};
+
+const isCountOrNull = (x: unknown) => x === null || (isInt(x) && x >= 0);
+
+/**
+ * 突合で一致した出力記録の件数（段落・数値・行）を 1 つの配列 rc にまとめる鍵。渡した出力は必ず不一致 0
+ * （不一致なら記録しない）なので、不一致の件数と照合の版は省いて、戻すときに補う（plan K8 の余裕。
+ * 実演＋CSRD の流れの出力 3 件分）
+ */
+const RECONCILED_KEY = 'rc';
+
+function packReconciliation(rest: Rec): Rec {
+  const counts = [rest.reconciledParagraphs, rest.reconciledNumbers, rest.reconciledRows];
+  if (
+    rest.mismatchCount !== 0 ||
+    rest.checkerVersion !== RECONCILIATION_CHECKER_VERSION ||
+    !counts.every((n) => isInt(n) && (n as number) >= 0)
+  ) {
+    return rest;
+  }
+  const {
+    reconciledParagraphs: _p,
+    reconciledNumbers: _n,
+    reconciledRows: _r,
+    mismatchCount: _m,
+    checkerVersion: _c,
+    ...others
+  } = rest;
+  return { ...others, [RECONCILED_KEY]: counts };
+}
+
+function unpackReconciliation(v: Rec): Rec | null {
+  if (!(RECONCILED_KEY in v)) return v;
+  const { [RECONCILED_KEY]: packed, ...others } = v;
+  if (
+    !Array.isArray(packed) ||
+    packed.length !== 3 ||
+    !packed.every((n) => isInt(n) && (n as number) >= 0)
+  ) {
+    return null;
+  }
+  const [reconciledParagraphs, reconciledNumbers, reconciledRows] = packed as number[];
+  return {
+    ...others,
+    reconciledParagraphs,
+    reconciledNumbers,
+    reconciledRows,
+    mismatchCount: 0,
+    checkerVersion: RECONCILIATION_CHECKER_VERSION,
+  };
+}
+
 function expandExportArtifact(v: Rec, db: FixtureDb): Rec | null {
-  const row = withDefaults(v, {});
+  const unpacked = unpackReconciliation(v);
+  if (!unpacked) return null;
+  const row = withDefaults(unpacked, EXPORT_ARTIFACT_DEFAULTS);
   const shape: Shape = {
     id: isStr,
     organizationId: isStr,
     snapshotId: isStr,
-    format: (x) => x === 'docx' || x === 'xlsx' || x === 'csv',
+    format: (x) => (EXPORT_ARTIFACT_FORMATS as readonly unknown[]).includes(x),
     audience: (x) => x === 'internal' || x === 'external',
     templateVersion: isStr,
     fileName: isStr,
@@ -467,6 +547,16 @@ function expandExportArtifact(v: Rec, db: FixtureDb): Rec | null {
     fileSha256: isStr,
     generatedAt: isStr,
     generatedBy: isStr,
+    reconciledParagraphs: isCountOrNull,
+    reconciledNumbers: isCountOrNull,
+    reconciledRows: isCountOrNull,
+    mismatchCount: isCountOrNull,
+    checkerVersion: isStrOrNull,
+    taxonomyPackageId: isStrOrNull,
+    mappingSetHash: isStrOrNull,
+    validationSummary: (x) =>
+      x === null ||
+      (!!x && typeof x === 'object' && !Array.isArray(x) && JSON.stringify(x).length <= 4000),
   };
   if (!hasShape(row, shape)) return null;
   // 内容ハッシュはスナップショットのもの（出力は必ずスナップショットから作る）。先にスナップショットが要る
@@ -664,8 +754,13 @@ function compactSnapshot(row: SnapshotRowLike, db: FixtureDb): Rec | null {
           : {}),
     });
   }
+  // v2 の写し（承認の記録・根拠資料・要求事項の状態）。承認の記録と判断・承認の記録の ID は、追記専用の行から
+  // 固定時点（作成日時）で同じ規則により組み立て直せるため載せない。可変の評価行のダイジェストと、
+  // 根拠資料の版（evidence_links は Cookie に載らず、書き換えもありうる）だけを載せる
+  const v2 = isSnapshotV2(row);
   const manifest: Rec = {
     [COMPACT_MARK]: COMPACT_VERSION,
+    ...(v2 ? { hv: 2 } : {}),
     id: row.id,
     organizationId: row.organizationId,
     projectId: row.projectId,
@@ -684,12 +779,16 @@ function compactSnapshot(row: SnapshotRowLike, db: FixtureDb): Rec | null {
       a: f.applicabilityStatus,
       d: f.decisionId,
       p: f.purpose,
+      ...(v2 && f.requirementState?.assessmentDigest
+        ? { rd: f.requirementState.assessmentDigest }
+        : {}),
     })),
     bl: blocks,
     mv: row.metricValues.map((m) => ({
       v: m.dataPointVersionId,
       s: m.status,
       ...(m.versionApproved ? { ok: 1 } : {}),
+      ...(v2 && (m.evidenceFileVersionIds ?? []).length > 0 ? { e: m.evidenceFileVersionIds } : {}),
     })),
     an: row.anchors.map((a) => a.sourceAnchorId),
   };
@@ -762,6 +861,16 @@ export function rehydrateSnapshotManifest(v: Rec, db: FixtureDb): Rec | null {
   if (!ok) return null;
   const pj = v.pj as Rec | null;
   if (pj !== null && (!pj || typeof pj !== 'object')) return null;
+  // v2 の写し（承認の記録・根拠資料・要求事項の状態を持つ）。知らない版の目録は戻さない
+  if (v.hv !== undefined && v.hv !== 2) return null;
+  const v2 = v.hv === 2;
+  const owner = v2
+    ? db.disclosureProjects.find(
+        (p) => p.id === v.projectId && p.organizationId === v.organizationId,
+      )
+    : undefined;
+  if (v2 && !owner) return null;
+  const frozenRevision = pj && isInt(pj.r) ? pj.r : 0;
 
   const frameworkVersions: SnapshotFramework[] = [];
   for (const entry of v.fw as Rec[]) {
@@ -770,6 +879,35 @@ export function rehydrateSnapshotManifest(v: Rec, db: FixtureDb): Rec | null {
     const framework = version
       ? (db.frameworks.find((f) => f.id === version.frameworkId) ?? null)
       : null;
+    let requirementState: SnapshotRequirementState | null = null;
+    if (v2 && owner) {
+      if (entry.rd !== undefined && !(isStr(entry.rd) && /^[0-9a-f]{16}$/.test(entry.rd))) {
+        return null;
+      }
+      // 作成時（report-snapshot.ts の loadRequirementState）と同じ規則で、固定時点までの記録を引き直す
+      const pf = db.projectFrameworks.find(
+        (p) =>
+          p.projectId === owner.id &&
+          p.organizationId === owner.organizationId &&
+          p.frameworkVersionId === entry.v,
+      );
+      requirementState = snapshotRequirementStateOf({
+        assessmentEvents: pf
+          ? db.projectRequirementAssessmentEvents.filter(
+              (e) => e.organizationId === owner.organizationId && e.projectFrameworkId === pf.id,
+            )
+          : [],
+        exclusionEvents: db.requirementExclusionEvents.filter(
+          (e) =>
+            e.organizationId === owner.organizationId &&
+            e.reportingPeriodId === owner.reportingPeriodId &&
+            e.frameworkVersionId === entry.v &&
+            (e.projectFrameworkId === null || e.projectFrameworkId === pf?.id),
+        ),
+        assessmentDigest: isStr(entry.rd) ? entry.rd : null,
+        asOf: v.createdAt as string,
+      });
+    }
     frameworkVersions.push(
       snapshotFrameworkOf(
         {
@@ -787,9 +925,14 @@ export function rehydrateSnapshotManifest(v: Rec, db: FixtureDb): Rec | null {
           periodEnd: String(pj.en ?? ''),
           scopeRevision: isInt(pj.r) ? pj.r : 0,
         },
+        v2 ? { requirementState } : undefined,
       ),
     );
   }
+  const orgRequests = v2
+    ? db.reviewRequests.filter((r) => r.organizationId === v.organizationId)
+    : [];
+  const orgEvents = v2 ? db.reviewEvents.filter((e) => e.organizationId === v.organizationId) : [];
 
   const itemById = new Map(db.disclosureItems.map((i) => [i.id, i]));
   const blocks: SnapshotBlock[] = [];
@@ -832,16 +975,35 @@ export function rehydrateSnapshotManifest(v: Rec, db: FixtureDb): Rec | null {
       return null;
     }
     blocks.push(
-      snapshotBlockOf(block, version ?? null, {
-        status: entry.s as SnapshotBlock['status'],
-        approvedVersionId:
-          entry.a === 1 ? (entry.v as string | null) : isStr(entry.a) ? entry.a : null,
-        isApprovedVersion: entry.ok === 1,
-        requirements: snapshotRequirementsOf(block.requirementItemIds, itemById),
-        issues,
-        internalComments: comments,
-        maskedFileNames: masked,
-      }),
+      snapshotBlockOf(
+        block,
+        version ?? null,
+        {
+          status: entry.s as SnapshotBlock['status'],
+          approvedVersionId:
+            entry.a === 1 ? (entry.v as string | null) : isStr(entry.a) ? entry.a : null,
+          isApprovedVersion: entry.ok === 1,
+          requirements: snapshotRequirementsOf(block.requirementItemIds, itemById),
+          issues,
+          internalComments: comments,
+          maskedFileNames: masked,
+        },
+        v2
+          ? {
+              // 承認の記録は追記専用の依頼・記録から作成時と同じ規則で選び直す（report-snapshot.ts の assemble）
+              approval:
+                entry.ok === 1 && version
+                  ? snapshotApprovalOf(
+                      block.id,
+                      version.id,
+                      orgRequests,
+                      orgEvents,
+                      v.snapshotKind === 'approved' ? frozenRevision : 0,
+                    )
+                  : null,
+            }
+          : undefined,
+      ),
     );
   }
 
@@ -851,6 +1013,8 @@ export function rehydrateSnapshotManifest(v: Rec, db: FixtureDb): Rec | null {
     const version = db.dataPointVersions.find((x) => x.id === entry.v);
     const dp = version ? db.dataPoints.find((d) => d.id === version.dataPointId) : undefined;
     if (!version || !dp) return null;
+    const evidence = entry.e ?? [];
+    if (!isStrArray(evidence) || !isUniqueStrList(evidence, MANIFEST_LIMITS.perBlock)) return null;
     metricValues.push(
       snapshotMetricValueOf(
         version,
@@ -861,6 +1025,7 @@ export function rehydrateSnapshotManifest(v: Rec, db: FixtureDb): Rec | null {
           period: db.periods.find((p) => p.id === dp.reportingPeriodId),
         },
         { status: entry.s as SnapshotMetricValue['status'], versionApproved: entry.ok === 1 },
+        v2 ? { evidenceFileVersionIds: evidence } : undefined,
       ),
     );
   }
@@ -929,6 +1094,54 @@ function expandSnapshot(v: Rec, db: FixtureDb, budget: ReplayBudget): Rec | null
 }
 
 // ----------------------------------------------------------------------
+// 保証側へ共有した写し（shared_report_copies）: 目録だけ
+// ----------------------------------------------------------------------
+
+const SHARED_COPY_DEFAULTS: Rec = { withdrawnAt: null, withdrawnBy: null };
+
+const SHARED_COPY_SHAPE: Shape = {
+  id: isStr,
+  engagementId: isStr,
+  assuranceFirmId: isStr,
+  clientOrganizationId: isStr,
+  snapshotId: isStr,
+  snapshotContentHash: isStr,
+  copyHash: isStr,
+  sharedBy: isStr,
+  sharedAt: isStr,
+  withdrawnAt: isStrOrNull,
+  withdrawnBy: isStrOrNull,
+};
+
+/** 写しの本文（copy）は載せない。共有の目録（どの案件へ・どのスナップショットを・誰が・いつ）だけ */
+function compactSharedCopy(row: Rec): Rec {
+  const { copy: _copy, ...rest } = row;
+  return withoutDefaults({ [COMPACT_MARK]: COMPACT_VERSION, ...rest }, SHARED_COPY_DEFAULTS);
+}
+
+/**
+ * 目録から写しを作り直す。スナップショット（先に戻る）から共有のときと同じ関数で作り、copy_hash が
+ * 一致したときだけ使う（同じハッシュで別の写しを保証側に出さない。スナップショットが無ければ戻さない）
+ */
+function expandSharedCopy(v: Rec, db: FixtureDb, budget: ReplayBudget): Rec | null {
+  const row = withDefaults(v, SHARED_COPY_DEFAULTS);
+  if (!hasShape(row, SHARED_COPY_SHAPE)) return null;
+  const snapshot = db.reportSnapshots.find((s) => s.id === row.snapshotId);
+  if (
+    !snapshot ||
+    snapshot.organizationId !== row.clientOrganizationId ||
+    snapshot.contentHash !== row.snapshotContentHash
+  ) {
+    return null;
+  }
+  const content = buildSharedReportCopy(asSnapshotDetail(snapshot));
+  const chars = JSON.stringify(content).length;
+  if (chars > MAX_SNAPSHOT_CONTENT_CHARS || !spend(budget, chars)) return null;
+  if (sharedReportCopyHash(content) !== row.copyHash) return null;
+  return { ...only(row, SHARED_COPY_SHAPE), copy: content as unknown as Rec };
+}
+
+// ----------------------------------------------------------------------
 // 入口
 // ----------------------------------------------------------------------
 
@@ -948,7 +1161,10 @@ export function compactRow(table: string, row: Rec, db: FixtureDb): Rec | null {
       return compactSnapshot(row as unknown as SnapshotRowLike, db);
     case 'exportArtifacts': {
       const { contentHash: _hash, ...rest } = row;
-      return { [COMPACT_MARK]: COMPACT_VERSION, ...rest };
+      return withoutDefaults(
+        { [COMPACT_MARK]: COMPACT_VERSION, ...packReconciliation(rest) },
+        EXPORT_ARTIFACT_DEFAULTS,
+      );
     }
     case 'quantitativeImportBatches':
       return compactImportBatch(row);
@@ -957,6 +1173,8 @@ export function compactRow(table: string, row: Rec, db: FixtureDb): Rec | null {
       return row.targetType === 'data_point'
         ? withoutDefaults({ [COMPACT_MARK]: COMPACT_VERSION, ...row }, APPROVAL_DEFAULTS)
         : null;
+    case 'sharedReportCopies':
+      return compactSharedCopy(row);
     default:
       return row;
   }
@@ -989,6 +1207,8 @@ export function expandRow(
       return expandImportBatch(v);
     case 'approvals':
       return expandApproval(v);
+    case 'sharedReportCopies':
+      return expandSharedCopy(v, db, budget);
     default:
       return null;
   }

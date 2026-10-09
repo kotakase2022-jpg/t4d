@@ -5,12 +5,36 @@ import {
   assertCan,
   assertEngagementMember,
   AuthorizationError,
+  can,
   NotFoundError,
 } from '@/lib/authorization/can';
 import { notFound } from 'next/navigation';
+import {
+  parseSharedReportCopy,
+  sharedReportCopyHash,
+  type SharedReportCopyContent,
+} from '@/lib/domain/report-copy';
+import { buildReportTrace, type TraceSummary, type TraceUnit } from '@/lib/domain/report-trace';
+import { ValidationError } from '@/lib/errors/user-facing';
 import { contentHash, fid } from '@/lib/fixtures/ids';
+import {
+  clientNoteStateOf,
+  listNotesForClient,
+  listNotesForCopy,
+  type ClientNoteEntry,
+  type FirmNoteEntry,
+} from '@/lib/services/assurance-notes';
+import { listDataRoomDataPoints } from '@/lib/services/data-room-sync';
+import {
+  listSharedReports,
+  listSharedReportsForClient,
+  loadSharedReport,
+  type LoadedSharedReport,
+} from '@/lib/services/report-share';
 import { selectSample } from '@/lib/services/sampling';
+import type { ClientNoteState } from '@/lib/ui/status/clientNote';
 import type { DbClient } from '@/lib/repositories/types';
+import { isUuid } from '@/lib/validation/uuid';
 import type {
   AssuranceSnapshot,
   AssuranceSnapshotItem,
@@ -18,15 +42,19 @@ import type {
   DataPoint,
   IsoDateTime,
   Engagement,
-  GrantSubjectType,
   MetricDefinition,
   OrganizationUnit,
   Population,
   PopulationItem,
+  ReportNoteTargetType,
+  ReviewNote,
+  ReviewNoteResponse,
   Sample,
   SampleItem,
   SamplingMethod,
   SamplingParameters,
+  SharedReportCopy,
+  Signoff,
   SignoffBlocker,
   SignoffStage,
   SnapshotChange,
@@ -112,57 +140,54 @@ export interface DataRoomRow {
   snapshotIncluded: boolean;
   changedSinceSnapshot: boolean;
   evidenceCount: number;
+  /** 指標の許諾が Evidence を含むか（含まなければ資料の実体は開けない） */
+  includesEvidence: boolean;
+}
+
+/** Data Room の「取得元: 開示レポート」の行（企業が共有した承認済みレポートの写し。NF-20） */
+export interface DataRoomReportRow {
+  copyId: Uuid;
+  /** 例「No.1 社内承認済み版」 */
+  label: string;
+  frameworkNames: string[];
+  sharedAt: IsoDateTime;
+  copyHash: string;
 }
 
 /**
- * 監査法人が読める Data Point だけに絞る。
+ * Data Room に出す Data Point（トライアル対応 NF-22。読み取り時に導出し、書き込まない）。
  *
- * DB 側の `t4d.assurance_can_read_data_point()`（0011_authorization_functions.sql）と
- * **同じ条件**を実装している。企業側で承認済みであること、削除されていないこと、
- * 指標・組織・期間のすべてに有効な（取り消されていない）許諾があること。
+ * 許諾（指標×組織×期間）と企業側承認済みの Data Point から導く（data-room-sync.ts。条件は DB 関数
+ * `t4d.assurance_can_read_data_point()` と同じ）。そのうえで data_room_items の **取り下げの記録** を守る:
+ * 企業が明示的に取り下げた Data Point（取り下げた行だけがあり、有効な行が無いもの）は出さない。
+ * Data Room の表示・Snapshot の固定・資料依頼の対象の 3 か所が同じこの関数を使う
+ * （画面ごとに別の条件で「共有中」を数えない）。
  *
- * Demo Mode には RLS が無いため、ここを通さないと
- * 「取り消した許諾が効かない」「未承認の下書きが監査法人に見える」が起きる。
+ * 認可は呼び出し側（assertEngagementMember）で確かめる。
  */
-async function filterReadableForAssurance(
-  db: DbClient,
-  engagementId: Uuid,
-  dataPoints: DataPoint[],
-): Promise<DataPoint[]> {
-  if (dataPoints.length === 0) return [];
+export { listDataRoomDataPoints };
 
-  const grants = await db.select('grants', {
-    where: { engagementId, revokedAt: { isNull: true } },
-  });
-  const grantedBySubject = new Map<GrantSubjectType, Set<Uuid>>();
-  for (const g of grants) {
-    const set = grantedBySubject.get(g.subjectType) ?? new Set<Uuid>();
-    set.add(g.subjectId);
-    grantedBySubject.set(g.subjectType, set);
-  }
-  const covers = (subject: GrantSubjectType, id: Uuid): boolean =>
-    grantedBySubject.get(subject)?.has(id) ?? false;
-
-  return dataPoints.filter(
-    (dp) =>
-      dp.status === 'approved' &&
-      dp.deletedAt === null &&
-      covers('metric', dp.metricId) &&
-      covers('organization_unit', dp.unitId) &&
-      covers('reporting_period', dp.reportingPeriodId),
-  );
+/** 写しの表示名（例「No.1 社内承認済み版」） */
+export function sharedReportLabel(content: Pick<SharedReportCopyContent, 'snapshotNo' | 'label'>) {
+  return `No.${content.snapshotNo} ${content.label}`;
 }
 
 export async function loadDataRoom(
   db: DbClient,
   ctx: AuthorizationContext,
   engagementId: Uuid,
-): Promise<{ rows: DataRoomRow[]; snapshot: AssuranceSnapshot | null }> {
+): Promise<{
+  rows: DataRoomRow[];
+  snapshot: AssuranceSnapshot | null;
+  reports: DataRoomReportRow[];
+}> {
   assertEngagementMember(ctx, engagementId);
 
-  const items = await db.select('dataRoomItems', {
-    where: { engagementId, sourceType: 'data_point', withdrawnAt: { isNull: true } },
-  });
+  // 許諾と承認状態は **アプリ層でも** 見る。
+  // Supabase Mode では t4d.assurance_can_read_data_point() が同じ判定をするが、
+  // Demo Mode（本番の動作モード）には RLS が無く、ここが唯一の防御になる。
+  // 判定条件は上記 SQL 関数と一致させること（片方だけ変えない。data-room-sync.ts）。
+  const shared = await listDataRoomDataPoints(db, engagementId);
   const snapshot = await loadLatestSnapshot(db, engagementId);
   const snapshotItems = snapshot
     ? await db.select('snapshotItems', { where: { snapshotId: snapshot.id } })
@@ -170,23 +195,11 @@ export async function loadDataRoom(
   const changes = snapshot ? await detectSnapshotChanges(db, ctx, snapshot.id) : [];
   const changedIds = new Set(changes.map((c) => c.snapshotItemId));
 
-  const dataPointIds = items.map((i) => i.sourceId);
-  const allDataPoints =
-    dataPointIds.length > 0
-      ? await db.select('dataPoints', { where: { id: { in: dataPointIds } } })
-      : [];
-
-  // 許諾と承認状態は **アプリ層でも** 見る。
-  // Supabase Mode では t4d.assurance_can_read_data_point() が同じ判定をするが、
-  // Demo Mode（本番の動作モード）には RLS が無く、ここが唯一の防御になる。
-  // 判定条件は上記 SQL 関数と一致させること（片方だけ変えない）。
-  const readable = await filterReadableForAssurance(db, engagementId, allDataPoints);
-  const dataPoints = readable;
-  const readableIds = new Set(readable.map((dp) => dp.id));
-
+  const dataPoints = shared.map((s) => s.dataPoint);
+  const dataPointIds = dataPoints.map((dp) => dp.id);
   const metricIds = [...new Set(dataPoints.map((dp) => dp.metricId))];
   const unitIds = [...new Set(dataPoints.map((dp) => dp.unitId))];
-  const [metrics, units, versions, evidenceLinks] = await Promise.all([
+  const [metrics, units, versions, evidenceLinks, copies] = await Promise.all([
     metricIds.length > 0 ? db.select('metrics', { where: { id: { in: metricIds } } }) : [],
     unitIds.length > 0 ? db.select('units', { where: { id: { in: unitIds } } }) : [],
     dataPointIds.length > 0
@@ -197,34 +210,96 @@ export async function loadDataRoom(
           where: { targetType: 'data_point', targetId: { in: dataPointIds } },
         })
       : [],
+    // 開示レポートの写しは案件の閲覧権限で読む（report-share.ts の listSharedReports と同じ条件）
+    can(ctx, 'assurance.engagement.read')
+      ? db.select('sharedReportCopies', {
+          where: { engagementId, withdrawnAt: { isNull: true } },
+          orderBy: [
+            { column: 'sharedAt', dir: 'desc' },
+            { column: 'id', dir: 'desc' },
+          ],
+        })
+      : [],
   ]);
 
   const metricById = new Map(metrics.map((m) => [m.id, m]));
   const unitById = new Map(units.map((u) => [u.id, u]));
 
-  const rows: DataRoomRow[] = items
-    .filter((item) => readableIds.has(item.sourceId))
-    .map((item) => {
-      const dp = dataPoints.find((d) => d.id === item.sourceId);
-      const version = versions.find((v) => v.id === dp?.currentVersionId);
-      const snapshotItem = snapshotItems.find((s) => s.sourceId === item.sourceId);
-      return {
-        dataPointId: item.sourceId,
-        metric: dp ? (metricById.get(dp.metricId) ?? null) : null,
-        unit: dp ? (unitById.get(dp.unitId) ?? null) : null,
-        currentValue: dp?.value ?? null,
-        currentUnitOfMeasure: dp?.unitOfMeasure ?? '',
-        currentVersionNo: version?.versionNo ?? null,
-        clientStatus: String(item.clientApprovalStatus),
-        sharedAt: item.sharedAt,
-        snapshotIncluded: Boolean(snapshotItem),
-        changedSinceSnapshot: snapshotItem ? changedIds.has(snapshotItem.id) : false,
-        evidenceCount: evidenceLinks.filter((l) => l.targetId === item.sourceId).length,
-      };
-    });
+  const rows: DataRoomRow[] = shared.map(({ dataPoint: dp, sharedAt, includesEvidence }) => {
+    const version = versions.find((v) => v.id === dp.currentVersionId);
+    const snapshotItem = snapshotItems.find((s) => s.sourceId === dp.id);
+    return {
+      dataPointId: dp.id,
+      metric: metricById.get(dp.metricId) ?? null,
+      unit: unitById.get(dp.unitId) ?? null,
+      currentValue: dp.value,
+      currentUnitOfMeasure: dp.unitOfMeasure,
+      currentVersionNo: version?.versionNo ?? null,
+      clientStatus: dp.status,
+      sharedAt,
+      snapshotIncluded: Boolean(snapshotItem),
+      changedSinceSnapshot: snapshotItem ? changedIds.has(snapshotItem.id) : false,
+      evidenceCount: evidenceLinks.filter((l) => l.targetId === dp.id).length,
+      includesEvidence,
+    };
+  });
 
-  return { rows, snapshot };
+  const reports: DataRoomReportRow[] = [];
+  for (const copy of copies) {
+    const content = parseSharedReportCopy(copy.copy);
+    if (!content) continue;
+    reports.push({
+      copyId: copy.id,
+      label: sharedReportLabel(content),
+      frameworkNames: content.frameworkVersions.map((f) => f.frameworkName),
+      sharedAt: copy.sharedAt,
+      copyHash: copy.copyHash,
+    });
+  }
+
+  return { rows, snapshot, reports };
 }
+
+/**
+ * Data Room を表示したことを監査ログに残し、この人の前回の表示日時を返す（NF-26 の閲覧記録の補完）。
+ *
+ * 1 画面の表示につき 1 件・要約だけ（件数）を残す（個々の値・指標名は入れない）。企業側は監査ログで
+ * 「監査法人が何をいつ見たか」を確かめられる。前回の表示日時は「前回表示以降に共有された n 件」の絞込に使う
+ * （Demo Mode の監査ログは同じインスタンスの記録だけのため、別のインスタンスでは前回が分からないことがある）。
+ */
+export async function recordDataRoomView(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  engagementId: Uuid,
+  summary: { dataPoints: number; reports: number },
+): Promise<{ previousViewedAt: IsoDateTime | null }> {
+  assertEngagementMember(ctx, engagementId);
+  const previous = await db.select('auditEvents', {
+    where: {
+      engagementId,
+      eventType: 'record_viewed',
+      resourceType: DATA_ROOM_VIEW_RESOURCE,
+      actorUserId: ctx.userId,
+    },
+    orderBy: [
+      { column: 'createdAt', dir: 'desc' },
+      { column: 'id', dir: 'desc' },
+    ],
+    limit: 1,
+  });
+  await recordAuditEvent(db, ctx, {
+    eventType: 'record_viewed',
+    resourceType: DATA_ROOM_VIEW_RESOURCE,
+    resourceId: engagementId,
+    engagementId,
+    afterSummary: `Data Room を表示（非財務データ ${summary.dataPoints} 件・開示レポート ${summary.reports} 件）`,
+  });
+  return { previousViewedAt: previous[0]?.createdAt ?? null };
+}
+
+/** 閲覧記録の対象の種類（監査ログの resource_type） */
+export const DATA_ROOM_VIEW_RESOURCE = 'data_room';
+export const SHARED_REPORT_VIEW_RESOURCE = 'shared_report_copy';
 
 // ----------------------------------------------------------------------
 // Snapshot
@@ -252,18 +327,18 @@ export async function createSnapshot(
   assertCan(ctx, 'assurance.snapshot.create');
 
   const { engagement } = await loadEngagement(db, ctx, engagementId);
-  const items = await db.select('dataRoomItems', {
-    where: { engagementId, sourceType: 'data_point', withdrawnAt: { isNull: true } },
-  });
-  if (items.length === 0) {
+  // 固定の対象は Data Room の表示と同じ導出（許諾×承認済み。取り下げの記録を守る）。
+  // 以前は data_room_items だけを読んでいたため、許諾を足しても承認しても固定の対象に入らなかった
+  const shared = await listDataRoomDataPoints(db, engagementId);
+  if (shared.length === 0) {
     throw new AuthorizationError('Data Room に共有された対象がありません。');
   }
 
-  const dataPointIds = items.map((i) => i.sourceId);
-  const [dataPoints, versions] = await Promise.all([
-    db.select('dataPoints', { where: { id: { in: dataPointIds } } }),
-    db.select('dataPointVersions', { where: { dataPointId: { in: dataPointIds } } }),
-  ]);
+  const dataPoints = shared.map((s) => s.dataPoint);
+  const dataPointIds = dataPoints.map((dp) => dp.id);
+  const versions = await db.select('dataPointVersions', {
+    where: { dataPointId: { in: dataPointIds } },
+  });
 
   const frozenAt = new Date().toISOString();
   const snapshotId = fid('snapshot', `${engagementId}/${frozenAt}`);
@@ -880,12 +955,21 @@ export async function evaluateSignoffBlockers(
   return blockers;
 }
 
+export interface CreateSignoffOptions {
+  /**
+   * 対象とした共有レポートの写し（任意。NF-23）。同じ案件で共有中の写しだけを結び付けられる。
+   * 内容ハッシュはクライアントから受け取らず、写しの copy_hash を記録する
+   */
+  sharedReportCopyId?: Uuid | null;
+}
+
 export async function createSignoff(
   db: DbClient,
   ctx: AuthorizationContext,
   engagementId: Uuid,
   stage: SignoffStage,
   comment: string | null,
+  options: CreateSignoffOptions = {},
 ): Promise<void> {
   assertEngagementMember(ctx, engagementId);
 
@@ -905,6 +989,9 @@ export async function createSignoff(
   }
 
   const { engagement } = await loadEngagement(db, ctx, engagementId);
+  const report = options.sharedReportCopyId
+    ? await signoffTargetCopy(db, engagementId, options.sharedReportCopyId)
+    : null;
   const existing = await db.select('signoffs', { where: { engagementId, signoffStage: stage } });
   const snapshot = await loadLatestSnapshot(db, engagementId);
   const roleKey =
@@ -924,6 +1011,9 @@ export async function createSignoff(
       snapshotId: snapshot?.id ?? null,
       comment,
       createdAt: new Date().toISOString(),
+      // 結び付けた写しと、その時点の写しの内容ハッシュ（DB のトリガ 0050 も同じ組を検査する）
+      sharedReportCopyId: report?.copy.id ?? null,
+      sharedReportContentHash: report?.copy.copyHash ?? null,
     },
   ]);
 
@@ -932,8 +1022,88 @@ export async function createSignoff(
     resourceType: 'signoff',
     resourceId: engagementId,
     engagementId,
-    afterSummary: `${stage} を ${ctx.displayName} が実行`,
+    afterSummary: report
+      ? `${stage} を ${ctx.displayName} が実行（対象の開示レポート: ${report.label}）`
+      : `${stage} を ${ctx.displayName} が実行`,
+    metadata: report
+      ? { sharedReportCopyId: report.copy.id, sharedReportContentHash: report.copy.copyHash }
+      : undefined,
   });
+}
+
+/**
+ * Sign-off に結び付ける写しを確かめる。同じ案件の共有中の写しだけ（他の案件の写しは存在を秘匿して
+ * 「見つからない」、取り下げた写しは理由を返す）。DB のトリガ t4d.signoff_shared_report_guard と同じ条件
+ */
+async function signoffTargetCopy(
+  db: DbClient,
+  engagementId: Uuid,
+  copyId: Uuid,
+): Promise<{ copy: SharedReportCopy; label: string }> {
+  const copy = isUuid(copyId) ? await db.findById('sharedReportCopies', copyId) : null;
+  if (!copy || copy.engagementId !== engagementId) {
+    throw new NotFoundError('対象の開示レポートが見つかりません。');
+  }
+  if (copy.withdrawnAt !== null) {
+    throw new ValidationError(
+      'この開示レポートは企業が共有を取り下げたため、Sign-off に結び付けられません。',
+    );
+  }
+  const content = parseSharedReportCopy(copy.copy);
+  if (!content || sharedReportCopyHash(content) !== copy.copyHash) {
+    throw new ValidationError(
+      'この開示レポートの写しは内容ハッシュが一致しないため、Sign-off に結び付けられません。',
+    );
+  }
+  return { copy, label: sharedReportLabel(content) };
+}
+
+/** Sign-off と共有レポートの注意（NF-23。保存せず、Sign-off と写しから毎回導く） */
+export interface SignoffReportAttention {
+  /** 写しを結び付けた最新の Sign-off */
+  signoff: Signoff;
+  /** 結び付けた写し（読めなければ null） */
+  linkedCopy: SharedReportCopy | null;
+  /** Sign-off の後に共有された別の写し（共有中のもの） */
+  newerCopies: SharedReportCopy[];
+  /** 結び付けた写しが後から取り下げられた */
+  linkedWithdrawn: boolean;
+}
+
+/**
+ * Sign-off の後に別の承認版が共有された（または結び付けた写しが取り下げられた）かを導く純粋関数。
+ * 写しを結び付けた Sign-off が無ければ null（注意を出さない）
+ */
+export function signoffReportAttentionOf(
+  signoffs: readonly Signoff[],
+  copies: readonly SharedReportCopy[],
+): SignoffReportAttention | null {
+  const linked = signoffs
+    .filter((s) => s.sharedReportCopyId !== null)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
+  if (!linked) return null;
+  const linkedCopy = copies.find((c) => c.id === linked.sharedReportCopyId) ?? null;
+  const newerCopies = copies.filter(
+    (c) =>
+      c.withdrawnAt === null && c.id !== linked.sharedReportCopyId && c.sharedAt > linked.createdAt,
+  );
+  const linkedWithdrawn = linkedCopy !== null && linkedCopy.withdrawnAt !== null;
+  if (newerCopies.length === 0 && !linkedWithdrawn) return null;
+  return { signoff: linked, linkedCopy, newerCopies, linkedWithdrawn };
+}
+
+/** 案件の Sign-off と共有レポートの注意（案件のメンバーだけ） */
+export async function loadSignoffReportAttention(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  engagementId: Uuid,
+): Promise<SignoffReportAttention | null> {
+  assertEngagementMember(ctx, engagementId);
+  const [signoffs, copies] = await Promise.all([
+    db.select('signoffs', { where: { engagementId } }),
+    db.select('sharedReportCopies', { where: { engagementId } }),
+  ]);
+  return signoffReportAttentionOf(signoffs, copies);
 }
 
 // ----------------------------------------------------------------------
@@ -1011,4 +1181,293 @@ export async function loadAssuranceDashboard(
   }
 
   return rows;
+}
+
+// ----------------------------------------------------------------------
+// 開示レポート（企業が共有した承認済みレポートの写し）の保証側の閲覧（NF-20・NF-21）
+// ----------------------------------------------------------------------
+
+export interface SharedReportListRow {
+  copy: SharedReportCopy;
+  /** 写しを読めない（形が崩れている）ときは null */
+  content: SharedReportCopyContent | null;
+  label: string;
+  frameworkNames: string[];
+  /** 写しが作成時のハッシュと一致するか（一致しなければ内容を出さない） */
+  integrityOk: boolean;
+  noteCount: number;
+  /** クリアしていないコメント */
+  openNoteCount: number;
+}
+
+/** 案件に共有された開示レポートの一覧（保証側。取り下げた写しは出さない） */
+export async function loadSharedReportList(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  engagementId: Uuid,
+): Promise<SharedReportListRow[]> {
+  const copies = await listSharedReports(db, ctx, engagementId);
+  const notes =
+    copies.length > 0
+      ? await db.select('reviewNotes', {
+          where: { engagementId, targetCopyId: { in: copies.map((c) => c.id) } },
+        })
+      : [];
+  return copies.map((copy) => {
+    const content = parseSharedReportCopy(copy.copy);
+    const own = notes.filter((n) => n.targetCopyId === copy.id);
+    return {
+      copy,
+      content,
+      label: content ? sharedReportLabel(content) : '（写しを読み込めません）',
+      frameworkNames: content ? content.frameworkVersions.map((f) => f.frameworkName) : [],
+      integrityOk: content !== null && sharedReportCopyHash(content) === copy.copyHash,
+      noteCount: own.length,
+      openNoteCount: own.filter((n) => n.status !== 'cleared').length,
+    };
+  });
+}
+
+/**
+ * 写しのトレース（NF-14 と同じ純関数）。写しには定性情報の版の根拠（引用位置）が無く、監査法人は
+ * 企業の定性情報を読めないため、定性情報の引用だけを根拠とする段落は「根拠なし」と数える
+ * （narrativeEvidenceUnknown で画面に断り書きを出す）
+ */
+export function sharedReportTrace(
+  content: Pick<SharedReportCopyContent, 'blocks' | 'metricValues' | 'narrativeVersionIds'>,
+  options: { frameworkVersionId?: Uuid | null } = {},
+): { units: TraceUnit[]; summary: TraceSummary; narrativeEvidenceUnknown: boolean } {
+  const trace = buildReportTrace(
+    {
+      blocks: content.blocks,
+      metricValues: content.metricValues,
+      narrativeVersionsWithEvidence: new Set<Uuid>(),
+    },
+    { frameworkVersionId: options.frameworkVersionId ?? null },
+  );
+  return { ...trace, narrativeEvidenceUnknown: content.narrativeVersionIds.length > 0 };
+}
+
+export interface SharedReportView extends LoadedSharedReport {
+  label: string;
+  notes: FirmNoteEntry[];
+}
+
+/** 開示レポートの内容を開く（保証側。案件のメンバーだけ。取り下げ・他の案件は「見つからない」） */
+export async function loadSharedReportView(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: { engagementId: Uuid; copyId: Uuid },
+): Promise<SharedReportView> {
+  const loaded = await loadSharedReport(db, ctx, input);
+  const notes = await listNotesForCopy(db, ctx, input);
+  return { ...loaded, label: sharedReportLabel(loaded.content), notes };
+}
+
+/**
+ * 開示レポートの内容を表示したことを監査ログに残す（1 画面 1 件・要約だけ。NF-26）。
+ * 企業側は「監査法人がどの承認版をいつ見たか」を監査ログで確かめられる
+ */
+export async function recordSharedReportView(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: { engagementId: Uuid; copyId: Uuid; label: string },
+): Promise<void> {
+  assertEngagementMember(ctx, input.engagementId);
+  await recordAuditEvent(db, ctx, {
+    eventType: 'record_viewed',
+    resourceType: SHARED_REPORT_VIEW_RESOURCE,
+    resourceId: input.copyId,
+    engagementId: input.engagementId,
+    afterSummary: `開示レポート ${input.label} を表示`,
+  });
+}
+
+/** コメントの対象の表示（段落・数値）。写しから作る（企業・保証側の両方が同じ表示を使う） */
+export interface ReportNoteTargetLabel {
+  kind: ReportNoteTargetType;
+  copyId: Uuid;
+  /** 例「No.1 社内承認済み版」。写しを読めなければ null */
+  reportLabel: string | null;
+  /** 例「ガバナンス 段落 2」「Scope1 排出量 ／ 本社 ／ FY2025」 */
+  place: string;
+  /** 追跡番号（写しに見つからなければ null） */
+  traceId: string | null;
+  /** 段落の本文・数値の表示（先頭 120 字） */
+  excerpt: string;
+}
+
+/** コメントの対象を「節・段落／数値」の言葉にする（写しに見つからなければ、その旨を書く） */
+export function describeReportNoteTarget(
+  note: Pick<
+    ReviewNote,
+    | 'targetType'
+    | 'targetCopyId'
+    | 'targetBlockId'
+    | 'targetParagraphId'
+    | 'targetDataPointVersionId'
+  >,
+  content: SharedReportCopyContent | null,
+  units: readonly TraceUnit[] = content ? sharedReportTrace(content).units : [],
+): ReportNoteTargetLabel | null {
+  if (!note.targetCopyId) return null;
+  if (note.targetType !== 'report_paragraph' && note.targetType !== 'report_metric') return null;
+  const kind = note.targetType;
+  const reportLabel = content ? sharedReportLabel(content) : null;
+  if (kind === 'report_paragraph') {
+    const block = content?.blocks.find((b) => b.blockId === note.targetBlockId) ?? null;
+    const unit = units.find(
+      (u) =>
+        u.kind === 'paragraph' &&
+        u.blockId === note.targetBlockId &&
+        u.paragraphId === note.targetParagraphId,
+    );
+    return {
+      kind,
+      copyId: note.targetCopyId,
+      reportLabel,
+      place: block
+        ? unit
+          ? `${block.title} 段落 ${unit.paragraphNo}`
+          : `${block.title}（段落が写しに見つかりません）`
+        : '節が写しに見つかりません',
+      traceId: unit?.traceId ?? null,
+      excerpt: excerptOf(unit?.text ?? ''),
+    };
+  }
+  const metric =
+    content?.metricValues.find((m) => m.dataPointVersionId === note.targetDataPointVersionId) ??
+    null;
+  const unit = units.find(
+    (u) => u.kind === 'number' && u.dataPointVersionId === note.targetDataPointVersionId,
+  );
+  return {
+    kind,
+    copyId: note.targetCopyId,
+    reportLabel,
+    place: metric
+      ? `${metric.metricName} ／ ${metric.unitName} ／ ${metric.periodCode}`
+      : '数値が写しに見つかりません',
+    traceId: unit?.traceId ?? null,
+    excerpt: excerptOf(unit?.text ?? ''),
+  };
+}
+
+function excerptOf(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 120 ? `${flat.slice(0, 119)}…` : flat;
+}
+
+/** 企業側の「保証側のコメント」の 1 行（クライアントへ共有されたコメントと回答・対象の表示） */
+export interface ClientCommentRow extends ClientNoteEntry {
+  /** 開示レポートの段落・数値へのコメントなら対象の表示（案件全体へのコメントは null） */
+  target: ReportNoteTargetLabel | null;
+  /** 対象の写しの開示プロジェクト（案件全体へのコメントは null） */
+  projectId: Uuid | null;
+  projectName: string | null;
+}
+
+/**
+ * 企業側: 保証側のコメント（クライアントへ共有されたものだけ）を、対象の段落・数値の言葉と一緒に読む。
+ * 監査法人の行（review_notes）は読むだけで更新しない。projectId で開示プロジェクトに絞れる
+ * （プロジェクトの「レビュー・承認」タブ）
+ */
+export async function loadClientAssuranceComments(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  options: { engagementId?: Uuid | null; projectId?: Uuid | null } = {},
+): Promise<ClientCommentRow[]> {
+  const entries = await listNotesForClient(db, ctx, { engagementId: options.engagementId ?? null });
+  const copyIds = new Set(
+    entries.map((e) => e.note.targetCopyId).filter((id): id is Uuid => id !== null),
+  );
+  const copies =
+    copyIds.size > 0
+      ? (await listSharedReportsForClient(db, ctx)).filter((e) => copyIds.has(e.copy.id))
+      : [];
+  const contentById = new Map<Uuid, SharedReportCopyContent | null>(
+    copies.map((e) => [e.copy.id, parseSharedReportCopy(e.copy.copy)]),
+  );
+  const rows = entries.map((entry) => {
+    const content = entry.note.targetCopyId
+      ? (contentById.get(entry.note.targetCopyId) ?? null)
+      : null;
+    return {
+      ...entry,
+      target: describeReportNoteTarget(entry.note, content),
+      projectId: content?.projectId ?? null,
+      projectName: content?.frameworkVersions[0]?.projectName ?? null,
+    };
+  });
+  return options.projectId ? rows.filter((r) => r.projectId === options.projectId) : rows;
+}
+
+/** 開示プロジェクトの「レビュー・承認」タブの「保証側のコメント」節（行と、回答できるか） */
+export async function loadProjectAssuranceComments(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  projectId: Uuid,
+): Promise<{ rows: ClientCommentRow[]; canRespond: boolean }> {
+  const rows = await loadClientAssuranceComments(db, ctx, { projectId });
+  return { rows, canRespond: can(ctx, 'enterprise.disclosure.write') };
+}
+
+export interface EngagementNoteEntry {
+  note: ReviewNote;
+  /** 企業の回答（クライアントへ共有したコメントだけに付く） */
+  responses: ReviewNoteResponse[];
+  /** 企業側から見た状態（クライアントへ共有したコメントだけ。内部限定は null） */
+  clientState: ClientNoteState | null;
+  /** 開示レポートの段落・数値へのコメントなら対象の表示 */
+  target: ReportNoteTargetLabel | null;
+}
+
+/** 案件のレビュー Note（案件全体・開示レポートの段落・数値）と企業の回答（案件のメンバーだけ） */
+export async function loadEngagementReviewNotes(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  engagementId: Uuid,
+): Promise<EngagementNoteEntry[]> {
+  assertEngagementMember(ctx, engagementId);
+  const notes = await db.select('reviewNotes', {
+    where: { engagementId },
+    orderBy: [
+      { column: 'createdAt', dir: 'desc' },
+      { column: 'id', dir: 'desc' },
+    ],
+  });
+  const copyIds = [
+    ...new Set(notes.map((n) => n.targetCopyId).filter((id): id is Uuid => id !== null)),
+  ];
+  const [responses, copies] = await Promise.all([
+    notes.length > 0
+      ? db.select('reviewNoteResponses', {
+          where: { reviewNoteId: { in: notes.map((n) => n.id) } },
+          orderBy: [{ column: 'respondedAt' }, { column: 'id' }],
+        })
+      : [],
+    copyIds.length > 0
+      ? db.select('sharedReportCopies', { where: { engagementId, id: { in: copyIds } } })
+      : [],
+  ]);
+  const contentById = new Map<Uuid, SharedReportCopyContent | null>(
+    copies.map((c) => [c.id, parseSharedReportCopy(c.copy)]),
+  );
+  const unitsById = new Map<Uuid, TraceUnit[]>(
+    [...contentById].map(([id, content]) => [id, content ? sharedReportTrace(content).units : []]),
+  );
+  return notes.map((note) => {
+    const own = responses.filter((r) => r.reviewNoteId === note.id);
+    const content = note.targetCopyId ? (contentById.get(note.targetCopyId) ?? null) : null;
+    return {
+      note,
+      responses: own,
+      clientState: note.sharedWithClient ? clientNoteStateOf(note, own) : null,
+      target: describeReportNoteTarget(
+        note,
+        content,
+        note.targetCopyId ? (unitsById.get(note.targetCopyId) ?? []) : [],
+      ),
+    };
+  });
 }

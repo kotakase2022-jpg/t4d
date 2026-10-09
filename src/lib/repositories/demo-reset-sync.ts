@@ -38,7 +38,72 @@ export const DISCLOSURE_DEMO_RESET_TABLES = [
   'csrdAssessments',
   'csrdActionPlans',
   'csrdDisclosureDrafts',
+  // トライアル対応（2026-10）: 要求事項の判断・対象外の申請・定性情報の対応付け・突合・XBRL の対応付け
+  'projectRequirementAssessments',
+  'projectRequirementAssessmentEvents',
+  'requirementExclusionEvents',
+  'narrativeRequirementLinks',
+  'exportReconciliations',
+  'xbrlTagMappings',
+  'xbrlTagMappingEvents',
 ] as const satisfies readonly TableName[];
+
+/**
+ * 開示デモのリセットで戻す、クライアント組織の列（client_organization_id）で範囲を決める表
+ * （保証側へ共有した写しと企業の回答）。共有したスナップショットを消すため、写しと、その写しを指す
+ * 保証側のコメント（reviewNotes の target_copy_id）も一緒に消す（消えた写しを指し続けないため）
+ */
+export const DISCLOSURE_CLIENT_RESET_TABLES = [
+  'reviewNoteResponses',
+  'sharedReportCopies',
+] as const satisfies readonly TableName[];
+
+interface ClientRow {
+  id: string;
+  clientOrganizationId?: string;
+}
+
+/** 写しを指す保証側のコメントのうち、その組織の写しを指すもの */
+export function isClientCopyNote(
+  row: { targetCopyId?: string | null },
+  copyIds: ReadonlySet<string>,
+): boolean {
+  return typeof row.targetCopyId === 'string' && copyIds.has(row.targetCopyId);
+}
+
+/** 組織の写し・回答と、写しを指すコメントを Fixture の初期値へ戻す（メモリに対して） */
+function restoreClientScoped(target: FixtureDb, pristine: FixtureDb, organizationId: string): void {
+  const copyIds = new Set(
+    [...target.sharedReportCopies, ...pristine.sharedReportCopies]
+      .filter((c) => c.clientOrganizationId === organizationId)
+      .map((c) => c.id),
+  );
+  const restoreBy = <T extends { id: string }>(
+    rows: T[],
+    pristineRows: readonly T[],
+    inScope: (row: T) => boolean,
+  ) => {
+    const fixture = pristineRows.filter(inScope);
+    const fixtureIds = new Set(fixture.map((r) => r.id));
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const row = rows[i];
+      if (row && inScope(row) && !fixtureIds.has(row.id)) rows.splice(i, 1);
+    }
+    for (const fixtureRow of fixture) {
+      const index = rows.findIndex((r) => r.id === fixtureRow.id);
+      if (index === -1) rows.push(structuredClone(fixtureRow));
+      else rows[index] = structuredClone(fixtureRow);
+    }
+  };
+  restoreBy(target.reviewNotes, pristine.reviewNotes, (n) => isClientCopyNote(n, copyIds));
+  for (const table of DISCLOSURE_CLIENT_RESET_TABLES) {
+    restoreBy(
+      target[table] as unknown as ClientRow[],
+      pristine[table] as unknown as ClientRow[],
+      (row) => row.clientOrganizationId === organizationId,
+    );
+  }
+}
 
 export type DisclosureDemoResetTable = (typeof DISCLOSURE_DEMO_RESET_TABLES)[number];
 
@@ -301,6 +366,7 @@ export function restoreDisclosureDemoTables(
       organizationId,
     );
   }
+  restoreClientScoped(target, pristine, organizationId);
   restoreTable(
     target.aiRuns as unknown as OrgRow[],
     pristine.aiRuns as unknown as OrgRow[],

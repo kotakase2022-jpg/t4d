@@ -139,6 +139,7 @@ export async function applySecuritiesReportScope(
       valueChainNote: '',
       confirmedAt: null,
       confirmedBy: null,
+      frameworkVersionId: null,
       createdAt: now,
       updatedAt: now,
       createdBy: ctx.userId,

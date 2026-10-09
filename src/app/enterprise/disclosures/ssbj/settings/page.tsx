@@ -1,7 +1,8 @@
-import { Check, CircleCheck, CircleDashed, FileSearch } from 'lucide-react';
+import { Check, CircleCheck, CircleDashed, FileSearch, Lock, Unlock } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { FlashMessage } from '@/components/shared/flash';
 import { PageHeader, SectionTitle } from '@/components/shared/page-header';
+import { Section } from '@/components/shared/section';
 import { StepNav, type StepItem } from '@/components/shared/step-nav';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -24,6 +25,7 @@ import {
   saveSsbjSettingsAction,
 } from '../../../actions';
 import { UnitScopeSelector } from '../../_components/unit-scope-selector';
+import { pinSsbjVersionAction } from './actions';
 import { MaterialityManager } from './materiality-manager';
 
 export const metadata = { title: 'SSBJ マテリアリティ・分析条件の設定' };
@@ -169,6 +171,11 @@ export default async function SsbjSettingsPage({
                 consequences={[
                   '確定した内容が、要求事項の評価・対応計画・データ収集の前提になります。',
                   '確定後に内容を変更すると確定は取り消され、もう一度確定が必要になります。',
+                  ...(view.frameworkVersion
+                    ? [
+                        `この年度の SSBJ の基準の版（${view.frameworkVersion.label}）を固定します。新しい版を足しても、この年度の要求事項は変わりません。`,
+                      ]
+                    : []),
                 ]}
                 confirmLabel="確定する"
                 destructive={false}
@@ -186,6 +193,69 @@ export default async function SsbjSettingsPage({
             )}
           </div>
         </Card>
+
+        {/* 対象年度×基準版（NF-12）。確定の操作でこの年度に固定し、新しい版への切り替えは人が明示して行う */}
+        {view.frameworkVersion && (
+          <Section
+            id="ssbj-settings-version"
+            title="対象年度×基準版"
+            className="scroll-mt-4"
+            actions={
+              <Badge tone={view.frameworkVersion.pinned ? 'brand' : 'neutral'}>
+                {view.frameworkVersion.pinned ? (
+                  <Lock className="size-3" aria-hidden="true" />
+                ) : (
+                  <Unlock className="size-3" aria-hidden="true" />
+                )}
+                {view.frameworkVersion.pinned ? '設定で固定' : '公開中の版（未固定）'}
+              </Badge>
+            }
+          >
+            <div className="space-y-2 text-small">
+              <p data-ssbj-version-stamp="">
+                {shell.currentPeriod.label} × {view.frameworkVersion.label}
+              </p>
+              <p className="text-caption text-ink-muted">
+                {view.frameworkVersion.pinned
+                  ? 'この年度は設定を確定した時点の版に固定しています。新しい版を足しても、この年度の対応状況・要求事項・ドラフトは変わりません。'
+                  : 'まだ固定していません（公開中の版を表示しています）。設定を確定すると、その時点の版にこの年度を固定します。'}
+              </p>
+              {view.frameworkVersion.newerVersions.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-caption font-medium text-ink">
+                    新しい版があります（この年度は自動では切り替えていません）
+                  </p>
+                  {view.canEdit &&
+                    view.frameworkVersion.newerVersions.map((newer) => (
+                      <ConfirmDialog
+                        key={newer.id}
+                        tier="bulk"
+                        title="この年度の基準の版を切り替えますか"
+                        scope={`${shell.currentPeriod.label}: ${view.frameworkVersion!.label} → ${newer.label}`}
+                        consequences={[
+                          '評価対象の要求事項が新しい版のものに変わります（これまでの評価は旧版の要求事項に残ります）。',
+                          '分析条件の確定は取り消されます。内容を確認して確定し直してください。',
+                        ]}
+                        confirmLabel="切り替える"
+                        destructive={false}
+                        action={pinSsbjVersionAction}
+                        fields={{
+                          reportingPeriodId: shell.currentPeriod.id,
+                          frameworkVersionId: newer.id,
+                        }}
+                        trigger={{
+                          label: `${newer.label} に切り替える…`,
+                          variant: 'secondary',
+                          size: 'xs',
+                          actionId: `pin-ssbj-version-${newer.id}`,
+                        }}
+                      />
+                    ))}
+                </div>
+              )}
+            </div>
+          </Section>
+        )}
 
         {/* ①②: 適用する基準と報告の範囲 */}
         <Card className="overflow-hidden" id="ssbj-settings-conditions">

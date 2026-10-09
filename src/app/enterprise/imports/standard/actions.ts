@@ -216,6 +216,8 @@ export async function commitStandardImportAction(
       correctionReason: text(formData, 'correctionReason'),
       source: read.ok ? read.input : undefined,
       confirmedRows: readConfirmedRows(text(formData, 'confirmedRows')),
+      // 過年度確定値として登録する（既定はしない。対象の行と経路はサービスが確かめる）
+      priorYearFinal: text(formData, 'priorYearFinal') === 'on',
     });
     revalidatePath('/enterprise/imports/standard');
     revalidatePath('/enterprise/data');

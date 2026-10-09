@@ -15,10 +15,12 @@ import {
   Save,
   ShieldCheck,
   Tag,
+  Target,
   X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Collapsible } from '@/components/ui/collapsible';
 import { FormSection } from '@/components/ui/form-section';
 import { Input, Textarea } from '@/components/ui/input';
 import { NativeCheckbox } from '@/components/ui/native-checkbox';
@@ -80,6 +82,19 @@ export interface NarrativeEditorProps {
   /** 現在の版が確認済みか（確認ボタンの出し分け） */
   currentConfirmed: boolean;
   isCandidate: boolean;
+  /**
+   * 基準別の対応状況（NF-06。サーバーで描いた節）。編集画面だけ。引用している原稿の一覧と影響の確認は
+   * この節の下に残す（保存の前に影響する原稿を確かめる規則は変えない）
+   */
+  coverage?: React.ReactNode;
+  /** 関連するインパクト・リスク・機会の選択肢（NF-10。リスク・機会／財務的影響のテーマだけ） */
+  iroOptions?: Array<{ id: string; label: string }>;
+  /** 選択肢の年度（年度を変えたときは選び直しを促す） */
+  iroOptionsPeriodId?: string | null;
+  /** 現在の版が参照している IRO */
+  initialIroRefs?: string[];
+  /** IRO を選べるテーマか（選べないテーマは節を出さない） */
+  iroSelectable?: boolean;
 }
 
 type SaveState =
@@ -143,6 +158,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
   const [fields, setFields] = React.useState<Record<string, string>>(props.initial.fields);
   const [body, setBody] = React.useState(props.initial.body);
   const [anchors, setAnchors] = React.useState<AnchorPayload[]>(props.initial.anchors);
+  const [iroRefs, setIroRefs] = React.useState<string[]>(props.initialIroRefs ?? []);
   const [changeReason, setChangeReason] = React.useState('');
   const [acknowledged, setAcknowledged] = React.useState(false);
   const [baseVersionId, setBaseVersionId] = React.useState(props.baseVersionId);
@@ -171,6 +187,7 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
     fields,
     body,
     anchors: anchors.map((a) => a.id),
+    iroRefs: [...iroRefs].sort(),
   });
   const initialSnapshot = React.useRef(snapshot);
   const dirty = snapshot !== initialSnapshot.current;
@@ -218,6 +235,8 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
         baseVersionId: base,
         changeReason,
         acknowledgeImpact: acknowledged,
+        // 選択肢の年度と同じ年度のときだけ送る。年度を変えたら送らない（サーバーが前の年度の IRO を外す）
+        ...(props.iroSelectable && periodId === props.iroOptionsPeriodId ? { iroRefs } : {}),
       });
       switch (result.status) {
         case 'saved':
@@ -510,37 +529,93 @@ export function NarrativeEditor(props: NarrativeEditorProps) {
           )}
         </section>
 
+        {!isCreate && props.iroSelectable && (
+          <section aria-labelledby="nv-iros" className="space-y-1">
+            <h2 id="nv-iros" className="flex items-center gap-1.5 text-body font-semibold text-ink">
+              <Target className="size-4" aria-hidden="true" />
+              関連するインパクト・リスク・機会（{iroRefs.length} 件）
+            </h2>
+            <p className="text-caption text-ink-muted">
+              この定性情報（SSBJ: 企業への影響）が説明する IRO を選びます。CSRD・ESRS-40a
+              の「人・環境へのインパクト」とは列を分けて、
+              <Link href="/enterprise/disclosures/impacts" className="text-brand-800 underline">
+                インパクト・リスク・機会の台帳
+              </Link>
+              に並びます。
+            </p>
+            {(props.iroOptions ?? []).length === 0 ? (
+              <p className="text-small text-ink-muted">
+                この年度の IRO はまだありません（CSRD の設定の事項の画面で登録します）。
+              </p>
+            ) : periodId !== props.iroOptionsPeriodId ? (
+              <p className="text-small text-warning-ink">
+                年度を変えると、関連する IRO は外れます。保存した後、新しい年度の IRO
+                を選び直してください。
+              </p>
+            ) : (
+              <fieldset className="grid gap-0.5 md:grid-cols-2" disabled={disabled}>
+                <legend className="sr-only">関連するインパクト・リスク・機会</legend>
+                {(props.iroOptions ?? []).map((option) => (
+                  <NativeCheckbox
+                    key={option.id}
+                    checked={iroRefs.includes(option.id)}
+                    onChange={(e) =>
+                      setIroRefs((prev) =>
+                        e.target.checked
+                          ? [...prev, option.id]
+                          : prev.filter((id) => id !== option.id),
+                      )
+                    }
+                    label={option.label}
+                  />
+                ))}
+              </fieldset>
+            )}
+            {fieldErrors.iroRefs && (
+              <p className="text-caption text-danger" role="alert">
+                {fieldErrors.iroRefs}
+              </p>
+            )}
+          </section>
+        )}
+
         {!isCreate && (
           <section aria-labelledby="nv-usage" className="space-y-1">
             <h2 id="nv-usage" className="text-body font-semibold text-ink">
-              利用先の原稿（{props.usage.length} 節）
+              基準別の対応状況
             </h2>
+            {props.coverage}
             {props.usage.length === 0 ? (
               <p className="text-small text-ink-muted">
                 この定性情報を引用している原稿はありません。
               </p>
             ) : (
               <>
-                <ul className="space-y-0.5 text-small">
-                  {props.usage.map((u) => (
-                    <li key={u.blockId} className="flex flex-wrap items-center gap-1">
-                      <Link
-                        href={`/enterprise/disclosure-projects/${u.projectId}/blocks/${u.blockId}`}
-                        className="text-brand-800 hover:underline"
-                      >
-                        {u.blockTitle}
-                      </Link>
-                      <Badge tone="neutral">
-                        <FileText className="size-3" aria-hidden="true" />
-                        {u.blockStatusLabel}
-                      </Badge>
-                      <span className="text-caption text-ink-muted">
-                        {u.projectName}／引用中の版 {u.citedVersionNo ?? '—'}
-                        {u.citesCurrent ? '' : '（最新ではない）'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <Collapsible
+                  variant="plain"
+                  summary={`引用している原稿（${props.usage.length} 節）`}
+                >
+                  <ul className="space-y-0.5 text-small">
+                    {props.usage.map((u) => (
+                      <li key={u.blockId} className="flex flex-wrap items-center gap-1">
+                        <Link
+                          href={`/enterprise/disclosure-projects/${u.projectId}/blocks/${u.blockId}`}
+                          className="text-brand-800 hover:underline"
+                        >
+                          {u.blockTitle}
+                        </Link>
+                        <Badge tone="neutral">
+                          <FileText className="size-3" aria-hidden="true" />
+                          {u.blockStatusLabel}
+                        </Badge>
+                        <span className="text-caption text-ink-muted">
+                          {u.projectName}／引用中の版 {u.citedVersionNo ?? '—'}
+                          {u.citesCurrent ? '' : '（最新ではない）'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </Collapsible>
                 <p className="text-caption text-ink-muted">
                   原稿は採用した時点の本文を持っています。ここで保存しても原稿の本文・承認は書き換わらず、原稿側に「再確認が必要」と表示されます。
                 </p>

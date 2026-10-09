@@ -18,7 +18,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible } from '@/components/ui/collapsible';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
+import { REQUIREMENT_COVERAGE_CATEGORIES } from '@/lib/domain/requirement-coverage';
 import { formatJstDate } from '@/lib/format/datetime';
+import { statusLabel } from '@/lib/ui/status/registry';
 import type { DisclosureHome } from '@/lib/services/disclosure-home';
 import { cn } from '@/lib/utils';
 
@@ -268,6 +270,24 @@ function ProgressSection({ home }: { home: DisclosureHome }) {
               <History className="size-3.5 shrink-0" aria-hidden="true" />
               承認済みのうち {progress.staleApprovedItemCount}{' '}
               項目は、承認後に引用先が更新され再確認が必要です
+            </p>
+          )}
+          {progress.coverageTotal > 0 && (
+            // 5 区分（トライアル対応 NF-03）。要求事項タブ・対応表と同じ関数の件数で、率にはまとめない
+            <p className="text-small text-ink" data-testid="home-coverage-counts">
+              <span className="text-ink-muted">区分: </span>
+              {REQUIREMENT_COVERAGE_CATEGORIES.map(
+                (c) => `${statusLabel('requirementCoverage', c)} ${progress.coverageCounts[c]}`,
+              ).join('／')}
+              <span className="text-ink-muted">（分母 {progress.coverageTotal} 項目）</span>
+              {home.project && (
+                <Link
+                  href={`${home.project.href}?tab=requirements&fw=all`}
+                  className="ml-1 text-brand-700 underline underline-offset-2"
+                >
+                  すべての基準の要求事項を見る
+                </Link>
+              )}
             </p>
           )}
           <Collapsible

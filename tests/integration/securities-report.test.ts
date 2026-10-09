@@ -86,6 +86,7 @@ describe('有価証券報告書からの報告対象の自動選択', () => {
       valueChainNote: '',
       confirmedAt: now,
       confirmedBy: ctx.userId,
+      frameworkVersionId: null,
       createdAt: now,
       updatedAt: now,
       createdBy: ctx.userId,

@@ -51,6 +51,7 @@ import {
   searchCsrdRequirements,
   type RequirementDataFacts,
 } from './form-input';
+import { CsrdScopeNote } from '../_components/csrd-scope-note';
 
 export const metadata = { title: 'CSRD 要求事項の評価' };
 
@@ -504,6 +505,7 @@ export default async function CsrdRequirementsPage({
     <>
       <PageHeader
         title="CSRD 要求事項の評価"
+        context={<CsrdScopeNote />}
         description={
           <span className="flex flex-wrap items-center gap-2">
             <span>

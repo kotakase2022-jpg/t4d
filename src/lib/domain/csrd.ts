@@ -98,6 +98,14 @@ export const CSRD_DRAFT_AI_BODY_TARGET = 600;
 /** 架空のサンプル・マスターであることの表示（正式な ESRS と見誤らせない） */
 export const CSRD_SAMPLE_MASTER_LABEL = 'サンプル（架空）';
 
+/**
+ * CSRD の画面（対応状況・設定・要求事項・計画・収集・ドラフト）の見出しの下の注記（トライアル対応 NF-12・X-14）。
+ * EU 法人向けの通常 ESRS のサンプルであり、CSRD 域外（ESRS-40a）の準備は開示プロジェクトで扱うことを示す
+ * （40a の要求事項・判断をこのメニューに混ぜない）
+ */
+export const CSRD_SCOPE_NOTE =
+  'EU 法人向け・通常 ESRS（2023 年版）の架空サンプル。CSRD 域外（ESRS-40a）は開示プロジェクトで扱います';
+
 /** ギャップの観点が問いかけている内容（CSRD の文言。SSBJ の GAP_KIND_QUESTION は使わない） */
 export const CSRD_GAP_KIND_QUESTION: Record<SsbjGapKind, string> = {
   disclosure: 'ESRS（サンプル）が求める情報が、現在の開示資料に記載されているか',
@@ -111,7 +119,8 @@ export const CSRD_GAP_KIND_QUESTION: Record<SsbjGapKind, string> = {
  */
 export const CSRD_DOUBLE_MATERIALITY_NOTE =
   'ダブル・マテリアリティの考え方は 2023 年採択の ESRS（委任規則 (EU) 2023/2772）に基づく。' +
-  '2026-07-03 採択の改正（簡素化）ESRS は官報掲載まで未発効で、本サンプルには反映していない。' +
+  // 官報掲載・発効の日付は一次資料（官報の本文）で確認できるまで書かない（plan NF-12。二次資料の報道だけ）
+  '2026-07-03 採択の改正（簡素化）ESRS は官報掲載の報道あり（一次資料で確認中）・未発効で、本サンプルには反映していない。' +
   'ESRS-40a 公開草案はインパクト重要性のみ。';
 
 /** ESRS は数値の閾値を定めていない。閾値・採点方法は会社が決めて開示する */

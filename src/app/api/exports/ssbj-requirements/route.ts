@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server';
+import { accessDeniedResponse } from '@/lib/errors/access-denied';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { getSession } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
 import { contentDisposition, EXPORT_CONTENT_TYPES, toCsv } from '@/lib/exports';
 import { SSBJ_REQUIREMENT_EXPORT_COLUMNS } from '@/lib/exports/ssbj-requirements';
 import { getDb } from '@/lib/repositories';
-import { filterRequirements, loadSsbjRequirementViews } from '@/lib/services/ssbj-gap';
+import {
+  filterRequirements,
+  loadSsbjRequirementViews,
+  resolveSsbjVersion,
+} from '@/lib/services/ssbj-gap';
 
 /**
  * 「SSBJ 要求事項の評価」一覧の CSV Export。
@@ -19,7 +24,10 @@ export async function GET(request: Request) {
   if (!session?.context) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const ctx = session.context;
   if (ctx.workspace.organizationType !== 'enterprise' || !can(ctx, 'enterprise.export.run')) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    return accessDeniedResponse(await getDb(), ctx, {
+      permission: 'enterprise.export.run',
+      request,
+    });
   }
 
   const url = new URL(request.url);
@@ -45,7 +53,10 @@ export async function GET(request: Request) {
     search: url.searchParams.get('q') ?? undefined,
   });
 
-  const baseName = `T4D_SSBJ要求事項の評価_${ctx.workspace.organizationName}_${period.code}`;
+  // ファイル名に対象年度×基準版を入れる（列は変えない。NF-12）。ファイル名に使えない文字は除く
+  const resolved = await resolveSsbjVersion(db, organizationId, period.id);
+  const versionPart = resolved ? `_${resolved.version.label.replace(/[\\/:*?"<>|\s]+/g, '')}` : '';
+  const baseName = `T4D_SSBJ要求事項の評価_${ctx.workspace.organizationName}_${period.code}${versionPart}`;
 
   await recordAuditEvent(db, ctx, {
     eventType: 'export_created',

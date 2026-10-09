@@ -12,22 +12,29 @@ import { getProject, type ProjectDetail } from '@/lib/services/disclosure-projec
 import { listProjectReviews } from '@/lib/services/disclosure-review';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { ProjectStatusBadge } from '../_components/framework-badges';
+import { CrosswalkTab } from './_tabs/crosswalk';
 import { ManuscriptsTab } from './_tabs/manuscripts';
 import { OutputsTab } from './_tabs/outputs';
 import { OverviewTab } from './_tabs/overview';
 import { RequirementsTab } from './_tabs/requirements';
 import { ReviewsTab } from './_tabs/reviews';
 import { SettingsTab } from './_tabs/settings';
+import { XbrlTab } from './_tabs/xbrl';
 
 export const metadata = { title: '開示プロジェクト' };
 
-/** タブのキー・URL（?tab=）・ラベルは変えない（E2E・共有 URL のため。plan S1）。設定は右端（L3） */
+/**
+ * タブのキー・URL（?tab=）・ラベルは変えない（E2E・共有 URL のため。plan S1）。設定は右端（L3）。
+ * トライアル対応（2026-10。K3）で「横断対応表」を要求事項の右、「XBRL」を出力の右に足した
+ */
 const TABS = [
   { key: 'overview', label: '概要' },
   { key: 'requirements', label: '要求事項' },
+  { key: 'crosswalk', label: '横断対応表' },
   { key: 'manuscripts', label: '原稿' },
   { key: 'reviews', label: 'レビュー・承認' },
   { key: 'outputs', label: '出力' },
+  { key: 'xbrl', label: 'XBRL' },
   { key: 'settings', label: '設定' },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
@@ -63,7 +70,7 @@ async function attentionCounts(
 }
 
 /**
- * 開示プロジェクトの詳細（§6.3 のタブ: 概要／要求事項／原稿／レビュー・承認／出力／設定）。
+ * 開示プロジェクトの詳細（§6.3 のタブ: 概要／要求事項／横断対応表／原稿／レビュー・承認／出力／XBRL／設定）。
  * タブは ?tab= で持ち、共有・戻る操作で同じ画面に戻れるようにする。
  * 見出しに企業・プロジェクト・報告期間（開始日〜終了日）・対象範囲を出す（§4.2）。
  * 主操作はタブごとに 1 つ（各タブの先頭）。タブには要対応の件数を文字で併記する（plan S1）。
@@ -155,9 +162,11 @@ export default async function DisclosureProjectPage({
         <FlashMessage searchParams={query} />
         {tab === 'overview' && <OverviewTab projectId={project.id} searchParams={query} />}
         {tab === 'requirements' && <RequirementsTab projectId={project.id} searchParams={query} />}
+        {tab === 'crosswalk' && <CrosswalkTab projectId={project.id} searchParams={query} />}
         {tab === 'manuscripts' && <ManuscriptsTab projectId={project.id} searchParams={query} />}
         {tab === 'reviews' && <ReviewsTab projectId={project.id} searchParams={query} />}
         {tab === 'outputs' && <OutputsTab projectId={project.id} searchParams={query} />}
+        {tab === 'xbrl' && <XbrlTab projectId={project.id} searchParams={query} />}
         {tab === 'settings' && <SettingsTab projectId={project.id} searchParams={query} />}
       </div>
     </>

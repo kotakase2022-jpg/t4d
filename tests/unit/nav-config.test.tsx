@@ -9,6 +9,7 @@ import {
   hiddenNavHrefsFor,
   isNavAncestorOfCurrent,
   isNavSubtreeActive,
+  missingNavOptions,
   missingNavPermissions,
   navBranchOf,
   navTreeFor,
@@ -464,6 +465,48 @@ describe('権限の無い項目を出さない（hiddenNavHrefsFor）', () => {
     const hidden = new Set(hiddenFor(ENTERPRISE_NAV, 'viewer'));
     expect(hidden.has('/enterprise/narratives')).toBe(false);
     expect(hidden.has('/enterprise/disclosures/csrd')).toBe(false);
+  });
+});
+
+describe('契約オプションの無い組織に CDP の葉を出さない（plan K2 の例外・NF-38）', () => {
+  const shapeOf = (items: NavItem[]): unknown =>
+    items.map((item) => ({
+      label: item.label,
+      href: item.href,
+      ...(item.children ? { children: shapeOf(item.children) } : {}),
+    }));
+
+  it.each([
+    ['従来メニュー', ENTERPRISE_NAV],
+    ['開示優先モード', ENTERPRISE_NAV_DISCLOSURE_FIRST],
+  ] as const)('%s: 契約のある組織の木は変えない（オプションで隠すものが無い）', (_label, tree) => {
+    expect(missingNavOptions(tree, new Set(['cdp']))).toEqual([]);
+    expect(shapeOf(visibleNavTree(tree, [], [], []))).toEqual(shapeOf(tree));
+  });
+
+  it('従来メニュー: 契約の無い組織には 開示対応 > CDP を出さない（MSCI・FTSE は残す）', () => {
+    const hidden = missingNavOptions(ENTERPRISE_NAV, new Set());
+    expect(hidden).toEqual(['cdp']);
+    const tree = visibleNavTree(ENTERPRISE_NAV, [], [], hidden);
+    const disclosure = tree.find((item) => item.label === '開示対応');
+    expect(disclosure?.children?.map((c) => c.label)).toEqual(['SSBJ', 'CSRD', 'MSCI', 'FTSE']);
+    expect(navCommandEntries(tree).map((e) => e.href)).not.toContain('/enterprise/disclosures/cdp');
+  });
+
+  it('開示優先: 契約の無い組織では「その他の開示」の入口を MSCI にし、CDP の葉を出さない', () => {
+    const tree = visibleNavTree(
+      ENTERPRISE_NAV_DISCLOSURE_FIRST,
+      [],
+      [],
+      missingNavOptions(ENTERPRISE_NAV_DISCLOSURE_FIRST, new Set()),
+    );
+    const other = tree
+      .find((item) => item.label === '開示プロジェクト')
+      ?.children?.find((item) => item.label === 'その他の開示');
+    expect(other?.href).toBe('/enterprise/disclosures/msci');
+    expect(other?.linkFallback).toBe(true);
+    expect(other?.children?.map((c) => c.label)).toEqual(['MSCI', 'FTSE']);
+    expect(navCommandEntries(tree).map((e) => e.href)).not.toContain('/enterprise/disclosures/cdp');
   });
 });
 

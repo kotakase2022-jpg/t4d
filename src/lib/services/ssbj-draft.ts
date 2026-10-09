@@ -44,6 +44,9 @@ export interface SsbjDraftView {
 
 export interface SsbjDraftOverview {
   period: ReportingPeriod;
+  /** この年度の SSBJ の基準の版（NF-12。対象年度×基準版の表示） */
+  versionLabel: string;
+  versionPinned: boolean;
   areas: SsbjDraftView[];
   /** 確定済みの節の数 */
   confirmedCount: number;
@@ -90,6 +93,8 @@ export async function loadSsbjDrafts(
 
   return {
     period,
+    versionLabel: master.versionLabel,
+    versionPinned: master.versionPinned,
     areas,
     confirmedCount: drafts.filter((d) => d.confirmedAt !== null).length,
     canWrite: can(ctx, 'enterprise.disclosure.write'),

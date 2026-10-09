@@ -19,6 +19,7 @@ import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import { FieldValidationError } from '@/lib/services/disclosure-project';
 import { listMembers, type MemberEntry } from '@/lib/services/identity';
+import { listIroOptions } from '@/lib/services/impact-ledger';
 import {
   createAnchorFromFragment,
   loadAnchorViews,
@@ -357,6 +358,13 @@ export interface NarrativeEditorData {
   confirmedByName: string | null;
   canWrite: boolean;
   isCandidate: boolean;
+  /**
+   * 「関連するインパクト・リスク・機会」の選択肢（現在の版の年度の IRO。NF-10）。
+   * 選べないテーマ・IRO が無い年度は空配列
+   */
+  iroOptions: Array<{ id: Uuid; label: string }>;
+  /** 選択肢の年度（現在の版の年度。版が無ければ null） */
+  iroOptionsPeriodId: Uuid | null;
 }
 
 async function loadRecord(
@@ -393,6 +401,14 @@ export async function getNarrativeEditor(
   const usageMap = await loadNarrativeUsageMap(db, organizationId, allVersions, records);
   const nameOf = (id: Uuid | null) =>
     id ? (members.find((m) => m.userId === id)?.displayName ?? '（組織外のユーザー）') : null;
+  const iroOptionsPeriodId = current?.reportingPeriodId ?? null;
+  const iroOptions =
+    iroOptionsPeriodId && IRO_REF_THEMES.includes(record.theme)
+      ? (await listIroOptions(db, ctx, iroOptionsPeriodId)).map((o) => ({
+          id: o.id,
+          label: o.label,
+        }))
+      : [];
 
   return {
     record,
@@ -416,6 +432,8 @@ export async function getNarrativeEditor(
     confirmedByName: nameOf(record.confirmedBy),
     canWrite: can(ctx, 'enterprise.disclosure.write'),
     isCandidate: isCandidateVersion(current),
+    iroOptions,
+    iroOptionsPeriodId,
   };
 }
 
@@ -435,6 +453,11 @@ export interface SaveNarrativeInput {
   changeReason: string;
   /** 原稿から引用されている場合、影響一覧を確認したか */
   acknowledgeImpact: boolean;
+  /**
+   * この版が説明するインパクト・リスク・機会（0052。NF-10）。省略すると直前の版のもの（同じ年度のとき）を
+   * 引き継ぐ。選べるのはリスク・機会／財務的影響のテーマで、版の年度の IRO だけ
+   */
+  iroRefs?: Uuid[];
 }
 
 export interface NarrativeFieldDiff {
@@ -510,6 +533,64 @@ async function validatePeriod(
   return period;
 }
 
+/** 「関連するインパクト・リスク・機会」を選べるテーマ（SSBJ の企業への影響を説明する定性情報） */
+export const IRO_REF_THEMES: readonly NarrativeTheme[] = ['risk_opportunity', 'financial_impact'];
+
+/** 1 つの版が参照できる IRO の上限（Demo の Cookie の検査と同じ値） */
+export const IRO_REFS_MAX = 50;
+
+/**
+ * 版が説明する IRO を確かめる。同じ組織・版の年度・論理削除していない IRO だけ
+ * （DB の t4d.narrative_iro_refs_guard は組織だけを見る。年度はここで揃える）
+ */
+async function validateIroRefs(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  theme: NarrativeTheme,
+  periodId: Uuid,
+  iroRefs: readonly Uuid[],
+): Promise<Uuid[]> {
+  const unique = [...new Set(iroRefs.filter((id) => id))];
+  if (unique.length === 0) return [];
+  if (!IRO_REF_THEMES.includes(theme)) {
+    throw new FieldValidationError({
+      iroRefs:
+        '関連するインパクト・リスク・機会は、リスク・機会／財務的影響の定性情報だけで選べます。',
+    });
+  }
+  if (unique.length > IRO_REFS_MAX) {
+    throw new FieldValidationError({
+      iroRefs: `関連するインパクト・リスク・機会は ${IRO_REFS_MAX} 件までです。`,
+    });
+  }
+  const rows = unique.every((id) => isUuid(id))
+    ? await db.select('csrdDmaIros', { where: { id: { in: unique } } })
+    : [];
+  const valid = new Set(
+    rows
+      .filter(
+        (r) =>
+          r.organizationId === ctx.workspace.organizationId &&
+          r.reportingPeriodId === periodId &&
+          r.deletedAt === null,
+      )
+      .map((r) => r.id),
+  );
+  if (unique.some((id) => !valid.has(id))) {
+    throw new FieldValidationError({
+      iroRefs:
+        'インパクト・リスク・機会が見つかりません（版の年度の、削除されていないものだけを選べます）。',
+    });
+  }
+  return unique;
+}
+
+function sameIds(a: readonly Uuid[], b: readonly Uuid[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
 /**
  * 定性情報の新しい版を保存する。
  *  - baseVersionId が現在の版と違えば保存せず、最新版との比較情報を返す（409 相当）。
@@ -567,7 +648,19 @@ export async function saveNarrative(
     body,
     sourceAnchorIds,
   });
-  if (current && current.contentHash === hash) return { status: 'unchanged', version: current };
+  // 関連するインパクト・リスク・機会（0052）。省略は直前の版のまま。年度を変えたら前の年度の IRO は外す
+  const previousIroRefs = current && current.reportingPeriodId === period.id ? current.iroRefs : [];
+  const iroRefs = await validateIroRefs(
+    db,
+    ctx,
+    record.theme,
+    period.id,
+    input.iroRefs ?? previousIroRefs,
+  );
+  // IRO の参照は内容ハッシュに入れない（0052）。本文が同じでも参照が変われば新しい版にする
+  if (current && current.contentHash === hash && sameIds(current.iroRefs, iroRefs)) {
+    return { status: 'unchanged', version: current };
+  }
 
   const changeReason = input.changeReason.trim();
   if (current && !changeReason) {
@@ -604,6 +697,8 @@ export async function saveNarrative(
     carriedFromVersionId: null,
     changeReason: changeReason.slice(0, 1000) || null,
     originatedFromAiRunId: null,
+    // 関連するインパクト・リスク・機会（0052・NF-10）。画面で選び直せる。省略時は直前の版のもの
+    iroRefs,
     contentHash: hash,
     createdAt: new Date().toISOString(),
     createdBy: ctx.userId,
@@ -626,6 +721,7 @@ export async function saveNarrative(
       baseVersionId: input.baseVersionId,
       sourceAnchorCount: sourceAnchorIds.length,
       impactedBlocks: usage.length,
+      iroRefCount: iroRefs.length,
     },
   });
   return { status: 'saved', version };
@@ -698,6 +794,7 @@ async function insertRecordWithVersion(
     carriedFromVersionId: null,
     changeReason: input.changeReason,
     originatedFromAiRunId: null,
+    iroRefs: [],
     contentHash: narrativeContentHash({
       reportingPeriodId: input.period.id,
       scopeNote: input.scopeNote,
@@ -893,6 +990,8 @@ export async function carryForwardNarrative(
     carriedFromVersionId: source.id,
     changeReason: `${sourcePeriod?.code ?? '前年度'} の版 ${source.versionNo} から引継ぎ（当年度の根拠は未登録・未確認）`,
     originatedFromAiRunId: null,
+    // IRO は報告期間ごとの評価のため、前年度の参照を当年度へ引き継がない
+    iroRefs: [],
     contentHash: narrativeContentHash({
       reportingPeriodId: target.id,
       scopeNote,

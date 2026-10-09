@@ -73,7 +73,7 @@
 - MSCI / FTSE 直接 API 連携
 - 全 SSBJ / 全 CDP 正式マスター
 - 全 Scope3 Category（Cat.1 のみ実装）
-- XBRL / iXBRL 提出 Package
+- 提出用の XBRL / iXBRL（公式タクソノミ・公式の検証。Stage 2〜3）。Stage 1（SAMPLE タクソノミでのタグ付け・簡易検査・xBRL-JSON・インライン XBRL のプレビュー。社内確認用・提出用ではない）は実装済み（known-limitations §13.5）
 - 監査法人既存調書システムとの Sync
 - 本番 SSO
 - 本番メール通知（通知は `notifications` テーブル + アプリ内 AlertCenter のみ）

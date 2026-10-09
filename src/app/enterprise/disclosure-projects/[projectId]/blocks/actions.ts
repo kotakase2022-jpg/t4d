@@ -2,9 +2,20 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect, unstable_rethrow } from 'next/navigation';
+import { recordAiFeedback, rejectionReasonOf } from '@/lib/ai/feedback';
 import { requireEnterpriseContext } from '@/lib/auth/session';
+import { runPreservingAction } from '@/lib/errors/form-action';
+import type { FormActionState } from '@/lib/errors/form-action-state';
 import { isUserFacingError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
+import {
+  adoptBlockMappingCandidates,
+  listRequirementOptions,
+  rejectBlockMappingCandidates,
+  updateBlockRequirements,
+  type RequirementOption,
+} from '@/lib/services/block-requirements';
+import { suggestRequirementMappings } from '@/lib/services/requirement-mapping-ai';
 import {
   adoptDraftParagraphs,
   closeDraftRun,
@@ -589,6 +600,8 @@ export interface CreateBlockFormValues {
   title: string;
   sectionKey: string;
   translationOfBlockId: string;
+  /** 対応する要求事項（節の基準の版のもの。トライアル対応 NF-05） */
+  requirementItemIds?: string[];
 }
 
 export interface CreateBlockFormState {
@@ -612,6 +625,9 @@ export async function createBlockFormAction(
     title: field(formData, 'title'),
     sectionKey: field(formData, 'sectionKey'),
     translationOfBlockId: field(formData, 'translationOfBlockId'),
+    requirementItemIds: formData
+      .getAll('requirementItemIds')
+      .filter((v): v is string => typeof v === 'string'),
   };
   let created: string;
   try {
@@ -624,6 +640,7 @@ export async function createBlockFormAction(
       title: values.title,
       language: values.language === 'en' ? 'en' : 'ja',
       translationOfBlockId: safeId(values.translationOfBlockId) || null,
+      requirementItemIds: (values.requirementItemIds ?? []).map(safeId).filter((id) => id !== ''),
     });
     created = block.id;
   } catch (error) {
@@ -661,4 +678,120 @@ export async function createBlockAction(formData: FormData): Promise<void> {
   });
   revalidatePath(projectPath(projectId));
   redirect(`${blockPath(projectId, created)}?flash=blockCreated`);
+}
+
+// ======================================================================
+// 要求事項の対応付け（トライアル対応 NF-05）と AI の対応候補（NF-11）
+// ======================================================================
+
+export type RequirementOptionsResult = { status: 'ok'; options: RequirementOption[] } | ActionError;
+
+/**
+ * 節の追加フォームで、選んだ基準の版の要求事項の一覧を読む（「対応する要求事項」を開いたときだけ呼ぶ）。
+ * 開示の編集権限とプロジェクトの基準の版をサービスが確かめる
+ */
+export async function listBlockRequirementOptionsAction(input: {
+  projectId: string;
+  frameworkVersionId: string;
+}): Promise<RequirementOptionsResult> {
+  try {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const options = await listRequirementOptions(db, ctx, {
+      projectId: safeId(input.projectId),
+      frameworkVersionId: safeId(input.frameworkVersionId),
+    });
+    return { status: 'ok', options };
+  } catch (error) {
+    // ログイン切れ・ワークスペースの切替による redirect() は、失敗として握りつぶさずに Next.js へ返す
+    unstable_rethrow(error);
+    return toActionError(error);
+  }
+}
+
+/** 節の要求事項の対応付けを保存する（承認済みの節は理由必須。断られたら選択と理由を残す） */
+export async function updateBlockRequirementsFormAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const projectId = safeId(field(formData, 'projectId'));
+  const blockId = safeId(field(formData, 'blockId'));
+  let changed = false;
+  const failure = await runPreservingAction(formData, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const result = await updateBlockRequirements(db, ctx, {
+      blockId,
+      itemIds: formData
+        .getAll('requirementItemIds')
+        .filter((v): v is string => typeof v === 'string'),
+      reason: field(formData, 'reason'),
+    });
+    changed = result.changed;
+  });
+  if (failure) return failure;
+  revalidateBlock(projectId, blockId);
+  redirect(
+    `${blockPath(projectId, blockId)}?pane=requirements&flash=${changed ? 'blockRequirementsSaved' : 'blockRequirementsUnchanged'}`,
+  );
+}
+
+/** 節に対応しうる要求事項の候補を AI に出させる（候補は ai_runs だけ。対応付けは変えない） */
+export async function suggestBlockRequirementsAction(formData: FormData): Promise<void> {
+  const projectId = safeId(field(formData, 'projectId'));
+  const blockId = safeId(field(formData, 'blockId'));
+  const back = `${blockPath(projectId, blockId)}?pane=requirements`;
+  let provider = 'mock';
+  await withUserFacingError(back, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const result = await suggestRequirementMappings(db, ctx, {
+      target: { kind: 'disclosure_block', id: blockId },
+      frameworkVersionIds: [safeId(field(formData, 'frameworkVersionId'))].filter(Boolean),
+    });
+    provider = result.run.provider;
+  });
+  revalidateBlock(projectId, blockId);
+  redirect(`${back}&flash=mappingCandidatesReady&ai=${provider === 'mock' ? 'mock' : 'openai'}`);
+}
+
+/** AI の候補から選んだ要求事項を対応付けに足す（人の操作。候補に無い ID は受け付けない） */
+export async function adoptBlockRequirementCandidatesAction(formData: FormData): Promise<void> {
+  const projectId = safeId(field(formData, 'projectId'));
+  const blockId = safeId(field(formData, 'blockId'));
+  const back = `${blockPath(projectId, blockId)}?pane=requirements`;
+  await withUserFacingError(back, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    await adoptBlockMappingCandidates(db, ctx, {
+      blockId,
+      runId: safeId(field(formData, 'runId')),
+      itemIds: formData.getAll('itemIds').filter((v): v is string => typeof v === 'string'),
+      reason: field(formData, 'reason'),
+    });
+  });
+  revalidateBlock(projectId, blockId);
+  redirect(`${back}&flash=mappingCandidatesAdopted`);
+}
+
+/** AI の候補を採用しない（理由は任意。AI の改善の検討に使う） */
+export async function rejectBlockRequirementCandidatesAction(formData: FormData): Promise<void> {
+  const projectId = safeId(field(formData, 'projectId'));
+  const blockId = safeId(field(formData, 'blockId'));
+  const back = `${blockPath(projectId, blockId)}?pane=requirements`;
+  await withUserFacingError(back, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    const run = await rejectBlockMappingCandidates(db, ctx, {
+      blockId,
+      runId: safeId(field(formData, 'runId')),
+    });
+    await recordAiFeedback(db, ctx, {
+      aiRunId: run.id,
+      decision: 'rejected',
+      comment: rejectionReasonOf(formData),
+    });
+  });
+  revalidateBlock(projectId, blockId);
+  redirect(`${back}&flash=mappingCandidatesRejected`);
 }

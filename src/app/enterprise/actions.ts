@@ -71,6 +71,7 @@ import {
   revokeInvitation,
 } from '@/lib/services/identity';
 import { carryForwardFromPreviousPeriod } from '@/lib/services/data-entry';
+import { assertFrameworkAvailable } from '@/lib/services/disclosure';
 import { evaluateApplicability } from '@/lib/services/disclosure-applicability';
 import { runDisclosureConsistencyCheck } from '@/lib/services/disclosure-check';
 import { confirmDisclosureImport } from '@/lib/services/disclosure-import';
@@ -1172,6 +1173,9 @@ export async function previewDisclosureImportAction(formData: FormData): Promise
       throw new ValidationError('ファイルを選択してください。');
     }
     const targetPeriodId = String(formData.get('targetPeriodId') ?? '');
+    // CDP 対応オプションの無い組織では、資料を保存する前に止める（plan NF-38。画面は入口を出さないが、
+    // 直接送られても資料だけが残らないように）
+    await assertFrameworkAvailable(db, ctx, 'cdp');
 
     const stored = await storeNewFile(db, ctx, {
       bucket: 'evidence-private',
@@ -1386,6 +1390,8 @@ export async function createInvitationAction(formData: FormData): Promise<void> 
     await createInvitation(db, ctx, {
       email: String(formData.get('email') ?? ''),
       roleKeys: formData.getAll('roleKeys').map(String) as RoleKey[],
+      // 担当拠点（トライアル対応 NF-25。未選択は全社。組織の拠点かはサービスが確かめる）
+      unitScopeIds: formData.getAll('unitScopeIds').map(String),
     });
   });
   revalidatePath('/enterprise/settings');

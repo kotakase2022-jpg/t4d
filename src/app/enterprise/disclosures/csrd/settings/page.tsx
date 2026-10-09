@@ -1,5 +1,13 @@
 import Link from 'next/link';
-import { ArrowLeft, Check, CircleCheck, CircleDashed, PencilLine, Save } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  CircleCheck,
+  CircleDashed,
+  PencilLine,
+  Save,
+  Target,
+} from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { FlashMessage } from '@/components/shared/flash';
 import { Notice } from '@/components/shared/notice';
@@ -33,6 +41,7 @@ import { UnitScopeSelector } from '../../_components/unit-scope-selector';
 import { confirmCsrdDmaAction, saveCsrdBoundaryAction, saveCsrdMethodAction } from './actions';
 import { axisProposalLabel, axisProposalText, formatScore, matrixInputsOf } from './dma-view';
 import { CSRD_SETTINGS_PATH } from './form-input';
+import { CsrdScopeNote } from '../_components/csrd-scope-note';
 
 export const metadata = { title: 'CSRD 設定（報告範囲・ダブル・マテリアリティ評価）' };
 
@@ -81,6 +90,16 @@ export default async function CsrdSettingsPage({
           label: '対応状況へ戻る',
           href: BASE,
           icon: <ArrowLeft aria-hidden="true" />,
+        },
+      ]}
+      more={[
+        {
+          // IRO を基準横断で並べる台帳（トライアル対応 NF-10）
+          kind: 'link',
+          id: 'impact-ledger',
+          label: 'インパクト・リスク・機会の台帳',
+          href: '/enterprise/disclosures/impacts',
+          icon: <Target aria-hidden="true" />,
         },
       ]}
     />
@@ -169,6 +188,7 @@ export default async function CsrdSettingsPage({
     <>
       <PageHeader
         title="CSRD 設定（報告範囲・ダブル・マテリアリティ評価）"
+        context={<CsrdScopeNote withBadge />}
         description={`${shell.currentPeriod.label} ／ 報告範囲と DMA が要求事項の適用を決めます`}
         help={
           <>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { recordAuditEvent } from '@/lib/audit/logger';
+import { fid } from '@/lib/fixtures/ids';
 import { getSession } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
@@ -14,6 +15,11 @@ import type { StorageBucket } from '@/types/domain';
  * Supabase Mode では Supabase Storage の Signed URL が直接使われるため、
  * このハンドラは Demo Mode でのみ有効。
  * 直接叩かれても、必ず DB（file_versions）で権限を再検証する。
+ *
+ * `engagementId` を付けて呼ばれたら、その案件がこの資料の組織の案件で、利用者がその案件のメンバーのときだけ
+ * アクセスの記録に案件を残す（トライアル対応 NF-26。保証側のアクセスを企業側の監査ログで案件ごとに辿る）。
+ * 案件の値は記録にだけ使い、認可には使わない（権限の判定は変えない）。企業の利用者の取得は案件に結び付けない
+ * （監査法人の案件の記録へ企業側の操作を混ぜない）。
  */
 export async function GET(request: Request) {
   if (getAppMode() !== 'demo') {
@@ -64,22 +70,30 @@ export async function GET(request: Request) {
     );
   }
 
+  const engagementId = await engagementOfFile(
+    db,
+    url.searchParams.get('engagementId'),
+    version,
+    session.context.engagementIds,
+  );
+  const now = new Date().toISOString();
   await db.insert('storageAccessEvents', [
     {
-      id: `${version.id}-${Date.now()}`,
+      id: fid('storage_access_event', `${version.id}/downloaded/${now}/${session.context.userId}`),
       organizationId: version.organizationId,
       actorUserId: session.context.userId,
       fileVersionId: version.id,
       action: 'downloaded',
-      engagementId: null,
+      engagementId,
       expiresAt: null,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
     },
   ]);
   await recordAuditEvent(db, session.context, {
     eventType: 'file_downloaded',
     resourceType: 'file_version',
     resourceId: version.id,
+    engagementId,
   });
 
   return new NextResponse(bytes as unknown as BodyInit, {
@@ -89,4 +103,22 @@ export async function GET(request: Request) {
       'Cache-Control': 'no-store',
     },
   });
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 記録に残す案件（この資料の組織がクライアントで、利用者がメンバーの案件だけ。形の合わない値・他の案件は残さない）
+ */
+async function engagementOfFile(
+  db: Awaited<ReturnType<typeof getDb>>,
+  raw: string | null,
+  version: { organizationId: string },
+  memberOf: readonly string[],
+): Promise<string | null> {
+  if (!raw || !UUID_PATTERN.test(raw) || !memberOf.includes(raw)) return null;
+  const engagement = await db.findById('engagements', raw);
+  return engagement && engagement.clientOrganizationId === version.organizationId
+    ? engagement.id
+    : null;
 }

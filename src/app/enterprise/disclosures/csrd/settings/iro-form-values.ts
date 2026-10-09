@@ -23,6 +23,8 @@ export interface IroFormValues {
   humanRights: boolean;
   affectedStakeholders: string;
   relatedImpactIroId: string;
+  /** 方針・取組のメモ（0052。台帳に表示） */
+  policyActionNote: string;
 }
 
 /** 追加のときの初期値（よく使う「実在・負のインパクト」） */
@@ -44,6 +46,7 @@ export const EMPTY_IRO_FORM: IroFormValues = {
   humanRights: false,
   affectedStakeholders: '',
   relatedImpactIroId: '',
+  policyActionNote: '',
 };
 
 const str = (value: number | string | null): string => (value === null ? '' : String(value));
@@ -68,6 +71,7 @@ export function iroFormValuesOf(iro: CsrdDmaIro): IroFormValues {
     humanRights: iro.humanRights,
     affectedStakeholders: iro.affectedStakeholders,
     relatedImpactIroId: iro.relatedImpactIroId ?? '',
+    policyActionNote: iro.policyActionNote ?? '',
   };
 }
 
@@ -104,5 +108,6 @@ export function iroFormValuesFromEntries(
     humanRights: get('humanRights') === 'on',
     affectedStakeholders: get('affectedStakeholders') ?? '',
     relatedImpactIroId: get('relatedImpactIroId') ?? '',
+    policyActionNote: get('policyActionNote') ?? fallback.policyActionNote,
   };
 }

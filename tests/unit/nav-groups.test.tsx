@@ -64,7 +64,7 @@ describe('監査法人ツリー（plan §1.4。形をここで厳密に固定す
     ]);
   });
 
-  it('案件を選ぶと 計画・実施・結論・記録 のグループに手続の 12 画面が並ぶ（案件の閲覧権限付き）', () => {
+  it('案件を選ぶと 計画・実施・結論・記録 のグループに手続の 13 画面が並ぶ（案件の閲覧権限付き。実施に開示レポート）', () => {
     expect(shape(assuranceNav(ENG))).toEqual([
       { label: '案件ホーム', href: '/assurance/dashboard' },
       { label: '保証契約', href: '/assurance/engagements' },
@@ -83,6 +83,8 @@ describe('監査法人ツリー（plan §1.4。形をここで厳密に固定す
         permission: READ,
         children: [
           { label: 'Data Room', href: `${base}/data-room`, permission: READ },
+          // トライアル対応（plan K2 の例外）: 企業が共有した承認済みレポートの写し
+          { label: '開示レポート', href: `${base}/reports`, permission: READ },
           { label: '母集団', href: `${base}/population`, permission: READ },
           { label: 'サンプリング', href: `${base}/sampling`, permission: READ },
           { label: '保証手続・調書', href: `${base}/testing`, permission: READ },

@@ -55,6 +55,9 @@
 | メニュー（Sidebar／⌘K）に載る画面         | 従来 31・開示優先 34・監査法人 14             | ⌘K は `navCommandEntries(nav)` のみ（`command-palette.tsx:22,59`。`extraEntries` は呼び出し元 0） |
 | E2E spec                                  | e2e 56＋stateless 1＋supabase 4＋production 1 | 条件付き `test.skip(count===0)` が 36 か所（§7.4）                                                |
 
+上の表は 2026-10-07 の基準線。UI 再設計で画面 3 つを足し（81）、トライアル対応（2026-10）の後はページルート 89（P82〜P89）・API ルート 17（E13〜E17）・
+`'use server'` ファイル 28・Server Action は機能 ID で F001〜F201（F145〜F201 の 57 件を追加。§3.14）。回帰の判定は `regression.md` §6。
+
 ---
 
 ## 2. 画面（ページルート）と到達経路
@@ -138,6 +141,24 @@
 | P76     | /reset                                                                                                                   | パスワード再設定                                                                                                     | —                                                      | メール identity.ts:327・設定画面で発行したリンク                           | トークン                                                | 0                                         |
 | P77     | /invite/[invitationId]                                                                                                   | 招待の受諾                                                                                                           | —                                                      | settings/page.tsx:309（発行後に表示）                                      | トークン                                                | 0（auth-copilot はリンク経由）            |
 | P78     | /                                                                                                                        | （/workspace へ redirect）                                                                                           | —                                                      | —                                                                          | —                                                       | —                                         |
+
+### 2.3 トライアル対応（2026-10）で足した画面（P82〜。P79〜P81 は欠番）
+
+メニュー木は変えない（ROUTE_CATALOG の menu none・header）。例外は監査法人ツリーの「実施」に足した「開示レポート」の 1 葉と、
+CDP 対応オプションの無い組織で出さない CDP の葉（契約のある組織の木は不変）。入口は画面内リンク・Command Palette・ユーザーメニュー。
+
+| ID  | ルート                                                             | 画面名                           | メニュー・入口                                                                                        | 閲覧条件                                         |
+| --- | ------------------------------------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| P82 | /enterprise/disclosure-projects/[projectId]/requirements/[itemId]  | 要求事項の詳細（プロジェクト）   | —（要求事項タブ・横断対応表の行・原稿エディタの要求事項）                                             | disclosure.read                                  |
+| P83 | /enterprise/disclosure-projects/[projectId]/snapshots/[snapshotId] | スナップショットの内容とトレース | —（出力タブの行「内容とトレースを開く」・データの詳細・資料の詳細）。パレットの操作「トレースを開く」 | disclosure.read                                  |
+| P84 | /enterprise/assurance-comments                                     | 保証側のコメント                 | —（ホームの Attention・ワークフロー・レビュー・承認タブ・原稿エディタ）。パレット                     | disclosure.read（回答は disclosure.write）       |
+| P85 | /assurance/engagements/[engagementId]/reports                      | 開示レポート                     | 監査法人ツリー「実施」（Data Room の次。plan K2 の例外）                                              | assurance.engagement.read＋案件メンバー          |
+| P86 | /assurance/engagements/[engagementId]/reports/[copyId]             | 開示レポートの内容               | —（開示レポートの行）                                                                                 | 同上（共有中の写しだけ）                         |
+| P87 | /enterprise/trial                                                  | トライアルの評価                 | ユーザーメニュー・ヘルプ・ヘッダーの「ご意見・不具合」の結果・パレット                                | data.read（編集・判定・出力は org.manage）       |
+| P88 | /enterprise/audit-log                                              | 監査ログ                         | —（設定の見出しの「その他」）・パレット                                                               | common.audit.read                                |
+| P89 | /enterprise/disclosures/impacts                                    | インパクト・リスク・機会の台帳   | —（定性情報の一覧・CSRD 設定・要求事項の詳細・横断対応表の「その他」）・パレット                      | disclosure.read（IRO の追加は disclosure.write） |
+
+タブ（既存の画面の中）: 開示プロジェクト `?tab=crosswalk`（横断対応表）・`?tab=xbrl`（XBRL）、設定 `?tab=approval`（承認ルート）・`?tab=roles`（役割と権限）・`?tab=data-handling`（データの取扱い）。
 
 ---
 
@@ -357,6 +378,72 @@
 
 （F048・F121 は置き換え先が無い。互換のため残す旨は AI_HANDOFF.md:2492,2564）
 
+### 3.14 トライアル対応（2026-10）で足した機能（F145〜F201）
+
+列: スライス＝並行実装の作業単位（T1〜T8）。E2E は `tests/e2e/feature-coverage.ts` と同じ。Action はすべて UI から呼ばれる（`server-action-reachability`）。
+
+| ID   | 機能                                                          | スライス | Action                                                         | 権限                                     | E2E                                                                                             |
+| ---- | ------------------------------------------------------------- | -------- | -------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| F145 | 要求事項の判断を記録（40a 等。3 観点・理由・担当・期限）      | T1       | requirements/actions.ts saveRequirementAssessmentAction        | ds.write                                 | trial-requirements・zzzzz-trial-chain                                                           |
+| F146 | 対象外・非重要として申請                                      | T1       | requirements/actions.ts requestExclusionAction                 | ds.write                                 | trial-requirements・zzzzz-trial-chain                                                           |
+| F147 | 対象外・非重要の判断を承認（別の人・取り消せない）            | T1       | requirements/actions.ts approveExclusionAction                 | ds.approve（申請者・理由の記録者と別人） | trial-requirements・zzzzz-trial-chain                                                           |
+| F148 | 対象外・非重要の申請を差し戻す（理由必須）                    | T1       | requirements/actions.ts returnExclusionAction                  | ds.approve                               | trial-requirements                                                                              |
+| F149 | 対象外・非重要の申請を取り下げる                              | T1       | requirements/actions.ts withdrawExclusionAction                | 申請者か ds.write                        | trial-requirements                                                                              |
+| F150 | 横断対応の AI 候補を出させる（表示だけ）                      | T1       | requirements/actions.ts suggestCrosswalkCandidatesAction       | ai.run＋ds.write                         | trial-requirements                                                                              |
+| F151 | 横断対応の AI 候補を採用しない（理由）                        | T1       | requirements/actions.ts rejectCrosswalkCandidatesAction        | ai.run＋ds.write                         | trial-requirements                                                                              |
+| F152 | 節の要求事項の選択肢を読む                                    | T1       | blocks/actions.ts listBlockRequirementOptionsAction            | ds.write                                 | trial-requirements                                                                              |
+| F153 | 節と要求事項の対応付けを変更（承認済みは理由必須）            | T1       | blocks/actions.ts updateBlockRequirementsFormAction            | ds.write                                 | trial-requirements・zzzzz-trial-chain                                                           |
+| F154 | 節の要求事項の AI 候補を出させる                              | T1       | blocks/actions.ts suggestBlockRequirementsAction               | ai.run＋ds.write                         | trial-requirements                                                                              |
+| F155 | 節の要求事項の AI 候補を採用（選んだ候補だけ）                | T1       | blocks/actions.ts adoptBlockRequirementCandidatesAction        | ds.write                                 | trial-requirements                                                                              |
+| F156 | 節の要求事項の AI 候補を採用しない（理由）                    | T1       | blocks/actions.ts rejectBlockRequirementCandidatesAction       | ds.write                                 | trial-requirements                                                                              |
+| F157 | 承認済みレポートを保証側へ共有（写し・取り消せない）          | T2       | outputs/actions.ts shareReportAction                           | grant.manage                             | trial-assurance・zzzzz-trial-chain                                                              |
+| F158 | 保証側への共有を取り下げる                                    | T2       | outputs/actions.ts withdrawSharedReportAction                  | grant.manage                             | trial-assurance                                                                                 |
+| F159 | 外部で編集したファイルを承認版と照合（保存しない）            | T2       | outputs/actions.ts reconcileUploadedFileAction                 | export.run                               | trial-trace-outputs                                                                             |
+| F160 | 保証側: 開示レポートの段落・数値にコメント                    | T3       | assurance/actions.ts createReportNoteAction                    | as.review.write＋案件メンバー            | trial-assurance・zzzzz-trial-chain                                                              |
+| F161 | 企業: 保証側のコメントへ回答（追記）                          | T3       | assurance-comments/actions.ts respondToAssuranceNoteAction     | ds.write                                 | trial-assurance・zzzzz-trial-chain                                                              |
+| F162 | Sign-off に共有した開示レポートを結び付けて記録               | T3       | assurance/actions.ts createSignoffAction（sharedReportCopyId） | as.signoff（代理禁止は不変）             | **E2E 無し**（Fixture の案件は抑止条件があり Sign-off を実行できない。int:signoff-report-link） |
+| F163 | トライアル計画を編集                                          | T4       | trial/actions.ts saveTrialPlanAction                           | org.manage                               | trial-evaluation                                                                                |
+| F164 | 選定ケースを編集                                              | T4       | trial/actions.ts saveTrialCasesAction                          | org.manage                               | trial-evaluation                                                                                |
+| F165 | 開始前の合意・終了時の扱い・導入判断を記録                    | T4       | trial/actions.ts saveTrialDecisionAction                       | org.manage                               | trial-evaluation                                                                                |
+| F166 | 検証シナリオの実施を記録（本人）                              | T4       | trial/actions.ts recordScenarioRunAction                       | 組織メンバー本人                         | trial-evaluation・zzzzz-trial-chain                                                             |
+| F167 | 評価者の判定を記録（取り消せない）                            | T4       | trial/actions.ts judgeScenarioAction                           | org.manage                               | trial-evaluation・zzzzz-trial-chain                                                             |
+| F168 | ご意見・不具合を送る（ヘッダー・改善管理表）                  | T4       | trial/actions.ts submitFeedbackAction                          | 組織メンバー本人                         | trial-evaluation・zzzzz-trial-chain                                                             |
+| F169 | 定例会などの論点を記録                                        | T4       | trial/actions.ts recordMeetingFeedbackAction                   | org.manage                               | trial-evaluation                                                                                |
+| F170 | 改善管理表の対応を記録                                        | T4       | trial/actions.ts triageFeedbackAction                          | org.manage                               | trial-evaluation                                                                                |
+| F171 | 再検証の結果を記録                                            | T4       | trial/actions.ts recordReverificationAction                    | org.manage                               | trial-evaluation                                                                                |
+| F172 | 作業時間を記録（現行・T4D）                                   | T4       | trial/actions.ts recordTaskTimingAction                        | 組織メンバー本人                         | trial-evaluation・zzzzz-trial-chain                                                             |
+| F173 | 承認ルートを保存（3 段階のひな形・過年度確定値）              | T5       | settings/actions.ts saveApprovalRouteAction                    | org.manage                               | trial-admin・zzzzz-trial-chain                                                                  |
+| F174 | メンバーの役割・担当拠点を変更                                | T5       | settings/actions.ts updateMembershipAction                     | member.manage                            | trial-admin                                                                                     |
+| F175 | メンバーの利用を停止・再開                                    | T5       | settings/actions.ts setMembershipStatusAction                  | member.manage                            | trial-admin                                                                                     |
+| F176 | データ取扱条件の版を記録                                      | T5       | settings/actions.ts recordDataTermsAction                      | org.manage                               | trial-admin                                                                                     |
+| F177 | XBRL の対応付けを追加・編集（候補）                           | T6       | xbrl/actions.ts saveXbrlMappingAction                          | ds.write                                 | trial-xbrl                                                                                      |
+| F178 | XBRL の対応付けを確定（作成者以外・行・一括）                 | T6       | xbrl/actions.ts confirmXbrlMappingsAction                      | ds.approve                               | trial-xbrl                                                                                      |
+| F179 | XBRL の対応付けを対象外にする（理由）                         | T6       | xbrl/actions.ts excludeXbrlMappingAction                       | ds.write                                 | trial-xbrl                                                                                      |
+| F180 | XBRL の対応付けの対象外を取り消す                             | T6       | xbrl/actions.ts restoreXbrlMappingAction                       | ds.write                                 | trial-xbrl                                                                                      |
+| F181 | XBRL の対応付けを削除                                         | T6       | xbrl/actions.ts deleteXbrlMappingAction                        | ds.write                                 | trial-xbrl                                                                                      |
+| F182 | XBRL の対応付けの AI 候補を出させる（候補のまま）             | T6       | xbrl/actions.ts suggestXbrlMappingsAction                      | ai.run＋ds.write                         | trial-xbrl                                                                                      |
+| F183 | 基準のタクソノミ（SAMPLE）を設定                              | T6       | xbrl/actions.ts setXbrlTaxonomyAction                          | ds.write                                 | trial-xbrl                                                                                      |
+| F184 | 提出者の識別子を保存                                          | T6       | xbrl/actions.ts saveFilingIdentifierAction                     | org.manage                               | **E2E 無し**（Demo Mode は読み取り専用。int:xbrl-export）                                       |
+| F185 | CDP の回答を始める                                            | T7       | cdp/actions.ts startResponseAction                             | ds.write＋CDP オプション                 | trial-cdp-option                                                                                |
+| F186 | CDP の回答を始めて AI 草案を作る                              | T7       | cdp/actions.ts startResponseDraftAction                        | ai.run＋ds.write＋CDP オプション         | trial-cdp-option                                                                                |
+| F187 | CDP の回答の担当・レビュー担当を割り当てる                    | T7       | cdp/actions.ts assignResponseAction                            | ds.write                                 | trial-cdp-option                                                                                |
+| F188 | CDP の質問の担当を一括で割り当てる                            | T7       | cdp/actions.ts bulkAssignResponsesAction                       | ds.write                                 | trial-cdp-option                                                                                |
+| F189 | CDP の AI の対応付けの候補を確定                              | T7       | cdp/actions.ts confirmMappingCandidateAction                   | ds.write                                 | trial-cdp-option                                                                                |
+| F190 | CDP の回答に T4D の情報を対応付ける                           | T7       | cdp/actions.ts addResponseLinkAction                           | ds.write                                 | trial-cdp-option                                                                                |
+| F191 | CDP の回答の指標の対応付けを外す                              | T7       | cdp/actions.ts removeMetricMappingAction                       | ds.write                                 | trial-cdp-option                                                                                |
+| F192 | CDP の回答と T4D の情報の対応付けを外す                       | T7       | cdp/actions.ts removeResponseLinkAction                        | ds.write                                 | trial-cdp-option                                                                                |
+| F193 | CDP の回答に根拠を紐付ける（再利用）                          | T7       | cdp/actions.ts linkResponseEvidenceAction                      | ds.write＋evidence.read                  | trial-cdp-option                                                                                |
+| F194 | CSRD 節ドラフトの確定本文を開示プロジェクトの原稿へ取り込む   | T8       | csrd/draft/actions.ts importCsrdDraftToProjectAction           | ds.write                                 | **E2E 無し**（Fixture の開示プロジェクトに CSRD の基準が無い。int:draft-import）                |
+| F195 | SSBJ 開示ドラフトの確定本文を開示プロジェクトの原稿へ取り込む | T8       | ssbj/draft/actions.ts importSsbjDraftToProjectAction           | ds.write                                 | trial-content-impact                                                                            |
+| F196 | SSBJ の基準の版をこの年度に固定し直す（設定の確定を外す）     | T8       | ssbj/settings/actions.ts pinSsbjVersionAction                  | ds.write                                 | **E2E 無し**（Fixture の SSBJ の版は 1 つで、切り替え先が無い。int:ssbj-version-pin）           |
+| F197 | 定性情報と要求事項を直接対応付ける                            | T8       | narratives/actions.ts addNarrativeLinkAction                   | ds.write                                 | trial-content-impact                                                                            |
+| F198 | 定性情報と要求事項の直接の対応付けを外す（元に戻す）          | T8       | narratives/actions.ts removeNarrativeLinkAction                | ds.write                                 | trial-content-impact                                                                            |
+| F199 | 定性情報の要求事項の AI 候補を出させる                        | T8       | narratives/actions.ts suggestNarrativeLinksAction              | ai.run＋ds.write                         | trial-content-impact                                                                            |
+| F200 | 定性情報の要求事項の AI 候補を採用                            | T8       | narratives/actions.ts adoptNarrativeLinksAction                | ds.write                                 | trial-content-impact                                                                            |
+| F201 | 定性情報の要求事項の AI 候補を採用しない（理由）              | T8       | narratives/actions.ts rejectNarrativeLinksAction               | ds.write                                 | trial-content-impact                                                                            |
+
+既存の機能に足した確認: F020（値の修正）は承認済みの値の保存で確認ダイアログ（影響する節・承認済みレポート・保証側へ共有中の件数）を通す。
+
 ---
 
 ## 4. 出力・ダウンロード（API ルート 12 件）
@@ -375,6 +462,17 @@
 | E10 | GET /api/files/inline?fileVersionId                                          | 画面内プレビュー                                   | ev.read                               | P37 evidence/[fileId]/page.tsx:145（iframe）                                                                                 | 画面側                           | authz-api-audit・mentions-evidence        |
 | E11 | GET /api/files/download?bucket&key                                           | Demo の実体配信（signed-url の行き先）             | Demo＋ev.read                         | lib/storage/index.ts:98                                                                                                      | —                                | robustness・tenant-isolation              |
 | E12 | GET /api/jobs/[jobId]                                                        | 取込ジョブの進捗（ワーカーを兼ねる）               | 企業・同組織                          | P34 job-poller.tsx:37（ポーリング）                                                                                          | —                                | robustness-audit                          |
+
+トライアル対応（2026-10）で足した出力 API（E13〜）と、既存の API に足した形式:
+
+| ID  | ルート                                                                                       | 機能                                                                                      | 権限（route 側）                           | 起点 UI                                        |
+| --- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------- |
+| E13 | GET /api/exports/requirement-matrix?project&format=xlsx\|csv                                 | 要求事項・情報対応表（全基準・全件。対象外一覧・未対応一覧・基準別件数・基準横断・注記）  | export.run（ID より先。403 は JSON）       | P28 要求事項タブ「対応表を出力 ▾」・横断対応表 |
+| E14 | GET /api/exports/xbrl/[snapshotId]?format=xbrl_json\|ixbrl_html\|trace_csv&audience=internal | XBRL（xBRL-JSON・インライン XBRL のプレビュー・照合表。社内確認用・提出用ではない）       | export.run（プレビューは disclosure.read） | P28 XBRL タブ・出力タブの行の「操作 ▾」        |
+| E15 | GET /api/exports/trial-report                                                                | 検証結果・改善管理表（XLSX）                                                              | org.manage                                 | P87 シナリオの「その他 ▾」                     |
+| E16 | GET /api/exports/audit-log?…（絞込条件付き）                                                 | 監査ログ（CSV・UTF-8 BOM）                                                                | common.audit.read                          | P88 見出しの「CSV で出力」                     |
+| E17 | GET /api/exports/tenant?part=data\|files                                                     | 全データの返却書き出し（ZIP・manifest）                                                   | org.manage＋export.run                     | 設定「データの取扱い」の「その他 ▾」→ 確認     |
+| E04 | （形式を追加）format=trace_xlsx・reconciliation_xlsx                                         | 追跡表（XLSX）・突合結果（XLSX）。出力は突合で不一致なら渡さない（422・画面は出力タブへ） | export.run                                 | P83・P28 出力タブ                              |
 
 ---
 

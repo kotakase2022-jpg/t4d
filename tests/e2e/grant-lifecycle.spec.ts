@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DEMO_USERS, loginAs } from './helpers';
+import { DEMO_USERS, gotoEngagementPage, loginAs } from './helpers';
 
 /**
  * 企業から監査法人への「選択共有」。
@@ -21,7 +21,8 @@ test('企業が許諾を新規付与でき、一覧に「有効」で現れる',
   const form = page.locator('form', { hasText: '許諾する' });
   await expect(form, '許諾を新規付与するフォームが無い').toBeVisible();
 
-  // まだ許諾されていない指標を選ぶ（水使用量は未許諾）
+  // Fixture の案件（次のテストで Data Room を確かめる案件）へ、まだ許諾されていない指標を選ぶ（水使用量は未許諾）
+  await form.locator('select[name="engagementId"]').selectOption({ label: 'ENG-2026-001' });
   await form.locator('select[name="subjectType"]').selectOption('metric');
   const subject = form.locator('select[name="subjectId"]');
   await subject.selectOption({ label: '水使用量' });
@@ -34,16 +35,14 @@ test('企業が許諾を新規付与でき、一覧に「有効」で現れる',
 
 test('付与した指標は監査法人の Data Room に現れる', async ({ page }) => {
   await loginAs(page, DEMO_USERS.assuranceManager);
-  await page.goto('/assurance/engagements');
-  const link = page.locator('a[href^="/assurance/engagements/"]').first();
-  const href = (await link.getAttribute('href'))!;
-  const engagementId = href.split('/')[3]!;
-
-  await page.goto(`/assurance/engagements/${engagementId}/data-room`);
-  await expect(page.locator('#t4d-main')).toBeVisible();
-  // 許諾しただけでは共有されない（企業が Data Room へ出す操作が別にある）ため、
-  // ここでは「許諾済みの指標が保証対象として扱われている」ことだけを確認する
+  // 他のテストが起票した案件は許諾が無いので、Fixture の案件（前のテストで許諾した案件）を名指しする
+  await gotoEngagementPage(page, 'data-room');
   await expect(page.locator('#t4d-main')).not.toContainText('処理を完了できませんでした');
+  // Data Room は許諾（指標×組織×期間）と企業側の承認から表示のたびに導く（トライアル対応 NF-22）。
+  // 企業が別に共有する操作は無い。許諾した指標のデータは、企業側で承認されると次の表示で出る
+  // （FY2026 の水使用量は Fixture では未承認のため、ここでは表が描けることまでを確かめる。
+  // 許諾・承認と同期することは tests/integration/data-room-sync-screen.test.ts が固定する）
+  await expect(page.getByRole('table', { name: '共有されているクライアントデータ' })).toBeVisible();
 });
 
 test('種別と対象の組み合わせが不正な付与はサーバー側で拒否される', async ({ page }) => {

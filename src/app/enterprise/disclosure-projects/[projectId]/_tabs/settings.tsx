@@ -1,5 +1,6 @@
-import { AlertTriangle, CheckCircle2, Info, Lock } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileQuestion, Info, Lock } from 'lucide-react';
 import { Section } from '@/components/shared/section';
+import { SemanticBadge } from '@/components/shared/status-badge';
 import { EmptyState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible } from '@/components/ui/collapsible';
@@ -13,12 +14,17 @@ import {
   DISCLOSURE_LANGUAGE_LABELS,
   DISCLOSURE_PROJECT_STATUS_LABELS,
 } from '@/lib/domain/disclosure-status';
+import { FRAMEWORK_DIFF_KIND_LABELS } from '@/lib/domain/framework-diff';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
+import {
+  MIGRATION_IMPACT_KIND_LABELS,
+  loadVersionMigrationImpact,
+  type VersionMigrationImpact,
+} from '@/lib/services/content-coverage';
 import {
   DECISION_STATUSES,
   FRAMEWORK_CONDITION_REFERENCE,
   PROJECT_FIELD_LABELS,
-  compareFrameworkVersions,
   computeBlockImpact,
   formatConditionValue,
   getProject,
@@ -60,15 +66,8 @@ export async function SettingsTab({
   // 新しい版を追加した直後は、版の移行の節を開いて描く
   const migrationOpen = searchParams.flash === 'frameworkVersionAttached';
 
-  // 新しい版ごとの移行差分と、旧版で書いた原稿への影響
-  const newerInfo = new Map<
-    string,
-    Array<{
-      versionId: string;
-      label: string;
-      diff: Awaited<ReturnType<typeof compareFrameworkVersions>>;
-    }>
-  >();
+  // 新しい版ごとの移行差分（改番を含む。NF-08）と、再確認が要る影響先
+  const newerInfo = new Map<string, NewerVersionInfo[]>();
   const impactByPf = new Map<string, Awaited<ReturnType<typeof computeBlockImpact>>>();
   for (const f of detail.frameworks) {
     if (f.newerVersions.length === 0) continue;
@@ -77,7 +76,12 @@ export async function SettingsTab({
       list.push({
         versionId: v.version.id,
         label: v.version.label,
-        diff: await compareFrameworkVersions(db, f.version.id, v.version.id),
+        legal: v.legal,
+        migration: await loadVersionMigrationImpact(db, ctx, {
+          projectId: project.id,
+          projectFrameworkId: f.projectFramework.id,
+          toVersionId: v.version.id,
+        }),
       });
     }
     newerInfo.set(f.projectFramework.id, list);
@@ -178,6 +182,13 @@ export async function SettingsTab({
   );
 }
 
+interface NewerVersionInfo {
+  versionId: string;
+  label: string;
+  legal: ProjectFrameworkView['legal'];
+  migration: VersionMigrationImpact;
+}
+
 function FrameworkSettings({
   projectId,
   framework: f,
@@ -194,11 +205,7 @@ function FrameworkSettings({
   canWrite: boolean;
   today: string;
   decidedByName: (id: string | null) => string | null;
-  newer: Array<{
-    versionId: string;
-    label: string;
-    diff: Awaited<ReturnType<typeof compareFrameworkVersions>>;
-  }>;
+  newer: NewerVersionInfo[];
   impact: Awaited<ReturnType<typeof computeBlockImpact>> | null;
   historyOpen: boolean;
   migrationOpen: boolean;
@@ -362,63 +369,140 @@ function FrameworkSettings({
             <Info className="size-3.5" aria-hidden="true" />
             新しい版があります（このプロジェクトは自動では切り替えていません）
           </h4>
+          {/* 要求事項を収録していない公開草案の版は、閉じた中ではなく見える所に並べる（K5。草案を準拠と見せない） */}
+          {newer
+            .filter(
+              (n) => n.legal.legalStatus === 'draft' && n.legal.coverageStatus === 'not_loaded',
+            )
+            .map((n) => (
+              <p
+                key={`draft-${n.versionId}`}
+                className="flex flex-wrap items-center gap-1.5 text-caption text-ink"
+                data-draft-not-loaded=""
+              >
+                <Badge tone="warning">
+                  <FileQuestion className="size-3" aria-hidden="true" />
+                  公開草案（未収録）
+                </Badge>
+                {n.label}: 要求事項の本文は収録していません。
+                {f.legal.isSample
+                  ? 'このプロジェクトは試行用サンプル（架空・条文ではない）で準備しています。'
+                  : ''}
+              </p>
+            ))}
           <Collapsible
             variant="plain"
             summary={`版の移行（詳細設定）: ${newer.map((n) => n.label).join('、')}`}
             open={migrationOpen || undefined}
           >
             <div className="space-y-3">
-              {newer.map((n) => (
-                <div key={n.versionId} className="space-y-1 text-small">
-                  <p className="font-medium">{n.label}</p>
-                  <p className="text-ink-muted">
-                    移行差分: 追加 {n.diff.added.length} 項目／変更 {n.diff.changed.length}{' '}
-                    項目／削除 {n.diff.removed.length} 項目／変更なし {n.diff.unchangedCount} 項目
-                  </p>
-                  {n.diff.added.length + n.diff.changed.length + n.diff.removed.length > 0 && (
-                    <Collapsible variant="plain" summary="差分の項番を見る">
-                      <ul className="space-y-0.5 text-caption">
-                        {n.diff.added.map((i) => (
-                          <li key={`a-${i.code}`}>
-                            追加: {i.code} {i.title}
-                          </li>
-                        ))}
-                        {n.diff.changed.map((i) => (
-                          <li key={`c-${i.code}`}>
-                            変更: {i.code} {i.title}
-                          </li>
-                        ))}
-                        {n.diff.removed.map((i) => (
-                          <li key={`r-${i.code}`}>
-                            削除: {i.code} {i.title}
-                          </li>
-                        ))}
-                      </ul>
-                    </Collapsible>
-                  )}
-                  {impact && impact.blocks.length > 0 && (
-                    <p className="text-caption text-ink-muted">
-                      現在の版で書いた原稿 {impact.blocks.length} 節（
-                      {impact.blocks.map((b) => `${b.title}（${b.statusLabel}）`).join('、')}）
-                      と承認・レビュー {impact.approvals.length} 件は、旧版のまま残ります。
+              {newer.map((n) => {
+                const diff = n.migration.diff;
+                const draftNotLoaded =
+                  n.legal.legalStatus === 'draft' && n.legal.coverageStatus === 'not_loaded';
+                return (
+                  <div key={n.versionId} className="space-y-1 text-small" data-newer-version="">
+                    <p className="flex flex-wrap items-center gap-1.5 font-medium">
+                      {n.label}
+                      <LegalStatusBadge legal={n.legal} />
+                      {draftNotLoaded && (
+                        <Badge tone="warning">
+                          <FileQuestion className="size-3" aria-hidden="true" />
+                          公開草案（未収録）
+                        </Badge>
+                      )}
                     </p>
-                  )}
-                  {canWrite && (
-                    <form
-                      action={attachFrameworkVersionAction}
-                      className="flex flex-wrap items-center gap-2"
-                    >
-                      <input type="hidden" name="projectId" value={projectId} />
-                      <input type="hidden" name="projectFrameworkId" value={pfId} />
-                      <input type="hidden" name="newVersionId" value={n.versionId} />
-                      <NativeCheckbox name="acknowledgeImpact" label="影響を確認しました" />
-                      <SubmitButton variant="secondary" size="xs" pendingLabel="追加中…">
-                        新しい版をこのプロジェクトに追加
-                      </SubmitButton>
-                    </form>
-                  )}
-                </div>
-              ))}
+                    {n.migration.notLoaded || !diff ? (
+                      <p className="text-ink-muted">
+                        要求事項は未収録のため、差分と影響は算定しません（正式な収録の後に確認できます。新しい版は未判定から始めます）。
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-ink-muted">
+                          移行差分: {FRAMEWORK_DIFF_KIND_LABELS.added} {diff.added.length} 項目／
+                          {FRAMEWORK_DIFF_KIND_LABELS.changed} {diff.changed.length} 項目／
+                          {FRAMEWORK_DIFF_KIND_LABELS.renumbered} {diff.renumbered.length} 項目／
+                          {FRAMEWORK_DIFF_KIND_LABELS.removed} {diff.removed.length} 項目／
+                          {FRAMEWORK_DIFF_KIND_LABELS.unchanged} {diff.unchangedCount} 項目
+                        </p>
+                        {diff.entries.some((e) => e.kind !== 'unchanged') && (
+                          <Collapsible variant="plain" summary="差分の項番を見る">
+                            <ul className="space-y-0.5 text-caption">
+                              {diff.entries
+                                .filter((e) => e.kind !== 'unchanged')
+                                .map((e) => (
+                                  <li key={`${e.kind}-${e.fromItemId ?? ''}-${e.toItemId ?? ''}`}>
+                                    {FRAMEWORK_DIFF_KIND_LABELS[e.kind]}
+                                    {e.kind === 'renumbered' && e.textChanged
+                                      ? '（文言も変更）'
+                                      : ''}
+                                    :{' '}
+                                    {e.kind === 'renumbered'
+                                      ? `${e.fromCode} → ${e.toCode}`
+                                      : (e.toCode ?? e.fromCode)}{' '}
+                                    {e.title}
+                                  </li>
+                                ))}
+                            </ul>
+                          </Collapsible>
+                        )}
+                        {n.migration.targets.length > 0 && (
+                          <div className="space-y-0.5" data-migration-targets="">
+                            <p className="text-caption font-medium text-ink">
+                              影響先（変更・改番・削除された要求事項に結び付いたもの）
+                            </p>
+                            <ul className="space-y-0.5 text-caption">
+                              {n.migration.targets.map((t) => (
+                                <li
+                                  key={`${t.kind}-${t.label}`}
+                                  className="flex flex-wrap items-center gap-1"
+                                >
+                                  <SemanticBadge semantic="pending" label="要再確認" />
+                                  <span className="text-ink-muted">
+                                    {MIGRATION_IMPACT_KIND_LABELS[t.kind]}:
+                                  </span>
+                                  {t.href ? (
+                                    <a href={t.href} className="text-brand-800 hover:underline">
+                                      {t.label}
+                                    </a>
+                                  ) : (
+                                    t.label
+                                  )}
+                                  <span className="text-ink-muted">（{t.codes.join('、')}）</span>
+                                </li>
+                              ))}
+                            </ul>
+                            <p className="text-caption text-ink-muted">
+                              対応付け・判断は新しい版へ自動では引き継ぎません。新しい版は未判定から始め、人が確認します。
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {impact && impact.blocks.length > 0 && (
+                      <p className="text-caption text-ink-muted">
+                        現在の版で書いた原稿 {impact.blocks.length} 節（
+                        {impact.blocks.map((b) => `${b.title}（${b.statusLabel}）`).join('、')}）
+                        と承認・レビュー {impact.approvals.length} 件は、旧版のまま残ります。
+                      </p>
+                    )}
+                    {canWrite && (
+                      <form
+                        action={attachFrameworkVersionAction}
+                        className="flex flex-wrap items-center gap-2"
+                      >
+                        <input type="hidden" name="projectId" value={projectId} />
+                        <input type="hidden" name="projectFrameworkId" value={pfId} />
+                        <input type="hidden" name="newVersionId" value={n.versionId} />
+                        <NativeCheckbox name="acknowledgeImpact" label="影響を確認しました" />
+                        <SubmitButton variant="secondary" size="xs" pendingLabel="追加中…">
+                          新しい版をこのプロジェクトに追加
+                        </SubmitButton>
+                      </form>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Collapsible>
         </section>

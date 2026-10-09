@@ -187,6 +187,54 @@ describe('タスク動詞とパレットのおすすめ（権限で絞る）', (
     expect(reset?.href).toBe('/enterprise/dashboard?confirm=reset-demo');
   });
 
+  it('トライアル対応の操作（plan §4.3-2）: 権限と現在のプロジェクトで行き先を決め、実行はしない', () => {
+    const project = { ...ctx, currentProjectId: 'p-1' };
+    const verbs = (role: RoleKey, c: typeof ctx & { currentProjectId?: string }) =>
+      new Map(availableTaskVerbs(canOf(role), c).map((v) => [v.id, v.href]));
+
+    const preparer = verbs('sustainability_manager', project);
+    expect(preparer.get('send-feedback')).toBe('/enterprise/trial?tab=feedback');
+    expect(preparer.get('export-requirement-matrix')).toBe(
+      '/enterprise/disclosure-projects/p-1?tab=requirements&fw=all',
+    );
+    expect(preparer.get('open-trace')).toBe('/enterprise/disclosure-projects/p-1?tab=outputs');
+    expect(preparer.get('map-xbrl')).toBe('/enterprise/disclosure-projects/p-1?tab=xbrl');
+    expect(preparer.get('answer-assurance-comments')).toBe(
+      '/enterprise/assurance-comments?state=unanswered',
+    );
+    // 監査ログは監査ログの閲覧権限（企業管理者）だけ
+    expect(preparer.has('see-audit-log')).toBe(false);
+    expect(verbs('enterprise_admin', ctx).get('see-audit-log')).toBe('/enterprise/audit-log');
+    // 現在のプロジェクトが無ければプロジェクトの一覧へ（行き先の ID を推測しない）
+    expect(verbs('sustainability_manager', ctx).get('open-trace')).toBe(
+      '/enterprise/disclosure-projects',
+    );
+    // 出力の権限が無い役割（レビュー担当）には対応表の出力を出さない
+    const reviewer = verbs('reviewer', project);
+    expect(reviewer.has('export-requirement-matrix')).toBe(false);
+    expect(reviewer.get('open-trace')).toBe('/enterprise/disclosure-projects/p-1?tab=outputs');
+    // 回答は開示の編集の権限が要る（最終承認者は持たない。respondToNote と同じ）
+    expect(verbs('approver', project).has('answer-assurance-comments')).toBe(false);
+    // ご意見は企業の全役割（拠点担当も）
+    expect(verbs('site_contributor', ctx).get('send-feedback')).toBe(
+      '/enterprise/trial?tab=feedback',
+    );
+  });
+
+  it('契約オプションの無い組織のパレットには CDP の画面を出さない（plan NF-38）', () => {
+    const can = canOf('sustainability_manager');
+    const base = { workspace: 'enterprise' as const, can, verbContext: ctx, navPaths: [] };
+    expect(buildPaletteEntries(base).screens.map((s) => s.href)).toContain(
+      '/enterprise/disclosures/cdp',
+    );
+    const hidden = buildPaletteEntries({ ...base, hiddenOptions: ['cdp'] }).screens.map(
+      (s) => s.href,
+    );
+    expect(hidden).not.toContain('/enterprise/disclosures/cdp');
+    expect(hidden).not.toContain('/enterprise/disclosures/cdp/import');
+    expect(hidden).toContain('/enterprise/disclosures/msci');
+  });
+
   it.each([
     [
       'site_contributor',

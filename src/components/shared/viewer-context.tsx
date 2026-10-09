@@ -3,7 +3,7 @@
 import * as React from 'react';
 import type { HomeProfile } from '@/lib/ui/home-profile';
 import type { TaskVerbContext } from '@/lib/ui/task-verbs';
-import type { PermissionKey } from '@/types/domain';
+import type { OrganizationOptionKey, PermissionKey } from '@/types/domain';
 import type { NavVariant } from './nav-config';
 
 /**
@@ -21,6 +21,11 @@ export interface ShellContextValue {
   hiddenHrefs: string[];
   /** 権限で隠すメニュー項目の権限キー（案件の画面のように URL に ID を含む項目も隠せる） */
   hiddenPermissions: PermissionKey[];
+  /**
+   * 契約オプションが無いため隠すメニュー項目のオプション（CDP の葉。plan K2・NF-38）。
+   * 省略時は隠さない（契約のある組織の木は変えない）
+   */
+  hiddenOptions?: OrganizationOptionKey[];
   /** 利用者が持つ権限（パレットの候補を権限で絞る。サーバー側の検査はそのまま） */
   permissions: PermissionKey[];
   /** 企業のみ: 役割ごとの初期表示 */

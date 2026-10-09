@@ -12,8 +12,28 @@
  *  B4 block・review・narrative・applicabilityProject
  *  B5 period・aiRun
  *  B6 pbc・test・issue・reviewNote・engagement・membership・signoff・samplingMethod
+ * トライアル対応（2026-10）の領域は Stage A が置く（付録 C。ラベル＋アイコン必須）:
+ *  requirementCoverage・exclusionApproval・crosswalkRelation・sharedReport・clientNote・reconciliation・
+ *  xbrlMapping・xbrlValidation・trialJudgement・trialCompletion・feedbackKind・feedbackStatus・severity・
+ *  costClass・dataTerms・cdpOption
  */
 import { aiRun } from './aiRun';
+import { cdpOption } from './cdpOption';
+import { clientNote } from './clientNote';
+import { costClass } from './costClass';
+import { crosswalkRelation } from './crosswalkRelation';
+import { dataTerms } from './dataTerms';
+import { exclusionApproval } from './exclusionApproval';
+import { feedbackKind } from './feedbackKind';
+import { feedbackStatus } from './feedbackStatus';
+import { reconciliation } from './reconciliation';
+import { requirementCoverage } from './requirementCoverage';
+import { severity } from './severity';
+import { sharedReport } from './sharedReport';
+import { trialCompletion } from './trialCompletion';
+import { trialJudgement } from './trialJudgement';
+import { xbrlMapping } from './xbrlMapping';
+import { xbrlValidation } from './xbrlValidation';
 import { applicabilityCsrd } from './applicabilityCsrd';
 import { applicabilityProject } from './applicabilityProject';
 import { approvalStep } from './approvalStep';
@@ -44,6 +64,14 @@ import { SEMANTIC_STYLE, type StatusEntry, type StatusSemantic } from './types';
 
 export * from './types';
 export { CSRD_DRAFT_STATES, type CsrdDraftStateKey } from './csrdDraft';
+export { CDP_OPTION_STATES, type CdpOptionState } from './cdpOption';
+export { CLIENT_NOTE_STATES, type ClientNoteState } from './clientNote';
+export { DATA_TERMS_STATES, type DataTermsState } from './dataTerms';
+export { RECONCILIATION_STATES, type ReconciliationState } from './reconciliation';
+export { SHARED_REPORT_STATES, type SharedReportState } from './sharedReport';
+export { TRIAL_JUDGEMENT_STATES, type TrialJudgementState } from './trialJudgement';
+export { XBRL_MAPPING_STATES, type XbrlMappingState } from './xbrlMapping';
+export { XBRL_VALIDATION_STATES, type XbrlValidationState } from './xbrlValidation';
 
 export const STATUS = {
   dataPoint,
@@ -73,6 +101,23 @@ export const STATUS = {
   scan,
   approvalStep,
   samplingMethod,
+  // トライアル対応（2026-10）
+  requirementCoverage,
+  exclusionApproval,
+  crosswalkRelation,
+  sharedReport,
+  clientNote,
+  reconciliation,
+  xbrlMapping,
+  xbrlValidation,
+  trialJudgement,
+  trialCompletion,
+  feedbackKind,
+  feedbackStatus,
+  severity,
+  costClass,
+  dataTerms,
+  cdpOption,
 } as const;
 
 export type StatusDomain = keyof typeof STATUS;

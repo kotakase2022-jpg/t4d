@@ -1,5 +1,13 @@
 import Link from 'next/link';
-import { KeyRound, LayoutPanelLeft, ShieldCheck, Undo2, UserPlus } from 'lucide-react';
+import {
+  FileClock,
+  KeyRound,
+  LayoutPanelLeft,
+  ListChecks,
+  ShieldCheck,
+  Undo2,
+  UserPlus,
+} from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { CreatePanel, createPanelHref, isCreatePanelOpen } from '@/components/shared/create-panel';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
@@ -7,6 +15,7 @@ import { FlashMessage } from '@/components/shared/flash';
 import { NavTabs } from '@/components/shared/nav-tabs';
 import { Notice } from '@/components/shared/notice';
 import { PageActions } from '@/components/shared/page-actions';
+import type { MenuActionSpec } from '@/lib/ui/actions';
 import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
@@ -22,13 +31,27 @@ import { can } from '@/lib/authorization/can';
 import { roleLabel } from '@/lib/authorization/roles';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
 import { getAppMode } from '@/lib/config';
+import { loadApprovalRoutes } from '@/lib/services/approval-route';
+import { memberActivity } from '@/lib/services/audit-log';
+import { dataTermsTextLimit, loadDataTerms, systemFacts } from '@/lib/services/data-terms';
+import { listSharedDataPoints } from '@/lib/services/data-room-sync';
 import { getFeatureSettings } from '@/lib/services/feature-settings';
+import { isProtectedDemoMember, listMemberAssignments } from '@/lib/services/identity';
+import { cdpOptionState } from '@/lib/services/organization-options';
+import { listSharedReportsForClient } from '@/lib/services/report-share';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { planTenantExport } from '@/lib/services/tenant-export';
 import type { StatusSemantic } from '@/lib/ui/status/registry';
-import type { Invitation, OrganizationMembership, RoleKey } from '@/types/domain';
-import { setDisclosureFirstAction } from './actions';
+import type { Invitation, OrganizationMembership, RoleKey, Uuid } from '@/types/domain';
+import { setDisclosureFirstAction, setMembershipStatusAction } from './actions';
 import { CopyLinkButton } from './copy-link-button';
 import { MfaEnrollCard } from './security-card';
+import { UnitScopeFields } from './_components/unit-scope-fields';
+import { enterpriseRoleMatrix, roleMemberCounts } from './_lib/role-matrix';
+import { ApprovalTab, approvalTabHref } from './_tabs/approval';
+import { DataHandlingTab, dataHandlingHref } from './_tabs/data-handling';
+import { HandoverPanel, MemberEditPanel, membersHref } from './_tabs/member-panels';
+import { RolesTab } from './_tabs/roles';
 import {
   createInvitationAction,
   issueResetLinkAction,
@@ -69,9 +92,19 @@ const INVITATION_STATUS: Record<Invitation['status'], { label: string; semantic:
 /**
  * 設定の節（plan S17: NavTabs で 1 画面 1 仕事に分ける）。
  * よく見るメンバーを既定にし、組織全体の構成を変える機能設定（L3）は右端に置く。
- * キーはタスク動詞・パレット（src/lib/ui/palette.ts）が指す ?tab= と同じ
+ * キーはタスク動詞・パレット（src/lib/ui/palette.ts）が指す ?tab= と同じ。
+ * トライアル対応（K3）で承認ルート・役割と権限・データの取扱いを足した（既存のキー・ラベルは変えない）
  */
-const TABS = ['members', 'invitations', 'grants', 'security', 'features'] as const;
+const TABS = [
+  'members',
+  'invitations',
+  'grants',
+  'approval',
+  'roles',
+  'security',
+  'data-handling',
+  'features',
+] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function resolveTab(
@@ -202,7 +235,79 @@ export default async function SettingsPage({
     : undefined;
   const activeGrants = grants.filter((g) => !g.revokedAt).length;
 
+  const demoMode = db.mode === 'demo';
+  const canReadAudit = can(ctx, 'common.audit.read');
+  const canExport = can(ctx, 'enterprise.export.run');
+  const profileOf = (userId: Uuid) => profiles.find((p) => p.id === userId);
+  const nameOf = (membership: OrganizationMembership) =>
+    profileOf(membership.userId)?.displayName ?? 'メンバー';
+  const rolesOf = (membership: OrganizationMembership) =>
+    roles.filter((r) => r.membershipId === membership.id).map((r) => r.roleKey);
+
+  // ---- メンバー: 利用状況（監査ログを読める人だけ。NF-37）・役割と担当拠点の変更・引継ぎ（NF-25）
+  const activity = tab === 'members' ? await memberActivity(db, ctx) : null;
+  const editId = tab === 'members' && typeof params.edit === 'string' ? params.edit : null;
+  const editMembership = editId ? memberships.find((m) => m.id === editId) : undefined;
+  const handoverId =
+    tab === 'members' && typeof params.handover === 'string' ? params.handover : null;
+  const handover =
+    handoverId && canManageMembers && memberships.some((m) => m.id === handoverId)
+      ? await listMemberAssignments(db, ctx, handoverId)
+      : null;
+  // 停止の結果の通知に「元に戻す」（再開）を置く。この組織の、停止中のメンバーのときだけ（URL の ID をそのまま信じない）
+  const undoMemberId = typeof params.member === 'string' ? params.member : null;
+  const undoMember =
+    canManageMembers && params.flash === 'membershipSuspended' && undoMemberId
+      ? memberships.find((m) => m.id === undoMemberId && m.status === 'suspended')
+      : undefined;
+  const memberUndo = undoMember
+    ? {
+        membershipSuspended: (
+          <form action={setMembershipStatusAction}>
+            <input type="hidden" name="membershipId" value={undoMember.id} />
+            <input type="hidden" name="status" value="active" />
+            <SubmitButton size="xs" variant="secondary" icon={<Undo2 aria-hidden="true" />}>
+              元に戻す
+            </SubmitButton>
+          </form>
+        ),
+      }
+    : undefined;
+
+  // ---- アクセス許諾: この許諾で共有中の承認済みデータの件数（NF-22。読み取り時に導出）・共有中のレポート（NF-20）
+  const sharedCountByGrant = new Map<Uuid, number>();
+  if (tab === 'grants') {
+    for (const engagement of engagements) {
+      for (const row of await listSharedDataPoints(db, engagement.id)) {
+        for (const grantId of new Set(row.grantIds)) {
+          sharedCountByGrant.set(grantId, (sharedCountByGrant.get(grantId) ?? 0) + 1);
+        }
+      }
+    }
+  }
+  const sharedReports =
+    tab === 'grants' && canManageGrants ? await listSharedReportsForClient(db, ctx, {}) : [];
+  const sharedSnapshots =
+    sharedReports.length > 0
+      ? await db.select('reportSnapshots', {
+          where: {
+            organizationId,
+            id: { in: [...new Set(sharedReports.map((r) => r.copy.snapshotId))] },
+          },
+        })
+      : [];
+
+  // ---- 承認ルート（NF-24・NF-44）・役割と権限（NF-27）・データの取扱い（NF-28・NF-29）・機能設定（NF-38）
+  const approvalRoutes = tab === 'approval' ? await loadApprovalRoutes(db, ctx) : [];
+  const dataTerms = tab === 'data-handling' ? await loadDataTerms(db, ctx) : null;
+  const exportPlan =
+    tab === 'data-handling' && params.confirm === 'tenant-export' && canExport
+      ? await planTenantExport(db, ctx)
+      : null;
+  const cdp = tab === 'features' ? await cdpOptionState(db, ctx) : null;
+
   // 見出しの主操作は節ごとに 1 つ。作成欄を開いているときは、欄の中の送信が主操作（同時に 2 つ出さない）
+  const approvalEditing = tab === 'approval' && typeof params.edit === 'string';
   const headerPrimary =
     tab === 'members' || tab === 'invitations'
       ? {
@@ -212,7 +317,10 @@ export default async function SettingsPage({
           label: 'メンバーを招待',
           icon: <UserPlus aria-hidden="true" />,
           href: tabHref('invitations', { new: '1' }),
-          hidden: !canManageMembers || (tab === 'invitations' && panelOpen),
+          hidden:
+            !canManageMembers ||
+            (tab === 'invitations' && panelOpen) ||
+            (tab === 'members' && editMembership !== undefined),
         }
       : tab === 'grants'
         ? {
@@ -224,7 +332,64 @@ export default async function SettingsPage({
             href: tabHref('grants', { new: '1' }),
             hidden: !canManageGrants || engagements.length === 0 || panelOpen,
           }
-        : undefined;
+        : tab === 'approval'
+          ? {
+              kind: 'link' as const,
+              id: 'add-approval-route',
+              shortcut: 'new' as const,
+              label: '承認ルートを追加',
+              icon: <ListChecks aria-hidden="true" />,
+              href: approvalTabHref({ edit: 'new' }),
+              hidden: approvalEditing,
+            }
+          : tab === 'data-handling'
+            ? {
+                kind: 'link' as const,
+                id: 'record-data-terms',
+                shortcut: 'new' as const,
+                label: '条件の版を記録',
+                icon: <FileClock aria-hidden="true" />,
+                href: dataHandlingHref({ new: '1' }),
+                hidden: panelOpen,
+              }
+            : undefined;
+  // 承認ルートのひな形は編集の欄に値を入れるだけ（保存は欄の中の主操作）
+  const headerSecondary =
+    tab === 'approval' && !approvalEditing
+      ? [
+          {
+            kind: 'link' as const,
+            id: 'approval-template-three',
+            label: '3 段階のひな形を入れる',
+            href: approvalTabHref({ edit: 'new', template: 'three' }),
+          },
+          {
+            kind: 'link' as const,
+            id: 'approval-template-prior-year',
+            label: '過年度確定値のひな形を入れる',
+            href: approvalTabHref({ edit: 'new', template: 'prior-year' }),
+          },
+        ]
+      : undefined;
+  // 頻度の低い操作（L3）: 監査ログ（common.audit.read）・全データの書き出し（返却用。出力の権限も要る）
+  const headerMore: MenuActionSpec[] = [
+    {
+      kind: 'link',
+      id: 'open-audit-log',
+      label: '監査ログを開く',
+      href: '/enterprise/audit-log',
+      group: 'advanced',
+      hidden: !canReadAudit,
+    },
+    {
+      kind: 'link',
+      id: 'tenant-export',
+      label: '全データを書き出す（返却用）…',
+      href: dataHandlingHref({ confirm: 'tenant-export' }),
+      group: 'export',
+      hidden: tab !== 'data-handling' || !canExport,
+    },
+  ];
 
   const memberColumns: DataTableColumn<OrganizationMembership>[] = [
     {
@@ -276,7 +441,90 @@ export default async function SettingsPage({
       importance: 'primary',
       cell: (membership) => <StatusBadge domain="membership" value={membership.status} />,
     },
+    // 利用状況（NF-37）は監査ログを読める人だけ。列 ▾ から出す L2 の列（既定では隠す）
+    ...(activity
+      ? ([
+          {
+            key: 'lastActive',
+            header: '最終ログイン',
+            importance: 'detail',
+            cell: (membership) => {
+              const at = activity.get(membership.userId)?.lastActiveAt ?? null;
+              return (
+                <span className="text-caption text-ink-muted">
+                  {at ? formatJst(at) : '記録なし'}
+                </span>
+              );
+            },
+          },
+          {
+            key: 'actions30d',
+            header: '直近 30 日の操作数',
+            importance: 'detail',
+            align: 'right',
+            cell: (membership) => (
+              <span className="tnum">{activity.get(membership.userId)?.actions30d ?? 0}</span>
+            ),
+          },
+        ] satisfies DataTableColumn<OrganizationMembership>[])
+      : []),
   ];
+
+  /** メンバーの行の操作（NF-25）。Demo のログイン利用者・自分自身の停止は理由を出して押せなくする */
+  const memberRowActions = (membership: OrganizationMembership) => {
+    if (!canManageMembers) return null;
+    const name = nameOf(membership);
+    const protectedMember = isProtectedDemoMember(db.mode, profileOf(membership.userId)?.email);
+    const protectedReason = protectedMember ? 'デモの利用者は変更できません' : undefined;
+    const self = membership.userId === ctx.userId;
+    return {
+      rowLabel: name,
+      items: [
+        {
+          kind: 'link' as const,
+          id: `edit-member-${membership.id}`,
+          label: '役割・担当拠点を変更…',
+          href: membersHref({ edit: membership.id }),
+          disabledReason: protectedReason,
+        },
+        {
+          kind: 'link' as const,
+          id: `handover-${membership.id}`,
+          label: '担当の一覧（引継ぎ）',
+          href: membersHref({ handover: membership.id }),
+        },
+        membership.status === 'suspended'
+          ? {
+              kind: 'submit' as const,
+              id: `resume-member-${membership.id}`,
+              label: '利用を再開',
+              action: setMembershipStatusAction,
+              fields: { membershipId: membership.id, status: 'active' },
+              disabledReason: protectedReason,
+            }
+          : {
+              kind: 'confirm' as const,
+              id: `suspend-member-${membership.id}`,
+              label: '利用を停止…',
+              destructive: true,
+              action: setMembershipStatusAction,
+              fields: { membershipId: membership.id, status: 'suspended' },
+              disabledReason:
+                protectedReason ?? (self ? '自分自身の利用は停止できません' : undefined),
+              confirm: {
+                tier: 'reversible' as const,
+                title: 'このメンバーの利用を停止しますか',
+                scope: `${name}（${profileOf(membership.userId)?.email ?? 'メールアドレス不明'}）`,
+                consequences: [
+                  'この人はこの組織のワークスペースに入れなくなります（これまでの記録は消えません）。',
+                  '元に戻すときは、結果の通知の「元に戻す」か、行の「利用を再開」を押します。',
+                ],
+                confirmLabel: '停止する',
+              },
+            },
+      ],
+    };
+  };
 
   const memberQuery = typeof params.q === 'string' ? params.q.trim().toLowerCase() : '';
   const memberStatus = typeof params.status === 'string' ? params.status : null;
@@ -294,9 +542,11 @@ export default async function SettingsPage({
     <>
       <PageHeader
         title="設定"
-        description="メンバー・招待・監査法人へのアクセス許諾・セキュリティ・機能を管理します。"
+        description="メンバー・招待・監査法人へのアクセス許諾・承認ルート・役割と権限・セキュリティ・データの取扱い・機能を管理します。"
         autoBreadcrumbs
-        actions={headerPrimary ? <PageActions primary={headerPrimary} /> : undefined}
+        actions={
+          <PageActions primary={headerPrimary} secondary={headerSecondary} more={headerMore} />
+        }
       />
 
       <NavTabs
@@ -325,10 +575,28 @@ export default async function SettingsPage({
             hidden: !allowedTabs.includes('grants'),
           },
           {
+            key: 'approval',
+            label: '承認ルート',
+            href: tabHref('approval'),
+            hidden: !allowedTabs.includes('approval'),
+          },
+          {
+            key: 'roles',
+            label: '役割と権限',
+            href: tabHref('roles'),
+            hidden: !allowedTabs.includes('roles'),
+          },
+          {
             key: 'security',
             label: 'セキュリティ',
             href: tabHref('security'),
             hidden: !allowedTabs.includes('security'),
+          },
+          {
+            key: 'data-handling',
+            label: 'データの取扱い',
+            href: tabHref('data-handling'),
+            hidden: !allowedTabs.includes('data-handling'),
           },
           {
             key: 'features',
@@ -340,7 +608,27 @@ export default async function SettingsPage({
       />
 
       <div className="space-y-3 p-4">
-        <FlashMessage searchParams={params} undo={grantUndo} />
+        <FlashMessage searchParams={params} undo={{ ...grantUndo, ...memberUndo }} />
+
+        {tab === 'members' && editId && !editMembership && (
+          <Notice tone="warning" role="alert">
+            指定のメンバーが見つかりません。一覧から選び直してください。
+          </Notice>
+        )}
+        {tab === 'members' && editMembership && canManageMembers && (
+          <MemberEditPanel
+            membership={editMembership}
+            displayName={nameOf(editMembership)}
+            roleKeys={rolesOf(editMembership)}
+            units={shell.units}
+            protectedMember={isProtectedDemoMember(
+              db.mode,
+              profileOf(editMembership.userId)?.email,
+            )}
+            demo={demoMode}
+          />
+        )}
+        {tab === 'members' && handover && <HandoverPanel params={params} assignments={handover} />}
 
         {tab === 'members' && (
           <Section title={`メンバー（${memberships.length}）`} divider="none">
@@ -355,6 +643,7 @@ export default async function SettingsPage({
               }
               searchParams={params}
               basePath={BASE}
+              rowActions={memberRowActions}
               search={{ placeholder: '氏名・メールアドレスで検索' }}
               filters={[
                 {
@@ -423,6 +712,14 @@ export default async function SettingsPage({
                       ))}
                     </div>
                   </fieldset>
+                  {/* 担当拠点（NF-25）。受諾したときにメンバーの担当範囲へ写る。未選択は全社 */}
+                  <fieldset className="space-y-1">
+                    <legend className="flex items-center gap-1.5 text-small font-medium text-ink">
+                      担当拠点（選ばなければ全社）
+                      <RequirementTag required={false} />
+                    </legend>
+                    <UnitScopeFields units={shell.units} />
+                  </fieldset>
                   <SubmitButton
                     variant="primary"
                     size="sm"
@@ -462,6 +759,7 @@ export default async function SettingsPage({
                       <TR>
                         <TH>メールアドレス</TH>
                         <TH>役割</TH>
+                        <TH>担当拠点</TH>
                         <TH>状態</TH>
                         <TH>期限</TH>
                         <TH>招待リンク</TH>
@@ -479,6 +777,13 @@ export default async function SettingsPage({
                             <TD className="text-small">{inv.email}</TD>
                             <TD className="text-small">
                               {inv.roleKeys.map((r) => roleLabel(r)).join(' / ')}
+                            </TD>
+                            <TD className="text-small">
+                              {(inv.unitScopeIds ?? []).length === 0
+                                ? '全社'
+                                : (inv.unitScopeIds ?? [])
+                                    .map((id) => unitById.get(id)?.name ?? '（削除した拠点）')
+                                    .join(' / ')}
                             </TD>
                             <TD>
                               <SemanticBadge
@@ -683,6 +988,7 @@ export default async function SettingsPage({
                             <TH>種別</TH>
                             <TH>対象</TH>
                             <TH>資料の共有</TH>
+                            <TH>共有中の承認済みデータ</TH>
                             <TH>付与</TH>
                             <TH>状態</TH>
                             <TH align="right">
@@ -699,6 +1005,11 @@ export default async function SettingsPage({
                                 <TD>{SUBJECT_LABEL[grant.subjectType] ?? '対象'}</TD>
                                 <TD className="font-medium">{label}</TD>
                                 <TD>{grant.includesEvidence ? 'あり' : '—'}</TD>
+                                <TD className="tnum text-small">
+                                  {grant.revokedAt
+                                    ? '—'
+                                    : `${sharedCountByGrant.get(grant.id) ?? 0} 件`}
+                                </TD>
                                 <TD className="text-caption text-ink-muted">
                                   {formatJst(grant.grantedAt)}
                                 </TD>
@@ -759,7 +1070,96 @@ export default async function SettingsPage({
                 </div>
               )}
             </Section>
+
+            {/* 共有中のレポート（NF-20）。共有・取り下げは開示プロジェクトの「出力」タブで行う */}
+            {canManageGrants && (
+              <Section
+                title={`保証側へ共有したレポート（${sharedReports.length}）`}
+                summary="写しは変更されません。取り下げると保証側から見えなくなります"
+              >
+                {sharedReports.length === 0 ? (
+                  <EmptyState
+                    kind="not-applicable"
+                    size="compact"
+                    title="共有したレポートはありません"
+                    description="開示プロジェクトの「出力」タブで、承認済みのスナップショットを案件へ共有できます。"
+                  />
+                ) : (
+                  <div className="t4d-scroll-x rounded-t4d border border-line">
+                    <Table>
+                      <THead>
+                        <TR>
+                          <TH>案件</TH>
+                          <TH>スナップショット</TH>
+                          <TH>内容ハッシュ</TH>
+                          <TH>共有日時</TH>
+                          <TH>状態</TH>
+                        </TR>
+                      </THead>
+                      <TBody>
+                        {sharedReports.map(({ copy, withdrawn }) => {
+                          const engagement = engagements.find((e) => e.id === copy.engagementId);
+                          const snapshot = sharedSnapshots.find((x) => x.id === copy.snapshotId);
+                          return (
+                            <TR key={copy.id} data-t4d-record="">
+                              <TD className="text-small">{engagement?.code ?? '案件'}</TD>
+                              <TD className="text-small">
+                                {snapshot ? (
+                                  <Link
+                                    href={`/enterprise/disclosure-projects/${snapshot.projectId}?tab=outputs`}
+                                    className="text-brand-700 hover:underline"
+                                  >
+                                    No.{snapshot.snapshotNo} {snapshot.label}
+                                  </Link>
+                                ) : (
+                                  '—'
+                                )}
+                              </TD>
+                              <TD className="font-mono text-caption">
+                                {copy.snapshotContentHash.slice(0, 12)}
+                              </TD>
+                              <TD className="text-caption text-ink-muted">
+                                {formatJst(copy.sharedAt)}
+                              </TD>
+                              <TD>
+                                <StatusBadge
+                                  domain="sharedReport"
+                                  value={withdrawn ? 'withdrawn' : 'active'}
+                                />
+                              </TD>
+                            </TR>
+                          );
+                        })}
+                      </TBody>
+                    </Table>
+                  </div>
+                )}
+              </Section>
+            )}
           </>
+        )}
+
+        {tab === 'approval' && <ApprovalTab params={params} routes={approvalRoutes} />}
+
+        {tab === 'roles' && (
+          <RolesTab
+            params={params}
+            matrix={enterpriseRoleMatrix()}
+            counts={roleMemberCounts(memberships, roles)}
+          />
+        )}
+
+        {tab === 'data-handling' && dataTerms && (
+          <DataHandlingTab
+            params={params}
+            facts={systemFacts()}
+            terms={dataTerms}
+            textLimit={dataTermsTextLimit(db)}
+            creatorNames={new Map(profiles.map((p) => [p.id, p.displayName]))}
+            demo={demoMode}
+            exportPlan={exportPlan}
+            canExport={canExport}
+          />
         )}
 
         {tab === 'security' && (
@@ -877,6 +1277,26 @@ export default async function SettingsPage({
                 />
               </fieldset>
             </form>
+          </Section>
+        )}
+
+        {tab === 'features' && cdp && (
+          <Section
+            title="契約オプション"
+            actions={<StatusBadge domain="cdpOption" value={cdp.state} />}
+          >
+            {/* 契約で開く有償の機能（NF-38）。顧客の管理者が自分で開けないことを隠さない（折りたたまない） */}
+            <dl className="grid gap-x-3 gap-y-1 text-small md:grid-cols-[minmax(10rem,auto)_1fr]">
+              <dt className="font-medium text-ink">CDP 対応（オプション）</dt>
+              <dd className="text-ink">
+                {cdp.state === 'contracted'
+                  ? `契約あり${cdp.option?.validFrom ? `（${cdp.option.validFrom} から${cdp.option.validTo ? ` ${cdp.option.validTo} まで` : ''}）` : ''}`
+                  : '契約なし（CDP の画面・出力・AI の草案は使えません）'}
+              </dd>
+            </dl>
+            <p className="mt-1.5 text-caption text-ink-muted">
+              オプションの有効・無効は契約に基づいて運営が設定します。この画面からは変更できません。
+            </p>
           </Section>
         )}
       </div>

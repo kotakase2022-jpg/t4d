@@ -48,6 +48,9 @@ http://localhost:3000 を開くと Demo / Fixture Mode で起動します。Supa
 4. `approver@demo.local` → 非財務データ詳細から承認
 5. 開示対応 → CDP → 質問を開き「ドラフトを生成」→ 編集して保存 → 承認
 6. `assurance-manager@demo.local` → Data Room で Snapshot 固定 → サンプリング → Testing → Sign-off（抑止条件で止まります）
+7. トライアル対応（架空のサンプル）: 開示プロジェクトの「要求事項」タブで判断・対象外の申請と承認 →「出力」タブで
+   承認済みレポートの「内容とトレースを開く」（追跡率）・保証側へ共有 → 監査法人の「開示レポート」でコメント。
+   評価の記録はユーザーメニューの「トライアルの評価」、ご意見はヘッダーの「ご意見・不具合」から（記録はすべて架空のデモです）
 
 ---
 
@@ -78,6 +81,9 @@ http://localhost:3000 を開くと Demo / Fixture Mode で起動します。Supa
 | `unpdf`                | PDF テキスト抽出（サーバーレス互換。失敗時は「OCR／AI解析要確認」）          |
 | `@axe-core/playwright` | 主要画面のアクセシビリティ検査                                               |
 
+トライアル対応（2026-10。要求事項の判断・トレース・保証側への共有・XBRL の社内確認用出力・トライアルの評価）では
+ライブラリを追加していません（XBRL・XLSX・DOCX は既存の `exceljs`・`docx` と自前の出力で作っています）。
+
 `openai` は **v7 系**を使います。当初の v4 系は同梱の `node-fetch` v2 が現在の API の応答を
 読めず、全 Model・全 Endpoint で `ERR_STREAM_PREMATURE_CLOSE`（Premature close）になりました
 （素の `fetch` では同じ Endpoint が正常に応答するため、SDK 側の問題）。
@@ -99,6 +105,8 @@ pnpm typecheck        # TypeScript strict
 pnpm test             # Vitest（unit + integration）
 pnpm test:rls         # PGlite へ migration を適用して RLS 越権テスト
 pnpm test:e2e         # Playwright（初回のみ pnpm test:e2e:install が必要）
+pnpm test:e2e:stateless  # リクエストごとに Fixture を作り直す構成で、Cookie だけで状態を持ち回す流れ（実演・CSRD・トライアル）
+pnpm test:e2e:prod       # 本番スモーク（PROD_BASE_URL にローカルの next start を指定して流せる）
 
 pnpm test:e2e:supabase   # 実 Supabase（Auth + RLS + Storage）に接続した E2E
 pnpm verify:supabase     # 実 Supabase へ 33 項目の越権・不変性・Storage 検証

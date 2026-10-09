@@ -47,6 +47,12 @@ export const TASK_VERB_IDS = [
   'create-project',
   'register-narrative',
   'register-target',
+  'send-feedback',
+  'export-requirement-matrix',
+  'open-trace',
+  'answer-assurance-comments',
+  'map-xbrl',
+  'see-audit-log',
   'reset-demo',
 ] as const;
 export type TaskVerbId = (typeof TASK_VERB_IDS)[number];
@@ -71,6 +77,13 @@ function withUnits(base: string, c: TaskVerbContext): string {
   if (c.unitScopeIds.length === 0) return base;
   const units = c.unitScopeIds.map((id) => `unit=${encodeURIComponent(id)}`).join('&');
   return `${base}&${units}`;
+}
+
+/** 現在のプロジェクトのタブ（無ければプロジェクトの一覧。行き先の ID を推測しない） */
+function projectTab(c: TaskVerbContext, query: string): string {
+  return c.currentProjectId
+    ? `/enterprise/disclosure-projects/${encodeURIComponent(c.currentProjectId)}?${query}`
+    : '/enterprise/disclosure-projects';
 }
 
 function projectManuscripts(c: TaskVerbContext, filter: 'mine' | 'returned'): string {
@@ -284,6 +297,56 @@ export const TASK_VERBS: readonly TaskVerb[] = [
     requires: ['enterprise.metric.manage'],
     href: () => '/enterprise/esg/targets?new=1',
     keywords: ['目標', 'KPI', '削減目標'],
+  },
+  // ---- トライアル対応（2026-10。plan §4.3-2）。移った先の画面で人が操作する（出力・回答も実行しない）
+  {
+    id: 'send-feedback',
+    label: 'フィードバックを送る',
+    hint: 'ご意見・不具合（改善管理表）',
+    requires: ['enterprise.data.read'],
+    // 送る窓はヘッダーの「ご意見・不具合」と改善管理表の画面にある。改善管理表で送った結果も見られる
+    href: () => '/enterprise/trial?tab=feedback',
+    keywords: ['ご意見', '不具合', '要望', '質問', 'フィードバック', '改善管理表', 'トライアル'],
+  },
+  {
+    id: 'export-requirement-matrix',
+    label: '対応表を出力する',
+    hint: '要求事項・情報対応表（すべての基準。XLSX・CSV）',
+    requires: ['enterprise.disclosure.read', 'enterprise.export.run'],
+    href: (c) => projectTab(c, 'tab=requirements&fw=all'),
+    keywords: ['対応表', '要求事項', '情報対応表', '対象外', '未対応', 'XLSX', 'CSV', '出力'],
+  },
+  {
+    id: 'open-trace',
+    label: 'トレースを開く',
+    hint: '出力タブの承認版から「内容とトレース」へ',
+    requires: ['enterprise.disclosure.read'],
+    href: (c) => projectTab(c, 'tab=outputs'),
+    keywords: ['トレース', '追跡率', '追跡番号', '遡る', '承認版', 'スナップショット', '突合'],
+  },
+  {
+    id: 'answer-assurance-comments',
+    label: '保証側のコメントに回答する',
+    hint: '保証側のコメント（未回答）',
+    requires: ['enterprise.disclosure.write'],
+    href: () => '/enterprise/assurance-comments?state=unanswered',
+    keywords: ['保証', '監査法人', 'コメント', '回答', 'レビューNote'],
+  },
+  {
+    id: 'map-xbrl',
+    label: 'XBRL の対応付けを確認する',
+    hint: 'XBRL（開示プロジェクト。社内確認用）',
+    requires: ['enterprise.disclosure.read'],
+    href: (c) => projectTab(c, 'tab=xbrl'),
+    keywords: ['XBRL', 'iXBRL', 'xBRL-JSON', 'タクソノミ', 'タグ', 'SAMPLE'],
+  },
+  {
+    id: 'see-audit-log',
+    label: '監査ログを見る',
+    hint: '監査ログ（操作・資料アクセスの記録）',
+    requires: ['common.audit.read'],
+    href: () => '/enterprise/audit-log',
+    keywords: ['監査ログ', '操作履歴', '証跡', '資料アクセス', 'ダウンロード履歴'],
   },
   {
     id: 'reset-demo',

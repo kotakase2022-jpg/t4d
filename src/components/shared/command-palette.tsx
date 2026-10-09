@@ -99,7 +99,12 @@ export function CommandPalette({
   const pathname = usePathname();
   const listNavigation = useListNavigation();
   const shell = useShell();
-  const navItems = useNavItems(variant, hiddenHrefs, shell?.hiddenPermissions);
+  const navItems = useNavItems(
+    variant,
+    hiddenHrefs,
+    shell?.hiddenPermissions,
+    shell?.hiddenOptions,
+  );
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -123,6 +128,7 @@ export function CommandPalette({
       verbContext: withProjectFromPath(shell?.verbContext ?? { unitScopeIds: [] }, pathname),
       engagementId: shell?.engagementId ?? engagementIdFromPath(pathname),
       navPaths,
+      hiddenOptions: shell?.hiddenOptions,
     });
     // メニューの項目は権限で絞った描画中のツリーから必ず出す（パレットを開いた画面のメニューと同じ集合）
     const navScreens: PaletteEntry[] = navPaths.map((nav) => ({

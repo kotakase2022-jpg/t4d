@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FIXTURE_TODAY } from '@/lib/config';
 import { AuthorizationError } from '@/lib/authorization/can';
-import { ORG_IDS, PERIOD_IDS, UNIT_IDS, userId } from '@/lib/fixtures/dataset';
+import { ENGAGEMENT_IDS, ORG_IDS, PERIOD_IDS, UNIT_IDS, userId } from '@/lib/fixtures/dataset';
+import { FY2025_APPROVED_SNAPSHOT_ID } from '@/lib/fixtures/trial-case';
+import { parseSharedReportCopy } from '@/lib/domain/report-copy';
+import { openIssueSummary } from '@/lib/domain/trial-metrics';
+import { createReportNote } from '@/lib/services/assurance-notes';
+import { shareReportSnapshot } from '@/lib/services/report-share';
+import { listPendingExclusions } from '@/lib/services/requirement-exclusion';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { loadMyWork } from '@/lib/services/my-work';
@@ -56,6 +62,83 @@ function expectOrdered(profile: keyof typeof MY_WORK_ORDER, kinds: string[]) {
   const ranks = kinds.map((k) => (order.includes(k) ? order.indexOf(k) : order.length + 1));
   expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
 }
+
+describe('トライアル対応の Attention（plan §4.3-3。保存せず導出）', () => {
+  const keysOf = (work: Awaited<ReturnType<typeof loadMyWork>>) =>
+    new Map(work.attention.map((a) => [a.key, a]));
+
+  it('最終承認者: 自分が承認できる対象外の申請（自分の申請は除く）を、承認する画面への行き先付きで出す', async () => {
+    const approver = ctxFor('approver@demo.local', ['approver', 'reviewer']);
+    const pending = (await listPendingExclusions(db, approver)).filter(
+      (p) => p.requestedBy !== approver.userId,
+    );
+    expect(pending.length).toBeGreaterThan(0);
+    const item = keysOf(await loadMyWork(db, approver, input())).get('exclusion-pending');
+    expect(item).toMatchObject({ count: pending.length, href: pending[0]!.href });
+    // 承認の権限が無い役割（作成担当）には出さない
+    const author = ctxFor('sustainability@demo.local', ['sustainability_manager']);
+    expect(keysOf(await loadMyWork(db, author, input())).has('exclusion-pending')).toBe(false);
+  });
+
+  it('作成担当: 未回答の保証側のコメント（クライアントへ共有されたもの）を回答の画面へ出す', async () => {
+    const author = ctxFor('sustainability@demo.local', ['sustainability_manager']);
+    expect(keysOf(await loadMyWork(db, author, input())).has('assurance-comments-unanswered')).toBe(
+      false,
+    );
+    const copy = await shareReportSnapshot(
+      db,
+      ctxFor('enterprise-admin@demo.local', ['enterprise_admin']),
+      { snapshotId: FY2025_APPROVED_SNAPSHOT_ID, engagementId: ENGAGEMENT_IDS.main },
+    );
+    const content = parseSharedReportCopy(copy.copy)!;
+    const block = content.blocks.find((b) =>
+      b.body.paragraphs.some((p) => p.kind === 'paragraph'),
+    )!;
+    const paragraph = block.body.paragraphs.find((p) => p.kind === 'paragraph')!;
+    await createReportNote(
+      db,
+      {
+        ...ctxFor('assurance-manager@demo.local', ['assurance_manager']),
+        workspace: {
+          organizationId: ORG_IDS.aoba,
+          organizationType: 'assurance_firm',
+          organizationName: 'テスト',
+          roleKeys: ['assurance_manager'],
+          unitScopeIds: [],
+        },
+        engagementIds: [ENGAGEMENT_IDS.main],
+      },
+      {
+        engagementId: ENGAGEMENT_IDS.main,
+        copyId: copy.id,
+        target: { kind: 'report_paragraph', blockId: block.blockId, paragraphId: paragraph.id },
+        body: '（テスト）根拠の版を確認させてください。',
+        sharedWithClient: true,
+      },
+    );
+    const item = keysOf(await loadMyWork(db, author, input())).get('assurance-comments-unanswered');
+    expect(item).toMatchObject({
+      count: 1,
+      href: '/enterprise/assurance-comments?state=unanswered',
+    });
+  });
+
+  it('管理者: トライアルの「必須要件 × 重大 × 未解決」を改善管理表へ。0 件なら出さない', async () => {
+    const admin = ctxFor('enterprise-admin@demo.local', ['enterprise_admin']);
+    const before = keysOf(await loadMyWork(db, admin, input())).get('trial-mandatory-critical');
+    // 改善管理表の見出しと同じ規則（trial-metrics.ts の openIssueSummary）で数える
+    const open = openIssueSummary(
+      fixture.trialFeedbackItems.filter((f) => f.organizationId === ORG_IDS.aomi),
+    ).mandatoryCriticalOpen;
+    if (open === 0) expect(before).toBeUndefined();
+    else expect(before).toMatchObject({ count: open, href: '/enterprise/trial?tab=feedback' });
+    // 作成担当（トライアルの管理をしない）には出さない
+    const author = ctxFor('sustainability@demo.local', ['sustainability_manager']);
+    expect(keysOf(await loadMyWork(db, author, input())).has('trial-mandatory-critical')).toBe(
+      false,
+    );
+  });
+});
 
 describe('loadMyWork', () => {
   it('拠点担当: 担当拠点のデータだけを数え、直す → 入力する の順', async () => {

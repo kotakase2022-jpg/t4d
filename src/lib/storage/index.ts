@@ -5,6 +5,8 @@ import { can } from '@/lib/authorization/can';
 import { getAppMode } from '@/lib/config';
 import { findDisclosureDocumentBytes } from '@/lib/fixtures/disclosure-documents';
 import { contentHash, fid } from '@/lib/fixtures/ids';
+import { parseSharedReportCopy } from '@/lib/domain/report-copy';
+import { listDataRoomDataPoints } from '@/lib/services/data-room-sync';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -341,16 +343,26 @@ export async function canReadEvidence(
   });
   if (grants.length === 0) return false;
 
-  // 当該ファイルが、この案件の Data Room 対象へ紐付いていること
+  // (1) 共有中の開示レポートの写しが引用する資料の版（0050 の t4d.assurance_can_read_shared_file_version と同じ）
+  const copies = await db.select('sharedReportCopies', {
+    where: { engagementId, withdrawnAt: { isNull: true } },
+  });
+  if (
+    copies.some((copy) =>
+      (parseSharedReportCopy(copy.copy)?.anchors ?? []).some((a) => a.fileVersionId === version.id),
+    )
+  ) {
+    return true;
+  }
+
+  // (2) Data Room の Data Point（許諾×承認の導出。企業の取り下げの記録を守る。NF-22）に紐付く資料で、
+  //     その Data Point の指標の許諾が Evidence を含むもの（DB の t4d.assurance_can_read_data_point と同じ範囲）
   const links = await db.select('evidenceLinks', {
     where: { fileVersionId: version.id, targetType: 'data_point' },
   });
   if (links.length === 0) return false;
-
-  const sharedItems = await db.select('dataRoomItems', {
-    where: { engagementId, sourceType: 'data_point', withdrawnAt: { isNull: true } },
-  });
-  const shared = new Set(sharedItems.map((i) => i.sourceId));
+  const rows = await listDataRoomDataPoints(db, engagementId);
+  const shared = new Set(rows.filter((r) => r.includesEvidence).map((r) => r.dataPoint.id));
   return links.some((l) => shared.has(l.targetId));
 }
 

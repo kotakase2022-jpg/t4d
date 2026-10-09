@@ -20,7 +20,8 @@ export type StatusIconName =
   | 'alert-triangle'
   | 'x-circle'
   | 'info'
-  | 'minus-circle';
+  | 'minus-circle'
+  | 'circle-help';
 
 export const STATUS_SEMANTICS = [
   'todo',
@@ -33,6 +34,8 @@ export const STATUS_SEMANTICS = [
   'error',
   'info',
   'excluded',
+  // 追加の確認が要る（トライアル対応: 要求事項の「追加確認が必要」・横断対応の「一部」など）
+  'question',
 ] as const;
 export type StatusSemantic = (typeof STATUS_SEMANTICS)[number];
 
@@ -56,4 +59,5 @@ export const SEMANTIC_STYLE: Record<StatusSemantic, { tone: StatusTone; icon: St
   error: { tone: 'danger', icon: 'x-circle' },
   info: { tone: 'neutral', icon: 'info' },
   excluded: { tone: 'neutral', icon: 'minus-circle' },
+  question: { tone: 'warning', icon: 'circle-help' },
 };

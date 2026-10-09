@@ -37,7 +37,8 @@ test('CDP 画面から整合チェックを実行して指摘を表示できる'
 
   // 指摘が 1 件以上あり、種別ラベルが日本語で出ている
   await expect(heading).toContainText(/（[1-9]\d* 件の指摘）/);
-  const resultTable = page.locator('table').first();
+  // 結果の表は結果の節の中のものを見る（一覧の上に、閉じた「前の版との比較」の表が並ぶようになった。T7 の版の比較）
+  const resultTable = page.getByRole('region', { name: /整合チェックの結果/ }).locator('table');
   await expect(resultTable.locator('tbody tr').first()).toBeVisible();
   await expect(resultTable).toContainText(
     /不足情報|古い記述|年度不一致|回答間の矛盾|Evidence 不足/,

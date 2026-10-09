@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { ENGAGEMENT_IDS } from '@/lib/fixtures/dataset';
+import { DISCLOSURE_FIRST_IDS } from '@/lib/fixtures/disclosure-first';
 import {
   ROUTE_CATALOG,
   canOpenRoute,
@@ -262,6 +263,64 @@ for (const [role, user, roles] of ASSURANCE) {
     test.setTimeout(300_000);
     await loginAs(page, user);
     const problems = await checkRole(page, role, [...roles], 'assurance', '/assurance/dashboard');
+    expect(problems).toEqual([]);
+  });
+}
+
+/**
+ * トライアル対応（2026-10）の詳細画面は固定の行き先（href）を持たないため、上の期待集合（パレット）には入らない。
+ * 入口の画面の本文に、その画面へのリンクがあることを役割ごとに確かめる（plan 付録 D の入口）
+ */
+const TRIAL_DETAIL_ENTRIES = [
+  {
+    name: '要求事項の詳細（プロジェクト）',
+    from: `/enterprise/disclosure-projects/${DISCLOSURE_FIRST_IDS.projects.fy2026}?tab=requirements&fw=${DISCLOSURE_FIRST_IDS.projectFrameworks.fy2026Esrs40a}`,
+    link: /^\/enterprise\/disclosure-projects\/[0-9a-f-]{36}\/requirements\/[0-9a-f-]{36}$/,
+  },
+  {
+    name: '要求事項の詳細（プロジェクト）— 横断対応表の行から',
+    from: `/enterprise/disclosure-projects/${DISCLOSURE_FIRST_IDS.projects.fy2026}?tab=crosswalk`,
+    link: /^\/enterprise\/disclosure-projects\/[0-9a-f-]{36}\/requirements\/[0-9a-f-]{36}$/,
+  },
+  {
+    name: 'スナップショットの内容とトレース',
+    from: `/enterprise/disclosure-projects/${DISCLOSURE_FIRST_IDS.projects.fy2025}?tab=outputs`,
+    link: /^\/enterprise\/disclosure-projects\/[0-9a-f-]{36}\/snapshots\/[0-9a-f-]{36}$/,
+  },
+] as const;
+
+for (const [role, user] of [
+  ['preparer', DEMO_USERS.sustainability],
+  ['reviewer', DEMO_USERS.reviewer],
+  ['approver', DEMO_USERS.approver],
+] as const) {
+  test(`トライアル対応の詳細画面: ${role} は入口の画面のリンクから届く`, async ({ page }) => {
+    await loginAs(page, user);
+    const problems: string[] = [];
+    for (const entry of TRIAL_DETAIL_ENTRIES) {
+      await page.goto(entry.from, { waitUntil: 'domcontentloaded' });
+      const hrefs = await page
+        .locator('#t4d-main a[href]')
+        .evaluateAll((links) => links.map((a) => a.getAttribute('href') ?? ''));
+      const target = hrefs.map((h) => h.split(/[?#]/)[0]!).find((h) => entry.link.test(h));
+      if (!target) {
+        problems.push(`${role}: ${entry.name} への入口のリンクが ${entry.from} に無い`);
+        continue;
+      }
+      const response = await page.goto(target, { waitUntil: 'domcontentloaded' });
+      if (!response || response.status() >= 400) {
+        problems.push(`${role}: ${entry.name}（${target}）が ${response?.status()}`);
+        continue;
+      }
+      if (
+        await page
+          .getByText('アクセス権限がありません')
+          .isVisible()
+          .catch(() => false)
+      ) {
+        problems.push(`${role}: ${entry.name}（${target}）が「アクセス権限がありません」`);
+      }
+    }
     expect(problems).toEqual([]);
   });
 }

@@ -34,6 +34,12 @@ import type { BlockEditorData } from '@/lib/services/disclosure-block';
 import { addReviewCommentAction, resolveReviewCommentAction } from '../actions';
 import { DiffText } from './diff-text';
 import type { RefInline } from './editor-model';
+import {
+  AssuranceNotesList,
+  RequirementMappingPanel,
+  type AssuranceNoteView,
+  type RequirementMappingPaneData,
+} from './requirement-mapping-panel';
 
 export type PaneTab = 'requirements' | 'evidence' | 'metrics' | 'prior' | 'comments';
 
@@ -54,6 +60,10 @@ export interface RightPaneProps {
   tab: PaneTab;
   onTabChange: (tab: PaneTab) => void;
   onAnnounce: (message: string) => void;
+  /** 要求事項の対応付けの編集と AI の候補（トライアル対応 NF-05・NF-11） */
+  requirementMapping?: RequirementMappingPaneData;
+  /** 保証側のコメント（この節を指すもの。NF-21） */
+  assuranceNotes?: AssuranceNoteView[];
 }
 
 function AiCheckbox({
@@ -134,6 +144,11 @@ export function RightPane(props: RightPaneProps) {
               未解決 {data.statusBar.unresolvedComments.count}
             </span>
           )}
+          {(props.assuranceNotes?.length ?? 0) > 0 && (
+            <span className="ml-1 rounded bg-brand-50 px-1 text-caption text-brand-800">
+              保証側 {props.assuranceNotes!.length}
+            </span>
+          )}
         </TabsTrigger>
       </TabsList>
       <div className="min-h-0 flex-1 overflow-y-auto p-3 text-small">
@@ -161,7 +176,13 @@ export function RightPane(props: RightPaneProps) {
 // 要求事項
 // ----------------------------------------------------------------------
 
-function RequirementsTab({ data, selected, onToggleSelect, canSelectForAi }: RightPaneProps) {
+function RequirementsTab({
+  data,
+  selected,
+  onToggleSelect,
+  canSelectForAi,
+  requirementMapping,
+}: RightPaneProps) {
   return (
     <div>
       <p className="mb-2 text-ink-muted">
@@ -211,6 +232,7 @@ function RequirementsTab({ data, selected, onToggleSelect, canSelectForAi }: Rig
           ))}
         </ul>
       )}
+      {requirementMapping && <RequirementMappingPanel mapping={requirementMapping} />}
     </div>
   );
 }
@@ -698,6 +720,7 @@ function CommentsTab({
   paragraphLabel,
   paragraphOptions,
   onAnnounce,
+  assuranceNotes,
 }: RightPaneProps) {
   const router = useRouter();
   const canComment = data.permissions.canWrite || data.permissions.canApprove;
@@ -764,6 +787,9 @@ function CommentsTab({
 
   return (
     <div>
+      {assuranceNotes && assuranceNotes.length > 0 && (
+        <AssuranceNotesList notes={assuranceNotes} paragraphLabel={paragraphLabel} />
+      )}
       {error && (
         <p
           role="alert"

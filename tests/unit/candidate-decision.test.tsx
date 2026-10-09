@@ -101,4 +101,30 @@ describe('CandidateDecision', () => {
     expect(primaryLabels(container)).toEqual([]);
     expect(container.querySelector('[data-candidate-decision="candidate"]')).not.toBeNull();
   });
+
+  it('採用しない（reject）: 理由（任意・上限つき）を同じフォームで送り、primary は増やさない', () => {
+    const { container } = render(
+      <CandidateDecision
+        candidate={candidate}
+        adopt={{ action }}
+        reject={{ action, fields: { aiRunId: 'r1' } }}
+        canWrite
+        canRunAi
+      />,
+    );
+    expect(primaryLabels(container)).toEqual(['候補を採用']);
+    const button = screen.getByRole('button', { name: '採用しない' });
+    expect(button.dataset.variant).toBe('secondary');
+    const reason = container.querySelector(
+      'textarea[name="rejectionReason"]',
+    ) as HTMLTextAreaElement;
+    expect(reason).not.toBeNull();
+    expect(reason.required).toBe(false);
+    expect(reason.maxLength).toBe(300);
+    expect(reason.form).toBe((button as HTMLButtonElement).form);
+    expect(screen.getByText('任意')).toBeTruthy();
+    expect((reason.form!.querySelector('input[name="aiRunId"]') as HTMLInputElement).value).toBe(
+      'r1',
+    );
+  });
 });

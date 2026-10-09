@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { Hint } from '@/components/ui/tooltip';
 import { isRecord, LOCAL_KEYS, readLocal, writeLocal } from '@/lib/ui/local-store';
-import type { PermissionKey } from '@/types/domain';
+import type { OrganizationOptionKey, PermissionKey } from '@/types/domain';
 import { DemoTour } from './demo-tour';
 import { cn } from '@/lib/utils';
 import { rememberNavBranch, useNavBranch } from './nav-branch';
@@ -56,19 +56,23 @@ export function useNavItems(
   variant: SidebarVariant,
   hiddenHrefs: string[],
   hiddenPermissions: readonly PermissionKey[] = [],
+  hiddenOptions: readonly OrganizationOptionKey[] = NO_OPTIONS,
 ): NavItem[] {
   const pathname = usePathname();
   return React.useMemo(
-    // 権限による非表示は全階層に効かせる（例: 管理 > 設定。3 階層目も同じ）
+    // 権限・契約オプションによる非表示は全階層に効かせる（例: 管理 > 設定、その他の開示 > CDP）
     () =>
       visibleNavTree(
         navTreeFor(variant, engagementIdFromPath(pathname)),
         hiddenHrefs,
         hiddenPermissions,
+        hiddenOptions,
       ),
-    [variant, hiddenHrefs, hiddenPermissions, pathname],
+    [variant, hiddenHrefs, hiddenPermissions, hiddenOptions, pathname],
   );
 }
+
+const NO_OPTIONS: readonly OrganizationOptionKey[] = [];
 
 // ----------------------------------------------------------------------
 // グループの開閉（plan §1.4）
@@ -206,6 +210,7 @@ export function Sidebar({
     variant,
     hiddenHrefs,
     hiddenPermissions ?? shell?.hiddenPermissions ?? EMPTY,
+    shell?.hiddenOptions,
   );
   const [collapsed, setCollapsed] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);

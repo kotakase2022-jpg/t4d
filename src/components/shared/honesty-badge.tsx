@@ -3,10 +3,12 @@ import {
   Bot,
   Calculator,
   CalendarClock,
+  FileWarning,
   FlaskConical,
   Hourglass,
   Lock,
   Sparkles,
+  Stamp,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Hint } from '@/components/ui/tooltip';
@@ -32,6 +34,9 @@ export const HONESTY_KINDS = [
   'fictional',
   'estimate',
   'not-effective',
+  // トライアル対応（2026-10。付録 C）
+  'not-filing-ready',
+  'internal-approval',
 ] as const;
 export type HonestyKind = (typeof HONESTY_KINDS)[number];
 
@@ -84,6 +89,17 @@ export const HONESTY_TEXT: Record<
     detail: '採択・公表済みでも、まだ発効していない基準です。',
     tone: 'warning',
   },
+  'not-filing-ready': {
+    label: '提出用ではない',
+    detail:
+      'XBRL の構造を確かめるための出力です。公式タクソノミ・公式の検証を通していないため、提出には使えません。',
+    tone: 'warning',
+  },
+  'internal-approval': {
+    label: '社内承認版',
+    detail: '社内の承認を経た版です。第三者保証ではありません。',
+    tone: 'neutral',
+  },
 };
 
 const ICONS: Record<HonestyKind, typeof Bot> = {
@@ -96,6 +112,8 @@ const ICONS: Record<HonestyKind, typeof Bot> = {
   fictional: FlaskConical,
   estimate: Calculator,
   'not-effective': CalendarClock,
+  'not-filing-ready': FileWarning,
+  'internal-approval': Stamp,
 };
 
 export function HonestyBadge({ kind, className }: { kind: HonestyKind; className?: string }) {

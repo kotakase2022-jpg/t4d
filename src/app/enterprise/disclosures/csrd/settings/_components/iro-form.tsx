@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { AlertTriangle, Save } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import { Input, Textarea } from '@/components/ui/input';
 import { NativeCheckbox } from '@/components/ui/native-checkbox';
 import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
@@ -324,6 +324,17 @@ function IroFormFields({
           </div>
         </fieldset>
       )}
+
+      {/* 方針・取組のメモ（0052）。インパクト・リスク・機会の台帳に出す。DMA の算定には使わない */}
+      <label className="block space-y-1 text-caption text-ink-muted">
+        <span className="block">方針・取組のメモ（任意・400 字まで。台帳に表示）</span>
+        <Textarea
+          name="policyActionNote"
+          defaultValue={initial.policyActionNote}
+          maxLength={400}
+          rows={2}
+        />
+      </label>
 
       <div className="flex items-center gap-2">
         {/* 事項の画面の主操作は「判断を保存」。IRO の保存は secondary（plan S12） */}

@@ -57,6 +57,7 @@ import {
   SampleMasterBadge,
 } from '../_components/csrd-badges';
 import { createCsrdCollectionItemAction } from './actions';
+import { CsrdScopeNote } from '../_components/csrd-scope-note';
 
 export const metadata = { title: 'CSRD データ収集' };
 
@@ -456,6 +457,7 @@ export default async function CsrdCollectionPage({
     <>
       <PageHeader
         title="CSRD データ収集"
+        context={<CsrdScopeNote />}
         description={
           <span className="flex flex-wrap items-center gap-2">
             <span>{shell.currentPeriod.label} ／ 評価対象の要求事項のデータと収集項目</span>

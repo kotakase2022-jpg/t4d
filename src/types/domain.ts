@@ -168,6 +168,8 @@ export interface Invitation extends AuditColumns {
   roleKeys: RoleKey[];
   status: 'pending' | 'accepted' | 'revoked' | 'expired';
   expiresAt: IsoDateTime;
+  /** 招待で決めた担当拠点（0056）。受諾で membership の unitScopeIds へ写す。空は全社 */
+  unitScopeIds: Uuid[];
 }
 
 export const RELATIONSHIP_STATUSES = ['pending', 'active', 'suspended', 'terminated'] as const;
@@ -768,7 +770,12 @@ export interface ApprovalRoute extends AuditColumns {
   description: string;
   /** 指定が無いデータに使う道筋。組織にひとつだけ true */
   isDefault: boolean;
+  /** 経路の用途（0056）。default＝通常のデータ、prior_year_final＝過年度確定値の登録 */
+  purpose: ApprovalRoutePurpose;
 }
+
+export const APPROVAL_ROUTE_PURPOSES = ['default', 'prior_year_final'] as const;
+export type ApprovalRoutePurpose = (typeof APPROVAL_ROUTE_PURPOSES)[number];
 
 /** 道筋の 1 段階 */
 export interface ApprovalRouteStage extends SoftDeletable {
@@ -1220,6 +1227,11 @@ export interface SsbjAnalysisSettings extends AuditColumns {
   /** 確定日時。null は未完了 */
   confirmedAt: IsoDateTime | null;
   confirmedBy: Uuid | null;
+  /**
+   * 設定を確定した時点の SSBJ の基準の版（0049）。新しい版を足しても過年度の画面が変わらないように固定する。
+   * null は公開中の版
+   */
+  frameworkVersionId: Uuid | null;
 }
 
 /**
@@ -1379,6 +1391,8 @@ export interface ProjectFramework extends AuditColumns {
   applicabilityStatus: ApplicabilityStatus;
   currentDecisionId: Uuid | null;
   conditions: FrameworkConditions;
+  /** この基準の XBRL プロファイル（タクソノミのパッケージ。0054）。null は未設定 */
+  taxonomyPackageId: Uuid | null;
 }
 
 /** 適用判断の確定記録（0035・追記専用）。未判定（not_assessed）は確定できない */
@@ -1445,6 +1459,8 @@ export interface NarrativeVersion {
   changeReason: string | null;
   /** AI の候補を人が採用して作った版なら、その実行 ID */
   originatedFromAiRunId: Uuid | null;
+  /** この版が説明するインパクト・リスク・機会（csrd_dma_iros.id。0052）。内容ハッシュには含めない */
+  iroRefs: Uuid[];
   contentHash: string;
   createdAt: IsoDateTime;
   createdBy: Uuid | null;
@@ -1789,7 +1805,8 @@ export interface ReportSnapshot {
   createdBy: Uuid;
 }
 
-export const EXPORT_ARTIFACT_FORMATS = ['docx', 'xlsx', 'csv'] as const;
+/** 出力の形式（0038・0051 で XBRL の 2 形式を追加。XBRL は社内確認用で提出用ではない） */
+export const EXPORT_ARTIFACT_FORMATS = ['docx', 'xlsx', 'csv', 'xbrl_json', 'ixbrl_html'] as const;
 export type ExportArtifactFormat = (typeof EXPORT_ARTIFACT_FORMATS)[number];
 
 export const EXPORT_AUDIENCES = ['internal', 'external'] as const;
@@ -1810,6 +1827,19 @@ export interface ExportArtifact {
   contentHash: string;
   generatedAt: IsoDateTime;
   generatedBy: Uuid;
+  /**
+   * 生成物を読み戻して承認版と照合した結果（0051）。null は未突合（この列を足す前の出力）。
+   * 挿入時に入れ、以後は変えない
+   */
+  reconciledParagraphs: number | null;
+  reconciledNumbers: number | null;
+  reconciledRows: number | null;
+  mismatchCount: number | null;
+  checkerVersion: string | null;
+  /** XBRL の出力だけ: タクソノミのパッケージ・対応付け集合のハッシュ・検証の要約 */
+  taxonomyPackageId: Uuid | null;
+  mappingSetHash: string | null;
+  validationSummary: Record<string, unknown> | null;
 }
 
 export const KPI_TARGET_TYPES = ['absolute', 'intensity'] as const;
@@ -2041,6 +2071,10 @@ export interface CsrdDmaIro extends AuditColumns, SoftDeletable {
   affectedStakeholders: string;
   /** リスク・機会が関連するインパクト IRO（任意。同じ組織の行だけ） */
   relatedImpactIroId: Uuid | null;
+  /** 根拠の引用位置（0052。同じ組織の source_anchors.id） */
+  sourceAnchorIds: Uuid[];
+  /** 方針・取組のメモ（0052） */
+  policyActionNote: string;
 }
 
 /**
@@ -2222,6 +2256,10 @@ export const AI_FEATURE_TYPES = [
   // CSRD（docs/disclosure-first.md §9.4）: 要求事項のギャップ分析と節の草案。どちらも候補列にだけ書く
   'csrdGapAnalysis',
   'csrdDisclosureDraft',
+  // トライアル対応（2026-10）: 要求事項の対応付けの候補と XBRL のタグの候補。どちらも ai_runs にだけ残し、
+  // 人が採用・確定するまで業務の値にしない
+  'requirementMappingSuggestion',
+  'xbrlTagSuggestion',
 ] as const;
 export type AiFeatureType = (typeof AI_FEATURE_TYPES)[number];
 
@@ -2280,7 +2318,9 @@ export interface AiSourceReference {
     | 'requirement'
     // CSRD の草案・ギャップ分析が根拠にした DMA の事項・IRO
     | 'dma_matter'
-    | 'dma_iro';
+    | 'dma_iro'
+    // トライアル対応: XBRL のタグの候補が根拠にした概念（SAMPLE の架空の概念）
+    | 'xbrl_concept';
   id: Uuid | null;
   label: string;
   locator: string | null;
@@ -2360,7 +2400,13 @@ export interface EngagementScope extends AuditColumns {
   note: string | null;
 }
 
-export const DATA_ROOM_SOURCE_TYPES = ['data_point', 'evidence', 'disclosure_response'] as const;
+/** Data Room の取得元（0050 で共有した開示レポートの写し report_copy を追加） */
+export const DATA_ROOM_SOURCE_TYPES = [
+  'data_point',
+  'evidence',
+  'disclosure_response',
+  'report_copy',
+] as const;
 export type DataRoomSourceType = (typeof DATA_ROOM_SOURCE_TYPES)[number];
 
 export interface DataRoomItem {
@@ -2668,6 +2714,14 @@ export interface ReviewNote extends AuditColumns {
   sharedWithClient: boolean;
   resolutionComment: string | null;
   resolvedAt: IsoDateTime | null;
+  /**
+   * 共有レポートの段落・数値を指すコメントの対象（0050）。targetType が report_paragraph・report_metric の
+   * ときだけ入る（それ以外の Note では null）
+   */
+  targetCopyId: Uuid | null;
+  targetBlockId: Uuid | null;
+  targetParagraphId: string | null;
+  targetDataPointVersionId: Uuid | null;
 }
 
 export const SIGNOFF_STAGES = ['prepared', 'reviewed', 'partner_approved'] as const;
@@ -2685,6 +2739,9 @@ export interface Signoff {
   snapshotId: Uuid | null;
   comment: string | null;
   createdAt: IsoDateTime;
+  /** 結び付けた共有レポートの写しとその内容ハッシュ（0050・任意） */
+  sharedReportCopyId: Uuid | null;
+  sharedReportContentHash: string | null;
 }
 
 export interface SignoffBlocker {
@@ -2764,6 +2821,17 @@ export const AUDIT_EVENT_TYPES = [
   'recheck_decided',
   'report_snapshot_created',
   'import_committed',
+  // トライアル対応（0048）
+  'report_shared',
+  'report_share_withdrawn',
+  'review_note_responded',
+  'requirement_mapping_changed',
+  'requirement_assessed',
+  'exclusion_requested',
+  'exclusion_decided',
+  'access_denied',
+  'xbrl_mapping_changed',
+  'xbrl_mapping_confirmed',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
 
@@ -2828,3 +2896,670 @@ export interface Page<T> {
 }
 
 export const DEFAULT_PAGE_SIZE = 25;
+
+// ======================================================================
+// トライアル対応（2026-10）: 要求事項の判断・対象外の承認・横断対応（0049）
+// ======================================================================
+
+/** プロジェクトの要求事項の適用区分（SSBJ・CSRD 以外の基準。0049） */
+export const REQUIREMENT_APPLICABILITIES = [
+  'applicable',
+  'not_applicable',
+  'not_material',
+  'not_assessed',
+] as const;
+export type RequirementApplicability = (typeof REQUIREMENT_APPLICABILITIES)[number];
+
+/**
+ * 開示プロジェクトの基準ごとの要求事項の判断と 3 観点の評価（0049）。SSBJ は ssbj_assessments、
+ * CSRD は DMA から導出し、それ以外の基準（ESRS-40a など）だけをここに持つ。表示では作らず、保存の操作でだけ作る
+ */
+export interface ProjectRequirementAssessment extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  projectFrameworkId: Uuid;
+  itemId: Uuid;
+  applicability: RequirementApplicability;
+  /** 対象外・非重要は必須 */
+  applicabilityReason: string;
+  ruleRef: string;
+  /** 3 観点の人の評価。null は未評価 */
+  disclosureCoverage: SsbjCoverageStatus | null;
+  dataCoverage: SsbjCoverageStatus | null;
+  processCoverage: SsbjCoverageStatus | null;
+  missingInformation: string;
+  ownerUserId: Uuid | null;
+  dueOn: IsoDate | null;
+  actionNote: string;
+  decidedBy: Uuid | null;
+  decidedAt: IsoDateTime | null;
+  reviewedBy: Uuid | null;
+  reviewedAt: IsoDateTime | null;
+}
+
+/** 判断の履歴（0049・追記専用）。承認版のスナップショットはこの ID で判断を固定する */
+export interface ProjectRequirementAssessmentEvent {
+  id: Uuid;
+  organizationId: Uuid;
+  assessmentId: Uuid;
+  projectFrameworkId: Uuid;
+  itemId: Uuid;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown>;
+  reason: string;
+  actorUserId: Uuid;
+  createdAt: IsoDateTime;
+}
+
+export const EXCLUSION_SOURCES = ['ssbj_assessment', 'project_assessment'] as const;
+export type ExclusionSource = (typeof EXCLUSION_SOURCES)[number];
+
+export const EXCLUSION_EVENT_TYPES = ['requested', 'approved', 'returned', 'withdrawn'] as const;
+export type ExclusionEventType = (typeof EXCLUSION_EVENT_TYPES)[number];
+
+export const EXCLUSION_DECISIONS = ['not_applicable', 'not_material'] as const;
+export type ExclusionDecision = (typeof EXCLUSION_DECISIONS)[number];
+
+/**
+ * 対象外・非重要の申請・承認・差戻し・取り下げ（0049・追記専用）。承認は申請者と別の承認権限者だけで、
+ * reasonDigest（区分＋理由の sha256）に結び付く。理由・区分を変えると承認は無効（再承認が必要）
+ */
+export interface RequirementExclusionEvent {
+  id: Uuid;
+  organizationId: Uuid;
+  frameworkVersionId: Uuid;
+  itemId: Uuid;
+  reportingPeriodId: Uuid;
+  /** プロジェクトの判断の申請のときだけ入る */
+  projectFrameworkId: Uuid | null;
+  source: ExclusionSource;
+  event: ExclusionEventType;
+  decision: ExclusionDecision;
+  reasonDigest: string;
+  /** 理由の先頭 200 字（確認ダイアログ・一覧の表示用） */
+  reasonExcerpt: string;
+  /** 差戻しの理由（差戻しのときは必須） */
+  note: string;
+  actorUserId: Uuid;
+  createdAt: IsoDateTime;
+}
+
+/** 定性情報と要求事項の直接の対応付け（0049）。外すときは deletedAt を入れる */
+export interface NarrativeRequirementLink {
+  id: Uuid;
+  organizationId: Uuid;
+  narrativeRecordId: Uuid;
+  frameworkVersionId: Uuid;
+  itemId: Uuid;
+  createdAt: IsoDateTime;
+  createdBy: Uuid;
+  deletedAt: IsoDateTime | null;
+  deletedBy: Uuid | null;
+}
+
+export const CROSSWALK_RELATIONS = ['equivalent', 'partial', 'related', 'no_counterpart'] as const;
+export type CrosswalkRelation = (typeof CROSSWALK_RELATIONS)[number];
+
+export const CROSSWALK_SOURCES = ['sample_fixture', 'suslab_curated'] as const;
+export type CrosswalkSource = (typeof CROSSWALK_SOURCES)[number];
+
+/** SSBJ ↔ ESRS／ESRS-40a の横断対応（0049・テナント横断のマスター・参照だけ） */
+export interface RequirementCrosswalk {
+  id: Uuid;
+  fromItemId: Uuid;
+  toFrameworkVersionId: Uuid;
+  /** relation が no_counterpart のときだけ null */
+  toItemId: Uuid | null;
+  relation: CrosswalkRelation;
+  rationale: string;
+  source: CrosswalkSource;
+  sourceRef: string | null;
+  verifiedAt: IsoDate | null;
+  verifiedBy: string | null;
+  createdAt: IsoDateTime;
+}
+
+// ======================================================================
+// 保証側への共有・コメントの回答（0050）
+// ======================================================================
+
+/**
+ * 保証側へ共有した承認済みレポートの写し（0050）。共有は企業側の行為で、写しは社内コメント・社内向けの
+ * 確認事項を除いたもの。取り下げ（withdrawnAt）以外は変更・削除できない
+ */
+export interface SharedReportCopy {
+  id: Uuid;
+  engagementId: Uuid;
+  assuranceFirmId: Uuid;
+  clientOrganizationId: Uuid;
+  snapshotId: Uuid;
+  snapshotContentHash: string;
+  copy: Record<string, unknown>;
+  copyHash: string;
+  sharedBy: Uuid;
+  sharedAt: IsoDateTime;
+  withdrawnAt: IsoDateTime | null;
+  withdrawnBy: Uuid | null;
+}
+
+/** 共有レポートを指す保証側のコメントの対象の種類（review_notes.target_type） */
+export const REPORT_NOTE_TARGET_TYPES = ['report_paragraph', 'report_metric'] as const;
+export type ReportNoteTargetType = (typeof REPORT_NOTE_TARGET_TYPES)[number];
+
+/** 保証側のコメント（クライアントへ共有したもの）への企業の回答（0050・追記専用） */
+export interface ReviewNoteResponse {
+  id: Uuid;
+  reviewNoteId: Uuid;
+  engagementId: Uuid;
+  clientOrganizationId: Uuid;
+  body: string;
+  respondedBy: Uuid;
+  respondedAt: IsoDateTime;
+}
+
+// ======================================================================
+// 出力の突合（0051）
+// ======================================================================
+
+export const EXPORT_RECONCILIATION_SOURCES = ['generated_blocked', 'uploaded'] as const;
+export type ExportReconciliationSource = (typeof EXPORT_RECONCILIATION_SOURCES)[number];
+
+/** 突合で照合する出力の形式（XBRL は別の検証規則 V01〜V16 で見る） */
+export const RECONCILED_FORMATS = ['docx', 'xlsx', 'csv'] as const;
+export type ReconciledFormat = (typeof RECONCILED_FORMATS)[number];
+
+export interface ExportReconciliationMismatch {
+  kind: 'paragraph' | 'number' | 'row' | 'approval' | 'missing' | 'extra';
+  /** 位置（節・段落 ID・シートとセル・行番号など） */
+  location: string;
+  expected: string;
+  actual: string;
+}
+
+/** 突合の記録（0051・追記専用）。外部のファイルは保存せず、sha256 と結果だけを持つ */
+export interface ExportReconciliation {
+  id: Uuid;
+  organizationId: Uuid;
+  snapshotId: Uuid;
+  source: ExportReconciliationSource;
+  format: ReconciledFormat;
+  audience: ExportAudience;
+  frameworkVersionId: Uuid | null;
+  fileSha256: string;
+  checkerVersion: string;
+  paragraphsChecked: number;
+  numbersChecked: number;
+  rowsChecked: number;
+  mismatchCount: number;
+  /** 不一致の明細（先頭 50 件まで） */
+  mismatches: ExportReconciliationMismatch[];
+  createdBy: Uuid;
+  createdAt: IsoDateTime;
+}
+
+// ======================================================================
+// XBRL（0053 マスター・0054 組織）
+// ======================================================================
+
+export const XBRL_PROFILES = [
+  'sample',
+  'edinet_ssbj',
+  'edinet_non_ssbj',
+  'esrs',
+  'esrs_40a',
+] as const;
+export type XbrlProfile = (typeof XBRL_PROFILES)[number];
+
+export const XBRL_PACKAGE_LEGAL_STATUSES = ['sample', 'draft', 'final', 'superseded'] as const;
+export type XbrlPackageLegalStatus = (typeof XBRL_PACKAGE_LEGAL_STATUSES)[number];
+
+export const XBRL_LICENSE_STATUSES = ['not_required', 'required_pending', 'granted'] as const;
+export type XbrlLicenseStatus = (typeof XBRL_LICENSE_STATUSES)[number];
+
+/** タクソノミのパッケージ（0053・テナント横断のマスター）。Stage 1 は SAMPLE（架空）だけ */
+export interface XbrlTaxonomyPackage {
+  id: Uuid;
+  key: string;
+  frameworkKey: FrameworkKey;
+  profile: XbrlProfile;
+  name: string;
+  versionLabel: string;
+  publisher: string;
+  legalStatus: XbrlPackageLegalStatus;
+  namespaceUri: string;
+  prefix: string;
+  entryPoint: string;
+  sourceUrl: string | null;
+  publishedOn: IsoDate | null;
+  verifiedAt: IsoDate | null;
+  licenseStatus: XbrlLicenseStatus;
+  licenseNote: string;
+  /** 提出用のファイルを作れる版か（サンプル・ライセンス未取得・草案は false） */
+  filingReady: boolean;
+  isFixture: boolean;
+  createdAt: IsoDateTime;
+}
+
+export const XBRL_CONCEPT_KINDS = ['item', 'text_block', 'abstract', 'axis', 'member'] as const;
+export type XbrlConceptKind = (typeof XBRL_CONCEPT_KINDS)[number];
+
+export const XBRL_PERIOD_TYPES = ['duration', 'instant'] as const;
+export type XbrlPeriodType = (typeof XBRL_PERIOD_TYPES)[number];
+
+export const XBRL_BALANCES = ['debit', 'credit'] as const;
+export type XbrlBalance = (typeof XBRL_BALANCES)[number];
+
+export interface XbrlConceptReference {
+  /** 参照先の名前（SAMPLE では架空の参照） */
+  name: string;
+  locator: string;
+}
+
+/** XBRL の概念（0053）。SAMPLE の概念は架空で、公式の要素名ではない */
+export interface XbrlConcept {
+  id: Uuid;
+  packageId: Uuid;
+  prefix: string;
+  localName: string;
+  namespaceUri: string;
+  kind: XbrlConceptKind;
+  /** 例: xbrli:decimalItemType・nonnum:textBlockItemType */
+  dataType: string;
+  periodType: XbrlPeriodType | null;
+  balance: XbrlBalance | null;
+  labelJa: string;
+  labelEn: string;
+  conceptReferences: XbrlConceptReference[];
+  parentId: Uuid | null;
+  roleCode: string;
+  sortOrder: number;
+  supersedesConceptId: Uuid | null;
+  deprecated: boolean;
+  createdAt: IsoDateTime;
+}
+
+export const XBRL_REQUIREMENT_BASES = ['sample_fixture', 'reference_link', 'manual'] as const;
+export type XbrlRequirementBasis = (typeof XBRL_REQUIREMENT_BASES)[number];
+
+/** 概念と要求事項の対応の候補（0053・マスターの参考。組織の対応付けの確定とは別） */
+export interface XbrlConceptRequirement {
+  id: Uuid;
+  conceptId: Uuid;
+  disclosureItemId: Uuid;
+  basis: XbrlRequirementBasis;
+  note: string;
+  createdAt: IsoDateTime;
+}
+
+export const FILING_IDENTIFIER_SCHEMES = [
+  'edinet_code',
+  'lei',
+  'corporate_number',
+  'sample',
+] as const;
+export type FilingIdentifierScheme = (typeof FILING_IDENTIFIER_SCHEMES)[number];
+
+/** 提出者の識別子（0054）。デモは架空の sample だけ */
+export interface OrganizationFilingIdentifier extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  scheme: FilingIdentifierScheme;
+  value: string;
+  verifiedAt: IsoDateTime | null;
+  verifiedBy: Uuid | null;
+}
+
+export const XBRL_TARGET_KINDS = ['metric', 'block', 'constant'] as const;
+export type XbrlTargetKind = (typeof XBRL_TARGET_KINDS)[number];
+
+export const XBRL_PERIOD_ROLES = ['current', 'prior1', 'base_year', 'target'] as const;
+export type XbrlPeriodRole = (typeof XBRL_PERIOD_ROLES)[number];
+
+export const XBRL_MAPPING_STATUSES = ['candidate', 'confirmed', 'excluded'] as const;
+export type XbrlMappingStatus = (typeof XBRL_MAPPING_STATUSES)[number];
+
+export const XBRL_MAPPING_ORIGINS = ['fixture', 'human', 'ai_adopted'] as const;
+export type XbrlMappingOrigin = (typeof XBRL_MAPPING_ORIGINS)[number];
+
+/**
+ * T4D の対象と XBRL の概念の対応付け（0054）。候補 → 確定（承認権限・作成者と別人）／対象外（理由必須）。
+ * 軸・decimals・単位は対応付けに明示して持つ（境界の文字列から推測しない）。AI は確定しない
+ */
+export interface XbrlTagMapping extends AuditColumns, SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  /** null は組織の既定 */
+  projectId: Uuid | null;
+  packageId: Uuid;
+  conceptId: Uuid;
+  targetKind: XbrlTargetKind;
+  metricId: Uuid | null;
+  unitId: Uuid | null;
+  boundary: string | null;
+  frameworkVersionId: Uuid | null;
+  sectionKey: string | null;
+  disclosureItemId: Uuid | null;
+  /** 軸の local_name → メンバーの local_name */
+  dimensions: Record<string, string>;
+  periodRole: XbrlPeriodRole;
+  decimals: number | null;
+  scale: number;
+  status: XbrlMappingStatus;
+  excludedReason: string;
+  origin: XbrlMappingOrigin;
+  aiRunId: Uuid | null;
+  confirmedBy: Uuid | null;
+  confirmedAt: IsoDateTime | null;
+}
+
+export const XBRL_MAPPING_EVENT_TYPES = [
+  'created',
+  'updated',
+  'confirmed',
+  'excluded',
+  'restored',
+  'deleted',
+] as const;
+export type XbrlMappingEventType = (typeof XBRL_MAPPING_EVENT_TYPES)[number];
+
+/** 対応付けの履歴（0054・追記専用） */
+export interface XbrlTagMappingEvent {
+  id: Uuid;
+  organizationId: Uuid;
+  mappingId: Uuid;
+  event: XbrlMappingEventType;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  reason: string;
+  actorUserId: Uuid;
+  createdAt: IsoDateTime;
+}
+
+// ======================================================================
+// トライアルの評価（0055）
+// ======================================================================
+
+export const TRIAL_PHASES = [
+  'setup',
+  'started',
+  'tuning',
+  'reverification',
+  'decision',
+  'closed',
+] as const;
+export type TrialPhase = (typeof TRIAL_PHASES)[number];
+
+export const TRIAL_END_DISPOSITIONS = ['continue', 'return', 'delete', 'undecided'] as const;
+export type TrialEndDisposition = (typeof TRIAL_END_DISPOSITIONS)[number];
+
+export const TRIAL_DECISIONS = ['adopt', 'conditional', 'decline', 'undecided'] as const;
+export type TrialDecision = (typeof TRIAL_DECISIONS)[number];
+
+/** 開始前に合意する 3 点（範囲・判断者・スケジュール）の合意日とメモ */
+export interface TrialAgreement {
+  agreedOn: IsoDate | null;
+  note: string;
+}
+
+export const TRIAL_AGREEMENT_KEYS = ['scope', 'decider', 'schedule'] as const;
+export type TrialAgreementKey = (typeof TRIAL_AGREEMENT_KEYS)[number];
+
+/** トライアルの計画・利用枠・選定ケース・終了時の扱い・導入判断（0055。人が入力する） */
+export interface TrialProgram extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  name: string;
+  startsOn: IsoDate | null;
+  endsOn: IsoDate | null;
+  phase: TrialPhase;
+  projectId: Uuid | null;
+  includedUnitIds: Uuid[];
+  targetDataNote: string;
+  /** 選定ケース（要求事項の集合）。追跡率と評価 #1 の既定の分母 */
+  selectedRequirementItemIds: Uuid[];
+  selectedMetricIds: Uuid[];
+  plannedMembers: number | null;
+  plannedSites: number | null;
+  plannedQuantitativeMetrics: number | null;
+  plannedNarrativeBlocks: number | null;
+  plannedRequirements: number | null;
+  plannedFiscalYears: number | null;
+  plannedFiles: number | null;
+  plannedApprovalLevels: number | null;
+  options: Record<string, unknown>;
+  agreements: Partial<Record<TrialAgreementKey, TrialAgreement>>;
+  endDisposition: TrialEndDisposition;
+  endAgreedOn: IsoDate | null;
+  decision: TrialDecision;
+  decisionConditions: string;
+  decidedByLabel: string;
+}
+
+export const TRIAL_THEMES = [
+  'traceability',
+  'gap_distinction',
+  'approval_change',
+  'output_reuse',
+  'usability',
+  'work_time',
+  'operations',
+] as const;
+export type TrialTheme = (typeof TRIAL_THEMES)[number];
+
+/** 検証シナリオ（0055） */
+export interface TrialScenario extends AuditColumns, SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  theme: TrialTheme;
+  code: string;
+  title: string;
+  steps: string;
+  targetRole: string;
+  acceptanceCriterion: string;
+  sortOrder: number;
+}
+
+export const TRIAL_COMPLETIONS = ['self', 'with_help', 'not_completed'] as const;
+export type TrialCompletion = (typeof TRIAL_COMPLETIONS)[number];
+
+/** シナリオの実施記録（0055・追記専用・本人名義） */
+export interface TrialScenarioRun {
+  id: Uuid;
+  organizationId: Uuid;
+  scenarioId: Uuid;
+  performedBy: Uuid;
+  performedRole: string;
+  startedAt: IsoDateTime | null;
+  endedAt: IsoDateTime | null;
+  minutes: number | null;
+  completion: TrialCompletion;
+  helpCount: number;
+  easeRating: number | null;
+  comment: string;
+  /** 記録の相対 URL・監査ログ ID・出力記録 ID */
+  evidence: Record<string, unknown>;
+  environmentVersion: string;
+  supersedesRunId: Uuid | null;
+  createdAt: IsoDateTime;
+}
+
+export const TRIAL_JUDGEMENTS = ['pass', 'fail', 'hold'] as const;
+export type TrialJudgement = (typeof TRIAL_JUDGEMENTS)[number];
+
+/** 評価者の判定（0055・追記専用。取り消せない） */
+export interface TrialScenarioJudgement {
+  id: Uuid;
+  organizationId: Uuid;
+  scenarioId: Uuid;
+  judgement: TrialJudgement;
+  reason: string;
+  measuredValue: string;
+  judgedBy: Uuid;
+  judgedAt: IsoDateTime;
+}
+
+export const FEEDBACK_KINDS = ['defect', 'request', 'question', 'positive', 'other'] as const;
+export type FeedbackKind = (typeof FEEDBACK_KINDS)[number];
+
+export const FEEDBACK_CHANNELS = ['in_app', 'meeting', 'email', 'phone', 'other'] as const;
+export type FeedbackChannel = (typeof FEEDBACK_CHANNELS)[number];
+
+export const FEEDBACK_SEVERITIES = ['critical', 'major', 'minor'] as const;
+export type FeedbackSeverity = (typeof FEEDBACK_SEVERITIES)[number];
+
+export const FEEDBACK_STATUSES = [
+  'open',
+  'triaged',
+  'in_progress',
+  'resolved',
+  'wont_fix',
+  'verified',
+] as const;
+export type FeedbackStatus = (typeof FEEDBACK_STATUSES)[number];
+
+export const COST_CLASSES = ['maintenance', 'separate_estimate', 'undecided'] as const;
+export type CostClass = (typeof COST_CLASSES)[number];
+
+/** フィードバックと改善管理表（0055）。投稿は組織メンバー本人、トリアージは enterprise.org.manage */
+export interface TrialFeedbackItem extends AuditColumns, SoftDeletable {
+  id: Uuid;
+  organizationId: Uuid;
+  kind: FeedbackKind;
+  channel: FeedbackChannel;
+  title: string;
+  body: string;
+  /** 画面のルートのパターン（クエリ・ID は記録しない） */
+  routePattern: string;
+  scenarioId: Uuid | null;
+  /** 不具合のみ */
+  severity: FeedbackSeverity | null;
+  mandatoryRequirement: boolean;
+  status: FeedbackStatus;
+  responsePolicy: string;
+  costClass: CostClass;
+  ownerLabel: string;
+  dueOn: IsoDate | null;
+  resolvedInVersion: string;
+  verificationResult: string;
+  verifiedBy: Uuid | null;
+  verifiedAt: IsoDateTime | null;
+  agreed: boolean;
+  environmentVersion: string;
+}
+
+export const TRIAL_TASK_KEYS = [
+  'transcription',
+  'check_reconcile',
+  'drafting',
+  'approval',
+  'assurance_response',
+  'handover',
+] as const;
+export type TrialTaskKey = (typeof TRIAL_TASK_KEYS)[number];
+
+export const TRIAL_TIMING_MODES = ['baseline', 't4d'] as const;
+export type TrialTimingMode = (typeof TRIAL_TIMING_MODES)[number];
+
+export const TRIAL_TIMING_METHODS = ['self_report', 'observed', 'log_estimate'] as const;
+export type TrialTimingMethod = (typeof TRIAL_TIMING_METHODS)[number];
+
+/** 作業時間（0055・追記専用・本人名義） */
+export interface TrialTaskTiming {
+  id: Uuid;
+  organizationId: Uuid;
+  taskKey: TrialTaskKey;
+  mode: TrialTimingMode;
+  unitLabel: string;
+  quantity: number;
+  minutes: number;
+  method: TrialTimingMethod;
+  department: string;
+  measuredOn: IsoDate;
+  scenarioRunId: Uuid | null;
+  supersedesId: Uuid | null;
+  note: string;
+  recordedBy: Uuid;
+  createdAt: IsoDateTime;
+}
+
+// ======================================================================
+// データ取扱条件（0056）・オプション（0057）
+// ======================================================================
+
+export const NDA_STATUSES = ['signed', 'pending', 'undecided'] as const;
+export type NdaStatus = (typeof NDA_STATUSES)[number];
+
+export const AI_TRAINING_USES = ['not_allowed', 'allowed', 'undecided'] as const;
+export type AiTrainingUse = (typeof AI_TRAINING_USES)[number];
+
+export const AI_PROVIDER_STORAGES = ['none', 'provider_default', 'undecided'] as const;
+export type AiProviderStorage = (typeof AI_PROVIDER_STORAGES)[number];
+
+export interface DataTermsSubprocessor {
+  name: string;
+  role: string;
+  location: string;
+}
+
+/** 合意したデータ取扱条件の版（0056・追記専用）。空の項目・undecided は「未合意」 */
+export interface OrganizationDataTerms {
+  id: Uuid;
+  organizationId: Uuid;
+  versionNo: number;
+  ndaStatus: NdaStatus;
+  processingTermsRef: string;
+  storageLocation: string;
+  retentionPolicy: string;
+  aiTrainingUse: AiTrainingUse;
+  aiProviderStorage: AiProviderStorage;
+  subprocessors: DataTermsSubprocessor[];
+  returnMethod: string;
+  deletionMethod: string;
+  agreedOn: IsoDate | null;
+  agreedByLabel: string;
+  note: string;
+  createdBy: Uuid;
+  createdAt: IsoDateTime;
+}
+
+export const ORGANIZATION_OPTION_KEYS = ['cdp'] as const;
+export type OrganizationOptionKey = (typeof ORGANIZATION_OPTION_KEYS)[number];
+
+/** 契約で開く有償オプション（0057）。組織メンバーは参照だけ。顧客は自分で開けない */
+export interface OrganizationOption {
+  id: Uuid;
+  organizationId: Uuid;
+  optionKey: OrganizationOptionKey;
+  enabled: boolean;
+  contractRef: string;
+  validFrom: IsoDate | null;
+  validTo: IsoDate | null;
+  note: string;
+  setAt: IsoDateTime;
+  setByLabel: string;
+}
+
+export const RESPONSE_CONTENT_TARGET_KINDS = [
+  'narrative_record',
+  'disclosure_block',
+  'requirement_item',
+] as const;
+export type ResponseContentTargetKind = (typeof RESPONSE_CONTENT_TARGET_KINDS)[number];
+
+export const RESPONSE_CONTENT_LINK_SOURCES = ['manual', 'ai_adopted'] as const;
+export type ResponseContentLinkSource = (typeof RESPONSE_CONTENT_LINK_SOURCES)[number];
+
+/** CDP 等の回答と T4D の情報の対応付け（0057）。人が確定したものだけ。外すときは deletedAt */
+export interface ResponseContentLink {
+  id: Uuid;
+  organizationId: Uuid;
+  itemId: Uuid;
+  targetKind: ResponseContentTargetKind;
+  targetId: Uuid;
+  linkSource: ResponseContentLinkSource;
+  aiRunId: Uuid | null;
+  confirmedBy: Uuid;
+  confirmedAt: IsoDateTime;
+  deletedAt: IsoDateTime | null;
+  deletedBy: Uuid | null;
+}

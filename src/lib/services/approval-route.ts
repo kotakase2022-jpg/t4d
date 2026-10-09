@@ -7,13 +7,14 @@ import { fid } from '@/lib/fixtures/ids';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   ApprovalRoute,
+  ApprovalRoutePurpose,
   ApprovalRouteStage,
   AuthorizationContext,
   DataPoint,
   DataPointApprovalStep,
   Uuid,
 } from '@/types/domain';
-import { MAX_APPROVAL_STAGES } from '@/types/domain';
+import { APPROVAL_ROUTE_PURPOSES, ENTERPRISE_ROLES, MAX_APPROVAL_STAGES } from '@/types/domain';
 
 /**
  * 最大 5 階層の承認フロー。
@@ -59,12 +60,43 @@ export async function loadApprovalRoutes(
   }));
 }
 
+/** 経路の用途（画面の言葉） */
+export const APPROVAL_ROUTE_PURPOSE_LABELS: Record<ApprovalRoutePurpose, string> = {
+  default: '通常のデータ',
+  prior_year_final: '過年度確定値の登録',
+};
+
+/** 用途の値（古い行・Cookie から戻した行に無いときは通常の経路として扱う） */
+function purposeOf(route: ApprovalRoute): ApprovalRoutePurpose {
+  return route.purpose === 'prior_year_final' ? 'prior_year_final' : 'default';
+}
+
+/**
+ * 通常のデータに使う既定の経路（過年度確定値の経路は選ばない）。
+ * 既定の印が無ければ、通常の用途の最初の経路
+ */
 export async function loadDefaultRoute(
   db: DbClient,
   ctx: AuthorizationContext,
 ): Promise<ApprovalRouteView | null> {
-  const routes = await loadApprovalRoutes(db, ctx);
+  const routes = (await loadApprovalRoutes(db, ctx)).filter(
+    (r) => purposeOf(r.route) === 'default',
+  );
   return routes.find((r) => r.route.isDefault) ?? routes[0] ?? null;
+}
+
+/**
+ * 過年度確定値の登録に使う経路（トライアル対応 NF-44。段階を持つものだけ）。無ければ null
+ * （標準 CSV の確定で「過年度確定値として登録」を選べない）
+ */
+export async function loadPriorYearRoute(
+  db: DbClient,
+  ctx: AuthorizationContext,
+): Promise<ApprovalRouteView | null> {
+  const routes = await loadApprovalRoutes(db, ctx);
+  return (
+    routes.find((r) => purposeOf(r.route) === 'prior_year_final' && r.stages.length > 0) ?? null
+  );
 }
 
 export interface RouteStageInput {
@@ -79,8 +111,16 @@ export interface SaveRouteInput {
   name: string;
   description: string;
   isDefault: boolean;
+  /** 省略時は通常の経路（既にある経路を書き換えるときは、その経路の用途のまま） */
+  purpose?: ApprovalRoutePurpose;
   stages: RouteStageInput[];
 }
+
+/**
+ * 名称・説明・段階名・部署の長さ。Demo Mode の Cookie から戻すときの検査（demo-trial-checks.ts）と同じ上限で、
+ * 画面にも同じ上限を出す（長すぎて別のインスタンスで消える経路を作らない）
+ */
+export const APPROVAL_ROUTE_TEXT_LIMITS = { name: 60, description: 300 } as const;
 
 /**
  * 道筋を作る・書き換える。
@@ -96,6 +136,19 @@ export async function saveApprovalRoute(
 
   const name = input.name.trim();
   if (name === '') throw new ValidationError('承認の道筋の名称を入力してください。');
+  if (name.length > APPROVAL_ROUTE_TEXT_LIMITS.name) {
+    throw new ValidationError(
+      `承認の道筋の名称は ${APPROVAL_ROUTE_TEXT_LIMITS.name} 文字以内で入力してください。`,
+    );
+  }
+  if (input.description.trim().length > APPROVAL_ROUTE_TEXT_LIMITS.description) {
+    throw new ValidationError(
+      `説明は ${APPROVAL_ROUTE_TEXT_LIMITS.description} 文字以内で入力してください。`,
+    );
+  }
+  if (input.purpose !== undefined && !APPROVAL_ROUTE_PURPOSES.includes(input.purpose)) {
+    throw new ValidationError('経路の用途が正しくありません。');
+  }
 
   const stages = input.stages.filter((s) => s.name.trim() !== '');
   if (stages.length === 0) {
@@ -103,6 +156,36 @@ export async function saveApprovalRoute(
   }
   if (stages.length > MAX_APPROVAL_STAGES) {
     throw new ValidationError(`承認段階は最大 ${MAX_APPROVAL_STAGES} 階層までです。`);
+  }
+  for (const [index, stage] of stages.entries()) {
+    const label = `${index + 1} 段目`;
+    if (stage.name.trim().length > APPROVAL_ROUTE_TEXT_LIMITS.name) {
+      throw new ValidationError(
+        `${label}の段階名は ${APPROVAL_ROUTE_TEXT_LIMITS.name} 文字以内で入力してください。`,
+      );
+    }
+    if (stage.department.trim().length > APPROVAL_ROUTE_TEXT_LIMITS.name) {
+      throw new ValidationError(
+        `${label}の部署は ${APPROVAL_ROUTE_TEXT_LIMITS.name} 文字以内で入力してください。`,
+      );
+    }
+    // 承認できる役割は企業の役割だけ（空は承認権限を持つ誰でも）。段階の判定（canDecideStep）が役割で見るため
+    const role = stage.approverRole.trim();
+    if (role !== '' && !(ENTERPRISE_ROLES as readonly string[]).includes(role)) {
+      throw new ValidationError(`${label}の承認できる役割が正しくありません。`);
+    }
+  }
+  // 個人を指定する段階は、この組織の有効なメンバーだけ
+  const namedApprovers = [
+    ...new Set(stages.flatMap((s) => (s.approverUserId ? [s.approverUserId] : []))),
+  ];
+  if (namedApprovers.length > 0) {
+    const members = await db.select('memberships', {
+      where: { organizationId, status: 'active', userId: { in: namedApprovers } },
+    });
+    if (members.length !== namedApprovers.length) {
+      throw new ValidationError('承認者に指定した人がこの組織の有効なメンバーではありません。');
+    }
   }
 
   const now = new Date().toISOString();
@@ -112,9 +195,13 @@ export async function saveApprovalRoute(
   if (existing && existing.organizationId !== organizationId) {
     throw new NotFoundError('承認の道筋が見つかりません。');
   }
+  const purpose: ApprovalRoutePurpose =
+    input.purpose ?? (existing ? purposeOf(existing) : 'default');
+  // 「既定」は通常のデータに使う経路の印。過年度確定値の経路は既定にしない（通常の提出に使われてしまう）
+  const isDefault = purpose === 'default' && input.isDefault;
 
   // 既定はひとつだけ。別の道筋を既定にしたら、元の既定は外す
-  if (input.isDefault) {
+  if (isDefault) {
     const others = await db.select('approvalRoutes', {
       where: { organizationId, isDefault: true },
     });
@@ -132,7 +219,8 @@ export async function saveApprovalRoute(
     await db.update('approvalRoutes', routeId, {
       name,
       description: input.description.trim(),
-      isDefault: input.isDefault,
+      isDefault,
+      ...(purpose !== purposeOf(existing) ? { purpose } : {}),
       updatedAt: now,
       updatedBy: ctx.userId,
     });
@@ -149,7 +237,9 @@ export async function saveApprovalRoute(
         organizationId,
         name,
         description: input.description.trim(),
-        isDefault: input.isDefault,
+        isDefault,
+        // 経路の用途（0056）。過年度確定値の経路は標準 CSV の確定で選んだときだけ使う
+        purpose,
         createdAt: now,
         updatedAt: now,
         createdBy: ctx.userId,
@@ -180,7 +270,7 @@ export async function saveApprovalRoute(
     eventType: existing ? 'data_updated' : 'data_created',
     resourceType: 'approval_route',
     resourceId: routeId,
-    afterSummary: `承認の道筋「${name}」（${stages.length} 階層）`,
+    afterSummary: `承認の道筋「${name}」（${stages.length} 階層・${APPROVAL_ROUTE_PURPOSE_LABELS[purpose]}${isDefault ? '・既定' : ''}）`,
   });
 
   const route = (await db.findById('approvalRoutes', routeId))!;
@@ -271,6 +361,11 @@ export async function startApprovalRoute(
   db: DbClient,
   ctx: AuthorizationContext,
   dataPointId: Uuid,
+  /**
+   * 経路の用途（トライアル対応 NF-44）。prior_year_final は過年度確定値の経路で始める
+   * （その経路が無ければ ValidationError。黙って既定の経路へ切り替えない）。省略時は既定の経路
+   */
+  options: { purpose?: ApprovalRoutePurpose } = {},
 ): Promise<ApprovalProgress> {
   const organizationId = ctx.workspace.organizationId;
   const dataPoint = await db.findById('dataPoints', dataPointId);
@@ -285,7 +380,13 @@ export async function startApprovalRoute(
   // 承認待ちが残っているなら、そのまま続ける（二重に道筋を作らない）
   if (current.currentStep) return current;
 
-  const route = await loadDefaultRoute(db, ctx);
+  const priorYear = options.purpose === 'prior_year_final';
+  const route = priorYear ? await loadPriorYearRoute(db, ctx) : await loadDefaultRoute(db, ctx);
+  if (priorYear && !route) {
+    throw new ValidationError(
+      '過年度確定値の承認経路がありません。設定の「承認ルート」で用途「過年度確定値の登録」の経路を作ってください。',
+    );
+  }
   if (!route || route.stages.length === 0) {
     // 道筋が定義されていない組織では、これまでどおり単段階の承認で進む
     return current;

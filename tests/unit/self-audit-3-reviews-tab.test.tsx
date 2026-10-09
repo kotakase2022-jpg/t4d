@@ -41,6 +41,10 @@ vi.mock('@/lib/services/shell', () => ({
 vi.mock('@/lib/services/disclosure-review', () => ({
   listProjectReviews: async () => items,
 }));
+// タブの末尾の「保証側のコメント」節（トライアル対応 NF-21）。この検査の対象外なので空にする
+vi.mock('@/lib/services/assurance', () => ({
+  loadProjectAssuranceComments: async () => ({ rows: [], canRespond: false }),
+}));
 
 describe('UX-R3-15 レビュー・承認タブの絞り込みの 0 件', () => {
   it('依頼はあるのに絞り込みで 0 件なら、条件に合わないことと、絞り込みを外すリンクを示す', async () => {

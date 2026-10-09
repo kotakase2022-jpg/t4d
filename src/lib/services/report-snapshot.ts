@@ -11,19 +11,25 @@ import {
 } from '@/lib/authorization/can';
 import { canonicalJson, hasBodyContent, isOldRefKept } from '@/lib/domain/disclosure-block';
 import {
+  asSnapshotDetail,
   computeSnapshotContentHash,
   isDraftStandard,
+  namesMentionedIn,
   snapshotAnchorOf,
+  snapshotApprovalOf,
   snapshotBlockOf,
   snapshotCommentOf,
   snapshotFrameworkOf,
   snapshotMetricValueOf,
+  csrdRequirementDigest,
+  snapshotRequirementStateOf,
+  ssbjRequirementDigest,
   snapshotRequirementsOf,
   unresolvedCommentsInOrder,
   type ReportSnapshotDetail,
   type SnapshotAnchor,
+  type SnapshotRequirementState,
   type SnapshotBlock,
-  type SnapshotComment,
   type SnapshotFramework,
   type SnapshotIssue,
   type SnapshotIssueCode,
@@ -53,7 +59,6 @@ import type {
   ApplicabilityStatus,
   AuthorizationContext,
   BlockBody,
-  ConfidentialityLevel,
   DataPoint,
   DataPointVersion,
   DisclosureBlock,
@@ -95,12 +100,17 @@ import type {
 // 写しを組み立て直すとき（demo-compact.ts）も同じ規則を使うため）
 export {
   SNAPSHOT_HASH_VERSION,
+  SNAPSHOT_HASH_VERSION_V1,
+  asSnapshotDetail,
   computeSnapshotContentHash,
+  isSnapshotV2,
 } from '@/lib/domain/report-snapshot-content';
 export type {
   ReportSnapshotDetail,
   SnapshotAnchor,
   SnapshotBlock,
+  SnapshotBlockApproval,
+  SnapshotRequirementState,
   SnapshotComment,
   SnapshotFramework,
   SnapshotIssue,
@@ -116,122 +126,12 @@ export type {
 export const SNAPSHOT_KIND_DISPLAY: Record<ReportSnapshotKind, string> =
   REPORT_SNAPSHOT_KIND_LABELS;
 
-/** 保存された内容が作成時のハッシュと一致するか（出力の直前に確かめる） */
+/**
+ * 保存された内容が作成時のハッシュと一致するか（出力の直前に確かめる）。
+ * 規則の版は写しから決まる（v2 の項目を持つ写しは v2、持たない以前の写しは v1 の規則で検査する）
+ */
 export function verifySnapshotIntegrity(snapshot: ReportSnapshot): boolean {
   return computeSnapshotContentHash(snapshot) === snapshot.contentHash;
-}
-
-// ======================================================================
-// 読み出し（jsonb に拡張項目が無い行でも出力できるよう既定値を補う）
-// ======================================================================
-
-function str(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback;
-}
-function strOrNull(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-function num(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-function arr<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
-}
-
-/**
- * 行の jsonb を出力用の型へ読み替える。欠けた拡張項目は「不明」を表す値で補い、推測で埋めない。
- * 既定値を補った写しはハッシュ計算に使わない（ハッシュは保存された行そのものから計算する）。
- */
-export function asSnapshotDetail(row: ReportSnapshot): ReportSnapshotDetail {
-  const frameworks = arr<Partial<SnapshotFramework>>(row.frameworkVersions).map(
-    (f): SnapshotFramework => ({
-      frameworkVersionId: str(f.frameworkVersionId),
-      frameworkKey: (f.frameworkKey ?? 'ssbj') as SnapshotFramework['frameworkKey'],
-      label: str(f.label, '（基準名不明）'),
-      versionCode: strOrNull(f.versionCode),
-      legalStatus: (f.legalStatus ?? null) as SnapshotFramework['legalStatus'],
-      coverageStatus: (f.coverageStatus ?? null) as SnapshotFramework['coverageStatus'],
-      applicabilityStatus: (f.applicabilityStatus ?? 'not_assessed') as ApplicabilityStatus,
-      decisionId: strOrNull(f.decisionId),
-      purpose: (f.purpose ?? null) as DisclosurePurpose | null,
-      draftStandardPrep: f.draftStandardPrep === true || f.legalStatus === 'draft',
-      frameworkName: str(f.frameworkName, str(f.label)),
-      coverageNote: strOrNull(f.coverageNote),
-      projectName: str(f.projectName, row.label),
-      reportingEntity: str(f.reportingEntity),
-      periodStart: str(f.periodStart),
-      periodEnd: str(f.periodEnd),
-      scopeRevision: num(f.scopeRevision),
-    }),
-  );
-  const blocks = arr<Partial<SnapshotBlock>>(row.blocks).map((b): SnapshotBlock => ({
-    blockId: str(b.blockId),
-    versionId: strOrNull(b.versionId),
-    sectionKey: str(b.sectionKey),
-    title: str(b.title, '（節名不明）'),
-    language: b.language === 'en' ? 'en' : 'ja',
-    status: (b.status ?? 'draft') as SnapshotBlock['status'],
-    body: (b.body && Array.isArray((b.body as BlockBody).paragraphs)
-      ? b.body
-      : { paragraphs: [] }) as BlockBody,
-    contentHash: strOrNull(b.contentHash),
-    frameworkVersionId: str(b.frameworkVersionId),
-    sortOrder: num(b.sortOrder) ?? 0,
-    versionNo: num(b.versionNo),
-    versionCreatedBy: strOrNull(b.versionCreatedBy),
-    versionCreatedAt: strOrNull(b.versionCreatedAt),
-    approvedVersionId: strOrNull(b.approvedVersionId),
-    isApprovedVersion: b.isApprovedVersion === true,
-    requirements: arr<SnapshotRequirement>(b.requirements),
-    issues: arr<SnapshotIssue>(b.issues),
-    internalComments: arr<SnapshotComment>(b.internalComments),
-    maskedFileNames: Array.isArray(b.maskedFileNames)
-      ? b.maskedFileNames.filter((n): n is string => typeof n === 'string')
-      : null,
-  }));
-  const metricValues = arr<Partial<SnapshotMetricValue>>(row.metricValues).map(
-    (m): SnapshotMetricValue => ({
-      dataPointId: str(m.dataPointId),
-      dataPointVersionId: str(m.dataPointVersionId),
-      metricId: str(m.metricId),
-      value: num(m.value),
-      textValue: strOrNull(m.textValue),
-      unitOfMeasure: str(m.unitOfMeasure),
-      reportingPeriodId: str(m.reportingPeriodId),
-      boundary: str(m.boundary),
-      status: (m.status ?? 'draft') as SnapshotMetricValue['status'],
-      valueKind: (m.valueKind ?? 'actual') as SnapshotMetricValue['valueKind'],
-      availabilityStatus: (m.availabilityStatus ??
-        'not_entered') as SnapshotMetricValue['availabilityStatus'],
-      versionNo: num(m.versionNo) ?? 0,
-      metricCode: str(m.metricCode),
-      metricName: str(m.metricName, '（指標名不明）'),
-      unitId: str(m.unitId),
-      unitName: str(m.unitName, '（組織不明）'),
-      periodCode: str(m.periodCode),
-      periodStart: str(m.periodStart),
-      periodEnd: str(m.periodEnd),
-      versionApproved: m.versionApproved === true,
-      changeReason: strOrNull(m.changeReason),
-      absenceReason: strOrNull(m.absenceReason),
-    }),
-  );
-  const anchors = arr<Partial<SnapshotAnchor>>(row.anchors).map((a): SnapshotAnchor => ({
-    sourceAnchorId: str(a.sourceAnchorId),
-    fileVersionId: str(a.fileVersionId),
-    anchorKind: (a.anchorKind ?? 'manual_excerpt') as SnapshotAnchor['anchorKind'],
-    page: num(a.page),
-    locator: strOrNull(a.locator),
-    quoteText: str(a.quoteText),
-    usagePurpose: (a.usagePurpose ?? null) as SnapshotAnchor['usagePurpose'],
-    fileId: strOrNull(a.fileId),
-    fileName: str(a.fileName, '（ファイル名不明）'),
-    fileVersionNo: num(a.fileVersionNo),
-    // 機密区分が分からない資料は公開扱いにしない（対外原稿へファイル名を出さない側に倒す）
-    confidentiality: (a.confidentiality ?? 'confidential') as ConfidentialityLevel,
-    editionLabel: strOrNull(a.editionLabel),
-  }));
-  return { ...row, frameworkVersions: frameworks, blocks, metricValues, anchors };
 }
 
 // ======================================================================
@@ -320,6 +220,8 @@ interface Assembly {
   draftStandardPrep: boolean;
   /** 固定した版ごとの本文を書いた人（作成者と自動保存した人。職務分離の判定に使う） */
   versionWriters: Uuid[][];
+  /** 固定時点（作成日時に使う）。この時点までの判断・承認の記録を写しに固定した */
+  asOf: IsoDateTime;
 }
 
 /** 適用判断が確定しているか（判断の記録があり、適用・任意適用のいずれか） */
@@ -351,11 +253,78 @@ function formatMetricLabel(
   return `${mv.metricName}（${mv.unitName}・${mv.periodCode}）`;
 }
 
+/**
+ * 固定時点の要求事項の状態（v2）。判断の履歴・対象外の申請と承認は追記専用の記録の ID で固定し、
+ * 可変の評価行（SSBJ の評価・CSRD の DMA と評価）は値のダイジェストだけを持つ（行そのものは写さない）。
+ * 出力の「固定後の変更」（disclosure-export.ts の requirementStateChanges）も、今の状態をこの関数で読んで比べる
+ * （同じ読み方・同じダイジェストで、固定と比較が食い違わないように）
+ */
+export async function loadRequirementState(
+  db: DbClient,
+  organizationId: Uuid,
+  project: DisclosureProject,
+  pf: ProjectFramework,
+  frameworkKey: DisclosureFramework['key'] | null,
+  asOf: IsoDateTime,
+): Promise<SnapshotRequirementState> {
+  const [exclusionEvents, assessmentEvents, items] = await Promise.all([
+    db.select('requirementExclusionEvents', {
+      where: {
+        organizationId,
+        reportingPeriodId: project.reportingPeriodId,
+        frameworkVersionId: pf.frameworkVersionId,
+      },
+    }),
+    db.select('projectRequirementAssessmentEvents', {
+      where: { organizationId, projectFrameworkId: pf.id },
+    }),
+    db.select('disclosureItems', { where: { frameworkVersionId: pf.frameworkVersionId } }),
+  ]);
+  // SSBJ の評価・CSRD の DMA の申請は基準の版と期間で、プロジェクトの判断の申請はプロジェクトの基準で引く
+  const ownExclusions = exclusionEvents.filter(
+    (e) => e.projectFrameworkId === null || e.projectFrameworkId === pf.id,
+  );
+  let assessmentDigest: string | null = null;
+  const itemIds = items.map((i) => i.id);
+  if (frameworkKey === 'ssbj') {
+    const rows = await db.select('ssbjAssessments', {
+      where: { organizationId, reportingPeriodId: project.reportingPeriodId },
+    });
+    assessmentDigest = ssbjRequirementDigest(itemIds, rows);
+  } else if (frameworkKey === 'csrd') {
+    const [matters, settings, assessments] = await Promise.all([
+      db.select('csrdDmaMatters', {
+        where: { organizationId, reportingPeriodId: project.reportingPeriodId },
+      }),
+      db.select('csrdAnalysisSettings', {
+        where: { organizationId, reportingPeriodId: project.reportingPeriodId },
+      }),
+      db.select('csrdAssessments', {
+        where: { organizationId, reportingPeriodId: project.reportingPeriodId },
+      }),
+    ]);
+    assessmentDigest = csrdRequirementDigest(
+      itemIds,
+      matters,
+      settings[0]?.dmaConfirmedAt ?? null,
+      assessments,
+    );
+  }
+  return snapshotRequirementStateOf({
+    assessmentEvents,
+    exclusionEvents: ownExclusions,
+    assessmentDigest,
+    asOf,
+  });
+}
+
 async function assemble(
   db: DbClient,
   ctx: AuthorizationContext,
   project: DisclosureProject,
   kind: ReportSnapshotKind,
+  /** 固定時点（作成日時）。この時点までの判断・承認の記録を写しに固定する */
+  asOf: IsoDateTime = new Date().toISOString(),
 ): Promise<Assembly> {
   const organizationId = ctx.workspace.organizationId;
 
@@ -527,7 +496,7 @@ async function assemble(
         .filter((n) => n.length >= 3),
     ),
   ].sort();
-  const [metrics, units, periods] = await Promise.all([
+  const [metrics, units, periods, approvalEvents, evidenceLinks] = await Promise.all([
     selectByIds(
       db,
       'metrics',
@@ -546,7 +515,25 @@ async function assemble(
       dataPoints.map((d) => d.reportingPeriodId),
       { organizationId },
     ),
+    // 節の版の承認の記録（v2: 誰がいつ承認したかを写しに固定する）
+    approvedRequests.length === 0
+      ? Promise.resolve([])
+      : db.select('reviewEvents', {
+          where: { organizationId, reviewRequestId: { in: approvedRequests.map((r) => r.id) } },
+        }),
+    // 引用した数値の根拠資料（v2: 固定時点に紐付いていた資料の版）
+    dataPointIds.length === 0
+      ? Promise.resolve([])
+      : db.select('evidenceLinks', {
+          where: { organizationId, targetType: 'data_point', targetId: { in: dataPointIds } },
+        }),
   ]);
+  const evidenceByDataPoint = new Map<Uuid, Uuid[]>();
+  for (const link of evidenceLinks) {
+    const list = evidenceByDataPoint.get(link.targetId) ?? [];
+    list.push(link.fileVersionId);
+    evidenceByDataPoint.set(link.targetId, list);
+  }
 
   const dpById = new Map<Uuid, DataPoint>(dataPoints.map((d) => [d.id, d]));
   const metricById = new Map(metrics.map((m) => [m.id, m]));
@@ -596,6 +583,7 @@ async function assemble(
           status: approved ? 'approved' : dp.currentVersionId === v.id ? dp.status : v.status,
           versionApproved: approved,
         },
+        { evidenceFileVersionIds: evidenceByDataPoint.get(dp.id) ?? [] },
       );
     })
     .filter((mv): mv is SnapshotMetricValue => mv !== null)
@@ -648,7 +636,18 @@ async function assemble(
     });
     if (!included) continue;
 
-    frameworks.push(snapshotFrameworkOf(pf, version, framework, project));
+    frameworks.push(
+      snapshotFrameworkOf(pf, version, framework, project, {
+        requirementState: await loadRequirementState(
+          db,
+          organizationId,
+          project,
+          pf,
+          framework?.key ?? null,
+          asOf,
+        ),
+      }),
+    );
 
     // 法定・任意適用の基準は、適用判断が確定していなければ確定させない。
     // 草案の基準による準備は、その区分のまま社内で確定できる（§10.4）。未判定だけは止める
@@ -872,15 +871,33 @@ async function assemble(
     );
 
     snapshotBlocks.push(
-      snapshotBlockOf(block, version, {
-        status: block.status,
-        approvedVersionId: block.approvedVersionId,
-        isApprovedVersion,
-        requirements,
-        issues: dedupeIssues(issues),
-        internalComments: unresolvedCommentsInOrder(blockComments).map(snapshotCommentOf),
-        maskedFileNames: namesMentionedIn(body, nonPublicNames),
-      }),
+      snapshotBlockOf(
+        block,
+        version,
+        {
+          status: block.status,
+          approvedVersionId: block.approvedVersionId,
+          isApprovedVersion,
+          requirements,
+          issues: dedupeIssues(issues),
+          internalComments: unresolvedCommentsInOrder(blockComments).map(snapshotCommentOf),
+          maskedFileNames: namesMentionedIn(body, nonPublicNames),
+        },
+        {
+          // 固定した版が承認済みの版なら、その承認の記録（誰がいつ承認したか）を固定する。確定版は
+          // 固定時点の報告範囲で承認された依頼に限る（DB の verify_report_snapshot と同じ条件）
+          approval:
+            isApprovedVersion && version
+              ? snapshotApprovalOf(
+                  block.id,
+                  version.id,
+                  approvedRequests,
+                  approvalEvents,
+                  kind === 'approved' ? (project.scopeRevision ?? 0) : 0,
+                )
+              : null,
+        },
+      ),
     );
   }
 
@@ -959,20 +976,8 @@ async function assemble(
     blockers,
     draftStandardPrep: frameworks.some((f) => f.draftStandardPrep),
     versionWriters,
+    asOf,
   };
-}
-
-/** 本文（地の文・定性情報の引用文）に現れる名前。出典印（cite）は出力側で別に伏せる */
-function namesMentionedIn(body: BlockBody, names: readonly string[]): string[] {
-  if (names.length === 0) return [];
-  const text = body.paragraphs
-    .flatMap((p) =>
-      p.children.map((inline) =>
-        inline.t === 'text' ? inline.text : inline.t === 'narrative' ? inline.quote : '',
-      ),
-    )
-    .join('\n');
-  return names.filter((name) => text.includes(name));
 }
 
 function dedupeIssues(issues: SnapshotIssue[]): SnapshotIssue[] {
@@ -1096,7 +1101,8 @@ async function insertSnapshot(
     snapshotNo,
     ...content,
     contentHash: computeSnapshotContentHash(content),
-    createdAt: new Date().toISOString(),
+    // 写しに固定した判断・承認の記録は、この日時までのもの（組み立て直しも同じ日時で切る）
+    createdAt: assembly.asOf,
     // RLS は created_by = auth.uid() を求める（クライアントから受け取った値は使わない）
     createdBy: ctx.userId,
   };

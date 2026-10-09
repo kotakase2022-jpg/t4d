@@ -1,4 +1,6 @@
-import type { PermissionKey } from '@/types/domain';
+import type { OrganizationOptionKey, PermissionKey } from '@/types/domain';
+import { DISCLOSURE_READ, DISCLOSURE_WRITE, engagementRoute } from './route-catalog-ext/helpers';
+import { TRIAL_ROUTE_EXTENSIONS } from './route-catalog-ext';
 
 /**
  * 全画面の一覧（plan §3.1 ROUTE_CATALOG）。Command Palette の「画面」・パンくず・到達性の検査の
@@ -37,6 +39,11 @@ export interface RouteCatalogEntry {
   engagement?: true;
   /** ログイン前・招待・リダイレクト専用など、パレットやメニューからは辿らない入口 */
   entryOnly?: true;
+  /**
+   * 契約オプションが有効な組織だけの画面（CDP。plan NF-38）。オプションの無い組織のパレットには出さない
+   * （画面を開くと「オプションは契約されていません」。404 にはしない）
+   */
+  option?: OrganizationOptionKey;
 }
 
 const E = '/enterprise';
@@ -44,32 +51,8 @@ const SSBJ = `${E}/disclosures/ssbj`;
 const CSRD = `${E}/disclosures/csrd`;
 const CDP = `${E}/disclosures/cdp`;
 const PROJECTS = `${E}/disclosure-projects`;
-const ENG = '/assurance/engagements/[engagementId]';
 
-const DISCLOSURE_READ: PermissionKey = 'enterprise.disclosure.read';
-const DISCLOSURE_WRITE: PermissionKey = 'enterprise.disclosure.write';
-const ENGAGEMENT_READ: PermissionKey = 'assurance.engagement.read';
-
-function engagementRoute(
-  segment: string,
-  label: string,
-  group: string,
-  keywords: readonly string[],
-): RouteCatalogEntry {
-  return {
-    pattern: `${ENG}/${segment}`,
-    label,
-    path: ['案件', group, label],
-    href: `/assurance/engagements/{engagementId}/${segment}`,
-    permission: ENGAGEMENT_READ,
-    workspace: 'assurance',
-    keywords,
-    menu: 'assurance',
-    engagement: true,
-  };
-}
-
-export const ROUTE_CATALOG: readonly RouteCatalogEntry[] = [
+const BASE_ROUTES: readonly RouteCatalogEntry[] = [
   // ---- 企業: ホーム・業務 -------------------------------------------------
   {
     pattern: `${E}/dashboard`,
@@ -206,6 +189,7 @@ export const ROUTE_CATALOG: readonly RouteCatalogEntry[] = [
     workspace: 'enterprise',
     keywords: ['CDP', '気候変動', '質問書'],
     menu: 'both',
+    option: 'cdp',
   },
   {
     pattern: `${CDP}/[questionId]`,
@@ -223,6 +207,7 @@ export const ROUTE_CATALOG: readonly RouteCatalogEntry[] = [
     workspace: 'enterprise',
     keywords: ['CDP', '過去回答', '取込', '前年'],
     menu: 'none',
+    option: 'cdp',
   },
   {
     pattern: `${E}/disclosures/[framework]`,
@@ -614,7 +599,20 @@ export const ROUTE_CATALOG: readonly RouteCatalogEntry[] = [
     // ページのゲートと同じ企業管理者だけ（権限の挙動は変えない。R1・plan Q6 は見送り）
     permission: 'enterprise.org.manage',
     workspace: 'enterprise',
-    keywords: ['設定', 'メンバー', '招待', 'セキュリティ', 'アクセス許諾', '開示優先モード'],
+    keywords: [
+      '設定',
+      'メンバー',
+      '招待',
+      'セキュリティ',
+      'アクセス許諾',
+      '開示優先モード',
+      // トライアル対応（T5）の設定のタブ
+      '承認ルート',
+      '役割と権限',
+      'データの取扱い',
+      '監査ログ',
+      '契約オプション',
+    ],
     menu: 'both',
   },
   // ---- 監査法人 --------------------------------------------------------------
@@ -731,6 +729,14 @@ export const ROUTE_CATALOG: readonly RouteCatalogEntry[] = [
     menu: 'none',
     entryOnly: true,
   },
+];
+
+/**
+ * 全画面の一覧。既存の画面に、トライアル対応（2026-10）でスライスごとに足す画面（route-catalog-ext）を合成する
+ */
+export const ROUTE_CATALOG: readonly RouteCatalogEntry[] = [
+  ...BASE_ROUTES,
+  ...TRIAL_ROUTE_EXTENSIONS,
 ];
 
 // ----------------------------------------------------------------------

@@ -67,6 +67,18 @@ export function MoreMenu({
     window.addEventListener(OPEN_CONFIRM_EVENT, onRequest);
     return () => window.removeEventListener(OPEN_CONFIRM_EVENT, onRequest);
   }, [ordered]);
+  // 開いていたダイアログの項目が隠れた（確定のリダイレクトで行の状態が変わった）ら、開いた印を捨てる。
+  // ダイアログは送信の終わり（CloseWhenDone）より先に消えるため、印が残ると、項目が再び出たとき
+  // （例: 対象外 → 取り消し）に前のダイアログが勝手に開き直していた
+  const openConfirmVisible =
+    openConfirm !== null &&
+    ordered.some(
+      (item) =>
+        item.id === openConfirm && item.kind === 'confirm' && !item.hidden && !item.disabledReason,
+    );
+  React.useEffect(() => {
+    if (openConfirm !== null && !openConfirmVisible) setOpenConfirm(null);
+  }, [openConfirm, openConfirmVisible]);
 
   if (ordered.length === 0) return null;
 

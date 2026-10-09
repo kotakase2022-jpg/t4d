@@ -31,6 +31,8 @@ import {
   type StandardCsvParseResult,
   type StandardField,
 } from '@/lib/imports/standard-csv';
+import { loadPriorYearRoute, startApprovalRoute } from '@/lib/services/approval-route';
+import { transitionDataPoint } from '@/lib/services/data-point-workflow';
 import { recomputePeriodValidations } from '@/lib/services/validation-store';
 import { sha256Hex } from '@/lib/storage';
 import type { DbClient } from '@/lib/repositories/types';
@@ -209,6 +211,11 @@ export interface QuantitativeImportPreview {
   counts: Record<QuantitativeImportDiffKind, number>;
   rows: QuantitativeImportPreviewRow[];
   createdAt: IsoDateTime;
+  /**
+   * 過年度確定値として登録できる行（トライアル対応 NF-44）。ヘッダーの報告期間より前に終わる期間の、
+   * 新規・変更の行の数と、使う経路の名前（経路が無ければ null で、確定の画面は選択肢を出さない）
+   */
+  priorYear: { rowCount: number; routeName: string | null };
 }
 
 export type QuantitativeImportCommitMode = 'all' | 'valid_only';
@@ -235,6 +242,11 @@ export interface CommitQuantitativeImportInput {
    * ものと違うときに、どの行が変わったかを示すためだけに使う（書き込みには使わない）
    */
   confirmedRows?: QuantitativeImportConfirmedRow[];
+  /**
+   * 過年度確定値として登録する（既定はしない）。ヘッダーの報告期間より前に終わる期間の行を、書いたあとに
+   * 過年度確定値の承認経路（approval_routes.purpose = prior_year_final）で提出する。承認はしない（人が行う）
+   */
+  priorYearFinal?: boolean;
 }
 
 /** 画面が確認した差分の行（競合の説明にだけ使う。信用しない値なので書き込みには使わない） */
@@ -263,6 +275,8 @@ export interface QuantitativeImportCommitResult {
     versionId: Uuid;
   }>;
   committedAt: IsoDateTime;
+  /** 過年度確定値の経路で提出した行（選んだときだけ。同じ確定キーの再送では返さない） */
+  priorYearRouted?: { count: number; routeName: string };
 }
 
 export interface QuantitativeImportConflict {
@@ -801,7 +815,32 @@ export async function validateQuantitativeImport(
 ): Promise<QuantitativeImportPreview> {
   const built = await buildValidatedBatch(db, ctx, input, crypto.randomUUID());
   await db.insert('quantitativeImportBatches', [built.batch]);
-  return buildPreview(built.batch, built.masters, built.meta);
+  const preview = buildPreview(built.batch, built.masters, built.meta);
+  const rowCount = priorYearRows(
+    built.batch.rows.map(toStandardRow),
+    built.masters.periodById,
+    built.batch.reportingPeriodId,
+  ).length;
+  const route = rowCount > 0 ? await loadPriorYearRoute(db, ctx) : null;
+  return { ...preview, priorYear: { rowCount, routeName: route?.route.name ?? null } };
+}
+
+/**
+ * 過年度の行: ヘッダー（画面）の報告期間が始まる前に終わる期間の、新規・変更の行（書き込む行）。
+ * 同じ期間・後の期間の行は当年度として扱い、過年度確定値の経路を選べない
+ */
+function priorYearRows(
+  rows: readonly StandardImportRow[],
+  periodById: ReadonlyMap<Uuid, ReportingPeriod>,
+  batchPeriodId: Uuid,
+): StandardImportRow[] {
+  const batchPeriod = periodById.get(batchPeriodId);
+  if (!batchPeriod) return [];
+  return rows.filter((row) => {
+    if (row.diffKind !== 'new' && row.diffKind !== 'changed') return false;
+    const period = row.reportingPeriodId ? periodById.get(row.reportingPeriodId) : undefined;
+    return !!period && period.endDate < batchPeriod.startDate;
+  });
 }
 
 /**
@@ -1166,6 +1205,8 @@ function buildPreview(
     counts,
     rows: rows.map((row) => toPreviewRow(row, masters)),
     createdAt: batch.createdAt,
+    // 経路の有無は DB を読む validateQuantitativeImport が埋める
+    priorYear: { rowCount: 0, routeName: null },
   };
 }
 
@@ -1590,10 +1631,28 @@ async function commitSerialized(
     }
   }
 
-  // --- まとめて書く -----------------------------------------------------------
   const periodsById = new Map(
     (await db.select('periods', { where: { organizationId } })).map((p) => [p.id, p]),
   );
+  // 過年度確定値として登録する（選んだときだけ）。書く前に、過年度の行と経路があることを確かめる
+  const priorYearTargets = input.priorYearFinal
+    ? priorYearRows(toWrite, periodsById, batch.reportingPeriodId)
+    : [];
+  const priorYearRoute = input.priorYearFinal ? await loadPriorYearRoute(db, ctx) : null;
+  if (input.priorYearFinal) {
+    if (priorYearTargets.length === 0) {
+      throw new ValidationError(
+        '過年度確定値として登録できる行がありません。画面の報告期間より前の期間の値だけが対象です（当年度の値は通常の承認で進めます）。',
+      );
+    }
+    if (!priorYearRoute) {
+      throw new ValidationError(
+        '過年度確定値の承認経路がありません。設定の「承認ルート」で用途「過年度確定値の登録」の経路を作ってから確定してください。',
+      );
+    }
+  }
+
+  // --- まとめて書く -----------------------------------------------------------
   const [metricsById, unitsById] = await Promise.all([
     db
       .select('metrics', { where: { organizationId } })
@@ -1676,6 +1735,27 @@ async function commitSerialized(
 
   const result = resultFromCommittedBatch(committed, false);
 
+  // 過年度確定値: 書いた行を過年度確定値の経路で提出する（承認はしない。段階の承認者が決める）。
+  // 先に経路を始めてから提出する（提出の処理は承認待ちの段階があれば既定の経路を作らない）
+  if (priorYearRoute && priorYearTargets.length > 0) {
+    let routed = 0;
+    for (const row of priorYearTargets) {
+      const target = written.get(row.rowNo);
+      if (!target) continue;
+      const dp = await db.findById('dataPoints', target.dataPointId);
+      if (!dp || (dp.status !== 'draft' && dp.status !== 'returned')) continue;
+      await startApprovalRoute(db, ctx, dp.id, { purpose: 'prior_year_final' });
+      await transitionDataPoint(db, ctx, {
+        dataPointId: dp.id,
+        to: 'submitted',
+        comment: null,
+        skipRevalidate: true,
+      });
+      routed += 1;
+    }
+    result.priorYearRouted = { count: routed, routeName: priorYearRoute.route.name };
+  }
+
   // 取込は複数行をまとめて更新するため、確定後に期間ごと 1 回だけ検証を再計算する
   if (toWrite.length > 0) {
     const touched = new Set(
@@ -1699,6 +1779,7 @@ async function commitSerialized(
       fileSha256: batch.fileSha256,
       excludedRowNos: result.excludedRows.map((r) => r.rowNo),
       changeReason: changedCount > 0 ? correctionReason : null,
+      priorYearRouted: result.priorYearRouted?.count ?? 0,
     },
   });
 

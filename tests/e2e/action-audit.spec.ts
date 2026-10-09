@@ -249,7 +249,12 @@ test('Snapshot 後変更の要約と影響評価が動作する', async ({ page 
   const before = await valueInput.inputValue();
   await valueInput.fill(String(Number(before || '0') + 7));
   await page.locator('input[name="changeReason"]').fill('監査テスト: Snapshot 後変更を発生させる');
-  await submitAndSettle(page, () => page.getByRole('button', { name: '保存' }).click());
+  // 承認済みの値の保存は、影響（節・承認済みレポート・保証側へ共有中）を確認ダイアログで示してから送る
+  // （トライアル対応 NF-16。上書きの確認）
+  await page.getByRole('button', { name: '保存…' }).click();
+  await expect(page.getByRole('dialog')).toContainText('影響する節');
+  await submitAndSettle(page, () => confirmInDialog(page));
+  await expect(page.locator('input[name="value"]')).toHaveValue(String(Number(before || '0') + 7));
 
   // 監査法人側: 変更要約（AI）と影響評価
   await loginAs(page, DEMO_USERS.assuranceManager);

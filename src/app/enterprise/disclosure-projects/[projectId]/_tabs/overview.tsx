@@ -21,8 +21,10 @@ import {
   DISCLOSURE_LANGUAGE_LABELS,
   DISCLOSURE_PURPOSE_LABELS,
 } from '@/lib/domain/disclosure-status';
+import { REQUIREMENT_COVERAGE_CATEGORIES } from '@/lib/domain/requirement-coverage';
 import { daysUntilJst, formatJst, formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { listProjectBlocks, type ManuscriptRow } from '@/lib/services/disclosure-block';
+import { detectFileUpdates } from '@/lib/services/disclosure-recheck';
 import {
   canCreateStatutoryPackage,
   getProject,
@@ -32,6 +34,9 @@ import {
 } from '@/lib/services/disclosure-project';
 import { listProjectReviews, type ReviewListItem } from '@/lib/services/disclosure-review';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { loadTranscriptionCheck } from '@/lib/services/transcription-check';
+import { statusLabel } from '@/lib/ui/status/registry';
+import { TranscriptionCheckSection } from '../requirements/_components/transcription-check-section';
 import { ApplicabilityBadge, LegalStatusBadge } from '../../_components/framework-badges';
 
 /** 期限が近いとみなす日数（期限切れ間近の注意に出す） */
@@ -141,10 +146,19 @@ export async function OverviewTab({
   const { db, ctx } = await loadEnterpriseShell();
   const detail = await getProject(db, ctx, projectId);
   const project = detail.project;
-  const [summaries, manuscripts, reviews] = await Promise.all([
+  const [summaries, manuscripts, reviews, transcription, fileUpdated] = await Promise.all([
     summarizeProject(db, ctx, detail),
     listProjectBlocks(db, ctx, projectId).catch(() => null),
     listProjectReviews(db, ctx, projectId).catch(() => [] as ReviewListItem[]),
+    loadTranscriptionCheck(db, ctx, { projectId }).catch(() => null),
+    // 資料の新版（引用位置の版より新しい版がある節。NF-16）。読めなければ数えない
+    Promise.all(
+      detail.blocks.map((block) =>
+        detectFileUpdates(db, ctx, block)
+          .then((items) => (items.length > 0 ? block.id : null))
+          .catch(() => null),
+      ),
+    ),
   ]);
   const packageCheck = canCreateStatutoryPackage({
     purposes: project.purposes,
@@ -165,6 +179,14 @@ export async function OverviewTab({
     const days = daysUntilJst(row.dueDate, today);
     return days !== null && days >= 0 && days <= DUE_SOON_DAYS;
   }).length;
+
+  // 上流の変更（数値・定性情報の新版・根拠の失効・資料の新版）で再確認が必要な節（NF-16。導出・保存しない）
+  const upstreamBlockIds = new Set([
+    ...rows
+      .filter((row) => row.freshness === 'upstream_updated' || row.freshness === 'evidence_invalid')
+      .map((row) => row.id),
+    ...fileUpdated.filter((id): id is string => id !== null),
+  ]);
 
   const attention: AttentionItem[] = [
     {
@@ -196,6 +218,13 @@ export async function OverviewTab({
       label: '引用先の再確認が必要な節',
       count: manuscripts?.counts.recheck ?? 0,
       href: manuscriptsHref('recheck'),
+      semantic: 'blocked',
+    },
+    {
+      key: 'upstream-recheck',
+      label: '上流の変更で再確認が必要な節',
+      count: upstreamBlockIds.size,
+      href: `${base}?tab=requirements&filter=recheck`,
       semantic: 'blocked',
     },
     {
@@ -343,11 +372,24 @@ export async function OverviewTab({
                       </div>
                       <div>
                         <dt className="inline text-ink-muted">対象外・非重要と判断: </dt>
-                        <dd className="inline">{summary.excludedDecided} 件（理由・判断者あり）</dd>
+                        <dd className="inline">
+                          {summary.excludedDecided} 件（理由・判断者・承認者あり）
+                        </dd>
                       </div>
                       <div>
                         <dt className="inline text-ink-muted">収録された要求事項: </dt>
                         <dd className="inline">{summary.total} 項目</dd>
+                      </div>
+                      {/* 5 区分（要求事項タブ・対応表と同じ関数で導いた件数。分母は収録された要求事項。NF-03） */}
+                      <div className="sm:col-span-2">
+                        <dt className="inline text-ink-muted">区分: </dt>
+                        <dd className="inline">
+                          {REQUIREMENT_COVERAGE_CATEGORIES.map(
+                            (c) =>
+                              `${statusLabel('requirementCoverage', c)} ${summary.coverageCounts[c]}`,
+                          ).join('／')}
+                          （分母 {summary.total} 項目）
+                        </dd>
                       </div>
                     </dl>
                   )}
@@ -378,6 +420,8 @@ export async function OverviewTab({
               )}
             </div>
           </Section>
+
+          {transcription && <TranscriptionCheckSection check={transcription} base={base} />}
 
           <Section title="基準・版と適用判断">
             <div className="t4d-scroll-x">

@@ -215,6 +215,38 @@ const INVOCATION_INPUTS: Record<AiFeature, Record<string, unknown>> = {
       },
     ],
   },
+  requirementMappingSuggestion: {
+    targetKind: 'narrative_version',
+    targetText:
+      '取締役会は、気候関連のリスク及び機会の監督体制として、サステナビリティ委員会から年 2 回報告を受ける（架空）。',
+    candidates: [
+      {
+        itemId: 'item-gov',
+        itemCode: '40A-S01',
+        title: '（サンプル）気候関連のリスク及び機会の監督体制',
+        sample: true,
+      },
+      {
+        itemId: 'item-water',
+        itemCode: '40A-S07',
+        title: '（サンプル）水資源の使用量',
+        sample: true,
+      },
+    ],
+  },
+  xbrlTagSuggestion: {
+    targets: [
+      { targetKind: 'metric', targetRef: 'metric-scope1', label: 'Scope1 排出量' },
+      { targetKind: 'block', targetRef: 'fv:governance', label: 'ガバナンス' },
+      { targetKind: 'metric', targetRef: 'metric-unknown', label: '謎の指標' },
+    ],
+    concepts: [
+      { localName: 'Scope1GhgEmissions', kind: 'item', labelJa: 'Scope1 排出量（サンプル）' },
+      { localName: 'Scope2GhgEmissions', kind: 'item', labelJa: 'Scope2 排出量（サンプル）' },
+      { localName: 'GovernanceTextBlock', kind: 'text_block', labelJa: 'ガバナンス（サンプル）' },
+      { localName: 'GhgAxis', kind: 'axis', labelJa: 'Scope1 排出量の軸（サンプル）' },
+    ],
+  },
 };
 
 const FEATURES = Object.keys(AI_SCHEMAS) as AiFeature[];
@@ -407,6 +439,38 @@ describe('MockAIProvider', () => {
       input: INVOCATION_INPUTS.assuranceChangeSummary,
     });
     expect(result.output.warnings.join(' ')).toContain('監査人が確定');
+  });
+});
+
+describe('トライアル対応の候補（要求事項の対応付け・XBRL のタグ）', () => {
+  it('要求事項の対応付けは入力の候補にある要求事項だけを返し、架空のサンプルであることを警告する', async () => {
+    const result = await provider.run({
+      feature: 'requirementMappingSuggestion',
+      context: { organizationName: '青海テクノロジー株式会社', reportingPeriodLabel: 'FY2026' },
+      inputReferenceIds: [],
+      input: INVOCATION_INPUTS.requirementMappingSuggestion,
+    });
+    const ids = result.output.candidates.map((c) => c.itemId);
+    expect(ids).toEqual(['item-gov']);
+    expect(result.output.candidates[0]!.relation).toBeNull();
+    expect(result.output.warnings.join(' ')).toContain('デモ生成');
+    expect(result.output.warnings.join(' ')).toContain('架空のサンプル');
+    expect(result.promptVersion).toBe(PROMPT_VERSIONS.requirementMappingSuggestion);
+  });
+
+  it('XBRL のタグは値の概念を指標に、文章の概念を節に選び、軸・メンバーは選ばない。公式のタクソノミでないことを警告する', async () => {
+    const result = await provider.run({
+      feature: 'xbrlTagSuggestion',
+      context: { organizationName: '青海テクノロジー株式会社', reportingPeriodLabel: 'FY2026' },
+      inputReferenceIds: [],
+      input: INVOCATION_INPUTS.xbrlTagSuggestion,
+    });
+    expect(result.output.candidates.map((c) => [c.targetRef, c.conceptLocalName])).toEqual([
+      ['metric-scope1', 'Scope1GhgEmissions'],
+      ['fv:governance', 'GovernanceTextBlock'],
+    ]);
+    expect(result.output.warnings.join(' ')).toContain('公式のタクソノミではありません');
+    expect(result.output.warnings.join(' ')).toContain('謎の指標');
   });
 });
 

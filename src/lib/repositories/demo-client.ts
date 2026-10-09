@@ -128,8 +128,11 @@ function persistedPatch(
 ): Record<string, unknown> {
   if (isCompactedTable(table)) {
     // 追記専用の表は書き換えを載せない。取込バッチだけは「確定した」ときに確定の控えを行ごと載せる
-    // （別インスタンスには検証した行が無く、変更の列だけでは戻せないため）
-    return table === 'quantitativeImportBatches' ? (compactRow(table, row, db) ?? {}) : {};
+    // （別インスタンスには検証した行が無く、変更の列だけでは戻せないため）。保証側へ共有した写しの
+    // 取り下げ（写しの唯一の更新）も、目録を行ごと載せ直す
+    return table === 'quantitativeImportBatches' || table === 'sharedReportCopies'
+      ? (compactRow(table, row, db) ?? {})
+      : {};
   }
   if (table === 'aiRuns' && isClosedDraftRun(row)) {
     const tokens = Array.isArray(row.inputReferenceIds) ? (row.inputReferenceIds as string[]) : [];

@@ -22,6 +22,8 @@ import {
   evaluateSignoffBlockers,
   loadEngagementOr404,
   loadLatestSnapshot,
+  loadSharedReportList,
+  loadSignoffReportAttention,
   loadTestingWorkspace,
 } from '@/lib/services/assurance';
 import { assuranceHomeProfileOf } from '@/lib/ui/home-profile';
@@ -60,8 +62,10 @@ export default async function EngagementOverviewPage({
       db.select('reviewNotes', { where: { engagementId } }),
       db.select('signoffs', { where: { engagementId } }),
       db.select('engagementMembers', { where: { engagementId } }),
+      // 閲覧の記録（Data Room・開示レポートの表示ごとに 1 件。NF-26）は作業の記録ではないので、
+      // 「直近の記録」には出さない（監査ログの画面にはすべて出る）
       db.select('auditEvents', {
-        where: { engagementId },
+        where: { engagementId, eventType: { neq: 'record_viewed' } },
         orderBy: { column: 'createdAt', dir: 'desc' },
         limit: 10,
       }),
@@ -69,6 +73,12 @@ export default async function EngagementOverviewPage({
 
   const changes = snapshot ? await detectSnapshotChanges(db, ctx, snapshot.id) : [];
   const blockers = await evaluateSignoffBlockers(db, ctx, engagementId, 'partner_approved');
+  // 共有された開示レポート（NF-20）と、Sign-off 後に別の承認版が共有された注意（NF-23。保存せず導く）
+  const [reportRows, reportAttention] = await Promise.all([
+    can(ctx, 'assurance.engagement.read') ? loadSharedReportList(db, ctx, engagementId) : [],
+    loadSignoffReportAttention(db, ctx, engagementId),
+  ]);
+  const openReportNotes = reportRows.reduce((n, row) => n + row.openNoteCount, 0);
   const [workRow] = await loadEngagementWorkRows(db, ctx, [context.engagement]);
   const profile = assuranceHomeProfileOf(ctx);
 
@@ -109,6 +119,17 @@ export default async function EngagementOverviewPage({
             count: blockers.length,
             href: `${base}/signoffs`,
             semantic: 'blocked' as const,
+          },
+        ]
+      : []),
+    ...(reportAttention
+      ? [
+          {
+            key: 'signoff-report',
+            label: 'Sign-off 後に開示レポートが変わりました',
+            count: reportAttention.newerCopies.length + (reportAttention.linkedWithdrawn ? 1 : 0),
+            href: `${base}/signoffs`,
+            semantic: 'pending' as const,
           },
         ]
       : []),
@@ -157,6 +178,17 @@ export default async function EngagementOverviewPage({
             value={openNotes}
             unit="件"
             href={`${base}/review-notes?filter=open`}
+          />
+          <MetricTile
+            label="共有された開示レポート"
+            value={reportRows.length}
+            unit="件"
+            hint={
+              reportRows.length === 0
+                ? 'クライアントの共有待ち'
+                : `未クリアのコメント ${openReportNotes} 件`
+            }
+            href={`${base}/reports`}
           />
           <MetricTile
             label="Sign-off の段階"

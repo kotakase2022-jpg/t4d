@@ -620,6 +620,8 @@ function seedDma(db: FixtureDb): void {
       humanRights: spec.impact.humanRights,
       affectedStakeholders: spec.impact.stakeholders,
       relatedImpactIroId: null,
+      sourceAnchorIds: [],
+      policyActionNote: '',
       deletedAt: null,
       ...audit(at(26)),
     };
@@ -645,6 +647,8 @@ function seedDma(db: FixtureDb): void {
       affectedStakeholders: '',
       // 気候変動だけ、リスクの原因になったインパクトを関連付けておく（関連付けは任意）
       relatedImpactIroId: spec.topic === 'E1' ? ids.impact : null,
+      sourceAnchorIds: [],
+      policyActionNote: '',
       deletedAt: null,
       ...audit(at(26)),
     };

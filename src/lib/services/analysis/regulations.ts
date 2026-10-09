@@ -10,6 +10,7 @@ import {
 } from '@/lib/domain/disclosure-status';
 import { combineCoverage } from '@/lib/domain/ssbj';
 import { loadCsrdRequirementViews } from '@/lib/services/csrd/requirements';
+import { hasOption, OPTION_NOT_CONTRACTED_MESSAGES } from '@/lib/services/organization-options';
 import type { DbClient } from '@/lib/repositories/types';
 import {
   SSBJ_COVERAGE_STATUSES,
@@ -110,6 +111,9 @@ export interface RegulatoryCoverage {
 }
 
 const PLANNED_LABEL = '今後対応予定';
+
+/** CDP 対応オプションが無い組織の CDP の行（算定しない理由） */
+export const CDP_OPTION_NOT_CONTRACTED_REASON = 'オプション未契約のため算定しない';
 
 /** 改正 ESRS は未収録（CSRD の行に必ず添える） */
 export const CSRD_REVISED_ESRS_NOTE = '改正 ESRS（2026-07-03 採択・未発効）は未収録';
@@ -379,6 +383,13 @@ async function cdpRow(
 ): Promise<RegulationRow> {
   const master = await loadMaster(db, 'cdp');
   const row = baseRow('cdp', master);
+  // CDP は組織ごとに契約するオプション（トライアル対応 NF-38）。契約が無ければ算定しない（0 件と出さない）
+  if (!(await hasOption(db, ctx, 'cdp'))) {
+    row.notCalculatedReason = CDP_OPTION_NOT_CONTRACTED_REASON;
+    row.notes.push(OPTION_NOT_CONTRACTED_MESSAGES.cdp);
+    row.links = [];
+    return row;
+  }
   if (!master || master.items.length === 0) return row;
   row.inScope = {
     count: master.items.length,

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, ClipboardCheck, Paperclip, Undo2 } from 'lucide-react';
+import { ArrowRight, ClipboardCheck, MessagesSquare, Paperclip, Undo2 } from 'lucide-react';
 import { PbcStatusBadge, PriorityBadge, TaskStatusBadge } from '@/components/shared/badges';
 import { FlashMessage } from '@/components/shared/flash';
 import { SegmentedFilter } from '@/components/shared/nav-tabs';
@@ -17,6 +17,7 @@ import { can } from '@/lib/authorization/can';
 import { describeReferenceDate } from '@/lib/clock';
 import { taskTargetTypeLabel } from '@/lib/domain/disclosure-status';
 import { daysUntilJst, formatJst, formatJstDate, isOverdue } from '@/lib/format/datetime';
+import { loadClientAssuranceComments } from '@/lib/services/assurance';
 import { listMyReviewTasks } from '@/lib/services/disclosure-review';
 import { getDb } from '@/lib/repositories';
 import { isDisclosureFirstEnabled } from '@/lib/services/feature-settings';
@@ -104,6 +105,12 @@ export default async function WorkflowsPage({
           orderBy: { column: 'submittedAt', dir: 'desc' },
         })
       : [];
+  // 保証側のコメント（クライアントへ共有されたもの。NF-21）。回答する番のもの（未回答）を先に並べる
+  const assuranceComments = can(ctx, 'enterprise.disclosure.read')
+    ? await loadClientAssuranceComments(db, ctx)
+    : null;
+  const unansweredComments = (assuranceComments ?? []).filter((r) => r.state === 'unanswered');
+  const canRespondComments = can(ctx, 'enterprise.disclosure.write');
 
   // 期限超過のみ（ホームの KPI「期限超過」の行き先。タスクと資料依頼の両方を数えている）
   const visibleTasks = overdueOnly ? tasks.filter((t) => isOverdue(t.dueDate, today)) : tasks;
@@ -134,7 +141,7 @@ export default async function WorkflowsPage({
         help={
           <p>
             自分が次に行う作業を、業務の順（直す・入力する → 確認する・承認する → 資料依頼に回答する
-            →
+            → 保証側のコメントに回答する →
             タスク）に並べます。開示本文のレビュー・最終承認があなたの段階になると「確認する・承認する」に並びます。
           </p>
         }
@@ -374,6 +381,65 @@ export default async function WorkflowsPage({
             </ul>
           )}
         </Section>
+
+        {!overdueOnly && assuranceComments !== null && (
+          <Section
+            id="assurance-comments"
+            title={`保証側のコメント（未回答 ${unansweredComments.length}）`}
+            actions={
+              <Link
+                href="/enterprise/assurance-comments"
+                className="text-small text-brand-700 hover:underline"
+              >
+                すべて見る（{assuranceComments.length}）
+              </Link>
+            }
+          >
+            {unansweredComments.length === 0 ? (
+              <EmptyState
+                kind="done"
+                size="compact"
+                title="未回答の保証側のコメントはありません"
+                description="監査法人が開示レポートの段落・数値にコメントしてクライアントへ共有すると、ここに並びます。"
+              />
+            ) : (
+              <ul className="divide-y divide-line">
+                {unansweredComments.slice(0, 5).map((row) => (
+                  <li
+                    key={row.note.id}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1.5"
+                    data-t4d-record=""
+                  >
+                    <Badge tone="brand">
+                      <MessagesSquare className="size-3" aria-hidden="true" />
+                      回答する
+                    </Badge>
+                    {canRespondComments ? (
+                      <Link
+                        href={`/enterprise/assurance-comments?new=1&note=${encodeURIComponent(row.note.id)}#respond-note`}
+                        className="text-small font-medium text-brand-700 hover:underline"
+                      >
+                        {row.target
+                          ? `${row.target.kind === 'report_paragraph' ? '段落' : '数値'}「${row.target.place}」`
+                          : '案件全体へのコメント'}
+                      </Link>
+                    ) : (
+                      <span className="text-small font-medium text-ink">
+                        {row.target ? row.target.place : '案件全体へのコメント'}
+                      </span>
+                    )}
+                    <span className="text-caption text-ink-muted">
+                      {row.engagement.code} ／ {formatJst(row.note.createdAt)}
+                    </span>
+                    <span className="w-full truncate text-caption text-ink-muted">
+                      {row.note.body}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        )}
 
         <Section id="tasks" title={`タスク（${visibleTasks.length}）`}>
           {visibleTasks.length === 0 ? (

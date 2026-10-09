@@ -88,13 +88,14 @@ describe('機能設定', () => {
 });
 
 describe('基準の版メタデータ', () => {
-  it('ESRS-40a は公開草案・要求事項未収録で、要求事項を 1 件も持たない', () => {
+  it('ESRS-40a の公開草案の版は要求事項未収録のままマスターに残り、要求事項を 1 件も持たない', () => {
     const framework = fixture.frameworks.find((f) => f.key === 'esrs_40a');
     expect(framework?.id).toBe(IDS.esrs40aFramework);
     const versions = fixture.frameworkVersions.filter((v) => v.frameworkId === framework?.id);
-    expect(versions).toHaveLength(1);
-    expect(versions[0]).toMatchObject({
-      id: IDS.esrs40aVersion,
+    // 公開草案（要求事項は未収録）と、トライアルの試行用サンプル（架空・条文ではない）の 2 版（K5）
+    expect(versions).toHaveLength(2);
+    const draft = versions.find((v) => v.id === IDS.esrs40aDraftVersion);
+    expect(draft).toMatchObject({
       versionCode: 'esrs-40a-ed-2026-07',
       legalStatus: 'draft',
       coverageStatus: 'not_loaded',
@@ -103,8 +104,42 @@ describe('基準の版メタデータ', () => {
       issuedAt: '2026-07-23',
     });
     expect(
-      fixture.disclosureItems.filter((i) => i.frameworkVersionId === IDS.esrs40aVersion),
+      fixture.disclosureItems.filter((i) => i.frameworkVersionId === IDS.esrs40aDraftVersion),
     ).toEqual([]);
+  });
+
+  it('ESRS-40a 試行用サンプルは架空の 8 項目で、全項目が「（サンプル）」と条文ではない旨を持つ（K5）', () => {
+    const sample = fixture.frameworkVersions.find((v) => v.id === IDS.esrs40aVersion);
+    expect(sample).toMatchObject({
+      frameworkId: IDS.esrs40aFramework,
+      legalStatus: 'sample',
+      coverageStatus: 'sample',
+      isFixture: true,
+    });
+    expect(sample?.label).toContain('架空・条文ではない');
+    // 公開草案の版が「新しい版」として並ぶ（サンプルの年は公開草案より前）
+    const draft = fixture.frameworkVersions.find((v) => v.id === IDS.esrs40aDraftVersion);
+    expect(sample!.year).toBeLessThan(draft!.year);
+    const items = fixture.disclosureItems.filter(
+      (i) => i.frameworkVersionId === IDS.esrs40aVersion,
+    );
+    expect(items.map((i) => i.code)).toEqual([
+      '40A-S01',
+      '40A-S02',
+      '40A-S03',
+      '40A-S04',
+      '40A-S05',
+      '40A-S06',
+      '40A-S07',
+      '40A-S08',
+    ]);
+    for (const item of items) {
+      expect(item.questionText.startsWith('（サンプル）'), item.code).toBe(true);
+      expect(item.guidance, item.code).toContain('公開草案の条文・要約ではありません');
+    }
+    // FY2026 のプロジェクトの ESRS-40a はサンプルの版に固定する
+    const pf = fixture.projectFrameworks.find((p) => p.id === IDS.projectFrameworks.fy2026Esrs40a);
+    expect(pf?.frameworkVersionId).toBe(IDS.esrs40aVersion);
   });
 
   it('SSBJ は公表済み・一部収録（133 項目）、CSRD は架空サンプル（12 項目）と明示される', () => {
@@ -506,7 +541,12 @@ describe('節とレビュー', () => {
     expect(esrsBlock.frameworkVersionId).toBe(IDS.esrs40aVersion);
     // 承認は基準ごとに独立（ESRS-40a 側は下書きのまま）
     expect(esrsBlock.status).toBe('draft');
-    expect(esrsBlock.requirementItemIds).toEqual([]);
+    // 要求事項は試行用サンプルのガバナンスの項目（架空）に対応付ける（K5）。節の基準の版の項目だけ
+    const items = esrsBlock.requirementItemIds.map((id) =>
+      fixture.disclosureItems.find((i) => i.id === id)!,
+    );
+    expect(items.map((i) => i.code)).toEqual(['40A-S01']);
+    expect(items.every((i) => i.frameworkVersionId === esrsBlock.frameworkVersionId)).toBe(true);
   });
 
   it('リスク・機会は下書きで、財務的影響が未確定である段落を持ち、レビュー依頼の阻害条件が無い', () => {

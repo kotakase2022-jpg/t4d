@@ -201,11 +201,14 @@ export function UserMenu({
   email,
   roleKeys,
   onLogoutAction,
+  links = [],
 }: {
   displayName: string;
   email: string;
   roleKeys: RoleKey[];
   onLogoutAction: () => Promise<void>;
+  /** プロフィール・ワークスペース選択の下に足す画面（ワークスペースごと） */
+  links?: ReadonlyArray<{ label: string; href: string }>;
 }) {
   return (
     <DropdownMenu>
@@ -231,6 +234,11 @@ export function UserMenu({
         <DropdownMenuItem asChild>
           <a href="/workspace">ワークスペース選択へ</a>
         </DropdownMenuItem>
+        {links.map((link) => (
+          <DropdownMenuItem key={link.href} asChild>
+            <a href={link.href}>{link.label}</a>
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuSeparator />
         {/*
           Menu 項目を選ぶと Radix が Menu を閉じ、中の form が unmount される。

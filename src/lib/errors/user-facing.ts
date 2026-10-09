@@ -94,6 +94,29 @@ export async function withUserFacingError(backTo: string, run: () => Promise<voi
     await run();
   } catch (error) {
     if (isControlFlowError(error) || !isUserFacingError(error)) throw error;
+    if (error instanceof AuthorizationError) await reportAccessDenied(error, backTo);
     await redirectWithUserError(backTo, error.message);
+  }
+}
+
+/**
+ * 権限で断った操作を監査ログ access_denied に残す（トライアル対応 NF-27）。権限名とルートのパターンだけ。
+ * セッション・DB は動的に読む（このモジュールは多くのサービスから読まれるため、静的に読むと循環する）。
+ * リクエストの外（テスト）・記録の失敗では何もしない（利用者への応答は変えない）
+ */
+async function reportAccessDenied(error: AuthorizationError, backTo: string): Promise<void> {
+  try {
+    const [{ getSession }, { getDb }, { recordAccessDenied }] = await Promise.all([
+      import('@/lib/auth/session'),
+      import('@/lib/repositories'),
+      import('./access-denied'),
+    ]);
+    const session = await getSession();
+    await recordAccessDenied(await getDb(), session?.context ?? null, {
+      permission: error.permission ?? null,
+      route: backTo,
+    });
+  } catch {
+    // 記録できなくても ?error= で戻す
   }
 }

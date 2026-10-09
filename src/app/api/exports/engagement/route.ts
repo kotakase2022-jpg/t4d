@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { accessDeniedResponse } from '@/lib/errors/access-denied';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { getSession } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
@@ -30,7 +31,10 @@ export async function GET(request: Request) {
   if (!session?.context) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const ctx = session.context;
   if (ctx.workspace.organizationType !== 'assurance_firm' || !can(ctx, 'assurance.export.run')) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    return accessDeniedResponse(await getDb(), ctx, {
+      permission: 'assurance.export.run',
+      request,
+    });
   }
 
   const url = new URL(request.url);

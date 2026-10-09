@@ -7,18 +7,27 @@ import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
 import { SemanticBadge } from '@/components/shared/status-badge';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { requireAssuranceContext } from '@/lib/auth/session';
-import { canSignoff } from '@/lib/authorization/can';
+import { can, canSignoff } from '@/lib/authorization/can';
 import { roleLabel } from '@/lib/authorization/roles';
+import { parseSharedReportCopy } from '@/lib/domain/report-copy';
 import { formatJst } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
-import { evaluateSignoffBlockers, loadEngagementOr404 } from '@/lib/services/assurance';
+import {
+  evaluateSignoffBlockers,
+  loadEngagementOr404,
+  loadSharedReportList,
+  loadSignoffReportAttention,
+  sharedReportLabel,
+} from '@/lib/services/assurance';
 import { canFor } from '@/lib/ui/home-profile';
 import { signoffStateActions } from '@/lib/ui/state-actions';
 import { statusLabel } from '@/lib/ui/status/registry';
 import type { SignoffStage } from '@/types/domain';
 import { createSignoffAction } from '../../../actions';
 import { EngagementHeader } from '../engagement-header';
+import { SignoffReportAttentionText } from './report-attention';
 
 export const metadata = { title: 'Sign-off' };
 
@@ -48,6 +57,18 @@ export default async function SignoffsPage({
     where: { engagementId },
     orderBy: { column: 'createdAt' },
   });
+  // Sign-off に結び付けられる開示レポート（共有中の写し。NF-23）と、Sign-off 後に共有された別の承認版の注意
+  const [reportRows, reportAttention, allCopies] = await Promise.all([
+    can(ctx, 'assurance.engagement.read') ? loadSharedReportList(db, ctx, engagementId) : [],
+    loadSignoffReportAttention(db, ctx, engagementId),
+    db.select('sharedReportCopies', { where: { engagementId } }),
+  ]);
+  const linkable = reportRows.filter((row) => row.integrityOk);
+  const reportLabelOf = (copyId: string): string => {
+    const copy = allCopies.find((c) => c.id === copyId);
+    const content = copy ? parseSharedReportCopy(copy.copy) : null;
+    return content ? sharedReportLabel(content) : '（写しを読めません）';
+  };
   const profileIds = [...new Set(signoffs.map((s) => s.userId))];
   const profiles =
     profileIds.length > 0 ? await db.select('profiles', { where: { id: { in: profileIds } } }) : [];
@@ -86,6 +107,17 @@ export default async function SignoffsPage({
             </span>
           </span>
         </Notice>
+
+        {reportAttention && (
+          // Sign-off の後に別の承認版が共有された／結び付けた写しが取り下げられた（保存せず毎回導く）
+          <Notice tone="warning" title="Sign-off の後に開示レポートが変わりました">
+            <SignoffReportAttentionText
+              attention={reportAttention}
+              labelOf={reportLabelOf}
+              reportsHref={`/assurance/engagements/${engagementId}/reports`}
+            />
+          </Notice>
+        )}
 
         <div className="grid grid-cols-3 gap-3">
           {STAGES.map(({ stage, description }) => {
@@ -134,6 +166,22 @@ export default async function SignoffsPage({
                             対象 Snapshot: {signoff.snapshotId.slice(0, 8)}
                           </div>
                         )}
+                        {signoff.sharedReportCopyId && (
+                          <div className="text-caption text-ink-muted" data-signoff-report="">
+                            対象の開示レポート:{' '}
+                            <Link
+                              href={`/assurance/engagements/${engagementId}/reports/${signoff.sharedReportCopyId}`}
+                              className="text-brand-700 hover:underline"
+                            >
+                              {reportLabelOf(signoff.sharedReportCopyId)}
+                            </Link>
+                            （写しのハッシュ{' '}
+                            <span className="font-mono">
+                              {(signoff.sharedReportContentHash ?? '').slice(0, 12)}
+                            </span>
+                            ）
+                          </div>
+                        )}
                         {signoff.comment && (
                           <p className="mt-0.5 text-small text-ink">{signoff.comment}</p>
                         )}
@@ -176,17 +224,47 @@ export default async function SignoffsPage({
                         consequences: [
                           '作成した Sign-off は取り消せません（追記専用）。',
                           '代理 Sign-off は禁止です。本人のアカウントで記録されます。',
+                          ...(linkable.length > 0
+                            ? [
+                                '対象の開示レポートを選ぶと、その写しと内容ハッシュを Sign-off に記録します（後から別の承認版が共有されると、案件の概要に注意が出ます）。',
+                              ]
+                            : []),
                         ],
                         extraFields: (
-                          <label className="block space-y-1">
-                            <span className="text-small font-medium text-ink">
-                              コメント
-                              <span className="ml-1 text-caption font-normal text-ink-muted">
-                                （任意）
+                          <div className="space-y-2">
+                            {linkable.length > 0 && (
+                              <label className="block space-y-1">
+                                <span className="text-small font-medium text-ink">
+                                  対象の開示レポート
+                                  <span className="ml-1 text-caption font-normal text-ink-muted">
+                                    （任意）
+                                  </span>
+                                </span>
+                                <NativeSelect
+                                  name="sharedReportCopyId"
+                                  aria-label="対象の開示レポート"
+                                  defaultValue=""
+                                >
+                                  <option value="">（結び付けない）</option>
+                                  {linkable.map((row) => (
+                                    <option key={row.copy.id} value={row.copy.id}>
+                                      {row.label}（共有 {formatJst(row.copy.sharedAt)}・写し
+                                      {row.copy.copyHash.slice(0, 12)}）
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                              </label>
+                            )}
+                            <label className="block space-y-1">
+                              <span className="text-small font-medium text-ink">
+                                コメント
+                                <span className="ml-1 text-caption font-normal text-ink-muted">
+                                  （任意）
+                                </span>
                               </span>
-                            </span>
-                            <Input name="comment" aria-label="コメント" />
-                          </label>
+                              <Input name="comment" aria-label="コメント" />
+                            </label>
+                          </div>
                         ),
                         confirmLabel: 'Sign-off を記録する',
                       },

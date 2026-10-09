@@ -117,6 +117,7 @@ export function NavBreadcrumbs({ tail }: { tail?: Crumb[] }) {
     shell?.variant ?? 'enterprise',
     shell?.hiddenHrefs ?? EMPTY,
     shell?.hiddenPermissions,
+    shell?.hiddenOptions,
   );
   // App Router の外（単体テスト）では pathname が null。経路が分からないので描かない
   if (!shell || !pathname) return null;

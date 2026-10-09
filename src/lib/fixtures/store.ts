@@ -36,6 +36,7 @@ import {
   metricId,
   userId,
 } from './dataset';
+import { IMPORTED_FRAMEWORK_MASTERS } from '@/lib/frameworks/imported';
 import { SSBJ_FRAMEWORK_INFO, SSBJ_MASTER_ITEMS } from '@/lib/frameworks/ssbj-2026';
 import {
   CSRD_SAMPLE_VERSION_METADATA,
@@ -44,8 +45,33 @@ import {
   seedDisclosureFirst,
 } from './disclosure-first';
 import { seedCsrd } from './csrd';
+import { seedTrialCase } from './trial-case';
 import { contentHash, fid } from './ids';
 import type {
+  AiFeedback,
+  ExportReconciliation,
+  NarrativeRequirementLink,
+  OrganizationDataTerms,
+  OrganizationFilingIdentifier,
+  OrganizationOption,
+  ProjectRequirementAssessment,
+  ProjectRequirementAssessmentEvent,
+  RequirementCrosswalk,
+  RequirementExclusionEvent,
+  ResponseContentLink,
+  ReviewNoteResponse,
+  SharedReportCopy,
+  TrialFeedbackItem,
+  TrialProgram,
+  TrialScenario,
+  TrialScenarioJudgement,
+  TrialScenarioRun,
+  TrialTaskTiming,
+  XbrlConcept,
+  XbrlConceptRequirement,
+  XbrlTagMapping,
+  XbrlTagMappingEvent,
+  XbrlTaxonomyPackage,
   Alert,
   Approval,
   ApprovalRoute,
@@ -233,6 +259,32 @@ export interface FixtureDb {
   ingestionJobFiles: IngestionJobFile[];
   ingestionRows: IngestionRow[];
   aiRuns: AiRun[];
+  aiFeedback: AiFeedback[];
+
+  // トライアル対応（2026-10。0049〜0057）
+  projectRequirementAssessments: ProjectRequirementAssessment[];
+  projectRequirementAssessmentEvents: ProjectRequirementAssessmentEvent[];
+  requirementExclusionEvents: RequirementExclusionEvent[];
+  narrativeRequirementLinks: NarrativeRequirementLink[];
+  requirementCrosswalks: RequirementCrosswalk[];
+  sharedReportCopies: SharedReportCopy[];
+  reviewNoteResponses: ReviewNoteResponse[];
+  exportReconciliations: ExportReconciliation[];
+  xbrlTaxonomyPackages: XbrlTaxonomyPackage[];
+  xbrlConcepts: XbrlConcept[];
+  xbrlConceptRequirements: XbrlConceptRequirement[];
+  organizationFilingIdentifiers: OrganizationFilingIdentifier[];
+  xbrlTagMappings: XbrlTagMapping[];
+  xbrlTagMappingEvents: XbrlTagMappingEvent[];
+  trialPrograms: TrialProgram[];
+  trialScenarios: TrialScenario[];
+  trialScenarioRuns: TrialScenarioRun[];
+  trialScenarioJudgements: TrialScenarioJudgement[];
+  trialFeedbackItems: TrialFeedbackItem[];
+  trialTaskTimings: TrialTaskTiming[];
+  organizationDataTerms: OrganizationDataTerms[];
+  organizationOptions: OrganizationOption[];
+  responseContentLinks: ResponseContentLink[];
 
   engagements: Engagement[];
   engagementMembers: EngagementMember[];
@@ -368,6 +420,30 @@ export function createFixtureDb(): FixtureDb {
     ingestionJobFiles: [],
     ingestionRows: [],
     aiRuns: [],
+    aiFeedback: [],
+    projectRequirementAssessments: [],
+    projectRequirementAssessmentEvents: [],
+    requirementExclusionEvents: [],
+    narrativeRequirementLinks: [],
+    requirementCrosswalks: [],
+    sharedReportCopies: [],
+    reviewNoteResponses: [],
+    exportReconciliations: [],
+    xbrlTaxonomyPackages: [],
+    xbrlConcepts: [],
+    xbrlConceptRequirements: [],
+    organizationFilingIdentifiers: [],
+    xbrlTagMappings: [],
+    xbrlTagMappingEvents: [],
+    trialPrograms: [],
+    trialScenarios: [],
+    trialScenarioRuns: [],
+    trialScenarioJudgements: [],
+    trialFeedbackItems: [],
+    trialTaskTimings: [],
+    organizationDataTerms: [],
+    organizationOptions: [],
+    responseContentLinks: [],
     engagements: [],
     engagementMembers: [],
     engagementScopes: [],
@@ -1156,6 +1232,15 @@ export function createFixtureDb(): FixtureDb {
     });
   });
 
+  // 登録スクリプト（scripts/import-framework-master.ts。運営側のみ）で一次資料から収録した基準マスター（NF-07・NF-08）。
+  // 基準が無い・同じ版が既にあるものは入れない（Fixture の版を上書きしない）。登録簿が空なら何も変わらない
+  for (const master of IMPORTED_FRAMEWORK_MASTERS) {
+    if (!db.frameworks.some((f) => f.id === master.version.frameworkId)) continue;
+    if (db.frameworkVersions.some((v) => v.id === master.version.id)) continue;
+    db.frameworkVersions.push({ ...master.version });
+    db.disclosureItems.push(...master.items.map((item) => ({ ...item })));
+  }
+
   // FY2025 回答（承認済み）と FY2026 回答（未着手中心）
   for (const spec of CDP_ITEM_SPECS) {
     const prevItemId = fid('disclosure_item', `cdp/2025/${spec.code}`);
@@ -1859,6 +1944,7 @@ export function createFixtureDb(): FixtureDb {
     name: '標準承認ルート',
     description: '拠点の入力担当から役員までの 5 段階。開示に載せる非財務データはこの道筋を通す。',
     isDefault: true,
+    purpose: 'default',
     ...audit(at(360), at(360), userId('enterprise-admin@demo.local')),
   });
 
@@ -2715,6 +2801,10 @@ export function createFixtureDb(): FixtureDb {
       sharedWithClient: spec.sharedWithClient,
       resolutionComment: spec.resolutionComment,
       resolvedAt: spec.status === 'cleared' ? at(7) : null,
+      targetCopyId: null,
+      targetBlockId: null,
+      targetParagraphId: null,
+      targetDataPointVersionId: null,
       ...audit(at(13), at(7), manager),
     });
   });
@@ -2988,6 +3078,13 @@ export function createFixtureDb(): FixtureDb {
       }),
     );
   }
+
+  // ------------------------------------------------------------------
+  // トライアル対応（2026-10）: ESRS-40a 試行用サンプル・判断と対象外の承認・横断対応・XBRL の SAMPLE・
+  // FY2025 の社内承認済みスナップショット・トライアルの記録など（すべて架空）。中身は trial-case.ts。
+  // 既存の数値・資料・許諾には触れない（Data Room・SNAP-1・検証の件数を変えない）
+  // ------------------------------------------------------------------
+  seedTrialCase(db);
 
   return db;
 }

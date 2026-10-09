@@ -1,6 +1,8 @@
 import * as React from 'react';
-import { Check, PenLine, Sparkles } from 'lucide-react';
+import { Check, PenLine, Sparkles, X } from 'lucide-react';
 import { Collapsible } from '@/components/ui/collapsible';
+import { Field } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import type { FormActionState } from '@/lib/errors/form-action-state';
 import { formatJst } from '@/lib/format/datetime';
@@ -21,6 +23,8 @@ import { PreservingForm } from './preserving-form';
  * - 採用のフォームに入力を添えられる（adoptFields。例: 確認コメント。採用の根拠を履歴に残す）
  * - 修正・手入力のフォームは、入力を残す Server Action（useActionState 型。preservingAction）も受ける。
  *   サーバーが断ったときに選んだ値・書いた理由を失わない（plan §1.13-5。PreservingForm を使う）
+ * - 候補を採用しない操作（reject）を渡すと、折りたたみの中に「採用しない理由（任意）」の欄を出す
+ *   （トライアル対応 NF-34。name は rejectionReason。Server Action は recordAiFeedback で ai_feedback に追記する）
  */
 type PreservingAction = (previous: FormActionState, formData: FormData) => Promise<FormActionState>;
 
@@ -42,6 +46,10 @@ export interface CandidateDecisionProps {
   /** 採用のフォームに添える入力（例: 確認コメント（任意））。name は採用の Server Action に合わせる */
   adoptFields?: React.ReactNode;
   editAndConfirm?: FormActionRef;
+  /** 候補を採用しない（不採用の理由は任意。name="rejectionReason"） */
+  reject?: FormActionRef;
+  /** 不採用の理由の上限（Demo Mode は 300 字。省略時 300） */
+  rejectReasonMaxLength?: number;
   manualConfirm?: FormActionRef;
   run?: FormActionRef;
   canWrite: boolean;
@@ -53,6 +61,7 @@ export interface CandidateDecisionProps {
   labels?: Partial<{
     adopt: string;
     editAndConfirm: string;
+    reject: string;
     manualConfirm: string;
     run: string;
   }>;
@@ -100,6 +109,8 @@ export function CandidateDecision({
   adopt,
   adoptFields,
   editAndConfirm,
+  reject,
+  rejectReasonMaxLength = 300,
   manualConfirm,
   run,
   canWrite,
@@ -111,6 +122,7 @@ export function CandidateDecision({
   const text = {
     adopt: labels?.adopt ?? '候補を採用',
     editAndConfirm: labels?.editAndConfirm ?? '修正して確定',
+    reject: labels?.reject ?? '採用しない',
     manualConfirm: labels?.manualConfirm ?? '担当者の入力として確定',
     run: labels?.run ?? 'AI ギャップ分析を実行',
   };
@@ -163,6 +175,29 @@ export function CandidateDecision({
                 {children}
                 <SubmitButton variant="secondary" size="sm" icon={<PenLine aria-hidden="true" />}>
                   {text.editAndConfirm}
+                </SubmitButton>
+              </DecisionForm>
+            </Collapsible>
+          )}
+          {reject && (
+            <Collapsible variant="plain" summary={`${text.reject}…`}>
+              <DecisionForm target={reject} className="space-y-2">
+                <Field
+                  label="採用しない理由"
+                  name="rejectionReason"
+                  hint="AI の候補の改善の検討に使います。"
+                >
+                  {(control) => (
+                    <Textarea
+                      {...control}
+                      name="rejectionReason"
+                      rows={2}
+                      maxLength={rejectReasonMaxLength}
+                    />
+                  )}
+                </Field>
+                <SubmitButton variant="secondary" size="sm" icon={<X aria-hidden="true" />}>
+                  {text.reject}
                 </SubmitButton>
               </DecisionForm>
             </Collapsible>

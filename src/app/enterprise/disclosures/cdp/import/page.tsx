@@ -13,10 +13,12 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { isFrameworkAvailable } from '@/lib/services/disclosure';
 import { buildImportPreview, type ImportPreview } from '@/lib/services/disclosure-import';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { readOwnedFileBytes } from '@/lib/storage';
 import { confirmDisclosureImportAction, previewDisclosureImportAction } from '../../../actions';
+import { CdpNotContracted } from '../_components/cdp-not-contracted';
 
 export const metadata = { title: '過去回答の取込' };
 
@@ -49,6 +51,10 @@ export default async function DisclosureImportPage({
 }) {
   const params = await searchParams;
   const shell = await loadEnterpriseShell();
+  // CDP は組織ごとに契約するオプション（トライアル対応 NF-38）。契約が無ければ取込の入口も出さない
+  if (!(await isFrameworkAvailable(shell.db, shell.ctx, 'cdp'))) {
+    return <CdpNotContracted title="過去回答の取込" />;
+  }
   const canWrite = can(shell.ctx, 'enterprise.disclosure.write');
 
   const fileVersionId = typeof params.file === 'string' ? params.file : null;

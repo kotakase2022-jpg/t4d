@@ -335,6 +335,18 @@ export async function confirmInDialog(
   await dialog.locator('[data-confirm-submit]').click();
 }
 
+/**
+ * ログイン中の利用者として API を取りに行き、HTTP の状態を返す（画面の中の fetch。httpOnly の
+ * ログインの Cookie が付く）。page.request はログインの Cookie を送らず、権限の検査より前に 401 になるため、
+ * 「権限の無い役割は 403」の確認には使えない（authz-api-audit・reachability と同じ取り方）
+ */
+export async function apiStatusAsViewer(page: Page, path: string): Promise<number> {
+  return page.evaluate(async (url) => {
+    const res = await fetch(url, { credentials: 'same-origin', redirect: 'manual' });
+    return res.status;
+  }, path);
+}
+
 /** ホームの「その他」に開示デモのリセットがあるか（開示優先モード・Demo Mode・開示の編集権限） */
 export async function hasDisclosureDemoReset(page: Page): Promise<boolean> {
   const trigger = page.locator('#t4d-main [data-more-menu]').filter({ hasText: 'その他' });

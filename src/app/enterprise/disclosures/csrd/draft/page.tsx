@@ -9,11 +9,15 @@ import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Card } from '@/components/ui/card';
 import { MoreInfo } from '@/components/ui/more-info';
 import { getAiProvider } from '@/lib/ai';
-import { AuthorizationError } from '@/lib/authorization/can';
+import { AuthorizationError, can } from '@/lib/authorization/can';
 import { loadCsrdDrafts, type CsrdDraftOverview } from '@/lib/services/csrd/draft';
+import { DRAFT_IMPORT_NOTE, listDraftImportOptions } from '@/lib/services/draft-import';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import type { MenuActionSpec } from '@/lib/ui/actions';
+import { draftImportMenuItems } from '../../ssbj/draft/import-menu';
 import { SampleMasterBadge } from '../_components/csrd-badges';
 import { CsrdDraftSectionCard } from './_components/draft-section-card';
+import { CsrdScopeNote } from '../_components/csrd-scope-note';
 
 export const metadata = { title: 'CSRD 開示ドラフト' };
 
@@ -55,9 +59,21 @@ export default async function CsrdDraftPage({
     throw error;
   }
 
+  // 確定本文を開示プロジェクトの原稿へ取り込む（NF-19）。CSRD を基準に持つ同じ年度のプロジェクトだけ（読むだけ）
+  const importItems: MenuActionSpec[] = overview
+    ? draftImportMenuItems(
+        await listDraftImportOptions(shell.db, shell.ctx, {
+          source: 'csrd',
+          periodId: shell.currentPeriod.id,
+        }),
+        can(shell.ctx, 'enterprise.disclosure.write'),
+      )
+    : [];
+
   // 定性情報（全基準共通の資産）と前の工程。対応状況へはパンくず・左メニューから戻る
   const headerActions = (
     <PageActions
+      more={importItems}
       secondary={[
         {
           kind: 'link',
@@ -112,6 +128,7 @@ export default async function CsrdDraftPage({
     <>
       <PageHeader
         title="CSRD 開示ドラフト"
+        context={<CsrdScopeNote />}
         description={
           <span className="flex flex-wrap items-center gap-2">
             <span>{overview.period.label} ／ 節ごとの AI 草案（候補）と担当者の本文</span>
@@ -151,6 +168,9 @@ export default async function CsrdDraftPage({
           <p className="flex items-start gap-1.5 text-small text-ink">
             <Bot className="mt-0.5 size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
             AI 草案は候補です。「本文に採用」を押すまで本文には入らず、確定も担当者が行います。
+          </p>
+          <p className="text-small text-ink" data-draft-import-note="">
+            {DRAFT_IMPORT_NOTE}
           </p>
           <ul className="grid grid-cols-3 gap-4" aria-label="開示ドラフトの件数">
             <li>

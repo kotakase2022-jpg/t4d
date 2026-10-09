@@ -11,6 +11,18 @@ import {
 } from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS } from '@/lib/fixtures/disclosure-first';
 import { fid } from '@/lib/fixtures/ids';
+import {
+  FY2025_APPROVED_SNAPSHOT_ID,
+  TRIAL_ASSESSMENT_IDS,
+  TRIAL_XBRL_MAPPING_IDS,
+  exclusionEventId,
+  trialScenarioId,
+} from '@/lib/fixtures/trial-case';
+import {
+  ESRS_40A_SAMPLE_VERSION_ID,
+  XBRL_SAMPLE_PACKAGE_ID,
+  esrs40aSampleItemId,
+} from '@/lib/fixtures/trial-ids';
 
 /**
  * RLS 越権テスト（指示書 11 章「RLS Test に必ず含める」10 項目）。
@@ -3725,3 +3737,759 @@ async function seedAiRun(): Promise<string> {
   );
   return row!.id;
 }
+
+// ======================================================================
+// トライアル対応（2026-10。0048〜0058）
+// ======================================================================
+
+describe('トライアル対応（0048〜0058）の越権・追記専用・職務分離', () => {
+  const ORG_A = ORG_IDS.aomi;
+  const ORG_B = ORG_IDS.soten;
+  const T_AUTHOR = userId('sustainability@demo.local');
+  const RLS = /row-level security/;
+  const ENG = ENGAGEMENT_IDS.main;
+  const PF_40A = DISCLOSURE_FIRST_IDS.projectFrameworks.fy2026Esrs40a;
+  const S01 = TRIAL_ASSESSMENT_IDS['40A-S01']!;
+
+  describe('0048 監査ログの種類', () => {
+    it('access_denied など新しい種類を記録でき、知らない種類は CHECK で止まる', async () => {
+      await h.asSuperuser(
+        `insert into audit_events (id, actor_user_id, actor_organization_id, event_type, created_at)
+         values (gen_random_uuid(), $1, $2, 'access_denied', now())`,
+        [ENT_A_ADMIN, ORG_A],
+      );
+      await expect(
+        h.asSuperuser(
+          `insert into audit_events (id, actor_user_id, actor_organization_id, event_type, created_at)
+           values (gen_random_uuid(), $1, $2, 'unknown_trial_event', now())`,
+          [ENT_A_ADMIN, ORG_A],
+        ),
+      ).rejects.toThrow(/audit_events_event_type_check/);
+    });
+  });
+
+  describe('0049 要求事項の判断', () => {
+    it('他社は判断・履歴・対象外の申請を読めない', async () => {
+      for (const table of [
+        'project_requirement_assessments',
+        'project_requirement_assessment_events',
+        'requirement_exclusion_events',
+        'narrative_requirement_links',
+      ]) {
+        const rows = await h.asUser(
+          ENT_B_ADMIN,
+          `select id from ${table} where organization_id = $1`,
+          [ORG_A],
+        );
+        expect(rows, table).toHaveLength(0);
+      }
+      const own = await h.asUser(
+        ENT_A_ADMIN,
+        'select id from project_requirement_assessments where organization_id = $1',
+        [ORG_A],
+      );
+      expect(own.length).toBeGreaterThan(0);
+    });
+
+    it('開示の編集権限の無い拠点担当は判断を更新できない（0 行）', async () => {
+      const rows = await h.asUser(
+        ENT_A_SITE,
+        `update project_requirement_assessments set action_note = '改ざん' where id = $1 returning id`,
+        [S01],
+      );
+      expect(rows).toHaveLength(0);
+    });
+
+    it('理由の無い対象外・基準の版に属さない要求事項は保存できない', async () => {
+      await expect(
+        h.asUser(
+          T_AUTHOR,
+          `update project_requirement_assessments
+              set applicability = 'not_applicable', applicability_reason = ''
+            where id = $1`,
+          [S01],
+        ),
+      ).rejects.toThrow(/project_requirement_assessments_reason_required|check constraint/);
+      const [ssbjItem] = await h.asSuperuser<{ id: string }>(
+        `select id from disclosure_items where framework_version_id <> $1 limit 1`,
+        [ESRS_40A_SAMPLE_VERSION_ID],
+      );
+      await expect(
+        h.asUser(
+          T_AUTHOR,
+          `insert into project_requirement_assessments
+             (organization_id, project_framework_id, item_id, applicability, created_by, updated_by)
+           values ($1, $2, $3, 'applicable', $4, $4)`,
+          [ORG_A, PF_40A, ssbjItem!.id, T_AUTHOR],
+        ),
+      ).rejects.toThrow(/T4D_REQUIREMENT_SCOPE/);
+    });
+
+    it('判断の履歴は追記専用（Service Role 相当でも止まる）', async () => {
+      const [event] = await h.asSuperuser<{ id: string }>(
+        `select id from project_requirement_assessment_events where organization_id = $1 limit 1`,
+        [ORG_A],
+      );
+      const rows = await h.asUser(
+        ENT_A_ADMIN,
+        `update project_requirement_assessment_events set reason = '改ざん' where id = $1 returning id`,
+        [event!.id],
+      );
+      expect(rows).toHaveLength(0);
+      expect(
+        await h.expectDenied(
+          ENT_A_ADMIN,
+          'delete from project_requirement_assessment_events where id = $1',
+          [event!.id],
+        ),
+      ).toMatch(/permission denied/i);
+      await expect(
+        h.asSuperuser(
+          `update project_requirement_assessment_events set reason = reason where id = $1`,
+          [event!.id],
+        ),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+
+    it('他社の名義で判断の履歴を作れない（本人名義・同じ組織）', async () => {
+      await expect(
+        h.asUser(
+          ENT_B_ADMIN,
+          `insert into project_requirement_assessment_events
+             (organization_id, assessment_id, project_framework_id, item_id, after, reason, actor_user_id)
+           values ($1, $2, $3, $4, '{}'::jsonb, '', $5)`,
+          [ORG_A, S01, PF_40A, esrs40aSampleItemId('40A-S01'), ENT_B_ADMIN],
+        ),
+      ).rejects.toThrow(RLS);
+    });
+  });
+
+  describe('0049 対象外の申請と承認（二者・承認者の記録）', () => {
+    const requestedId = exclusionEventId('esrs40a/40A-S06/requested');
+
+    async function requested() {
+      const [row] = await h.asSuperuser<{
+        framework_version_id: string;
+        item_id: string;
+        reporting_period_id: string;
+        reason_digest: string;
+      }>(
+        `select framework_version_id, item_id, reporting_period_id, reason_digest
+           from requirement_exclusion_events where id = $1`,
+        [requestedId],
+      );
+      return row!;
+    }
+
+    async function insertEvent(actor: string, event: string, digest?: string) {
+      const r = await requested();
+      return h.asUser(
+        actor,
+        `insert into requirement_exclusion_events
+           (organization_id, framework_version_id, item_id, reporting_period_id, project_framework_id,
+            source, event, decision, reason_digest, reason_excerpt, note, actor_user_id)
+         values ($1, $2, $3, $4, $5, 'project_assessment', $6, 'not_applicable', $7, '', $8, $9)
+         returning id`,
+        [
+          ORG_A,
+          r.framework_version_id,
+          r.item_id,
+          r.reporting_period_id,
+          PF_40A,
+          event,
+          digest ?? r.reason_digest,
+          event === 'returned' ? '理由（テスト）' : '',
+          actor,
+        ],
+      );
+    }
+
+    it('承認の権限の無い人は承認できない（RLS）', async () => {
+      await expect(insertEvent(ENT_A_REVIEWER, 'approved')).rejects.toThrow(
+        /row-level security|T4D_EXCLUSION_FORBIDDEN/,
+      );
+    });
+
+    it('申請者と別の承認権限者は承認できる', async () => {
+      const rows = await insertEvent(ENT_A_APPROVER, 'approved');
+      expect(rows).toHaveLength(1);
+    });
+
+    it('自分で申請したものは承認できない（職務分離）', async () => {
+      await insertEvent(ENT_A_APPROVER, 'requested');
+      await expect(insertEvent(ENT_A_APPROVER, 'approved')).rejects.toThrow(/T4D_EXCLUSION_SOD/);
+    });
+
+    it('理由・区分と一致しない申請は受け付けない（理由を変えたら申請し直す）', async () => {
+      await expect(insertEvent(T_AUTHOR, 'requested', 'f'.repeat(64))).rejects.toThrow(
+        /T4D_EXCLUSION_STALE/,
+      );
+    });
+
+    it('申請・承認の記録は追記専用', async () => {
+      const rows = await h.asUser(
+        ENT_A_ADMIN,
+        `update requirement_exclusion_events set note = '改ざん' where id = $1 returning id`,
+        [requestedId],
+      );
+      expect(rows).toHaveLength(0);
+      await expect(
+        h.asSuperuser(`delete from requirement_exclusion_events where id = $1`, [requestedId]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0049 横断対応のマスター・定性情報の対応付け', () => {
+    it('横断対応は誰でも読めるが、利用者は書けない', async () => {
+      const rows = await h.asUser(ENT_A_ADMIN, 'select id from requirement_crosswalks limit 1');
+      expect(rows).toHaveLength(1);
+      const [crosswalk] = await h.asSuperuser<{ id: string }>(
+        'select id from requirement_crosswalks limit 1',
+      );
+      const updated = await h.asUser(
+        ENT_A_ADMIN,
+        `update requirement_crosswalks set rationale = '改ざん' where id = $1 returning id`,
+        [crosswalk!.id],
+      );
+      expect(updated).toHaveLength(0);
+      await expect(
+        h.asUser(
+          ENT_A_ADMIN,
+          `insert into requirement_crosswalks (from_item_id, to_framework_version_id, relation, rationale, source)
+           select from_item_id, to_framework_version_id, 'related', 'x', 'sample_fixture'
+             from requirement_crosswalks limit 1`,
+        ),
+      ).rejects.toThrow(RLS);
+    });
+
+    it('定性情報の対応付けは外す以外に変更できず、他社は作れない', async () => {
+      const [record] = await h.asSuperuser<{ id: string }>(
+        `select id from narrative_records where organization_id = $1 and deleted_at is null limit 1`,
+        [ORG_A],
+      );
+      const item = esrs40aSampleItemId('40A-S02');
+      await expect(
+        h.asUser(
+          ENT_B_ADMIN,
+          `insert into narrative_requirement_links
+             (organization_id, narrative_record_id, framework_version_id, item_id, created_by)
+           values ($1, $2, $3, $4, $5)`,
+          [ORG_A, record!.id, ESRS_40A_SAMPLE_VERSION_ID, item, ENT_B_ADMIN],
+        ),
+      ).rejects.toThrow(RLS);
+      const [link] = await h.asUser<{ id: string }>(
+        T_AUTHOR,
+        `insert into narrative_requirement_links
+           (organization_id, narrative_record_id, framework_version_id, item_id, created_by)
+         values ($1, $2, $3, $4, $5) returning id`,
+        [ORG_A, record!.id, ESRS_40A_SAMPLE_VERSION_ID, item, T_AUTHOR],
+      );
+      await expect(
+        h.asUser(T_AUTHOR, `update narrative_requirement_links set item_id = $1 where id = $2`, [
+          esrs40aSampleItemId('40A-S03'),
+          link!.id,
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0050 承認済みレポートの共有・保証側のコメント・回答', () => {
+    let copyId = '';
+    let sharedNoteId = '';
+    let internalNoteId = '';
+
+    async function snapshotHash(): Promise<string> {
+      const [row] = await h.asSuperuser<{ content_hash: string }>(
+        'select content_hash from report_snapshots where id = $1',
+        [FY2025_APPROVED_SNAPSHOT_ID],
+      );
+      return row!.content_hash;
+    }
+
+    function shareSql(actor: string, hash: string): [string, unknown[]] {
+      return [
+        `insert into shared_report_copies
+           (engagement_id, assurance_firm_id, client_organization_id, snapshot_id,
+            snapshot_content_hash, copy, copy_hash, shared_by)
+         values ($1, $2, $3, $4, $5, '{"copyVersion":"report-copy-v1"}'::jsonb, 'h', $6)
+         returning id`,
+        [ENG, ORG_IDS.aoba, ORG_A, FY2025_APPROVED_SNAPSHOT_ID, hash, actor],
+      ];
+    }
+
+    it('許諾の管理の権限が無い役割・別の人の名義では共有できない', async () => {
+      const hash = await snapshotHash();
+      const [sql, params] = shareSql(ENT_A_REVIEWER, hash);
+      await expect(h.asUser(ENT_A_REVIEWER, sql, params)).rejects.toThrow(RLS);
+      const [sql2, params2] = shareSql(ENT_A_REVIEWER, hash);
+      await expect(h.asUser(ENT_A_ADMIN, sql2, params2)).rejects.toThrow(
+        /row-level security|T4D_ACTOR_MUST_BE_SELF/,
+      );
+    });
+
+    it('内容ハッシュが承認版と違えば共有できない', async () => {
+      const [sql, params] = shareSql(ENT_A_ADMIN, 'not-the-hash');
+      await expect(h.asUser(ENT_A_ADMIN, sql, params)).rejects.toThrow(/T4D_SHARE_SCOPE/);
+    });
+
+    it('企業の管理者が共有すると、案件のメンバーだけが読める', async () => {
+      const [sql, params] = shareSql(ENT_A_ADMIN, await snapshotHash());
+      const [row] = await h.asUser<{ id: string }>(ENT_A_ADMIN, sql, params);
+      copyId = row!.id;
+      expect(
+        await h.asUser(FIRM_A_MANAGER, 'select id from shared_report_copies where id = $1', [
+          copyId,
+        ]),
+      ).toHaveLength(1);
+      for (const outsider of [FIRM_B_MANAGER, FIRM_A_ADMIN_UNASSIGNED, ENT_B_ADMIN]) {
+        expect(
+          await h.asUser(outsider, 'select id from shared_report_copies where id = $1', [copyId]),
+        ).toHaveLength(0);
+      }
+    });
+
+    it('保証側はコメントを起票でき、企業はクライアントへ共有されたコメントだけに回答できる', async () => {
+      const [dpv] = await h.asSuperuser<{ id: string }>(
+        `select id from data_point_versions where organization_id = $1 limit 1`,
+        [ORG_A],
+      );
+      const insertNote = (shared: boolean) =>
+        h.asUser<{ id: string }>(
+          FIRM_A_MANAGER,
+          `insert into review_notes
+             (engagement_id, assurance_firm_id, target_type, target_id, body, raised_by,
+              shared_with_client, target_copy_id, target_data_point_version_id, created_by, updated_by)
+           values ($1, $2, 'report_metric', $3, '確認（テスト）', $4, $5, $3, $6, $4, $4)
+           returning id`,
+          [ENG, ORG_IDS.aoba, copyId, FIRM_A_MANAGER, shared, dpv!.id],
+        );
+      sharedNoteId = (await insertNote(true))[0]!.id;
+      internalNoteId = (await insertNote(false))[0]!.id;
+
+      const respond = (actor: string, noteId: string) =>
+        h.asUser(
+          actor,
+          `insert into review_note_responses
+             (review_note_id, engagement_id, client_organization_id, body, responded_by)
+           values ($1, $2, $3, '回答（テスト）', $4) returning id`,
+          [noteId, ENG, ORG_A, actor],
+        );
+      expect(await respond(T_AUTHOR, sharedNoteId)).toHaveLength(1);
+      // 共有していないコメントには回答できない（存在も見えない）
+      await expect(respond(T_AUTHOR, internalNoteId)).rejects.toThrow(/T4D_/);
+      // 閲覧だけの拠点担当・他社は回答できない
+      await expect(respond(ENT_A_SITE, sharedNoteId)).rejects.toThrow(RLS);
+      await expect(respond(ENT_B_ADMIN, sharedNoteId)).rejects.toThrow(RLS);
+      // 企業は監査法人の行（review_notes）を更新できない
+      const updated = await h.asUser(
+        T_AUTHOR,
+        `update review_notes set status = 'cleared' where id = $1 returning id`,
+        [sharedNoteId],
+      );
+      expect(updated).toHaveLength(0);
+      // 別法人は回答を読めない
+      expect(
+        await h.asUser(
+          FIRM_B_MANAGER,
+          'select id from review_note_responses where review_note_id = $1',
+          [sharedNoteId],
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('写しは取り下げ以外に変更できず、取り下げは 1 回だけ。取り下げた写しにはコメントできない', async () => {
+      await expect(
+        h.asUser(ENT_A_ADMIN, `update shared_report_copies set copy_hash = 'x' where id = $1`, [
+          copyId,
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      const withdrawn = await h.asUser(
+        ENT_A_ADMIN,
+        `update shared_report_copies set withdrawn_at = now(), withdrawn_by = $1 where id = $2 returning id`,
+        [ENT_A_ADMIN, copyId],
+      );
+      expect(withdrawn).toHaveLength(1);
+      await expect(
+        h.asUser(
+          ENT_A_ADMIN,
+          `update shared_report_copies set withdrawn_at = now(), withdrawn_by = $1 where id = $2`,
+          [ENT_A_ADMIN, copyId],
+        ),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asSuperuser('delete from shared_report_copies where id = $1', [copyId]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asUser(
+          FIRM_A_MANAGER,
+          `insert into review_notes
+             (engagement_id, assurance_firm_id, target_type, target_id, body, raised_by,
+              shared_with_client, target_copy_id, target_block_id, target_paragraph_id)
+           values ($1, $2, 'report_paragraph', $3, '確認', $4, false, $3, $3, 'p1')`,
+          [ENG, ORG_IDS.aoba, copyId, FIRM_A_MANAGER],
+        ),
+      ).rejects.toThrow(/T4D_SHARE_SCOPE/);
+    });
+
+    it('回答は追記専用', async () => {
+      const [response] = await h.asSuperuser<{ id: string }>(
+        'select id from review_note_responses where review_note_id = $1',
+        [sharedNoteId],
+      );
+      await expect(
+        h.asSuperuser(`update review_note_responses set body = '改ざん' where id = $1`, [
+          response!.id,
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0051 出力の突合', () => {
+    it('出力の権限の無い人は記録できず、記録は追記専用', async () => {
+      const insert = (actor: string) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into export_reconciliations
+             (organization_id, snapshot_id, source, format, file_sha256, checker_version, created_by)
+           values ($1, $2, 'generated_blocked', 'docx', $3, 'test-1', $4) returning id`,
+          [ORG_A, FY2025_APPROVED_SNAPSHOT_ID, 'a'.repeat(64), actor],
+        );
+      await expect(insert(ENT_A_SITE)).rejects.toThrow(RLS);
+      const [row] = await insert(ENT_A_ADMIN);
+      expect(
+        await h.asUser(ENT_B_ADMIN, 'select id from export_reconciliations where id = $1', [
+          row!.id,
+        ]),
+      ).toHaveLength(0);
+      await expect(
+        h.asSuperuser('update export_reconciliations set mismatch_count = 1 where id = $1', [
+          row!.id,
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0053・0054 XBRL', () => {
+    it('タクソノミのマスターは読めるが、利用者は書けない', async () => {
+      expect(
+        await h.asUser(ENT_A_ADMIN, 'select id from xbrl_concepts where package_id = $1 limit 1', [
+          XBRL_SAMPLE_PACKAGE_ID,
+        ]),
+      ).toHaveLength(1);
+      const updated = await h.asUser(
+        ENT_A_ADMIN,
+        `update xbrl_taxonomy_packages set filing_ready = true where id = $1 returning id`,
+        [XBRL_SAMPLE_PACKAGE_ID],
+      );
+      expect(updated).toHaveLength(0);
+    });
+
+    it('他社は対応付けを読めない。作った人は確定できず、承認権限者だけが本人名義で確定する', async () => {
+      expect(
+        await h.asUser(ENT_B_ADMIN, 'select id from xbrl_tag_mappings where organization_id = $1', [
+          ORG_A,
+        ]),
+      ).toHaveLength(0);
+      const candidate = TRIAL_XBRL_MAPPING_IDS.scope2Candidate;
+      // 編集権限だけの人（作成者）は確定できない
+      await expect(
+        h.asUser(
+          T_AUTHOR,
+          `update xbrl_tag_mappings set status = 'confirmed', confirmed_by = $1, confirmed_at = now()
+            where id = $2`,
+          [T_AUTHOR, candidate],
+        ),
+      ).rejects.toThrow(/T4D_XBRL_FORBIDDEN|xbrl_tag_mappings_confirm_sod/);
+      // 別の人の名義では確定できない
+      await expect(
+        h.asUser(
+          ENT_A_APPROVER,
+          `update xbrl_tag_mappings set status = 'confirmed', confirmed_by = $1, confirmed_at = now()
+            where id = $2`,
+          [ENT_A_ADMIN, candidate],
+        ),
+      ).rejects.toThrow(/T4D_ACTOR_MUST_BE_SELF/);
+      const confirmed = await h.asUser(
+        ENT_A_APPROVER,
+        `update xbrl_tag_mappings set status = 'confirmed', confirmed_by = $1, confirmed_at = now(),
+                updated_by = $1
+          where id = $2 returning id`,
+        [ENT_A_APPROVER, candidate],
+      );
+      expect(confirmed).toHaveLength(1);
+    });
+
+    it('対応付けの履歴は追記専用', async () => {
+      const [event] = await h.asSuperuser<{ id: string }>(
+        'select id from xbrl_tag_mapping_events where organization_id = $1 limit 1',
+        [ORG_A],
+      );
+      await expect(
+        h.asSuperuser(`update xbrl_tag_mapping_events set reason = 'x' where id = $1`, [event!.id]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0055 トライアルの評価', () => {
+    const scenario = trialScenarioId('TS-01');
+
+    it('計画・判定は組織の管理者だけ。他社は読めない', async () => {
+      await expect(
+        h.asUser(
+          ENT_A_SITE,
+          `insert into trial_programs (organization_id, name, created_by, updated_by)
+           values ($1, '計画（テスト）', $2, $2)`,
+          [ORG_A, ENT_A_SITE],
+        ),
+      ).rejects.toThrow(RLS);
+      await expect(
+        h.asUser(
+          ENT_A_SITE,
+          `insert into trial_scenario_judgements (organization_id, scenario_id, judgement, reason, judged_by)
+           values ($1, $2, 'pass', '理由', $3)`,
+          [ORG_A, scenario, ENT_A_SITE],
+        ),
+      ).rejects.toThrow(RLS);
+      expect(
+        await h.asUser(
+          ENT_B_ADMIN,
+          'select id from trial_scenario_runs where organization_id = $1',
+          [ORG_A],
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('実施記録は組織メンバー本人の名義だけで、追記専用', async () => {
+      const insert = (actor: string, performedBy: string) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into trial_scenario_runs (organization_id, scenario_id, performed_by, completion)
+           values ($1, $2, $3, 'self') returning id`,
+          [ORG_A, scenario, performedBy],
+        );
+      await expect(insert(ENT_A_SITE, ENT_A_ADMIN)).rejects.toThrow(RLS);
+      await expect(insert(ENT_B_ADMIN, ENT_B_ADMIN)).rejects.toThrow(RLS);
+      const [run] = await insert(ENT_A_SITE, ENT_A_SITE);
+      const updated = await h.asUser(
+        ENT_A_ADMIN,
+        `update trial_scenario_runs set comment = '改ざん' where id = $1 returning id`,
+        [run!.id],
+      );
+      expect(updated).toHaveLength(0);
+      await expect(
+        h.asSuperuser('delete from trial_scenario_runs where id = $1', [run!.id]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+
+    it('フィードバックは本人名義で投稿でき、トリアージ（更新）は管理者だけ', async () => {
+      const [item] = await h.asUser<{ id: string }>(
+        ENT_A_SITE,
+        `insert into trial_feedback_items (organization_id, kind, channel, title, created_by, updated_by)
+         values ($1, 'question', 'in_app', '質問（テスト）', $2, $2) returning id`,
+        [ORG_A, ENT_A_SITE],
+      );
+      const bySite = await h.asUser(
+        ENT_A_SITE,
+        `update trial_feedback_items set status = 'triaged' where id = $1 returning id`,
+        [item!.id],
+      );
+      expect(bySite).toHaveLength(0);
+      const byAdmin = await h.asUser(
+        ENT_A_ADMIN,
+        `update trial_feedback_items set status = 'triaged', updated_by = $1 where id = $2 returning id`,
+        [ENT_A_ADMIN, item!.id],
+      );
+      expect(byAdmin).toHaveLength(1);
+    });
+  });
+
+  describe('0056 招待の担当拠点・データ取扱条件', () => {
+    it('招待の担当拠点に別の組織の拠点は入れられない', async () => {
+      const [otherUnit] = await h.asSuperuser<{ id: string }>(
+        'select id from organization_units where organization_id = $1 limit 1',
+        [ORG_B],
+      );
+      await expect(
+        h.asUser(
+          ENT_A_ADMIN,
+          `insert into invitations (organization_id, email, role_keys, expires_at, unit_scope_ids, created_by)
+           values ($1, 'invitee@fictional.invalid', '{site_contributor}', now() + interval '7 days', $2::uuid[], $3)`,
+          [ORG_A, `{${otherUnit!.id}}`, ENT_A_ADMIN],
+        ),
+      ).rejects.toThrow(/T4D_TENANT_SCOPE/);
+      const ok = await h.asUser(
+        ENT_A_ADMIN,
+        `insert into invitations (organization_id, email, role_keys, expires_at, unit_scope_ids, created_by)
+         values ($1, 'invitee@fictional.invalid', '{site_contributor}', now() + interval '7 days', $2::uuid[], $3)
+         returning id`,
+        [ORG_A, `{${UNIT_IDS.east}}`, ENT_A_ADMIN],
+      );
+      expect(ok).toHaveLength(1);
+    });
+
+    it('データ取扱条件の版は管理者が本人名義で追記するだけ', async () => {
+      const insert = (actor: string, versionNo: number) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into organization_data_terms (organization_id, version_no, created_by)
+           values ($1, $2, $3) returning id`,
+          [ORG_A, versionNo, actor],
+        );
+      await expect(insert(ENT_A_SITE, 90)).rejects.toThrow(RLS);
+      const [row] = await insert(ENT_A_ADMIN, 91);
+      await expect(
+        h.asSuperuser(`update organization_data_terms set note = 'x' where id = $1`, [row!.id]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0057 CDP オプション', () => {
+    it('組織メンバーは参照だけ。顧客の管理者でも書けない。他社のオプションは見えない', async () => {
+      expect(
+        await h.asUser(
+          ENT_A_ADMIN,
+          'select id from organization_options where organization_id = $1',
+          [ORG_A],
+        ),
+      ).toHaveLength(1);
+      expect(
+        await h.asUser(
+          ENT_B_ADMIN,
+          'select id from organization_options where organization_id = $1',
+          [ORG_A],
+        ),
+      ).toHaveLength(0);
+      const updated = await h.asUser(
+        ENT_B_ADMIN,
+        `update organization_options set enabled = true where organization_id = $1 returning id`,
+        [ORG_B],
+      );
+      expect(updated).toHaveLength(0);
+      await expect(
+        h.asUser(
+          ENT_A_ADMIN,
+          `insert into organization_options (organization_id, option_key, enabled) values ($1, 'cdp', true)`,
+          [ORG_B],
+        ),
+      ).rejects.toThrow(RLS);
+    });
+  });
+
+  describe('0058 テナントの終了（削除の保守関数）', () => {
+    it('authenticated・service_role は保守関数を実行できない', async () => {
+      const denied = await h.expectDenied(
+        ENT_A_ADMIN,
+        `select t4d.offboard_organization($1, 'AOMI')`,
+        [ORG_A],
+      );
+      expect(denied).toMatch(/permission denied/i);
+      await h.db.exec('begin;');
+      try {
+        await h.db.exec('set local role service_role;');
+        await expect(
+          h.db.query(`select t4d.offboard_organization($1, 'AOMI')`, [ORG_A]),
+        ).rejects.toThrow(/permission denied/i);
+      } finally {
+        await h.db.exec('rollback;');
+      }
+    });
+
+    it('設定（GUC）を自分で立てても、関数の外では追記専用の行を消せない', async () => {
+      const [row] = await h.asSuperuser<{ id: string }>(
+        'select id from organization_data_terms where organization_id = $1 limit 1',
+        [ORG_A],
+      );
+      await h.db.exec('begin;');
+      try {
+        await h.db.exec('set local role service_role;');
+        await h.db.query(`select set_config('t4d.offboarding_organization_id', $1, true)`, [ORG_A]);
+        await h.db
+          .query('delete from organization_data_terms where id = $1', [row!.id])
+          .catch(() => undefined);
+      } finally {
+        await h.db.exec('rollback;');
+      }
+      const still = await h.asSuperuser('select id from organization_data_terms where id = $1', [
+        row!.id,
+      ]);
+      expect(still).toHaveLength(1);
+      // 利用者の JWT でも同じ（DELETE の権限自体が無い）
+      await h.db.exec('begin;');
+      try {
+        await h.db.query(`select set_config('request.jwt.claims', $1, true)`, [
+          JSON.stringify({ sub: ENT_A_ADMIN, role: 'authenticated' }),
+        ]);
+        await h.db.exec('set local role authenticated;');
+        await h.db.query(`select set_config('t4d.offboarding_organization_id', $1, true)`, [ORG_A]);
+        await expect(
+          h.db.query('delete from organization_data_terms where id = $1', [row!.id]),
+        ).rejects.toThrow(/permission denied/i);
+      } finally {
+        await h.db.exec('rollback;');
+      }
+    });
+
+    it('保証側の案件が残る組織・確認コードの不一致は止まる', async () => {
+      await expect(
+        h.asSuperuser(`select t4d.offboard_organization($1, 'AOMI')`, [ORG_A]),
+      ).rejects.toThrow(/T4D_OFFBOARD_(BLOCKED|CONFIRM_MISMATCH)/);
+      await expect(
+        h.asSuperuser(`select t4d.offboard_organization($1, 'WRONG-CODE')`, [ORG_B]),
+      ).rejects.toThrow(/T4D_OFFBOARD_CONFIRM_MISMATCH/);
+    });
+
+    it('使い捨ての組織は関数の所有者だけが削除でき、記録には顧客の内容を残さない', async () => {
+      const tmp = fid('organization', 'TMP-OFFBOARD');
+      await h.asSuperuser(
+        `insert into organizations (id, type, name, code) values ($1, 'enterprise', '終了テスト（架空）', 'TMP-OFF')`,
+        [tmp],
+      );
+      await h.asSuperuser(
+        `insert into organization_data_terms (organization_id, version_no, created_by) values ($1, 1, $2)`,
+        [tmp, ENT_A_ADMIN],
+      );
+      await h.asSuperuser(
+        `insert into organization_options (organization_id, option_key, enabled) values ($1, 'cdp', false)`,
+        [tmp],
+      );
+      const [result] = await h.asSuperuser<{ id: string }>(
+        `select t4d.offboard_organization($1, 'TMP-OFF', null, 'テスト') as id`,
+        [tmp],
+      );
+      expect(result!.id).toMatch(/^[0-9a-f-]{36}$/);
+      const left = await h.asSuperuser<{ count: string }>(
+        `select (select count(*) from organization_data_terms where organization_id = $1)
+              + (select count(*) from organization_options where organization_id = $1) as count`,
+        [tmp],
+      );
+      expect(Number(left[0]!.count)).toBe(0);
+      const [org] = await h.asSuperuser<{ deleted_at: string | null }>(
+        'select deleted_at from organizations where id = $1',
+        [tmp],
+      );
+      expect(org!.deleted_at).not.toBeNull();
+      const [record] = await h.asSuperuser<{
+        organization_code_hash: string;
+        table_counts: object;
+      }>(
+        'select organization_code_hash, table_counts from tenant_lifecycle_records where id = $1',
+        [result!.id],
+      );
+      expect(record!.organization_code_hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(JSON.stringify(record)).not.toContain('TMP-OFF');
+      expect(JSON.stringify(record)).not.toContain('終了テスト');
+      // 利用者は削除の記録を読めない
+      expect(await h.asUser(ENT_A_ADMIN, 'select id from tenant_lifecycle_records')).toHaveLength(
+        0,
+      );
+      // 関数の外では、追記専用の行の削除は引き続き止まる
+      const [terms] = await h.asSuperuser<{ id: string }>(
+        'select id from organization_data_terms where organization_id = $1 limit 1',
+        [ORG_A],
+      );
+      await expect(
+        h.asSuperuser('delete from organization_data_terms where id = $1', [terms!.id]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+});

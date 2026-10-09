@@ -15,6 +15,10 @@ import {
   type BlockBlocker,
 } from '@/lib/domain/disclosure-status';
 import { isOldRefKept, workingBodyInEffect } from '@/lib/domain/disclosure-block';
+import {
+  countByCategory,
+  type RequirementCoverageCategory,
+} from '@/lib/domain/requirement-coverage';
 import { unresolvedNarrativeFields } from '@/lib/domain/narrative-template';
 import { daysUntilJst } from '@/lib/format/datetime';
 import type { DbClient, Query, Row, TableName } from '@/lib/repositories/types';
@@ -239,6 +243,8 @@ export interface FrameworkProgressRow {
   /** 承認済みだが引用先に新しい版があり、再確認が必要な要求事項 */
   staleApprovedItemCount: number;
   blockCount: number;
+  /** 5 区分の件数（要求事項タブと同じ関数。適用すると確定した基準だけ。それ以外は 0） */
+  coverageCounts: Record<RequirementCoverageCategory, number>;
 }
 
 export interface HomeProgress {
@@ -258,6 +264,12 @@ export interface HomeProgress {
   /** 適用判断が確定していない基準の数（別枠で示す。分母から黙って外さない） */
   notAssessedCount: number;
   excludedFrameworkCount: number;
+  /**
+   * 5 区分の件数（トライアル対応 NF-03。要求事項タブ・対応表と同じ関数で導く。保存しない）。
+   * 分母（coverageTotal）は適用すると確定した基準に収録された要求事項の全件（対象外・未判定も含む）
+   */
+  coverageCounts: Record<RequirementCoverageCategory, number>;
+  coverageTotal: number;
   rows: FrameworkProgressRow[];
 }
 
@@ -993,6 +1005,7 @@ export async function loadDisclosureHome(
         approvedItemCount: inScope ? summary.approvedOfApplicable : 0,
         staleApprovedItemCount: staleApproved,
         blockCount: fwBlocks.length,
+        coverageCounts: inScope ? summary.coverageCounts : countByCategory([]),
       };
     })
     .sort((a, b) => Number(b.inScope) - Number(a.inScope) || a.label.localeCompare(b.label, 'ja'));
@@ -1007,6 +1020,11 @@ export async function loadDisclosureHome(
     notAssessedItemCount: inScopeRows.reduce((sum, r) => sum + r.notAssessedItemCount, 0),
     notAssessedCount: rows.filter((r) => !r.decided).length,
     excludedFrameworkCount: rows.filter((r) => r.excluded).length,
+    coverageCounts: sumCoverage(inScopeRows.map((r) => r.coverageCounts)),
+    coverageTotal: inScopeRows.reduce(
+      (sum, r) => sum + Object.values(r.coverageCounts).reduce((a, n) => a + n, 0),
+      0,
+    ),
     rows,
   };
 
@@ -1034,6 +1052,18 @@ export async function loadDisclosureHome(
     progress,
     unitSubmissions,
   };
+}
+
+function sumCoverage(
+  counts: ReadonlyArray<Record<RequirementCoverageCategory, number>>,
+): Record<RequirementCoverageCategory, number> {
+  const total = countByCategory([]);
+  for (const count of counts) {
+    for (const key of Object.keys(total) as RequirementCoverageCategory[]) {
+      total[key] += count[key];
+    }
+  }
+  return total;
 }
 
 function latestRequest(

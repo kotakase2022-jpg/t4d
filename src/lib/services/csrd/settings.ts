@@ -468,7 +468,15 @@ export interface UpsertCsrdDmaIroInput extends CsrdIroInput {
   topic: string;
   /** 既存の IRO を直すときの ID。省略・null は追加 */
   iroId?: Uuid | null;
+  /**
+   * 方針・取組のメモ（0052。インパクト・リスク・機会の台帳 NF-10）。省略（undefined）は今の値のまま。
+   * Demo の Cookie の検査と同じく 400 字まで
+   */
+  policyActionNote?: string;
 }
+
+/** 方針・取組のメモの上限（Demo の Cookie の検査 demo-csrd-checks.ts と同じ値） */
+export const IRO_POLICY_NOTE_MAX = 400;
 
 /**
  * IRO を追加・更新する。形の検査（validateIroShape）を通らなければ ValidationError。
@@ -494,6 +502,10 @@ export async function upsertCsrdDmaIro(
   };
   const errors = validateIroShape(shape);
   if (errors.length > 0) throw new ValidationError(errors.join(' '));
+  const policyActionNote =
+    input.policyActionNote === undefined
+      ? undefined
+      : cleanText(input.policyActionNote, IRO_POLICY_NOTE_MAX, '方針・取組のメモ');
 
   const now = new Date().toISOString();
   const existing = input.iroId ? await db.findById('csrdDmaIros', input.iroId) : null;
@@ -551,6 +563,7 @@ export async function upsertCsrdDmaIro(
   if (existing) {
     saved = await db.update('csrdDmaIros', existing.id, {
       ...values,
+      ...(policyActionNote === undefined ? {} : { policyActionNote }),
       updatedAt: now,
       updatedBy: ctx.userId,
     });
@@ -565,6 +578,9 @@ export async function upsertCsrdDmaIro(
       reportingPeriodId: period.id,
       matterId: matter.id,
       ...values,
+      // 根拠の引用位置（0052）は空から始める（定性情報と同じ引用位置を後から結ぶ）。方針のメモは入力のまま
+      sourceAnchorIds: [],
+      policyActionNote: policyActionNote ?? '',
       deletedAt: null,
       createdAt: now,
       updatedAt: now,

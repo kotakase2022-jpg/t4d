@@ -1,4 +1,12 @@
-import { BadgeCheck, CheckCheck, ClipboardCheck, History, Info } from 'lucide-react';
+import Link from 'next/link';
+import {
+  ArrowLeftRight,
+  BadgeCheck,
+  CheckCheck,
+  ClipboardCheck,
+  History,
+  Info,
+} from 'lucide-react';
 import { PageActions } from '@/components/shared/page-actions';
 import { Collapsible } from '@/components/ui/collapsible';
 import type { ParagraphDiff } from '@/lib/domain/disclosure-block';
@@ -33,6 +41,7 @@ export function ReviewPanel({
   paragraphs,
   paragraphNames,
   diff,
+  diffBase,
   history,
 }: {
   projectId: string;
@@ -43,8 +52,19 @@ export function ReviewPanel({
   paragraphs: Array<{ id: string; label: string }>;
   /** 段落 ID → 表示名（本文の中の位置。内部の段落 ID は出さない） */
   paragraphNames: Record<string, string>;
-  /** 前の版からの差分（依頼で固定した版） */
+  /** 比較元の版からの差分（依頼で固定した版） */
   diff: ParagraphDiff[] | null;
+  /**
+   * 差分の比較元（トライアル対応 NF-17）。再承認では既定で「前回承認した版」、切り替えで「直前の版」。
+   * switchHref は両方があるときだけ
+   */
+  diffBase?: {
+    label: string;
+    switchHref: string | null;
+    switchLabel: string;
+    /** 切り替えて来たとき（?diff=）は開いて描く */
+    openByDefault: boolean;
+  } | null;
   history: EditorReviewRequest[];
 }) {
   const past = history.filter((r) => r.id !== request?.id);
@@ -133,7 +153,24 @@ export function ReviewPanel({
           )}
 
           {diff && (
-            <Collapsible variant="plain" summary="前の版からの差分を表示" className="mt-1">
+            <Collapsible
+              variant="plain"
+              summary={`${diffBase?.label ?? '前の版'}からの差分を表示`}
+              defaultOpen={diffBase?.openByDefault ?? false}
+              className="mt-1"
+            >
+              {diffBase?.switchHref && (
+                <p className="mb-1 text-caption">
+                  <Link
+                    href={diffBase.switchHref}
+                    scroll={false}
+                    className="inline-flex items-center gap-1 text-brand-800 hover:underline"
+                  >
+                    <ArrowLeftRight className="size-3" aria-hidden="true" />
+                    {diffBase.switchLabel}
+                  </Link>
+                </p>
+              )}
               <ol className="space-y-1">
                 {diff
                   .filter((d) => d.kind !== 'unchanged')
@@ -163,7 +200,9 @@ export function ReviewPanel({
                     </li>
                   ))}
                 {diff.every((d) => d.kind === 'unchanged') && (
-                  <li className="text-ink-muted">前の版から本文の変更はありません。</li>
+                  <li className="text-ink-muted">
+                    {diffBase?.label ?? '前の版'}から本文の変更はありません。
+                  </li>
                 )}
               </ol>
             </Collapsible>

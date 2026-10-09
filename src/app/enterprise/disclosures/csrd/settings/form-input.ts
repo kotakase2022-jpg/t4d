@@ -133,6 +133,9 @@ export function parseIroForm(form: FormLike): UpsertCsrdDmaIroInput {
     affectedStakeholders: text(form, 'affectedStakeholders'),
     // 関連するインパクト IRO はリスク・機会だけが持つ
     relatedImpactIroId: isImpact ? null : optionalText(form, 'relatedImpactIroId'),
+    // 方針・取組のメモ（0052）。欄が無いフォームから送られたときは今の値のまま（undefined）
+    policyActionNote:
+      form.get('policyActionNote') === null ? undefined : text(form, 'policyActionNote'),
   };
 }
 

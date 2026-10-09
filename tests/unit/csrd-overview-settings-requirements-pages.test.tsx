@@ -501,7 +501,9 @@ describe('CSRD 設定（ダブル・マテリアリティ）', () => {
       expectOutsideDetails(screen.getByRole('heading', { level: 2, name }));
     }
     // 改正 ESRS が未発効であることは、閉じていても summary で見える
-    const revised = screen.getByText(/2026-07-03 採択の改正（簡素化）ESRS は官報掲載まで未発効/);
+    const revised = screen.getByText(
+      /2026-07-03 採択の改正（簡素化）ESRS は官報掲載の報道あり（一次資料で確認中）・未発効/,
+    );
     expect(inClosedDetails(revised)).toBe(true);
     expect(summaryOf(revised)).toContain(
       '改正 ESRS（2026-07-03 採択）は未発効・本サンプルに未反映',
@@ -718,7 +720,9 @@ describe('CSRD 要求事項の評価', () => {
     const line = screen.getByText(/改正 ESRS（2026-07-03 採択）は未発効・本サンプルに未反映/);
     expectOutsideDetails(line);
     expect(line.textContent).toContain('SSBJ は財務的重要性のみ（シングル）');
-    expect(inClosedDetails(screen.getByText(/官報掲載まで未発効/))).toBe(true);
+    expect(
+      inClosedDetails(screen.getByText(/官報掲載の報道あり（一次資料で確認中）・未発効/)),
+    ).toBe(true);
 
     const funnel = screen.getByRole('list', { name: '評価対象の件数の流れ' });
     expectOutsideDetails(funnel);

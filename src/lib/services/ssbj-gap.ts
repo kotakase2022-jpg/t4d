@@ -26,6 +26,7 @@ import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
   DataPoint,
+  DisclosureFrameworkVersion,
   DisclosureItem,
   IsoDate,
   MaterialityCategory,
@@ -96,6 +97,8 @@ export interface SsbjAreaSummary {
 
 export interface SsbjOverview {
   versionLabel: string;
+  /** 設定で版を固定しているか（NF-12。false は公開中の版を読んでいる） */
+  versionPinned: boolean;
   isFixture: boolean;
   /**
    * 収録範囲の注記（例: 一般33・気候96・実務対応4 の計133項目。ユニバーサル基準は未収録）。
@@ -169,6 +172,57 @@ async function sectionPrefixesFor(
   return prefixes.length > 0 ? prefixes : null;
 }
 
+export interface SsbjVersionResolution {
+  /** この年度で使う版（設定で固定した版。固定していなければ公開中の版） */
+  version: DisclosureFrameworkVersion;
+  /** 設定で版を固定しているか（0049 の ssbj_analysis_settings.framework_version_id） */
+  pinned: boolean;
+  /** 公開中の版（固定した版より新しい版があるかの判定に使う） */
+  published: DisclosureFrameworkVersion;
+  /** SSBJ の全版（新しい順） */
+  versions: DisclosureFrameworkVersion[];
+}
+
+/**
+ * その年度の SSBJ の基準の版（トライアル対応 NF-12・X-13）。設定の確定時に固定した版を読み、
+ * 新しい版を足しても過年度の画面（対応状況・要求事項・ドラフト）が変わらないようにする。
+ * 固定していない年度（設定が未確定・以前のデータ）は公開中の版（null＝公開中の版）
+ */
+export async function resolveSsbjVersion(
+  db: DbClient,
+  organizationId: Uuid,
+  reportingPeriodId: Uuid,
+): Promise<SsbjVersionResolution | null> {
+  const frameworks = await db.select('frameworks', { where: { key: 'ssbj' }, limit: 1 });
+  const framework = frameworks[0];
+  if (!framework) return null;
+  const versions = await db.select('frameworkVersions', {
+    where: { frameworkId: framework.id },
+    orderBy: { column: 'year', dir: 'desc' },
+  });
+  const published = versions.find((v) => v.status === 'published') ?? versions[0];
+  if (!published) return null;
+  const settings = (
+    await db.select('ssbjAnalysisSettings', {
+      where: { organizationId, reportingPeriodId },
+      limit: 1,
+    })
+  )[0];
+  // 固定した版は SSBJ の版に限る（他の基準の版 ID が入っていても使わない）
+  const pinned = settings?.frameworkVersionId
+    ? versions.find((v) => v.id === settings.frameworkVersionId)
+    : undefined;
+  return { version: pinned ?? published, pinned: pinned !== undefined, published, versions };
+}
+
+/** 「対象年度×基準版」の表示（SSBJ の対応状況・設定・出力に出す） */
+export function ssbjVersionStamp(
+  periodLabel: string,
+  resolution: Pick<SsbjVersionResolution, 'version' | 'pinned'>,
+): string {
+  return `${periodLabel} × ${resolution.version.label}${resolution.pinned ? '（設定で固定）' : '（公開中の版・未固定）'}`;
+}
+
 /** SSBJ の要求事項マスター（disclosure_items）を取得する */
 async function loadSsbjItems(
   db: DbClient,
@@ -181,16 +235,11 @@ async function loadSsbjItems(
   versionLabel: string;
   isFixture: boolean;
   coverageNote: string | null;
+  versionPinned: boolean;
 } | null> {
-  const frameworks = await db.select('frameworks', { where: { key: 'ssbj' }, limit: 1 });
-  const framework = frameworks[0];
-  if (!framework) return null;
-  const versions = await db.select('frameworkVersions', {
-    where: { frameworkId: framework.id },
-    orderBy: { column: 'year', dir: 'desc' },
-  });
-  const current = versions.find((v) => v.status === 'published') ?? versions[0];
-  if (!current) return null;
+  const resolved = await resolveSsbjVersion(db, organizationId, reportingPeriodId);
+  if (!resolved) return null;
+  const current = resolved.version;
   const all = await db.select('disclosureItems', {
     where: { frameworkVersionId: current.id },
     orderBy: { column: 'sortOrder' },
@@ -207,7 +256,23 @@ async function loadSsbjItems(
     versionLabel: current.label,
     isFixture: current.isFixture,
     coverageNote: current.coverageNote ?? null,
+    versionPinned: resolved.pinned,
   };
+}
+
+/**
+ * その年度の SSBJ の対象（版と、分析条件で適用する基準）に入る要求事項か（読むだけ）。
+ * 入らない要求事項は一覧にも詳細（loadSsbjRequirementDetail）にも出ないため、他の画面からの行き先を
+ * 作る前に確かめる（行き先が 404 にならないように）
+ */
+export async function isSsbjItemInScope(
+  db: DbClient,
+  organizationId: Uuid,
+  reportingPeriodId: Uuid,
+  itemId: Uuid,
+): Promise<boolean> {
+  const master = await loadSsbjItems(db, organizationId, reportingPeriodId);
+  return master?.items.some((item) => item.id === itemId) ?? false;
 }
 
 /**
@@ -337,6 +402,8 @@ export async function loadSsbjRequirementViews(
   versionLabel: string;
   isFixture: boolean;
   coverageNote: string | null;
+  /** 設定で版を固定しているか（NF-12） */
+  versionPinned: boolean;
 } | null> {
   const master = await loadSsbjItems(db, ctx.workspace.organizationId, period.id);
   if (!master) return null;
@@ -400,6 +467,7 @@ export async function loadSsbjRequirementViews(
     versionLabel: master.versionLabel,
     isFixture: master.isFixture,
     coverageNote: master.coverageNote,
+    versionPinned: master.versionPinned,
   };
 }
 
@@ -473,16 +541,12 @@ export async function loadSsbjScopeMapping(
       orderBy: { column: 'createdAt', dir: 'asc' },
     }),
     (async () => {
-      const frameworks = await db.select('frameworks', { where: { key: 'ssbj' }, limit: 1 });
-      if (!frameworks[0]) return 0;
-      const versions = await db.select('frameworkVersions', {
-        where: { frameworkId: frameworks[0].id },
-        orderBy: { column: 'year', dir: 'desc' },
-      });
-      const current = versions.find((v) => v.status === 'published') ?? versions[0];
-      if (!current) return 0;
-      return (await db.select('disclosureItems', { where: { frameworkVersionId: current.id } }))
-        .length;
+      // 一覧と同じ版（設定で固定した版。無ければ公開中の版）で数える
+      const resolved = await resolveSsbjVersion(db, organizationId, period.id);
+      if (!resolved) return 0;
+      return (
+        await db.select('disclosureItems', { where: { frameworkVersionId: resolved.version.id } })
+      ).length;
     })(),
     db.select('disclosureMappings', { where: { organizationId } }),
     db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),
@@ -683,7 +747,7 @@ export async function loadSsbjOverview(
 ): Promise<SsbjOverview | null> {
   const loaded = await loadSsbjRequirementViews(db, ctx, period, options);
   if (!loaded) return null;
-  const { views, versionLabel, isFixture, coverageNote, masterCount } = loaded;
+  const { views, versionLabel, isFixture, coverageNote, masterCount, versionPinned } = loaded;
 
   // 対象外・重要性なしは整備度の分母から外す（対応する必要が無いため）
   const inScope = views.filter(isInScope);
@@ -753,6 +817,7 @@ export async function loadSsbjOverview(
 
   return {
     versionLabel,
+    versionPinned,
     isFixture,
     coverageNote,
     masterTotal: masterCount,

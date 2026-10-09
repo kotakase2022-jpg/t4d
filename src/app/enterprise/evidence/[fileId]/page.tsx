@@ -1,6 +1,15 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Download, Eye, FileText, Highlighter, Lock, PenLine, Tag } from 'lucide-react';
+import {
+  AlertTriangle,
+  Download,
+  Eye,
+  FileText,
+  Highlighter,
+  Lock,
+  PenLine,
+  Tag,
+} from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
 import { Notice } from '@/components/shared/notice';
 import { PageActions } from '@/components/shared/page-actions';
@@ -8,6 +17,7 @@ import { PageHeader } from '@/components/shared/page-header';
 import { DocumentPreview } from '@/components/shared/document-preview';
 import { ScanStatusBadge } from '@/components/shared/scan-status-badge';
 import { Section } from '@/components/shared/section';
+import { SemanticBadge } from '@/components/shared/status-badge';
 import { EmptyState, PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,6 +27,8 @@ import { fileTypeLabel } from '@/lib/domain/evidence-limits';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
 import { parseUploadedFile } from '@/lib/imports/parsers';
 import { isDisclosureFirstEnabled } from '@/lib/services/feature-settings';
+import { BLOCK_USAGE_LABELS, listFileUsage, type FileUsage } from '@/lib/services/impact';
+import { SNAPSHOT_KIND_DISPLAY } from '@/lib/services/report-snapshot';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import {
   CONFIDENTIALITY_LABELS,
@@ -25,6 +37,7 @@ import {
   usagePurposeLabel,
 } from '@/lib/services/source-anchor';
 import { readEvidenceFileBytes } from '@/lib/storage';
+import { usageItemCount, usageSummaryText } from '../../data/[dataPointId]/usage';
 import { evidenceTitles } from '../titles';
 import { ManualExcerptForm } from './manual-excerpt-form';
 
@@ -44,6 +57,8 @@ export async function generateMetadata() {
  * - 実体は同一オリジンの /api/files/inline から取得（CSP・認可の観点）。
  * - Demo Mode の Fixture ファイルは実体を持たないため、抽出済み Fragment を表示する
  *   （「動いているように見えるだけ」を避け、実体が無いことは明示する）。
+ * - トライアル対応（NF-16）: L2 に「この資料を使っている原稿・レポート」（引用位置を経由して引用している
+ *   節・定性情報・固定したスナップショットと、引用中の版が資料の最新版か）。読むだけで保存しない
  */
 export default async function EvidenceViewerPage({
   params,
@@ -151,6 +166,8 @@ export default async function EvidenceViewerPage({
 
   // 引用の利用先（定性情報・原稿）の逆引きと、手動抜粋の可否
   const anchorUsages = full ? await listAnchorUsagesForFile(db, ctx, file.id) : [];
+  // この資料を使っている原稿・レポート（NF-16。読むだけ）
+  const fileUsage: FileUsage | null = full ? await listFileUsage(db, ctx, file.id) : null;
   const canWriteEvidence = can(ctx, 'enterprise.evidence.write');
   // 引用の利用先（定性情報・原稿の題名）は開示の内容。開示の閲覧権限が無い人には欄ごと出さない
   const canReadDisclosure = can(ctx, 'enterprise.disclosure.read');
@@ -613,6 +630,8 @@ export default async function EvidenceViewerPage({
             </Section>
           )}
 
+          {fileUsage && <FileUsageSection usage={fileUsage} />}
+
           {/* 履歴は既定で閉じる（見出しは常に見せる。docs/disclosure-first.md §10.4 B6） */}
           <Section
             id="evidence-versions"
@@ -641,5 +660,115 @@ export default async function EvidenceViewerPage({
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * この資料を使っている原稿・レポート（NF-16）。資料の引用位置を経由して引用している節（引用中の版が
+ * 資料の最新版か）・定性情報・この資料を固定したスナップショット。読むだけ
+ */
+function FileUsageSection({ usage }: { usage: FileUsage }) {
+  const count = usageItemCount(usage) + usage.narratives.length;
+  return (
+    <Section
+      id="file-usage"
+      collapsible
+      title={`この資料を使っている原稿・レポート（${count}）`}
+      summary={usageSummaryText(usage.counts)}
+    >
+      {usage.disclosureHidden ? (
+        <p className="flex items-start gap-1 text-small text-ink-muted">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          開示の閲覧権限が無いため、引用している原稿・レポートは表示しません（引用位置{' '}
+          {usage.anchorCount} 件）。
+        </p>
+      ) : count === 0 ? (
+        <EmptyState
+          kind="not-applicable"
+          size="compact"
+          title="この資料を使っている原稿・レポートはありません"
+          description="原稿・定性情報がこの資料を出典として引用すると、ここに影響先として表示します。"
+        />
+      ) : (
+        <div className="space-y-2 text-small">
+          {usage.blocks.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-ink">原稿の節（{usage.blocks.length}）</h3>
+              <ul className="divide-y divide-line">
+                {usage.blocks.map((b) => (
+                  <li key={b.blockId} className="py-1.5">
+                    <Link
+                      href={`/enterprise/disclosure-projects/${b.projectId}/blocks/${b.blockId}`}
+                      className="text-brand-800 underline"
+                    >
+                      {b.title}
+                    </Link>
+                    <span className="ml-1 text-caption text-ink-muted">
+                      {b.projectName}・{b.statusLabel}・
+                      {b.usage.map((u) => BLOCK_USAGE_LABELS[u]).join('・')}
+                    </span>
+                    <div className="mt-0.5">
+                      {b.upToDate ? (
+                        <SemanticBadge semantic="done" label="資料の最新版を引用" />
+                      ) : (
+                        <SemanticBadge semantic="blocked" label="上流に新版あり（資料）" />
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {usage.narratives.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-ink">定性情報（{usage.narratives.length}）</h3>
+              <ul className="space-y-0.5">
+                {usage.narratives.map((n) => (
+                  <li key={n.narrativeVersionId}>
+                    <Link
+                      href={`/enterprise/narratives/${n.narrativeRecordId}`}
+                      className="text-brand-800 underline"
+                    >
+                      {n.title}
+                    </Link>
+                    <span className="ml-1 text-caption text-ink-muted">
+                      {n.isCurrent ? '現在の版' : '過去の版'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {usage.snapshots.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-ink">
+                固定したレポート（{usage.snapshots.length}）
+              </h3>
+              <ul className="divide-y divide-line">
+                {usage.snapshots.map((s) => (
+                  <li key={s.snapshotId} className="py-1.5">
+                    <Link
+                      href={`/enterprise/disclosure-projects/${s.projectId}/snapshots/${s.snapshotId}`}
+                      className="text-brand-800 underline"
+                    >
+                      {SNAPSHOT_KIND_DISPLAY[s.snapshotKind]} No.{s.snapshotNo}
+                    </Link>
+                    <span className="ml-1 text-caption text-ink-muted">
+                      {formatJst(s.createdAt)}
+                      {s.sharedEngagementIds.length > 0
+                        ? `・保証側へ共有中 ${s.sharedEngagementIds.length} 案件`
+                        : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-caption text-ink-muted">
+                固定したレポートの内容は、資料に新しい版を登録しても変わりません。
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }

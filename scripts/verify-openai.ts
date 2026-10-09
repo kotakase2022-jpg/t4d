@@ -279,6 +279,38 @@ const INPUTS: Record<AiFeature, unknown> = {
       },
     ],
   },
+  requirementMappingSuggestion: {
+    targetKind: 'narrative_version',
+    targetText:
+      '取締役会は、気候関連のリスク及び機会への対応をサステナビリティ委員会から年 2 回報告を受けて監督している（架空）。',
+    candidates: [
+      {
+        itemId: '00000000-0000-4000-8000-000000000020',
+        itemCode: '40A-S01',
+        title: '（サンプル）気候関連のリスク及び機会の監督体制',
+        sample: true,
+      },
+      {
+        itemId: '00000000-0000-4000-8000-000000000021',
+        itemCode: '40A-S05',
+        title: '（サンプル）温室効果ガス排出量の目標',
+        sample: true,
+      },
+    ],
+  },
+  xbrlTagSuggestion: {
+    targets: [
+      {
+        targetKind: 'metric',
+        targetRef: '00000000-0000-4000-8000-000000000030',
+        label: 'Scope1 排出量',
+      },
+    ],
+    concepts: [
+      { localName: 'Scope1GhgEmissions', kind: 'item', labelJa: 'Scope1 排出量（サンプル）' },
+      { localName: 'GovernanceTextBlock', kind: 'text_block', labelJa: 'ガバナンス（サンプル）' },
+    ],
+  },
 };
 
 const CONTEXT = {
@@ -322,6 +354,8 @@ async function runFeature(client: OpenAI, feature: AiFeature): Promise<Outcome> 
       { role: 'user', content: userContent },
     ],
     text: { format: zodTextFormat(schema, feature) },
+    // アプリ（openai-provider.ts）と同じく、提供元での保存を明示する（既定は保存しない）
+    store: process.env.OPENAI_STORE?.trim() === 'true',
   });
 
   const latencyMs = Date.now() - startedAt;

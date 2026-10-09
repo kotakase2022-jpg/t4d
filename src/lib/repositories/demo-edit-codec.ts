@@ -16,6 +16,13 @@ import {
   acceptCsrdEdit,
   isCsrdCheckedTable,
 } from './demo-csrd-checks';
+import {
+  TRIAL_APPEND_ONLY_TABLES,
+  TRIAL_DEFERRED_ORDER,
+  TRIAL_PERSISTED_TABLES,
+  acceptTrialEdit,
+  isTrialCheckedTable,
+} from './demo-trial-checks';
 import type {
   Approval,
   DataPoint,
@@ -259,6 +266,9 @@ const PERSISTED_TABLES = new Set<TableName>([
   'dataPoints',
   'dataPointVersions',
   'disclosureResponses',
+  // CDP の質問と指標の対応付け（確定・追加・外す）。1 回の操作で 1 行。持ち回さないと、確定した対応付けが
+  // 別のインスタンスで消える（T7。戻すときは demo-trial-checks.ts が CDP の質問・同じ組織・本人名義を検査）
+  'disclosureMappings',
   'metrics',
   'units',
   'notifications',
@@ -326,6 +336,11 @@ const PERSISTED_TABLES = new Set<TableName>([
   'periods',
   'campaigns',
   'campaignScopes',
+  // トライアル対応（2026-10。plan 付録 B）: 人の判断・コメント・共有・評価の記録だけを小さい形で載せる。
+  // 5 区分・対応表・トレース・Data Room・影響先・通知・XBRL の事実は導出し、書かない。
+  // 戻すときは demo-trial-checks.ts が DB と同じ検査（組織・権限・職務分離・本人名義・大きさ）を通す。
+  // メンバーシップは架空メンバーの担当拠点・状態の変更だけ（実在のデモ利用者の行・新しい行は戻さない）
+  ...TRIAL_PERSISTED_TABLES,
 ]);
 
 /**
@@ -349,6 +364,8 @@ const APPEND_ONLY_TABLES: ReadonlySet<string> = new Set([
   'exportArtifacts',
   'quantitativeImportBatches',
   'approvals',
+  // トライアル対応の追記専用の表（0049〜0057 の forbid_mutation）
+  ...TRIAL_APPEND_ONLY_TABLES,
 ]);
 
 /**
@@ -412,6 +429,8 @@ const DEFERRED_ORDER: Readonly<Record<string, number>> = {
   quantitativeImportBatches: 8,
   // CSRD: 事項 → IRO、評価 → 計画、事項 → 分析条件（DMA の確定の条件）。割当は指標・拠点の後
   ...CSRD_DEFERRED_ORDER,
+  // トライアル対応: 判断 → 履歴・申請、スナップショット → 共有した写し → コメント → 回答、道筋 → 段階
+  ...TRIAL_DEFERRED_ORDER,
 };
 
 /**
@@ -468,6 +487,15 @@ const SNAPSHOT_INDEPENDENT_TABLES: ReadonlySet<string> = new Set([
   // CSRD の表と割当は開示プロジェクトのスナップショットに含まれない
   ...CSRD_PERSISTED_TABLES,
   'metricAssignments',
+  'disclosureMappings',
+  // トライアル対応の表のうち、スナップショットの写し（v2 の判断の状態・承認の記録）に関わらないもの。
+  // 要求事項の判断・その履歴・対象外の申請は v2 の目録が参照するため、ここに入れない
+  ...TRIAL_PERSISTED_TABLES.filter(
+    (t) =>
+      t !== 'projectRequirementAssessments' &&
+      t !== 'projectRequirementAssessmentEvents' &&
+      t !== 'requirementExclusionEvents',
+  ),
 ]);
 
 /**
@@ -587,6 +615,8 @@ function applyOne(db: FixtureDb, edit: DemoEdit, ctx: ApplyContext): ApplyOutcom
     // ただし標準 CSV の確定の控えは、このインスタンスで検証しただけのバッチに重ねる（検証と確定が
     // 別のインスタンスに届いた後、確定の再送が検証したインスタンスに届く場合）
     if (row) {
+      if (edit.t === 'sharedReportCopies')
+        return applySharedCopyWithdrawal(db, edit, row, index, ctx);
       if (edit.t !== 'quantitativeImportBatches') return 'settled';
       const receipt = expandRow(edit.t, edit.v, db);
       if (!receipt || receipt.id !== edit.id) return 'settled';
@@ -624,6 +654,29 @@ function applyOne(db: FixtureDb, edit: DemoEdit, ctx: ApplyContext): ApplyOutcom
   }
   // 新規作成された行（コメントなど）は、そのまま足す
   return push(next);
+}
+
+/**
+ * 保証側へ共有した写しの取り下げを、このインスタンスに既にある写しに重ねる（トライアル対応 NF-20）。
+ * 写しは追記専用で、取り下げ（withdrawn_at・withdrawn_by を 1 回だけ入れる）だけが更新。取り下げを戻さないと、
+ * 共有したインスタンスでは保証側に写しが見え続ける。目録から写しを作り直し、取り下げ以外が同じときだけ重ねる
+ */
+function applySharedCopyWithdrawal(
+  db: FixtureDb,
+  edit: DemoEdit,
+  row: Record<string, unknown>,
+  index: number,
+  ctx: ApplyContext,
+): ApplyOutcome {
+  if (row.withdrawnAt !== null || edit.v.withdrawnAt === undefined || edit.v.withdrawnAt === null) {
+    return 'settled';
+  }
+  const expanded = expandRow(edit.t, edit.v, db, { budget: ctx.budget });
+  if (!expanded || expanded.id !== edit.id) return 'settled';
+  if (!acceptEdit(db, edit.t, row, expanded, ctx)) return 'settled';
+  const rows = db.sharedReportCopies as unknown as Array<Record<string, unknown>>;
+  rows[index] = expanded;
+  return 'applied';
 }
 
 /**
@@ -674,6 +727,14 @@ function mergeImportReceipt(
   };
 }
 
+/** トライアル対応で既存の表に足した列の既定値（DB の default と同じ） */
+const TRIAL_ADDED_COLUMN_DEFAULTS: Readonly<Record<string, Record<string, unknown>>> = {
+  csrdDmaIros: { sourceAnchorIds: [], policyActionNote: '' },
+  ssbjAnalysisSettings: { frameworkVersionId: null },
+  projectFrameworks: { taxonomyPackageId: null },
+  approvalRoutes: { purpose: 'default' },
+};
+
 /**
  * 以前のデプロイの Cookie に残った行を、今の列の形へそろえる。
  * 0039 より前に作られた Data Point・版の行は、値の区分・値の有無・理由の列を持たない。
@@ -683,6 +744,15 @@ export function normalizeLegacyRow(
   table: string,
   row: Record<string, unknown>,
 ): Record<string, unknown> {
+  // トライアル対応（0052・0054・0056）で足した列。以前のデプロイの Cookie の行には無い
+  const added = TRIAL_ADDED_COLUMN_DEFAULTS[table];
+  if (added) {
+    const out = { ...row };
+    for (const [key, value] of Object.entries(added)) {
+      if (out[key] === undefined) out[key] = structuredClone(value);
+    }
+    return out;
+  }
   if (table !== 'dataPoints' && table !== 'dataPointVersions') return row;
   const out = { ...row };
   if (out.valueKind === undefined) out.valueKind = 'actual';
@@ -962,6 +1032,22 @@ function acceptBlock(
   next: DisclosureBlock,
   ctx: ApplyContext,
 ): boolean {
+  // 対応する要求事項は節の基準の版のもの（0049 の t4d.block_requirement_items_guard と同じ）。
+  // 対応付けを変えた編集だけを見る（以前の行の対応付けはそのまま戻す）
+  const items = next.requirementItemIds;
+  if (!existing || JSON.stringify(existing.requirementItemIds) !== JSON.stringify(items ?? null)) {
+    if (
+      !Array.isArray(items) ||
+      items.length > 200 ||
+      !items.every((id) =>
+        db.disclosureItems.some(
+          (i) => i.id === id && i.frameworkVersionId === next.frameworkVersionId,
+        ),
+      )
+    ) {
+      return false;
+    }
+  }
   // 現在の版は、この節の版でなければならない（版も Cookie で持ち回すため、先に戻っている。
   // 押し出されて無いときは、画面が「版を読み込めない」として編集を止める）。
   // まだ戻っていない版でも、同じ Cookie の版の編集が別の節の版を名乗っていれば受け付けない
@@ -1121,6 +1207,13 @@ function acceptProjectFramework(
   existing: ProjectFramework | undefined,
   next: ProjectFramework,
 ): boolean {
+  // XBRL のプロファイル（0054）はマスターにあるパッケージだけ
+  if (
+    next.taxonomyPackageId != null &&
+    !db.xbrlTaxonomyPackages.some((p) => p.id === next.taxonomyPackageId)
+  ) {
+    return false;
+  }
   if (next.currentDecisionId === null) {
     // 確定した判断を外す操作は無い。判断なしで確定の区分（適用・対象外など）を名乗らせない
     if (existing?.currentDecisionId) return false;
@@ -1236,8 +1329,21 @@ function acceptNarrativeVersion(db: FixtureDb, next: NarrativeVersion): boolean 
   const period = db.periods.find((p) => p.id === next.reportingPeriodId);
   if (!period || period.organizationId !== next.organizationId) return false;
   // 根拠の引用位置は同じ組織のもの（先に戻しておく）
-  return next.sourceAnchorIds.every((id) =>
-    db.sourceAnchors.some((a) => a.id === id && a.organizationId === next.organizationId),
+  if (
+    !next.sourceAnchorIds.every((id) =>
+      db.sourceAnchors.some((a) => a.id === id && a.organizationId === next.organizationId),
+    )
+  ) {
+    return false;
+  }
+  // 説明するインパクト・リスク・機会も同じ組織のもの（0052 の t4d.narrative_iro_refs_guard と同じ）
+  const iroRefs = (next as { iroRefs?: unknown }).iroRefs ?? [];
+  return (
+    Array.isArray(iroRefs) &&
+    iroRefs.length <= 50 &&
+    iroRefs.every((id) =>
+      db.csrdDmaIros.some((i) => i.id === id && i.organizationId === next.organizationId),
+    )
   );
 }
 
@@ -1629,6 +1735,12 @@ function acceptEdit(
       // CSRD の表と割当（0044〜0046・収集項目）は DB の規則と同じ検査を通す
       if (isCsrdCheckedTable(table)) {
         return acceptCsrdEdit(db, table, existing, next, (organizationId, userId, permission) =>
+          hasPermission(db, organizationId, userId, permission),
+        );
+      }
+      // トライアル対応の表（0049〜0057）も DB の規則と同じ検査を通す
+      if (isTrialCheckedTable(table)) {
+        return acceptTrialEdit(db, table, existing, next, (organizationId, userId, permission) =>
           hasPermission(db, organizationId, userId, permission),
         );
       }

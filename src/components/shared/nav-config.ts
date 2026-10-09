@@ -36,7 +36,7 @@ import {
   Waypoints,
   Workflow,
 } from 'lucide-react';
-import type { PermissionKey } from '@/types/domain';
+import type { OrganizationOptionKey, PermissionKey } from '@/types/domain';
 
 export interface NavItem {
   label: string;
@@ -72,6 +72,16 @@ export interface NavItem {
   linkPermission?: PermissionKey;
   /** visibleNavTree が付ける印: 行のリンク先を最初の子に置き換えた（パレットに入口として出さない） */
   linkFallback?: true;
+  /**
+   * 契約オプション（organization_options）が有効な組織にだけ出す項目（plan K2 の例外: CDP の葉）。
+   * 契約のある組織の木は変えない。権限ではない（契約は役割の権限ではない。plan NF-38）
+   */
+  option?: OrganizationOptionKey;
+  /**
+   * グループの行だけに付ける。入口の画面（href）がオプションの画面のとき、オプションの無い組織では
+   * 行のリンク先を「出せる最初の子」にする（linkPermission と同じ置き換え。子は隠さない）
+   */
+  linkOption?: OrganizationOptionKey;
 }
 
 /**
@@ -164,7 +174,13 @@ export const ENTERPRISE_NAV: NavItem[] = [
           },
         ],
       },
-      { label: 'CDP', href: '/enterprise/disclosures/cdp', icon: FileSpreadsheet },
+      {
+        label: 'CDP',
+        href: '/enterprise/disclosures/cdp',
+        icon: FileSpreadsheet,
+        // CDP 対応オプションの契約が無い組織には出さない（plan K2・NF-38。契約のある組織の木は不変）
+        option: 'cdp',
+      },
       {
         // SSBJ と同じ画面構成。ただし重要性はダブル・マテリアリティ（設定は対応状況の工程①から入る）。
         // CSRD の画面はすべて開示の閲覧権限を求める（拠点担当などには出さない。開いても権限なしの画面になる）
@@ -452,6 +468,8 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
         label: 'その他の開示',
         href: '/enterprise/disclosures/cdp',
         icon: FileStack,
+        // 入口は CDP。CDP 対応オプションの無い組織では MSCI を入口にする（CDP の葉は出さない）
+        linkOption: 'cdp',
         keywords: ['CDP', 'MSCI', 'FTSE', '評価機関'],
         children: [
           legacyItem('/enterprise/disclosures/cdp', 'CDP'),
@@ -815,6 +833,8 @@ export function assuranceNav(engagementId: string | null): NavItem[] {
     ]),
     group('実施', FileSearch, [
       item('Data Room', 'data-room', FolderOpen, ['共有', 'snapshot']),
+      // 企業が共有した承認済みレポートの写し（plan K2 の例外: 「実施」に 1 葉。NF-20）
+      item('開示レポート', 'reports', FileText, ['開示レポート', '共有レポート', 'トレース']),
       item('母集団', 'population', Filter, ['population', '完全性']),
       item('サンプリング', 'sampling', ListChecks, ['sample', '抽出']),
       item('保証手続・調書', 'testing', FileSearch, ['test', '調書', 'workpaper']),
@@ -903,22 +923,47 @@ export function visibleNavTree(
   items: NavItem[],
   hiddenHrefs: readonly string[],
   hiddenPermissions: readonly PermissionKey[],
+  hiddenOptions: readonly OrganizationOptionKey[] = [],
 ): NavItem[] {
   const filterTree = (nodes: NavItem[]): NavItem[] =>
     nodes
       .filter(
         (node) =>
           !hiddenHrefs.includes(node.href) &&
-          !(node.permission && hiddenPermissions.includes(node.permission)),
+          !(node.permission && hiddenPermissions.includes(node.permission)) &&
+          !(node.option && hiddenOptions.includes(node.option)),
       )
       .map((node) => {
         const children = node.children ? filterTree(node.children) : undefined;
         const next: NavItem = children ? { ...node, children } : node;
-        if (node.linkPermission && hiddenPermissions.includes(node.linkPermission)) {
+        const linkHidden =
+          (node.linkPermission && hiddenPermissions.includes(node.linkPermission)) ||
+          (node.linkOption && hiddenOptions.includes(node.linkOption));
+        if (linkHidden) {
           const first = children?.find((child) => !child.secondary);
           if (first) return { ...next, href: first.href, linkFallback: true };
         }
         return next;
       });
   return filterTree(items);
+}
+
+/**
+ * 契約オプションが無いため出さない項目のオプション（Sidebar・Command Palette・パンくずが同じ一覧で隠す）。
+ * contracted は組織で有効なオプション（organization-options.ts の hasOption の結果）
+ */
+export function missingNavOptions(
+  items: NavItem[],
+  contracted: ReadonlySet<OrganizationOptionKey>,
+): OrganizationOptionKey[] {
+  const missing = new Set<OrganizationOptionKey>();
+  const walk = (nodes: NavItem[]) => {
+    for (const node of nodes) {
+      if (node.option && !contracted.has(node.option)) missing.add(node.option);
+      if (node.linkOption && !contracted.has(node.linkOption)) missing.add(node.linkOption);
+      walk(node.children ?? []);
+    }
+  };
+  walk(items);
+  return [...missing];
 }

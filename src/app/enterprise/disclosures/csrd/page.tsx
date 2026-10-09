@@ -37,6 +37,7 @@ import {
   CSRD_OPEN_HIGH_PRIORITY_QUERY,
   CSRD_REQUIREMENT_DATA_COLS,
 } from './requirements/form-input';
+import { CsrdScopeNote } from './_components/csrd-scope-note';
 
 export const metadata = { title: 'CSRD 対応状況' };
 
@@ -228,6 +229,7 @@ export default async function CsrdOverviewPage({
     <>
       <PageHeader
         title="CSRD 開示対応（ESRS）"
+        context={<CsrdScopeNote />}
         description={
           <span className="flex flex-wrap items-center gap-2">
             <span>

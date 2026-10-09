@@ -174,20 +174,34 @@ export interface ResponseStateInput {
   isAiDraft?: boolean;
   /** 採否の決まっていない AI 下書きがある（「不採用にする」を出す） */
   hasPendingAiDraft?: boolean;
+  /**
+   * 利用者が回答の現在の版を作った人（職務分離。トライアル対応 NF-39 C-07）。
+   * 作った人には下書きの承認を出さず、レビュー中の承認は理由付きで押せなくする
+   */
+  isCurrentVersionAuthor?: boolean;
 }
 
 /** サーバーの検査（disclosure-write.ts transitionDisclosureResponse）と同じ文 */
 export const AI_DRAFT_APPROVAL_REASON =
   'AI が生成したままの回答は承認できません。内容を確認し、編集して保存してから承認してください。';
 
+/** サーバーの検査（disclosure-write.ts transitionDisclosureResponse・DB トリガ 0057）と同じ意味の文 */
+export const RESPONSE_AUTHOR_APPROVAL_REASON =
+  '回答の現在の版を作成した人は承認できません。別の承認者に承認を依頼してください。';
+
 export function responseStateActions(input: ResponseStateInput): StateActionPlan<ResponseActionId> {
   const { status, can, hasResponse } = input;
   const canWrite = can('enterprise.disclosure.write');
   const canApprove = can('enterprise.disclosure.approve');
+  const isAuthor = Boolean(input.isCurrentVersionAuthor);
   const approve: StateAction<ResponseActionId> = {
     id: 'approve',
     label: '承認',
-    ...(input.isAiDraft ? { disabledReason: AI_DRAFT_APPROVAL_REASON } : {}),
+    ...(input.isAiDraft
+      ? { disabledReason: AI_DRAFT_APPROVAL_REASON }
+      : isAuthor
+        ? { disabledReason: RESPONSE_AUTHOR_APPROVAL_REASON }
+        : {}),
   };
   const aiMore: Array<StateAction<ResponseActionId> | false> = can('enterprise.ai.run')
     ? [
@@ -211,8 +225,9 @@ export function responseStateActions(input: ResponseStateInput): StateActionPlan
             hasResponse &&
             status === 'draft' && { id: 'request-review', label: 'レビュー依頼' },
         ],
-        // 作成と承認を兼ねる利用者が下書きのまま承認する経路は残し、「その他」へ置く（plan §6 B2）
-        [...aiMore, canApprove && hasResponse && status === 'draft' && approve],
+        // 下書きのまま承認する経路は「その他」へ置く（plan §6 B2）。現在の版を作った人には出さない
+        // （作成者が自分の下書きを承認する経路を外した。職務分離 NF-39 C-07。CSRD の回答も同じ）
+        [...aiMore, canApprove && hasResponse && status === 'draft' && !isAuthor && approve],
       );
     case 'in_review':
       return plan(

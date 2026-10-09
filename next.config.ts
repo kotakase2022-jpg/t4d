@@ -1,4 +1,21 @@
+import { execSync } from 'node:child_process';
 import type { NextConfig } from 'next';
+
+/**
+ * この環境の版（src/lib/build-info.ts）。Vercel はコミットを環境変数で渡す（設定は不要）。
+ * 手元のビルドは git から読む。読めなければ空にし、画面は「不明」と出す（ビルドは止めない）
+ */
+function buildCommit(): string {
+  const fromVercel = process.env.VERCEL_GIT_COMMIT_SHA;
+  if (fromVercel) return fromVercel.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return '';
+  }
+}
 
 /**
  * Secure headers.
@@ -22,6 +39,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  env: {
+    T4D_BUILD_COMMIT: buildCommit(),
+    T4D_BUILD_TIME: new Date().toISOString(),
+  },
   reactStrictMode: true,
   poweredByHeader: false,
   typescript: {

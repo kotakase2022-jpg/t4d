@@ -1,7 +1,8 @@
 /**
  * 機能（Server Action）→ その機能を通す E2E の対応表（docs/ui-redesign/plan.md §5.1-1・IF §7.4）。
  *
- * 初期値は docs/ui-redesign/inventory-features.md §3 の E2E 列（棚卸し 2026-10-07）。
+ * 初期値は docs/ui-redesign/inventory-features.md §3 の E2E 列（棚卸し 2026-10-07）。F145〜F201 はトライアル対応
+ * （2026-10。§3.14）で足した機能。
  * tests/unit/feature-coverage.test.ts が (a) §3 の全機能が表にあること、(b) 参照先の spec が実在すること、
  * (c) Action の名前が実在することを検査する。操作を L2 へ移して spec を直したら、ここも合わせて直す。
  * NO_E2E_YET は棚卸しの時点で E2E が無かった機能（再設計で壊しても E2E では気づけない。Stage C が足す）。
@@ -731,27 +732,27 @@ export const FEATURE_COVERAGE: Record<string, FeatureCoverage> = {
     specs: NO_E2E_YET,
   },
   F138: {
-    name: 'blocks/actions.ts:360 requestReviewAction',
+    name: 'blocks/actions.ts:371 requestReviewAction',
     action: 'requestReviewAction',
     specs: NO_E2E_YET,
   },
   F139: {
-    name: 'blocks/actions.ts:375 returnReviewAction',
+    name: 'blocks/actions.ts:386 returnReviewAction',
     action: 'returnReviewAction',
     specs: NO_E2E_YET,
   },
   F140: {
-    name: 'blocks/actions.ts:499 withdrawReviewAction',
+    name: 'blocks/actions.ts:510 withdrawReviewAction',
     action: 'withdrawReviewAction',
     specs: NO_E2E_YET,
   },
   F141: {
-    name: 'blocks/actions.ts:519 decideRecheckAction',
+    name: 'blocks/actions.ts:530 decideRecheckAction',
     action: 'decideRecheckAction',
     specs: NO_E2E_YET,
   },
   F142: {
-    name: 'blocks/actions.ts:644 createBlockAction',
+    name: 'blocks/actions.ts:661 createBlockAction',
     action: 'createBlockAction',
     specs: NO_E2E_YET,
   },
@@ -764,5 +765,291 @@ export const FEATURE_COVERAGE: Record<string, FeatureCoverage> = {
     name: 'evidence/actions.ts:200 addManualExcerptAction',
     action: 'addManualExcerptAction',
     specs: NO_E2E_YET,
+  },
+  // ---- トライアル対応（2026-10。inventory-features.md §3.14。F145〜F201）
+  F145: {
+    name: '要求事項の判断を記録（40a 等。3 観点・理由・担当・期限）',
+    action: 'saveRequirementAssessmentAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F146: {
+    name: '対象外・非重要として申請',
+    action: 'requestExclusionAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F147: {
+    name: '対象外・非重要の判断を承認（別の人・取り消せない）',
+    action: 'approveExclusionAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F148: {
+    name: '対象外・非重要の申請を差し戻す（理由必須）',
+    action: 'returnExclusionAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F149: {
+    name: '対象外・非重要の申請を取り下げる',
+    action: 'withdrawExclusionAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F150: {
+    name: '横断対応の AI 候補を出させる（表示だけ）',
+    action: 'suggestCrosswalkCandidatesAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F151: {
+    name: '横断対応の AI 候補を採用しない（理由）',
+    action: 'rejectCrosswalkCandidatesAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F152: {
+    name: '節の要求事項の選択肢を読む（節の追加・開いたときだけ）',
+    action: 'listBlockRequirementOptionsAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F153: {
+    name: '節と要求事項の対応付けを変更（承認済みは理由必須）',
+    action: 'updateBlockRequirementsFormAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F154: {
+    name: '節の要求事項の AI 候補を出させる',
+    action: 'suggestBlockRequirementsAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F155: {
+    name: '節の要求事項の AI 候補を採用（選んだ候補だけ）',
+    action: 'adoptBlockRequirementCandidatesAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F156: {
+    name: '節の要求事項の AI 候補を採用しない（理由）',
+    action: 'rejectBlockRequirementCandidatesAction',
+    specs: ['tests/e2e/trial-requirements.spec.ts'],
+  },
+  F157: {
+    name: '承認済みレポートを保証側へ共有（写し・取り消せない）',
+    action: 'shareReportAction',
+    specs: ['tests/e2e/trial-assurance.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F158: {
+    name: '保証側への共有を取り下げる',
+    action: 'withdrawSharedReportAction',
+    specs: ['tests/e2e/trial-assurance.spec.ts'],
+  },
+  F159: {
+    name: '外部で編集したファイルを承認版と照合（保存しない）',
+    action: 'reconcileUploadedFileAction',
+    specs: ['tests/e2e/trial-trace-outputs.spec.ts'],
+  },
+  F160: {
+    name: '保証側: 開示レポートの段落・数値にコメント',
+    action: 'createReportNoteAction',
+    specs: ['tests/e2e/trial-assurance.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F161: {
+    name: '企業: 保証側のコメントへ回答（追記）',
+    action: 'respondToAssuranceNoteAction',
+    specs: ['tests/e2e/trial-assurance.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F162: {
+    name: 'Sign-off に共有した開示レポートを結び付けて記録',
+    action: 'createSignoffAction',
+    specs: NO_E2E_YET,
+  },
+  F163: {
+    name: 'トライアル計画を編集',
+    action: 'saveTrialPlanAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts'],
+  },
+  F164: {
+    name: '選定ケースを編集',
+    action: 'saveTrialCasesAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts'],
+  },
+  F165: {
+    name: '開始前の合意・終了時の扱い・導入判断を記録',
+    action: 'saveTrialDecisionAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts'],
+  },
+  F166: {
+    name: '検証シナリオの実施を記録（本人）',
+    action: 'recordScenarioRunAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F167: {
+    name: '評価者の判定を記録（取り消せない）',
+    action: 'judgeScenarioAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F168: {
+    name: 'ご意見・不具合を送る（ヘッダー・改善管理表）',
+    action: 'submitFeedbackAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F169: {
+    name: '定例会などの論点を記録（管理者）',
+    action: 'recordMeetingFeedbackAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts'],
+  },
+  F170: {
+    name: '改善管理表の対応を記録（状態・方針・担当・期限・費用区分）',
+    action: 'triageFeedbackAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts'],
+  },
+  F171: {
+    name: '再検証の結果を記録',
+    action: 'recordReverificationAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts'],
+  },
+  F172: {
+    name: '作業時間を記録（現行・T4D）',
+    action: 'recordTaskTimingAction',
+    specs: ['tests/e2e/trial-evaluation.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F173: {
+    name: '承認ルートを保存（3 段階のひな形・過年度確定値）',
+    action: 'saveApprovalRouteAction',
+    specs: ['tests/e2e/trial-admin.spec.ts', 'tests/e2e/zzzzz-trial-chain.stateless.ts'],
+  },
+  F174: {
+    name: 'メンバーの役割・担当拠点を変更',
+    action: 'updateMembershipAction',
+    specs: ['tests/e2e/trial-admin.spec.ts'],
+  },
+  F175: {
+    name: 'メンバーの利用を停止・再開',
+    action: 'setMembershipStatusAction',
+    specs: ['tests/e2e/trial-admin.spec.ts'],
+  },
+  F176: {
+    name: 'データ取扱条件の版を記録',
+    action: 'recordDataTermsAction',
+    specs: ['tests/e2e/trial-admin.spec.ts'],
+  },
+  F177: {
+    name: 'XBRL の対応付けを追加・編集（候補）',
+    action: 'saveXbrlMappingAction',
+    specs: ['tests/e2e/trial-xbrl.spec.ts'],
+  },
+  F178: {
+    name: 'XBRL の対応付けを確定（作成者以外・行・一括）',
+    action: 'confirmXbrlMappingsAction',
+    specs: ['tests/e2e/trial-xbrl.spec.ts'],
+  },
+  F179: {
+    name: 'XBRL の対応付けを対象外にする（理由）',
+    action: 'excludeXbrlMappingAction',
+    specs: ['tests/e2e/trial-xbrl.spec.ts'],
+  },
+  F180: {
+    name: 'XBRL の対応付けの対象外を取り消す',
+    action: 'restoreXbrlMappingAction',
+    specs: ['tests/e2e/trial-xbrl.spec.ts'],
+  },
+  F181: {
+    name: 'XBRL の対応付けを削除',
+    action: 'deleteXbrlMappingAction',
+    specs: ['tests/e2e/trial-xbrl.spec.ts'],
+  },
+  F182: {
+    name: 'XBRL の対応付けの AI 候補を出させる（候補のまま）',
+    action: 'suggestXbrlMappingsAction',
+    specs: ['tests/e2e/trial-xbrl.spec.ts'],
+  },
+  F183: {
+    name: '基準のタクソノミ（SAMPLE）を設定',
+    action: 'setXbrlTaxonomyAction',
+    specs: ['tests/e2e/trial-xbrl.spec.ts'],
+  },
+  F184: {
+    name: '提出者の識別子を保存（Supabase Mode。Demo は読み取り専用）',
+    action: 'saveFilingIdentifierAction',
+    specs: NO_E2E_YET,
+  },
+  F185: {
+    name: 'CDP の回答を始める',
+    action: 'startResponseAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F186: {
+    name: 'CDP の回答を始めて AI 草案を作る',
+    action: 'startResponseDraftAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F187: {
+    name: 'CDP の回答の担当・レビュー担当を割り当てる',
+    action: 'assignResponseAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F188: {
+    name: 'CDP の質問の担当を一括で割り当てる',
+    action: 'bulkAssignResponsesAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F189: {
+    name: 'CDP の AI の対応付けの候補を確定',
+    action: 'confirmMappingCandidateAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F190: {
+    name: 'CDP の回答に T4D の情報（定性情報・原稿・要求事項・指標）を対応付ける',
+    action: 'addResponseLinkAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F191: {
+    name: 'CDP の回答の指標の対応付けを外す',
+    action: 'removeMetricMappingAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F192: {
+    name: 'CDP の回答と T4D の情報の対応付けを外す',
+    action: 'removeResponseLinkAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F193: {
+    name: 'CDP の回答に根拠を紐付ける（再利用）',
+    action: 'linkResponseEvidenceAction',
+    specs: ['tests/e2e/trial-cdp-option.spec.ts'],
+  },
+  F194: {
+    name: 'CSRD 節ドラフトの確定本文を開示プロジェクトの原稿へ取り込む',
+    action: 'importCsrdDraftToProjectAction',
+    specs: NO_E2E_YET,
+  },
+  F195: {
+    name: 'SSBJ 開示ドラフトの確定本文を開示プロジェクトの原稿へ取り込む',
+    action: 'importSsbjDraftToProjectAction',
+    specs: ['tests/e2e/trial-content-impact.spec.ts'],
+  },
+  F196: {
+    name: 'SSBJ の基準の版をこの年度に固定し直す（設定の確定を外す）',
+    action: 'pinSsbjVersionAction',
+    specs: NO_E2E_YET,
+  },
+  F197: {
+    name: '定性情報と要求事項を直接対応付ける',
+    action: 'addNarrativeLinkAction',
+    specs: ['tests/e2e/trial-content-impact.spec.ts'],
+  },
+  F198: {
+    name: '定性情報と要求事項の直接の対応付けを外す（元に戻す）',
+    action: 'removeNarrativeLinkAction',
+    specs: ['tests/e2e/trial-content-impact.spec.ts'],
+  },
+  F199: {
+    name: '定性情報の要求事項の AI 候補を出させる',
+    action: 'suggestNarrativeLinksAction',
+    specs: ['tests/e2e/trial-content-impact.spec.ts'],
+  },
+  F200: {
+    name: '定性情報の要求事項の AI 候補を採用',
+    action: 'adoptNarrativeLinksAction',
+    specs: ['tests/e2e/trial-content-impact.spec.ts'],
+  },
+  F201: {
+    name: '定性情報の要求事項の AI 候補を採用しない（理由）',
+    action: 'rejectNarrativeLinksAction',
+    specs: ['tests/e2e/trial-content-impact.spec.ts'],
   },
 };

@@ -181,7 +181,10 @@ describe('TS の enum と migration の CHECK 制約の一致（開示優先モ�
 
   it('スナップショット・出力・KPI・取込バッチ（0038・0039）', () => {
     expect(checkValues('report_snapshots', 'snapshot_kind')).toEqual(sorted(REPORT_SNAPSHOT_KINDS));
-    expect(checkValues('export_artifacts', 'format')).toEqual(sorted(EXPORT_ARTIFACT_FORMATS));
+    // 形式は 0051 で XBRL の 2 形式を足して付け替えた（最後の制約と一致すること）
+    expect(lastConstraintValues('export_artifacts_format_check', 'format')).toEqual(
+      sorted(EXPORT_ARTIFACT_FORMATS),
+    );
     expect(checkValues('export_artifacts', 'audience')).toEqual(sorted(EXPORT_AUDIENCES));
     expect(checkValues('kpi_targets', 'target_type')).toEqual(sorted(KPI_TARGET_TYPES));
     expect(checkValues('kpi_targets', 'direction')).toEqual(sorted(KPI_DIRECTIONS));

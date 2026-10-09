@@ -27,6 +27,7 @@ import {
   type UpdateProjectInput,
 } from '@/lib/services/disclosure-project';
 import { saveSsbjScope } from '@/lib/services/ssbj-gap';
+import { exclusionReasonDigest } from '@/lib/domain/exclusion-digest';
 import type { AuthorizationContext, DisclosureProject, RoleKey } from '@/types/domain';
 
 /**
@@ -155,14 +156,20 @@ describe('一覧と詳細（テナント分離・基準の位置付け）', () =
     );
   });
 
-  it('A22: ESRS-40a は「公開草案に基づく準備」、要求事項は未収録として示す', async () => {
+  it('A22: ESRS-40a は試行用サンプル（架空）として示し、公開草案（要求事項は未収録）は新しい版として並ぶ', async () => {
     const detail = await getProject(db, manager(), IDS.projects.fy2026);
     const esrs = detail.frameworks.find(
       (f) => f.projectFramework.id === IDS.projectFrameworks.fy2026Esrs40a,
     )!;
-    expect(esrs.legal.label).toBe('公開草案に基づく準備');
+    // FY2026 の ESRS-40a は試行用サンプル（架空・条文ではない）の版に固定した（トライアル対応 K5）
+    expect(esrs.legal.label).toBe('サンプル（架空）');
     expect(esrs.legal.isPreparationOnly).toBe(true);
-    expect(esrs.legal.coverageLabel).toBe('要求事項は未収録');
+    expect(esrs.legal.coverageLabel).toBe('サンプル（架空）');
+    expect(esrs.itemCount).toBe(8);
+    // 公開草案の版は「公開草案に基づく準備」「要求事項は未収録」のままマスターに残り、設定で新しい版として並ぶ
+    const draft = esrs.newerVersions.find((v) => v.version.id === IDS.esrs40aDraftVersion);
+    expect(draft?.legal.label).toBe('公開草案に基づく準備');
+    expect(draft?.legal.coverageLabel).toBe('要求事項は未収録');
     expect(esrs.confirmed).toBe(false);
     expect(esrs.applicabilityLabel).toBe('適用候補');
 
@@ -173,12 +180,28 @@ describe('一覧と詳細（テナント分離・基準の位置付け）', () =
     expect(ssbj.currentDecision?.id).toBe(IDS.decisions.fy2026Ssbj);
     expect(ssbj.itemCount).toBe(133);
 
+    // 試行用サンプルは架空の 8 項目を行として並べる（サンプルと示し、準備完了にはしない）
     const requirements = await loadProjectRequirements(db, manager(), IDS.projects.fy2026, {
       projectFrameworkId: IDS.projectFrameworks.fy2026Esrs40a,
     });
-    expect(requirements.result?.mode).toBe('not_loaded');
-    expect(requirements.result?.rows).toHaveLength(0);
+    expect(requirements.result?.mode).toBe('rows');
+    expect(requirements.result?.rows).toHaveLength(8);
+    expect(requirements.result?.rows.every((r) => r.isSample)).toBe(true);
     expect(requirements.result?.summary.readyForCompletion).toBe(false);
+
+    // 公開草案の版を追加すると、その版は要求事項が未収録（0 にせず「未収録」として示す）
+    const added = await attachFrameworkVersion(db, manager(), {
+      projectFrameworkId: IDS.projectFrameworks.fy2026Esrs40a,
+      newVersionId: IDS.esrs40aDraftVersion,
+      acknowledgeImpact: true,
+    });
+    const draftRequirements = await loadProjectRequirements(db, manager(), IDS.projects.fy2026, {
+      projectFrameworkId: added.id,
+    });
+    expect(draftRequirements.result?.mode).toBe('not_loaded');
+    expect(draftRequirements.result?.rows).toHaveLength(0);
+    expect(draftRequirements.result?.summary.readyForCompletion).toBe(false);
+    expect(draftRequirements.result?.summary.notReadyReasons.join()).toContain('未収録');
   });
 
   it('フォームの選択肢: 版ごとに法的位置付けを添え、サンプルはサンプルと示す', async () => {
@@ -361,8 +384,8 @@ describe('確定パッケージの可否（S-e が使う）', () => {
   it('適用判断が未確定の基準がある間は、法定提出用の確定パッケージを作れない', async () => {
     const check = await loadStatutoryPackageCheck(db, manager(), IDS.projects.fy2026);
     expect(check.ok).toBe(false);
-    expect(check.unconfirmed).toContain('ESRS-40a 公開草案（2026年7月）');
-    expect(check.preparationOnly).toContain('ESRS-40a 公開草案（2026年7月）');
+    expect(check.unconfirmed).toContain('ESRS-40a 試行用サンプル（架空・条文ではない）');
+    expect(check.preparationOnly).toContain('ESRS-40a 試行用サンプル（架空・条文ではない）');
   });
 
   it('法定の目的で判断が確定していれば作れる。草案の基準を法定の目的に使うと作れない', async () => {
@@ -455,15 +478,62 @@ describe('A21: 要求事項の適用判断と分母', () => {
       materialityReason: '',
       ownerDepartment: 'サステナビリティ推進部',
     });
+    // 理由を記録しただけでは分母から外さない（別の人の承認が要る。トライアル対応 NF-02）
+    const recorded = await loadProjectRequirements(db, manager(), IDS.projects.fy2026, {});
+    const pending = recorded.result!.rows.find((r) => r.item.id === target.item.id)!;
+    expect(pending.decision).toMatchObject({
+      kind: 'not_assessed',
+      excluded: false,
+      label: '対象外（未申請）',
+      reason: '当社の事業に該当する活動がないため（架空）',
+      decidedBy: userId('enterprise-admin@demo.local'),
+      decidedByName: '青海 太郎',
+    });
+    expect(pending.coverage.category).toBe('undetermined');
+    expect(recorded.result!.summary.notAssessed).toBe(before.result!.summary.notAssessed);
+
+    // 申請（理由のダイジェストに結び付く）→ 申請者と別の承認権限者が承認すると、理由・判断者・承認者つきで外れる
+    const reason = '当社の事業に該当する活動がないため（架空）';
+    const base = {
+      organizationId: ORG_IDS.aomi,
+      frameworkVersionId: SSBJ_VERSION,
+      itemId: target.item.id,
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      projectFrameworkId: null,
+      source: 'ssbj_assessment' as const,
+      decision: 'not_applicable' as const,
+      reasonDigest: exclusionReasonDigest('not_applicable', reason),
+      reasonExcerpt: reason,
+      note: '',
+    };
+    fixture.requirementExclusionEvents.push(
+      {
+        ...base,
+        id: 'e1e1e1e1-0000-4000-8000-000000000001',
+        event: 'requested',
+        actorUserId: userId('enterprise-admin@demo.local'),
+        createdAt: '2026-08-14T01:00:00.000Z',
+      },
+      {
+        ...base,
+        id: 'e1e1e1e1-0000-4000-8000-000000000002',
+        event: 'approved',
+        actorUserId: APPROVER,
+        createdAt: '2026-08-14T02:00:00.000Z',
+      },
+    );
     const after = await loadProjectRequirements(db, manager(), IDS.projects.fy2026, {});
     const row = after.result!.rows.find((r) => r.item.id === target.item.id)!;
     expect(row.decision).toMatchObject({
       kind: 'not_applicable',
       excluded: true,
-      reason: '当社の事業に該当する活動がないため（架空）',
+      reason,
       decidedBy: userId('enterprise-admin@demo.local'),
       decidedByName: '青海 太郎',
+      approvedBy: APPROVER,
+      approvedByName: '承 花子',
     });
+    expect(row.coverage.category).toBe('excluded');
     const s0 = before.result!.summary;
     const s1 = after.result!.summary;
     expect(s1.total).toBe(s0.total);
@@ -515,7 +585,7 @@ describe('A21: 要求事項の適用判断と分母', () => {
     expect(mineReviewer.filteredRows).toHaveLength(0);
   });
 
-  it('CSRD の架空 12 項目はサンプルとして並ぶ（全件 未判定）', async () => {
+  it('CSRD の架空 12 項目はサンプルとして並び、適用判断はダブル・マテリアリティ評価から導く（全件「未判定」にしない: B-5）', async () => {
     const { project, frameworks } = await createProject(
       db,
       manager(),
@@ -529,13 +599,24 @@ describe('A21: 要求事項の適用判断と分母', () => {
     });
     expect(result!.rows).toHaveLength(12);
     expect(result!.rows.every((r) => r.isSample)).toBe(true);
-    expect(result!.summary.notAssessed).toBe(12);
+    // 以前は SSBJ の評価を読んでいたため全件「未判定」だった。DMA の人の判断から適用を導く
+    expect(result!.rows.every((r) => r.decision.source === 'csrd_dma')).toBe(true);
+    expect(result!.summary.notAssessed).toBeLessThan(12);
+    expect(result!.summary.applicableConfirmed).toBeGreaterThan(0);
+    // ESRS 2（全般開示）は重要性に関わらず適用
+    const esrs2 = result!.rows.filter((r) => r.item.code.startsWith('ESRS2'));
+    expect(esrs2.length).toBeGreaterThan(0);
+    expect(esrs2.every((r) => r.decision.label === '適用（常に適用）')).toBe(true);
+    // サンプルの基準は人の確認が済んでも「充足確認済み」にしない（K6）
+    expect(result!.rows.some((r) => r.coverage.category === 'confirmed')).toBe(false);
   });
 
   it('概要の進捗は基準ごとに分母を持つ', async () => {
     const detail = await getProject(db, manager(), IDS.projects.fy2026);
     const summaries = await summarizeProject(db, manager(), detail);
-    expect(summaries.map((s) => s.mode).sort()).toEqual(['not_loaded', 'rows']);
+    // ESRS-40a は試行用サンプル（架空）の 8 項目を収録した版（K5）。どちらの基準も要求事項の行を持つ
+    expect(summaries.map((s) => s.mode).sort()).toEqual(['rows', 'rows']);
+    expect(summaries.map((s) => s.summary.total).sort((a, b) => a - b)).toEqual([8, 133]);
   });
 });
 

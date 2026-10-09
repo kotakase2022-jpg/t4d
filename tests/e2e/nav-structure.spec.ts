@@ -334,6 +334,7 @@ test('監査法人のメニュー: 案件を選ぶまで手続の画面を出さ
   await expect(childList(page, '計画').getByRole('link')).toHaveText(['概要', 'スコープ']);
   await expect(childList(page, '実施').getByRole('link')).toHaveText([
     'Data Room',
+    '開示レポート',
     '母集団',
     'サンプリング',
     '保証手続・調書',

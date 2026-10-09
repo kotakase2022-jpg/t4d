@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect, unstable_rethrow } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
+import { rejectionReasonOf } from '@/lib/ai/feedback';
 import { can } from '@/lib/authorization/can';
 import { EVIDENCE_USAGE_PURPOSE_LABELS } from '@/lib/domain/disclosure-status';
 import { isUserFacingError, withUserFacingError } from '@/lib/errors/user-facing';
@@ -17,6 +18,13 @@ import {
   saveNarrative,
   type NarrativeUsage,
 } from '@/lib/services/narrative';
+import {
+  addNarrativeRequirementLinks,
+  adoptNarrativeMappingCandidates,
+  rejectNarrativeMappingCandidates,
+  removeNarrativeRequirementLink,
+  suggestNarrativeRequirementMappings,
+} from '@/lib/services/narrative-requirement-links';
 import {
   createAnchorFromFragment,
   loadAnchorViews,
@@ -72,6 +80,8 @@ export interface NarrativeContentInput {
   fields: Record<string, string>;
   body: string;
   sourceAnchorIds: string[];
+  /** 関連するインパクト・リスク・機会（NF-10）。省略は直前の版のまま */
+  iroRefs?: string[];
 }
 
 export type SaveNarrativeActionResult =
@@ -105,6 +115,7 @@ export async function saveNarrativeAction(
       sourceAnchorIds: (input.sourceAnchorIds ?? []).map(String),
       changeReason: String(input.changeReason ?? ''),
       acknowledgeImpact: input.acknowledgeImpact === true,
+      ...(Array.isArray(input.iroRefs) ? { iroRefs: input.iroRefs.map(String) } : {}),
     });
     if (result.status === 'saved') {
       revalidatePath(BASE);
@@ -288,4 +299,101 @@ export async function createNarrativeCandidateAction(formData: FormData): Promis
   });
   revalidatePath(BASE);
   redirect(`${BASE}/${createdId}?flash=narrativeCandidate&warnings=${warnings}`);
+}
+
+// ----------------------------------------------------------------------
+// 基準別の対応状況: 要求事項との直接の対応付けと AI の候補（トライアル対応 NF-06・NF-11）
+// ----------------------------------------------------------------------
+
+const COVERAGE_ANCHOR = '#nv-coverage';
+
+/** 要求事項を直接対応付ける */
+export async function addNarrativeLinkAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const narrativeId = String(formData.get('narrativeId') ?? '');
+  const back = `${BASE}/${narrativeId}`;
+  await withUserFacingError(back, async () => {
+    await addNarrativeRequirementLinks(db, ctx, {
+      narrativeRecordId: narrativeId,
+      itemIds: formData.getAll('itemId').map(String).filter(Boolean),
+    });
+  });
+  revalidatePath(BASE);
+  revalidatePath(back);
+  redirect(`${back}?flash=narrativeLinkAdded${COVERAGE_ANCHOR}`);
+}
+
+/** 直接の対応付けを外す（物理削除しない） */
+export async function removeNarrativeLinkAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const narrativeId = String(formData.get('narrativeId') ?? '');
+  const back = `${BASE}/${narrativeId}`;
+  let itemId = '';
+  await withUserFacingError(back, async () => {
+    const removed = await removeNarrativeRequirementLink(db, ctx, {
+      linkId: String(formData.get('linkId') ?? ''),
+    });
+    itemId = removed.itemId;
+  });
+  revalidatePath(BASE);
+  revalidatePath(back);
+  // 「元に戻す」（同じ要求事項を対応付け直す）のために、外した要求事項を通知に添える（plan §1.16 区分 3）
+  redirect(
+    `${back}?flash=narrativeLinkRemoved&undoItem=${encodeURIComponent(itemId)}${COVERAGE_ANCHOR}`,
+  );
+}
+
+/** AI に対応付けの候補を出させる（候補は ai_runs だけ。対応付けは変えない） */
+export async function suggestNarrativeLinksAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const narrativeId = String(formData.get('narrativeId') ?? '');
+  const back = `${BASE}/${narrativeId}`;
+  let runId = '';
+  await withUserFacingError(back, async () => {
+    const run = await suggestNarrativeRequirementMappings(db, ctx, {
+      narrativeRecordId: narrativeId,
+    });
+    runId = run.id;
+  });
+  redirect(`${back}?mappingRun=${encodeURIComponent(runId)}${COVERAGE_ANCHOR}`);
+}
+
+/** AI の候補を採用する（選んだ要求事項だけを対応付ける。人の操作） */
+export async function adoptNarrativeLinksAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const narrativeId = String(formData.get('narrativeId') ?? '');
+  const runId = String(formData.get('runId') ?? '');
+  const back = `${BASE}/${narrativeId}?mappingRun=${encodeURIComponent(runId)}`;
+  await withUserFacingError(back, async () => {
+    await adoptNarrativeMappingCandidates(db, ctx, {
+      narrativeRecordId: narrativeId,
+      runId,
+      itemIds: formData.getAll('itemId').map(String).filter(Boolean),
+    });
+  });
+  revalidatePath(BASE);
+  revalidatePath(`${BASE}/${narrativeId}`);
+  redirect(`${back}&flash=narrativeLinksAdopted${COVERAGE_ANCHOR}`);
+}
+
+/** AI の候補を採用しない（理由は任意。改善管理表の「AI に関する意見」に集計される） */
+export async function rejectNarrativeLinksAction(formData: FormData): Promise<void> {
+  const ctx = await requireEnterpriseContext();
+  const db = await getDb();
+  const narrativeId = String(formData.get('narrativeId') ?? '');
+  const runId = String(formData.get('runId') ?? '');
+  const back = `${BASE}/${narrativeId}?mappingRun=${encodeURIComponent(runId)}`;
+  await withUserFacingError(back, async () => {
+    await rejectNarrativeMappingCandidates(db, ctx, {
+      narrativeRecordId: narrativeId,
+      runId,
+      reason: rejectionReasonOf(formData),
+    });
+  });
+  revalidatePath(`${BASE}/${narrativeId}`);
+  redirect(`${back}&flash=narrativeLinksRejected${COVERAGE_ANCHOR}`);
 }

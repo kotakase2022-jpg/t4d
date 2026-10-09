@@ -35,6 +35,8 @@ export default defineConfig({
     'zzz-csrd-chain.spec.ts',
     // 報告年度・収集キャンペーンの作成（結果の画面が別のサーバーに届いても行が出る）
     'zzzz-master-create.stateless.ts',
+    // トライアル対応の「試行の流れ」（plan §4.3-6。開示デモのリセットから始め、Cookie だけで最後まで通す）
+    'zzzzz-trial-chain.stateless.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

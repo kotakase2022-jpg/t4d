@@ -150,6 +150,17 @@ export const AUDIT_EVENT_LABEL: Record<AuditEventType, string> = {
   recheck_decided: '再確認の判断',
   report_snapshot_created: 'レポートの確定',
   import_committed: '取込の確定',
+  // トライアル対応（0048）
+  report_shared: '開示レポートの共有',
+  report_share_withdrawn: '開示レポートの共有の取り下げ',
+  review_note_responded: '保証側のコメントへの回答',
+  requirement_mapping_changed: '要求事項の対応付けの変更',
+  requirement_assessed: '要求事項の判断の記録',
+  exclusion_requested: '対象外の申請',
+  exclusion_decided: '対象外の承認・差戻し',
+  access_denied: '権限による拒否',
+  xbrl_mapping_changed: 'XBRL の対応付けの変更',
+  xbrl_mapping_confirmed: 'XBRL の対応付けの確定',
 };
 
 export function auditEventLabel(eventType: string): string {

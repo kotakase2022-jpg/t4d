@@ -302,6 +302,19 @@ function acceptIro(
     return false;
   }
   if (validateIroShape(row).length > 0) return false;
+  // 根拠の引用位置は同じ組織のもの（0052 の t4d.iro_source_anchor_guard と同じ）。方針・行動のメモは 400 字まで
+  const anchors = (row as { sourceAnchorIds?: unknown }).sourceAnchorIds ?? [];
+  if (
+    !Array.isArray(anchors) ||
+    anchors.length > 50 ||
+    !anchors.every((id) =>
+      db.sourceAnchors.some((a) => a.id === id && a.organizationId === row.organizationId),
+    )
+  ) {
+    return false;
+  }
+  const note = (row as { policyActionNote?: unknown }).policyActionNote ?? '';
+  if (!isString(note) || note.length > 400) return false;
   if (row.relatedImpactIroId !== null) {
     const related = db.csrdDmaIros.find((i) => i.id === row.relatedImpactIroId);
     if (

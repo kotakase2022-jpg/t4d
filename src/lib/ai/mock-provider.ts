@@ -5,6 +5,7 @@ import { parseFlexibleNumber } from '@/lib/imports/number';
 import { CSRD_DRAFT_AI_BODY_TARGET, perspectiveSentence } from '@/lib/domain/csrd';
 import type { DmaPerspective, SsbjCoverageStatus as SsbjCoverage } from '@/types/domain';
 import { buildMockDisclosureDraft, type DraftInvocationInput } from './mock-disclosure-draft';
+import { mockRequirementMapping, mockXbrlTagSuggestion } from './mock-trial-suggestions';
 import { AI_SCHEMAS, PROMPT_VERSIONS, type AiFeature, type AiOutputOf } from './schemas';
 import { AiProviderError, type AiInvocation, type AiProvider, type AiResult } from './types';
 
@@ -1319,6 +1320,13 @@ function buildMockOutput<F extends AiFeature>(
       // 文は入力の source の本文だけから組み立てる（mock-disclosure-draft.ts）。乱数は使わない
       return buildMockDisclosureDraft(input as unknown as DraftInvocationInput);
     }
+
+    case 'requirementMappingSuggestion':
+      // 入力の候補の題名と本文の重なりで選ぶ（mock-trial-suggestions.ts）。乱数は使わない
+      return mockRequirementMapping(input);
+
+    case 'xbrlTagSuggestion':
+      return mockXbrlTagSuggestion(input);
 
     default: {
       const exhaustive: never = invocation.feature;

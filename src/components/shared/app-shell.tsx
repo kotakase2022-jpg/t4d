@@ -6,13 +6,14 @@ import { logoutAction, selectWorkspaceAction } from '@/lib/auth/actions';
 import { switchDemoRoleAction } from '@/lib/auth/demo-role-actions';
 import { selectPeriodAction } from '@/lib/auth/preferences';
 import { searchPaletteAction } from '@/app/(common)/palette/actions';
+import { FeedbackDialog } from '@/app/enterprise/trial/_components/feedback-dialog';
 import { can, permissionsFor } from '@/lib/authorization/can';
 import { describeReferenceDate } from '@/lib/clock';
 import { formatJstDate } from '@/lib/format/datetime';
 import { canFor, homeProfileOf } from '@/lib/ui/home-profile';
 import { viewerKeyOf } from '@/lib/ui/local-store';
 import { defaultProjectId } from '@/lib/ui/task-verbs';
-import type { AuthorizationContext, IsoDate } from '@/types/domain';
+import type { AuthorizationContext, IsoDate, OrganizationOptionKey } from '@/types/domain';
 import { BrandLogo } from './brand-logo';
 import { DemoDataBadge } from './badges';
 import { CommandPalette } from './command-palette';
@@ -27,6 +28,7 @@ import { NavigationProgress } from './navigation-progress';
 import {
   defaultCollapsedGroups,
   hiddenNavHrefsFor,
+  missingNavOptions,
   missingNavPermissions,
   navTreeFor,
   type NavVariant,
@@ -80,6 +82,16 @@ export interface AppShellProps {
   demoRoleChoices?: DemoRoleChoiceView[];
   /** 監査法人ワークスペースのみ */
   engagements?: EngagementChoice[];
+  /**
+   * 企業ワークスペースのみ: 組織で有効な契約オプション（organization-options.ts の hasOption）。
+   * 省略時はメニューを絞らない。渡したときは、無いオプションの項目（CDP の葉）を隠す（plan K2・NF-38）
+   */
+  contractedOptions?: OrganizationOptionKey[];
+  /**
+   * 企業ワークスペースのみ: ヘッダーの「ご意見・不具合」の件名・内容の上限（サーバーの検査と同じ値。
+   * trial-program.ts の trialTextLimits）。省略時は Demo Mode の上限
+   */
+  feedbackLimits?: { title: number; text: number };
   unreadNotifications: number;
   children: React.ReactNode;
 }
@@ -101,6 +113,12 @@ function hiddenNavPermissions(ctx: AuthorizationContext, variant: NavVariant) {
     can(ctx, permission),
   );
 }
+
+/**
+ * ユーザーメニューの画面（ROUTE_CATALOG の menu: 'header'）。トライアルの評価はメニュー木に足さない
+ * （plan K2・§5 D22）。企業の全役割が開ける（enterprise.data.read）
+ */
+const ENTERPRISE_USER_MENU_LINKS = [{ label: 'トライアルの評価', href: '/enterprise/trial' }];
 
 function periodText(start: IsoDate, end: IsoDate): string {
   return `${formatJstDate(start)}〜${formatJstDate(end)}`;
@@ -145,6 +163,8 @@ export function AppShell({
   demoRoleChoices = [],
   demoEditsEvicted = false,
   engagements,
+  contractedOptions,
+  feedbackLimits,
   unreadNotifications,
   children,
 }: AppShellProps) {
@@ -166,6 +186,10 @@ export function AppShell({
     workspace: isEnterprise ? 'enterprise' : 'assurance',
     hiddenHrefs: hidden,
     hiddenPermissions: hiddenNavPermissions(ctx, variant),
+    hiddenOptions:
+      isEnterprise && contractedOptions
+        ? missingNavOptions(navTreeFor(variant, null), new Set(contractedOptions))
+        : [],
     permissions: [...permissionsFor(ctx.workspace.roleKeys)],
     profile: isEnterprise ? homeProfileOf(ctx) : undefined,
     defaultCollapsedGroups: defaultCollapsedGroups(variant, userCan),
@@ -257,12 +281,23 @@ export function AppShell({
                 )}
               </Link>
             </Button>
+            {isEnterprise && (
+              // トライアルの改善管理表への入口（plan NF-34）。どの画面からも送れるよう main の外に置く。
+              // 主操作ではない（ghost）。送った後も画面を移らない
+              <FeedbackDialog
+                triggerVariant="ghost"
+                triggerSize="xs"
+                titleMaxLength={feedbackLimits?.title}
+                bodyMaxLength={feedbackLimits?.text}
+              />
+            )}
             <HelpDialog />
             <UserMenu
               displayName={ctx.displayName}
               email={ctx.email}
               roleKeys={ctx.workspace.roleKeys}
               onLogoutAction={logoutAction}
+              links={isEnterprise ? ENTERPRISE_USER_MENU_LINKS : undefined}
             />
           </div>
         </header>

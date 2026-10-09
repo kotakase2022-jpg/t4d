@@ -9,6 +9,7 @@ import {
   Landmark,
   Quote,
   Tag,
+  Target,
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
@@ -31,6 +32,15 @@ import {
   listNarratives,
   type NarrativeListRow,
 } from '@/lib/services/narrative';
+import {
+  CONTENT_COVERAGE_FILTERS,
+  CONTENT_COVERAGE_FILTER_LABELS,
+  coverageSummaryText,
+  isContentCoverageFilter,
+  loadContentCoverageSummaries,
+  matchesCoverageFilter,
+  type ContentCoverageSummary,
+} from '@/lib/services/content-coverage';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { DEFAULT_PAGE_SIZES, parsePage, parsePageSize } from '@/lib/table/columns';
 import { statusEntry, statusStyle } from '@/lib/ui/status/registry';
@@ -62,6 +72,8 @@ function narrativeStatusIcon(status: (typeof NARRATIVE_STATUSES)[number]): Lucid
  * - 主操作は「新しく登録」。「資料から候補を作成」は「その他」（頻度が低い）
  * - 一覧は DataTable（検索・情報種別と状態の絞り込みは URL）。責任者は「列 ▾」で出す
  * - 前年から引継ぎ（新年度の下書き。確認は引き継がない）は行の「操作 ▾」
+ * - 列「基準別の状況」（トライアル対応 NF-06）: 要求事項タブと同じ 5 区分を基準ごとに数える（書き込まない）。
+ *   絞り込み ?coverage=（区分ごと・要求事項との対応なし）は「絞り込み ▾」
  */
 export default async function NarrativesPage({
   searchParams,
@@ -74,6 +86,7 @@ export default async function NarrativesPage({
   const theme = isNarrativeTheme(query.theme) ? query.theme : null;
   const status = isNarrativeStatus(query.status) ? query.status : null;
   const q = typeof query.q === 'string' ? query.q : '';
+  const coverageFilter = isContentCoverageFilter(query.coverage) ? query.coverage : null;
 
   let rows: NarrativeListRow[];
   try {
@@ -95,8 +108,17 @@ export default async function NarrativesPage({
   const canWrite = can(ctx, 'enterprise.disclosure.write');
   const target = shell.currentPeriod;
   // 状態別・種別の内訳は絞り込みに関係なく全件で数える（絞り込むと内訳が 1 区分だけになるため）
-  const filtered = theme !== null || status !== null || q !== '';
-  const allRows = filtered ? await listNarratives(db, ctx, {}) : rows;
+  const allRows =
+    theme !== null || status !== null || q !== '' ? await listNarratives(db, ctx, {}) : rows;
+  // 基準別の状況（NF-06）。要求事項タブと同じ区分を、全件まとめて 1 回で数える（書き込まない）
+  const coverage: Map<string, ContentCoverageSummary> = await loadContentCoverageSummaries(
+    db,
+    ctx,
+    allRows.map((row) => row.record),
+  );
+  if (coverageFilter) {
+    rows = rows.filter((row) => matchesCoverageFilter(coverage.get(row.record.id), coverageFilter));
+  }
   const pageSize = parsePageSize(query.size);
   const page = Math.min(parsePage(query.page), Math.max(1, Math.ceil(rows.length / pageSize)));
   const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
@@ -222,6 +244,24 @@ export default async function NarrativesPage({
         ),
     },
     {
+      key: 'coverage',
+      header: '基準別の状況',
+      importance: 'secondary',
+      width: 'md',
+      cell: (row) => {
+        const summary = coverage.get(row.record.id);
+        return (
+          <span className="text-small" data-coverage-summary="">
+            {summary && !summary.unmapped ? (
+              coverageSummaryText(summary)
+            ) : (
+              <span className="text-ink-muted">{coverageSummaryText(summary)}</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       key: 'owner',
       header: '責任者',
       importance: 'detail',
@@ -266,6 +306,13 @@ export default async function NarrativesPage({
                 href: `${NEW_PATH}?mode=documents`,
                 icon: <Quote aria-hidden="true" />,
                 hidden: !canWrite,
+              },
+              {
+                kind: 'link',
+                id: 'impact-ledger',
+                label: 'インパクト・リスク・機会の台帳',
+                href: '/enterprise/disclosures/impacts',
+                icon: <Target aria-hidden="true" />,
               },
             ]}
           />
@@ -326,6 +373,17 @@ export default async function NarrativesPage({
               options: NARRATIVE_STATUSES.map((s) => ({
                 value: s,
                 label: NARRATIVE_STATUS_LABELS[s],
+              })),
+            },
+          ]}
+          overflowFilters={[
+            {
+              key: 'coverage',
+              label: '基準別の状況',
+              multiple: false,
+              options: CONTENT_COVERAGE_FILTERS.map((f) => ({
+                value: f,
+                label: CONTENT_COVERAGE_FILTER_LABELS[f],
               })),
             },
           ]}

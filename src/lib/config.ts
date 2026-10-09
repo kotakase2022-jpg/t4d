@@ -69,6 +69,11 @@ export function getOpenAiConfig(): {
   model: string;
   timeoutMs: number;
   maxRetries: number;
+  /**
+   * OpenAI の Responses API に応答を保存させるか（トライアル対応 NF-28）。既定は保存しない
+   * （plan §5 D16 の既定。データ取扱条件で合意したときだけ OPENAI_STORE=true にする）
+   */
+  store: boolean;
 } {
   if (typeof window !== 'undefined') {
     throw new Error('OPENAI_API_KEY must never be read on the client.');
@@ -78,6 +83,7 @@ export function getOpenAiConfig(): {
     model: nonEmpty(process.env.OPENAI_MODEL) ?? 'gpt-4.1-mini',
     timeoutMs: Number(nonEmpty(process.env.OPENAI_TIMEOUT_MS) ?? 60_000),
     maxRetries: Number(nonEmpty(process.env.OPENAI_MAX_RETRIES) ?? 2),
+    store: nonEmpty(process.env.OPENAI_STORE) === 'true',
   };
 }
 

@@ -55,3 +55,18 @@ test('知らない framework を指定すると 400 になる', async ({ page })
   const res = await apiGet(page, '/api/exports/cdp?framework=unknown&format=csv');
   expect(res.status).toBe(400);
 });
+
+test('CDP の回答一覧は担当・承認者・承認日時・版の列を持ち、承認済みだけも出せる（NF-39 C-08）', async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.enterpriseAdmin);
+  await page.goto('/enterprise/disclosures/cdp');
+  const all = await apiGet(page, '/api/exports/cdp?format=csv');
+  expect(all.status).toBe(200);
+  for (const header of ['作成担当', 'レビュー担当', '承認者', '承認日時', '版']) {
+    expect(all.body, `${header} の列が無い`).toContain(header);
+  }
+  const approved = await apiGet(page, '/api/exports/cdp?format=csv&approvedOnly=1');
+  expect(approved.status).toBe(200);
+  expect(decodeURIComponent(approved.disposition)).toContain('承認済み');
+});

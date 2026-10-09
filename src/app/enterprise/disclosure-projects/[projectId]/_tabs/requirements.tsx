@@ -1,22 +1,45 @@
 import Link from 'next/link';
-import { AlertTriangle, ClipboardCheck, FileQuestion, FlaskConical } from 'lucide-react';
+import {
+  AlertTriangle,
+  ClipboardCheck,
+  ClipboardPen,
+  FileQuestion,
+  FileSpreadsheet,
+} from 'lucide-react';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
+import { HonestyBadge } from '@/components/shared/honesty-badge';
 import { SegmentedFilter } from '@/components/shared/nav-tabs';
+import { PageActions } from '@/components/shared/page-actions';
 import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { MoreInfo } from '@/components/ui/more-info';
+import { can } from '@/lib/authorization/can';
 import { getReferenceDate } from '@/lib/clock';
+import {
+  OWNER_DUE_SOURCE_LABELS,
+  REQUIREMENT_COVERAGE_CATEGORIES,
+  REQUIREMENT_GAP_LABELS,
+  countByCategory,
+  type RequirementCoverageCategory,
+} from '@/lib/domain/requirement-coverage';
 import { formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { DEFAULT_PAGE_SIZES, parsePage, parsePageSize } from '@/lib/table/columns';
 import {
+  REQUIREMENT_DECISION_SOURCE_LABELS,
   REQUIREMENT_FILTERS,
   REQUIREMENT_FILTER_LABELS,
   isRequirementFilter,
   loadProjectRequirements,
+  nameOf,
   type RequirementRow,
 } from '@/lib/services/disclosure-project';
+import { decisionHomeOf } from '@/lib/services/project-requirement-assessment';
+import { exclusionNoteLimit } from '@/lib/services/requirement-exclusion';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import type { ActionSpec, MenuActionSpec } from '@/lib/ui/actions';
+import { statusLabel } from '@/lib/ui/status/registry';
 import { cn } from '@/lib/utils';
 import {
   EvidenceStateBadge,
@@ -24,10 +47,22 @@ import {
   MetricStateBadge,
   RequirementDecisionBadge,
 } from '../../_components/framework-badges';
+import { AllRequirementsView } from '../requirements/_components/all-requirements-view';
+import { exclusionActions } from '../requirements/_components/exclusion-action-specs';
+
+/** すべての基準を並べる表示（?fw=all。NF-04） */
+export const ALL_FRAMEWORKS_KEY = 'all';
+
+export function isCoverageFilter(value: unknown): value is RequirementCoverageCategory {
+  return (
+    typeof value === 'string' &&
+    (REQUIREMENT_COVERAGE_CATEGORIES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * 承認まで進めない理由（展開行に出す。plan S1「展開行に阻害条件」）。
- * 値はサービスの判定（根拠の充足・数値の状態・適用判断）をそのまま使い、新しい規則を作らない
+ * 値はサービスの判定（根拠の充足・数値の状態・適用判断・区分の理由）をそのまま使い、新しい規則を作らない
  */
 function blockingReasons(row: RequirementRow): string[] {
   const reasons: string[] = [];
@@ -46,18 +81,54 @@ function blockingReasons(row: RequirementRow): string[] {
   ) {
     reasons.push(`数値の状態: ${row.metrics.label}`);
   }
+  if (row.coverage.category !== 'confirmed' && row.coverage.category !== 'excluded') {
+    for (const reason of row.coverage.reasons) {
+      const line = `区分（${statusLabel('requirementCoverage', row.coverage.category)}）: ${reason}`;
+      if (!reasons.includes(line)) reasons.push(line);
+    }
+  }
   return reasons;
 }
 
+/** 対応表の出力（XLSX・CSV）。出力の権限があるときだけ */
+function exportMenu(projectId: string, canExport: boolean): MenuActionSpec[] {
+  if (!canExport) return [];
+  const href = (format: 'xlsx' | 'csv') =>
+    `/api/exports/requirement-matrix?project=${projectId}&format=${format}`;
+  return [
+    {
+      kind: 'link',
+      id: 'export-requirement-matrix-xlsx',
+      label: '要求事項・情報対応表（XLSX・全基準）',
+      icon: <FileSpreadsheet aria-hidden="true" />,
+      href: href('xlsx'),
+      download: true,
+      group: 'export',
+    },
+    {
+      kind: 'link',
+      id: 'export-requirement-matrix-csv',
+      label: '要求事項・情報対応表（CSV・全基準）',
+      icon: <FileSpreadsheet aria-hidden="true" />,
+      href: href('csv'),
+      download: true,
+      group: 'export',
+    },
+  ];
+}
+
 /**
- * 要求事項タブ（§6.3・§8.3。plan S1）。
+ * 要求事項タブ（§6.3・§8.3。plan S1。トライアル対応 NF-01〜NF-04）。
  *
- * 列は「適用判断」「内容評価（対応済み…。既存 SSBJ の評価）」「本文状態（原稿の工程）」を分ける。
- * 内容評価の AI 判定は「候補」と明示し、人の判定を優先する。未判定の要求事項は一覧から消さない。
- * 標準フィルタ（自分の担当／情報不足／レビュー待ち／差戻し／要再確認）と基準の切り替えは URL に持つ。
+ * 列は「適用判断（と出所）」「区分（5 区分）」「本文状態（原稿の工程）」を分ける。区分は保存せず、
+ * 要求事項・情報対応表・開示ホームと同じ関数で毎回導く。内容評価の AI 判定は「候補」と明示し、人の判定を優先する。
+ * 未判定の要求事項は一覧から消さない。標準フィルタ・区分の絞り込み・基準の切り替えは URL に持つ。
+ * 基準の切り替えの「すべての基準」（?fw=all）は全基準・全件の対応表（NF-04）。
  *
- * 一覧は DataTable（既定の列: 基準・条項・要求事項・適用判断・本文状態・担当・期限。テーマ・内容評価・
- * 根拠の充足・数値の状態は「列 ▾」）。SSBJ は 133 項目あるため 25 件ずつのページ送りにする（plan §1.12-5）。
+ * 一覧は DataTable（既定の列: 基準・条項・要求事項・適用判断・区分・本文状態・担当・期限。テーマ・内容評価・
+ * 根拠の充足・数値の状態・不足・担当期限の出所は「列 ▾」）。SSBJ は 133 項目あるため 25 件ずつのページ送り。
+ * 行の主操作: 承認待ちの対象外を承認できる人は「対象外を承認」、判断を記録できる基準（ESRS-40a など）の
+ * 編集者は「判断を記録」、それ以外は「原稿を開く」。
  */
 export async function RequirementsTab({
   projectId,
@@ -69,14 +140,19 @@ export async function RequirementsTab({
   const { db, ctx } = await loadEnterpriseShell();
   const fw = typeof searchParams.fw === 'string' ? searchParams.fw : null;
   const filter = isRequirementFilter(searchParams.filter) ? searchParams.filter : null;
+  const coverage = isCoverageFilter(searchParams.coverage) ? searchParams.coverage : null;
+  const showAll = fw === ALL_FRAMEWORKS_KEY;
   const { detail, result, filteredRows, filterCounts } = await loadProjectRequirements(
     db,
     ctx,
     projectId,
-    { projectFrameworkId: fw, filter },
+    { projectFrameworkId: showAll ? null : fw, filter },
   );
   const today = getReferenceDate();
   const base = `/enterprise/disclosure-projects/${projectId}`;
+  const canWrite = can(ctx, 'enterprise.disclosure.write');
+  const canApprove = can(ctx, 'enterprise.disclosure.approve');
+  const canExport = can(ctx, 'enterprise.export.run');
 
   if (!result) {
     return (
@@ -90,23 +166,70 @@ export async function RequirementsTab({
 
   const selected = result.framework;
   // 絞り込み・基準の切り替えではページを 1 へ戻す（page を引き継がない）
-  const hrefFor = (params: { fw?: string; filter?: string | null }) => {
+  const hrefFor = (params: { fw?: string; filter?: string | null; coverage?: string | null }) => {
     const search = new URLSearchParams();
     search.set('tab', 'requirements');
-    search.set('fw', params.fw ?? selected.projectFramework.id);
-    if (params.filter) search.set('filter', params.filter);
+    search.set('fw', params.fw ?? (showAll ? ALL_FRAMEWORKS_KEY : selected.projectFramework.id));
+    const nextFilter = params.filter === undefined ? filter : params.filter;
+    const nextCoverage = params.coverage === undefined ? coverage : params.coverage;
+    if (nextFilter && params.fw === undefined) search.set('filter', nextFilter);
+    if (nextCoverage && params.fw === undefined) search.set('coverage', nextCoverage);
     return `${base}?${search.toString()}`;
   };
+
+  const header = (
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      {/* 基準ごとの法的な位置付け（公開草案・サンプルなど）は選ぶ前に読めるよう、名前に併記する */}
+      <SegmentedFilter
+        ariaLabel="基準の切り替え"
+        current={showAll ? ALL_FRAMEWORKS_KEY : selected.projectFramework.id}
+        items={[
+          ...detail.frameworks.map((f) => ({
+            key: f.projectFramework.id,
+            label: `${f.label}（${f.legal.label}）`,
+            href: hrefFor({ fw: f.projectFramework.id }),
+          })),
+          {
+            key: ALL_FRAMEWORKS_KEY,
+            label: 'すべての基準（要求事項・情報対応表）',
+            href: hrefFor({ fw: ALL_FRAMEWORKS_KEY }),
+          },
+        ]}
+      />
+      <PageActions moreLabel="対応表を出力" more={exportMenu(projectId, canExport)} />
+    </div>
+  );
+
+  if (showAll) {
+    return (
+      <div className="space-y-3">
+        {header}
+        <AllRequirementsView
+          projectId={projectId}
+          searchParams={searchParams}
+          coverage={coverage}
+          coverageHref={(key) => hrefFor({ coverage: key })}
+        />
+      </div>
+    );
+  }
+
   const summary = result.summary;
+  const coverageRows = coverage
+    ? filteredRows.filter((r) => r.coverage.category === coverage)
+    : filteredRows;
+  const coverageCounts = countByCategory(filteredRows.map((r) => r.coverage.category));
   const pageSize = parsePageSize(searchParams.size);
   const page = Math.min(
     parsePage(searchParams.page),
-    Math.max(1, Math.ceil(filteredRows.length / pageSize)),
+    Math.max(1, Math.ceil(coverageRows.length / pageSize)),
   );
-  const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+  const pageRows = coverageRows.slice((page - 1) * pageSize, page * pageSize);
   const isSsbj = selected.frameworkKey === 'ssbj';
+  const home = decisionHomeOf(selected);
   const overdue = (row: RequirementRow) =>
     isOverdue(row.dueDate, today) && row.manuscript.status !== 'approved';
+  const noteLimit = exclusionNoteLimit(ctx);
 
   const columns: DataTableColumn<RequirementRow>[] = [
     {
@@ -118,12 +241,7 @@ export async function RequirementsTab({
       cell: (row) => (
         <span className="whitespace-nowrap text-small font-medium">
           {row.item.code}
-          {row.isSample && (
-            <Badge tone="neutral" className="ml-1">
-              <FlaskConical className="size-3" aria-hidden="true" />
-              サンプル
-            </Badge>
-          )}
+          {row.isSample && <HonestyBadge kind="sample-master" className="ml-1" />}
         </span>
       ),
     },
@@ -142,7 +260,12 @@ export async function RequirementsTab({
             {row.item.questionText}
           </Link>
         ) : (
-          <span className="text-small">{row.item.questionText}</span>
+          <Link
+            href={`/enterprise/disclosure-projects/${projectId}/requirements/${row.item.id}`}
+            className="text-small text-brand-800 hover:underline"
+          >
+            {row.item.questionText}
+          </Link>
         ),
     },
     {
@@ -152,15 +275,39 @@ export async function RequirementsTab({
       cell: (row) => (
         <span className="text-small">
           <RequirementDecisionBadge kind={row.decision.kind} label={row.decision.label} />
-          {row.decision.excluded && (
+          {row.decision.exclusion && (
+            <StatusBadge
+              domain="exclusionApproval"
+              value={row.decision.exclusion.state}
+              className="ml-1"
+            />
+          )}
+          {/* 判断の出所（SSBJ の評価・DMA・判断の記録）を小さく併記する（NF-01） */}
+          <span className="mt-0.5 block text-caption text-ink-muted">
+            出所: {REQUIREMENT_DECISION_SOURCE_LABELS[row.decision.source]}
+          </span>
+          {row.decision.reason && (row.decision.excluded || row.decision.exclusion !== null) && (
             <span className="mt-0.5 block text-caption text-ink-muted">
               理由: {row.decision.reason}／判断: {row.decision.decidedByName ?? '—'}
+              {row.decision.approvedByName ? `／承認: ${row.decision.approvedByName}` : ''}
             </span>
           )}
           {row.decision.kind === 'not_assessed' && row.decision.note && (
             <span className="mt-0.5 block text-caption text-ink-muted">{row.decision.note}</span>
           )}
         </span>
+      ),
+    },
+    {
+      key: 'coverage',
+      header: '区分',
+      importance: 'primary',
+      cell: (row) => (
+        <StatusBadge
+          domain="requirementCoverage"
+          value={row.coverage.category}
+          detail={row.coverage.reasons.join(' ')}
+        />
       ),
     },
     {
@@ -196,6 +343,43 @@ export async function RequirementsTab({
         >
           {formatJstDate(row.dueDate)}
           {overdue(row) && <span className="block text-caption">期限超過</span>}
+        </span>
+      ),
+    },
+    {
+      key: 'gaps',
+      header: '不足',
+      importance: 'detail',
+      cell: (row) =>
+        row.coverage.gaps.length === 0 ? (
+          <span className="text-small text-ink-muted">—</span>
+        ) : (
+          <span className="flex flex-wrap gap-1">
+            {row.coverage.gaps.map((gap) => (
+              <Badge key={gap} tone="warning">
+                <AlertTriangle className="size-3" aria-hidden="true" />
+                {REQUIREMENT_GAP_LABELS[gap]}
+              </Badge>
+            ))}
+          </span>
+        ),
+    },
+    {
+      key: 'ownerDue',
+      header: '担当・期限（出所）',
+      importance: 'detail',
+      cell: (row) => (
+        <span className="text-small">
+          {nameOf(detail.members, row.ownerDue.ownerUserId) ?? row.ownerDue.ownerLabel ?? '未定'}
+          <span className="text-ink-muted"> ／ {formatJstDate(row.ownerDue.dueDate)}</span>
+          <span className="block text-caption text-ink-muted">
+            出所: {OWNER_DUE_SOURCE_LABELS[row.ownerDue.source]}
+          </span>
+          {row.actionPlans.length > 0 && (
+            <span className="block text-caption text-ink-muted">
+              対応計画: {row.actionPlans.join('／')}
+            </span>
+          )}
         </span>
       ),
     },
@@ -244,18 +428,88 @@ export async function RequirementsTab({
     },
   ];
 
+  /** 行の操作（対象外の承認・判断の記録・原稿を開く・詳細） */
+  const rowActionsOf = (row: RequirementRow) => {
+    const detailHref = `/enterprise/disclosure-projects/${projectId}/requirements/${row.item.id}`;
+    const exclusion = row.decision.exclusion;
+    const ops =
+      exclusion && row.decision.reason && home !== 'csrd'
+        ? exclusionActions({
+            fields: {
+              projectId,
+              itemId: row.item.id,
+              returnTo: 'requirements',
+              fw: selected.projectFramework.id,
+              ...(home === 'ssbj'
+                ? {
+                    source: 'ssbj_assessment',
+                    reportingPeriodId: detail.project.reportingPeriodId,
+                  }
+                : {
+                    source: 'project_assessment',
+                    projectFrameworkId: selected.projectFramework.id,
+                  }),
+            },
+            state: exclusion.state,
+            requestedBy: exclusion.requestedBy,
+            // 承認待ちの判断は decision.kind が「未判定」になるため、判断の区分（exclusionDecision）から取る
+            decision: row.decision.exclusionDecision ?? 'not_applicable',
+            reason: row.decision.reason,
+            frameworkLabel: selected.label,
+            code: row.item.code,
+            viewerId: ctx.userId,
+            canWrite,
+            canApprove,
+            noteLimit,
+            idSuffix: row.item.code,
+          })
+        : {};
+    const ordered = [...row.blocks].sort((a, b) => Number(a.translation) - Number(b.translation));
+    const openBlocks: MenuActionSpec[] = ordered.map((b) => ({
+      kind: 'link' as const,
+      id: `open-${b.id}`,
+      label: `「${b.title}」${b.language === 'en' ? '（英語）' : ''}を開く`,
+      href: `${base}/blocks/${b.id}`,
+    }));
+    const record: ActionSpec | undefined =
+      home === 'project' && canWrite
+        ? {
+            kind: 'link',
+            id: `record-${row.item.code}`,
+            label: '判断を記録',
+            icon: <ClipboardPen aria-hidden="true" />,
+            href: `${detailHref}?new=1#assessment-panel`,
+          }
+        : undefined;
+    const openDetail: MenuActionSpec = {
+      kind: 'link',
+      id: `detail-${row.item.code}`,
+      label: '要求事項の詳細（プロジェクト）を開く',
+      href: detailHref,
+    };
+    const firstBlock: ActionSpec | undefined = ordered[0]
+      ? {
+          kind: 'link',
+          id: `open-${ordered[0].id}`,
+          label: '原稿を開く',
+          href: `${base}/blocks/${ordered[0].id}`,
+        }
+      : undefined;
+    const primary = ops.approve ?? record ?? firstBlock;
+    const items: MenuActionSpec[] = [
+      ...(ops.returnBack ? [ops.returnBack] : []),
+      ...(ops.request ? [ops.request] : []),
+      ...(primary !== record && record ? [record] : []),
+      ...openBlocks.filter((b) => !(primary === firstBlock && b.id === firstBlock?.id)),
+      openDetail,
+      ...(ops.withdraw ? [ops.withdraw] : []),
+    ];
+    return { rowLabel: row.item.code, primary, items };
+  };
+
   return (
     <div className="space-y-3">
-      {/* 基準ごとの法的な位置付け（公開草案・サンプルなど）は選ぶ前に読めるよう、名前に併記する */}
-      <SegmentedFilter
-        ariaLabel="基準の切り替え"
-        current={selected.projectFramework.id}
-        items={detail.frameworks.map((f) => ({
-          key: f.projectFramework.id,
-          label: `${f.label}（${f.legal.label}）`,
-          href: hrefFor({ fw: f.projectFramework.id }),
-        }))}
-      />
+      {header}
 
       {result.mode === 'not_loaded' ? (
         <Section title="要求事項は未収録（公開草案）" divider="none">
@@ -289,14 +543,14 @@ export async function RequirementsTab({
               適用未判定 <strong>{summary.notAssessed}</strong> 件
             </span>
             <span className="text-ink-muted">
-              対象外・非重要と判断 {summary.excludedDecided} 件（理由・判断者あり）
+              対象外・非重要と判断 {summary.excludedDecided} 件（理由・判断者・承認者あり）
             </span>
             <span className="text-ink-muted">収録 {summary.total} 項目</span>
             {selected.legal.isSample && (
-              <Badge tone="neutral">
-                <FlaskConical className="size-3" aria-hidden="true" />
-                サンプル（架空）の要求事項です
-              </Badge>
+              <span className="inline-flex items-center gap-1">
+                <HonestyBadge kind="sample-master" />
+                サンプル（架空）の要求事項です（基準の条文ではありません）
+              </span>
             )}
           </p>
 
@@ -318,19 +572,44 @@ export async function RequirementsTab({
               })),
             ]}
           />
+          {/* 5 区分（スライド 5 の 4 区分＋未判定）。分母は上の絞り込みの結果（NF-03） */}
+          <SegmentedFilter
+            ariaLabel="区分の絞り込み"
+            current={coverage ?? 'all'}
+            items={[
+              {
+                key: 'all',
+                label: '区分: すべて',
+                href: hrefFor({ coverage: null }),
+                count: filteredRows.length,
+              },
+              ...REQUIREMENT_COVERAGE_CATEGORIES.map((key) => ({
+                key,
+                label: statusLabel('requirementCoverage', key),
+                href: hrefFor({ coverage: key }),
+                count: coverageCounts[key],
+              })),
+            ]}
+          />
+          {!selected.legal.isPreparationOnly ? null : (
+            <p className="text-caption text-ink-muted">
+              {selected.legal.label}
+              の基準は、人が確認しても「充足確認済み」にしません（上限は「追加確認が必要」）。
+            </p>
+          )}
 
-          {filteredRows.length === 0 && filter ? (
+          {coverageRows.length === 0 && (filter || coverage) ? (
             <EmptyState
               kind="filtered"
               size="compact"
-              title={`「${REQUIREMENT_FILTER_LABELS[filter]}」に当たる要求事項はありません`}
+              title={`「${[filter ? REQUIREMENT_FILTER_LABELS[filter] : null, coverage ? statusLabel('requirementCoverage', coverage) : null].filter(Boolean).join('・')}」に当たる要求事項はありません`}
               description="絞り込みを外すと全件を表示します。"
-              resetHref={hrefFor({ filter: null })}
+              resetHref={hrefFor({ filter: null, coverage: null })}
             />
           ) : (
             <DataTable
               id="project-requirements"
-              caption={`要求事項（${filteredRows.length} 件${filter ? `／${REQUIREMENT_FILTER_LABELS[filter]}` : ''}）`}
+              caption={`要求事項（${coverageRows.length} 件${filter ? `／${REQUIREMENT_FILTER_LABELS[filter]}` : ''}${coverage ? `／${statusLabel('requirementCoverage', coverage)}` : ''}）`}
               columns={columns}
               rows={pageRows}
               getRowId={(row) => row.item.id}
@@ -339,33 +618,11 @@ export async function RequirementsTab({
               searchParams={searchParams}
               basePath={base}
               search={false}
-              page={{ page, pageSize, total: filteredRows.length, sizes: DEFAULT_PAGE_SIZES }}
+              page={{ page, pageSize, total: coverageRows.length, sizes: DEFAULT_PAGE_SIZES }}
               className="rounded-t4d-lg border border-line bg-surface"
-              rowActions={(row) => {
-                // 行の主操作は「原稿を開く」（元の節を優先）。翻訳版など残りの節は「操作 ▾」から開く
-                const ordered = [...row.blocks].sort(
-                  (a, b) => Number(a.translation) - Number(b.translation),
-                );
-                const [first, ...rest] = ordered;
-                if (!first) return null;
-                return {
-                  rowLabel: row.item.code,
-                  primary: {
-                    kind: 'link',
-                    id: `open-${first.id}`,
-                    label: '原稿を開く',
-                    href: `${base}/blocks/${first.id}`,
-                  },
-                  items: rest.map((b) => ({
-                    kind: 'link' as const,
-                    id: `open-${b.id}`,
-                    label: `「${b.title}」${b.language === 'en' ? '（英語）' : ''}を開く`,
-                    href: `${base}/blocks/${b.id}`,
-                  })),
-                };
-              }}
+              rowActions={rowActionsOf}
               expand={(row) => {
-                // 承認まで進めない理由（根拠・数値・未判定）。無い行は展開しない
+                // 承認まで進めない理由（根拠・数値・未判定・区分の理由）。無い行は展開しない
                 const reasons = blockingReasons(row);
                 return reasons.length === 0 ? null : (
                   <ul className="space-y-0.5">
@@ -397,11 +654,15 @@ export async function RequirementsTab({
               }}
             />
           )}
-          <MoreInfo label="内容評価と本文状態の違い">
+          <MoreInfo label="区分・内容評価・本文状態の違い">
+            <p>
+              区分（充足確認済み／追加確認が必要／未対応／未判定／対象外）は、判断・原稿・数値・根拠・人の評価から毎回導く値です。
+              対象外・非重要は、理由があり別の人が承認したときだけ「対象外」として分母から外し、承認待ちは「未判定」として残します。
+            </p>
             <p>
               内容評価は既存の SSBJ
               評価（対応済み／おおむね対応／一部対応／未対応／未確認）で、原稿の工程（本文状態）とは別の値です。
-              資料を登録しただけでは要求事項を対応済みにしません。内容評価・根拠の充足・数値の状態は「列」から表示できます。
+              資料を登録しただけでは要求事項を対応済みにしません。内容評価・根拠の充足・数値の状態・不足・担当期限の出所は「列」から表示できます。
             </p>
           </MoreInfo>
         </>

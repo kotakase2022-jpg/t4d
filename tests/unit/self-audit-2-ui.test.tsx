@@ -16,6 +16,7 @@ const actionMocks = vi.hoisted(() => ({
   addReviewCommentAction: vi.fn(),
   resolveReviewCommentAction: vi.fn(),
   createBlockFormAction: vi.fn(),
+  listBlockRequirementOptionsAction: vi.fn(),
   uploadEvidenceDocumentFormAction: vi.fn(),
 }));
 
@@ -179,6 +180,53 @@ describe('UX-04 節を追加するフォームは、キーの形式を送る前�
     expect(new RegExp(`^(?:${SECTION_KEY_PATTERN})$`).test('risk_opportunity')).toBe(true);
     expect(new RegExp(`^(?:${SECTION_KEY_PATTERN})$`).test('Governance')).toBe(false);
     expect(screen.getByRole('button', { name: '節を追加' })).toBeTruthy();
+  });
+});
+
+// ----------------------------------------------------------------------
+// トライアル対応 NF-05: 節を追加するときに対応する要求事項を選べる（T1）
+// ----------------------------------------------------------------------
+
+describe('NF-05 節を追加するフォームで、対応する要求事項を選べる', () => {
+  it('「要求事項を選ぶ」で選んでいる基準の版の一覧を読み、絞り込んでも選んだ要求事項を送る', async () => {
+    actionMocks.listBlockRequirementOptionsAction.mockResolvedValue({
+      status: 'ok',
+      options: [
+        { id: 'item-1', code: '40A-S01', section: '（サンプル）', title: '（サンプル）体制' },
+        { id: 'item-2', code: '40A-S02', section: '（サンプル）', title: '（サンプル）手順' },
+      ],
+    });
+    const { AddBlockForm } =
+      await import('@/app/enterprise/disclosure-projects/[projectId]/_tabs/add-block-form');
+    render(
+      <AddBlockForm
+        projectId="project-1"
+        frameworks={[
+          { versionId: 'fv-ssbj', label: 'SSBJ 2026' },
+          { versionId: 'fv-40a', label: 'ESRS-40a サンプル' },
+        ]}
+        rows={[]}
+      />,
+    );
+    // 一覧は開くまで読まない（開かない人の表示を重くしない）
+    expect(actionMocks.listBlockRequirementOptionsAction).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/基準の版/), { target: { value: 'fv-40a' } });
+    fireEvent.click(screen.getByRole('button', { name: '要求事項を選ぶ' }));
+    await waitFor(() =>
+      expect(actionMocks.listBlockRequirementOptionsAction).toHaveBeenCalledWith({
+        projectId: 'project-1',
+        frameworkVersionId: 'fv-40a',
+      }),
+    );
+    const second = (await screen.findByRole('checkbox', { name: /40A-S02/ })) as HTMLInputElement;
+    fireEvent.click(second);
+    expect(screen.getByText(/1 件を選択中/)).toBeTruthy();
+
+    // 絞り込みは表示を減らすだけ（隠れた選択も送る）
+    fireEvent.change(screen.getByLabelText('要求事項を検索'), { target: { value: 'S01' } });
+    expect(second.closest('li')?.hidden).toBe(true);
+    const form = second.closest('form')!;
+    expect(new FormData(form).getAll('requirementItemIds')).toEqual(['item-2']);
   });
 });
 

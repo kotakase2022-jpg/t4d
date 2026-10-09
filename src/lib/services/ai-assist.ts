@@ -16,7 +16,7 @@ import type {
   ReportingPeriod,
   Uuid,
 } from '@/types/domain';
-import { loadDisclosureWorkspace } from './disclosure';
+import { assertFrameworkAvailable, loadDisclosureWorkspace } from './disclosure';
 
 /**
  * 画面から実行できていなかった AI 機能をつなぐ層。
@@ -47,6 +47,8 @@ export async function runQuestionMapping(
   periods: ReportingPeriod[],
 ): Promise<QuestionMappingResult> {
   assertCan(ctx, 'enterprise.ai.run');
+  // 契約オプションの基準（CDP）は、契約の無い組織に契約の理由を返して止める（AI を呼ばない。plan NF-38）
+  await assertFrameworkAvailable(db, ctx, frameworkKey);
 
   const metrics = await db.select('metrics', {
     where: { organizationId: ctx.workspace.organizationId, deletedAt: { isNull: true } },

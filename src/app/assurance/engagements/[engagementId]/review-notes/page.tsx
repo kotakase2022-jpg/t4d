@@ -17,7 +17,8 @@ import { requireAssuranceContext } from '@/lib/auth/session';
 import { can } from '@/lib/authorization/can';
 import { formatJst } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
-import { loadEngagementOr404 } from '@/lib/services/assurance';
+import { loadEngagementOr404, loadEngagementReviewNotes } from '@/lib/services/assurance';
+import { noteBodyLimit } from '@/lib/services/assurance-notes';
 import { clearReviewNoteAction, createReviewNoteAction } from '../../../actions';
 import { EngagementHeader } from '../engagement-header';
 
@@ -39,10 +40,11 @@ export default async function ReviewNotesPage({
   const context = await loadEngagementOr404(db, ctx, engagementId);
   const basePath = `/assurance/engagements/${engagementId}/review-notes`;
 
-  const notes = await db.select('reviewNotes', {
-    where: { engagementId },
-    orderBy: { column: 'createdAt', dir: 'desc' },
-  });
+  // 案件全体へのコメントと、開示レポートの段落・数値へのコメント（NF-21）。企業の回答と状態も付ける
+  const entries = await loadEngagementReviewNotes(db, ctx, engagementId);
+  const notes = entries.map((e) => e.note);
+  const entryOf = new Map(entries.map((e) => [e.note.id, e]));
+  const limit = noteBodyLimit(ctx);
   const members = await db.select('engagementMembers', { where: { engagementId } });
   const team = members.filter((m) => m.removedAt === null);
   const profileIds = [
@@ -94,8 +96,19 @@ export default async function ReviewNotesPage({
         <Notice tone="info">
           レビュー Note は<strong>既定で監査法人内部限定</strong>です。「クライアントへ共有」を
           明示的に有効にしたものだけが企業側から閲覧できます（DB の RLS
-          でも同じ条件で制御しています）。
+          でも同じ条件で制御しています）。企業の回答は追記で残り、レビュー Note
+          そのものは企業側から変更されません。
         </Notice>
+        <p className="text-caption text-ink-muted">
+          開示レポートの段落・数値へのコメントは、
+          <Link
+            href={`/assurance/engagements/${engagementId}/reports`}
+            className="mx-0.5 text-brand-700 hover:underline"
+          >
+            開示レポート
+          </Link>
+          の内容の画面から起票します（対象の段落・数値と追跡番号が付きます）。
+        </p>
 
         {canWrite && (
           <CreatePanel
@@ -107,8 +120,14 @@ export default async function ReviewNotesPage({
             <form action={createReviewNoteAction} className="space-y-2">
               <input type="hidden" name="engagementId" value={engagementId} />
               <div className="grid grid-cols-6 gap-2">
-                <Field label="内容" name="body" required className="col-span-5">
-                  {(p) => <Textarea {...p} name="body" rows={2} />}
+                <Field
+                  label="内容"
+                  name="body"
+                  required
+                  hint={`${limit} 字まで`}
+                  className="col-span-5"
+                >
+                  {(p) => <Textarea {...p} name="body" rows={2} maxLength={limit} />}
                 </Field>
                 <Field label="担当" name="assignedTo" className="col-span-1">
                   {(p) => (
@@ -190,42 +209,99 @@ export default async function ReviewNotesPage({
             <EmptyState kind="filtered" size="compact" resetHref={filterHref('all')} />
           ) : (
             <ul className="divide-y divide-line rounded-t4d border border-line">
-              {shown.map((note) => (
-                <li key={note.id} className="p-3" data-t4d-record="">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge domain="reviewNote" value={note.status} />
-                    {note.sharedWithClient ? (
-                      <SemanticBadge semantic="info" label="クライアント共有" />
-                    ) : (
-                      <SemanticBadge semantic="excluded" label="法人内部限定" />
+              {shown.map((note) => {
+                const entry = entryOf.get(note.id);
+                const target = entry?.target ?? null;
+                const responses = entry?.responses ?? [];
+                return (
+                  <li key={note.id} className="p-3" data-t4d-record="">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge domain="reviewNote" value={note.status} />
+                      {note.sharedWithClient ? (
+                        <SemanticBadge semantic="info" label="クライアント共有" />
+                      ) : (
+                        <SemanticBadge semantic="excluded" label="法人内部限定" />
+                      )}
+                      {entry?.clientState && (
+                        // 企業側から見た状態（未回答／回答済み／クリア）。回答の有無から導く
+                        <StatusBadge domain="clientNote" value={entry.clientState} />
+                      )}
+                      <span className="ml-auto text-caption text-ink-muted">
+                        {nameOf(note.raisedBy)} ／ {formatJst(note.createdAt)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-caption text-ink-muted" data-note-target="">
+                      対象:{' '}
+                      {target ? (
+                        <>
+                          <Link
+                            href={`/assurance/engagements/${engagementId}/reports/${target.copyId}${target.traceId ? `?unit=${target.traceId}#trace-detail` : ''}`}
+                            className="text-brand-700 hover:underline"
+                          >
+                            開示レポート {target.reportLabel ?? '（写しを読めません）'}
+                          </Link>
+                          {' ／ '}
+                          {target.kind === 'report_paragraph' ? '段落' : '数値'}「{target.place}」
+                          {target.traceId && (
+                            <span className="ml-1 font-mono">{target.traceId}</span>
+                          )}
+                        </>
+                      ) : (
+                        '案件全体'
+                      )}
+                    </p>
+                    {target?.excerpt && (
+                      <p className="mt-0.5 border-l-2 border-line pl-2 text-caption text-ink-muted">
+                        {target.excerpt}
+                      </p>
                     )}
-                    <span className="ml-auto text-caption text-ink-muted">
-                      {nameOf(note.raisedBy)} ／ {formatJst(note.createdAt)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-small text-ink">{note.body}</p>
-                  {note.assignedTo && (
-                    <p className="text-caption text-ink-muted">担当: {nameOf(note.assignedTo)}</p>
-                  )}
-                  {note.resolutionComment && (
-                    <p className="mt-1 text-small text-success">対応: {note.resolutionComment}</p>
-                  )}
+                    <p className="mt-1 text-small text-ink">{note.body}</p>
+                    {note.assignedTo && (
+                      <p className="text-caption text-ink-muted">担当: {nameOf(note.assignedTo)}</p>
+                    )}
+                    {responses.length > 0 && (
+                      <ul
+                        className="mt-1 space-y-0.5 border-l-2 border-brand-200 pl-2"
+                        aria-label="クライアントの回答"
+                      >
+                        {responses.map((r) => (
+                          <li key={r.id} className="text-small">
+                            <span className="text-caption font-medium text-ink">
+                              クライアントの回答
+                            </span>
+                            <span className="ml-1 text-caption text-ink-muted">
+                              {formatJst(r.respondedAt)}
+                            </span>
+                            <p className="text-ink">{r.body}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {note.resolutionComment && (
+                      <p className="mt-1 text-small text-success">対応: {note.resolutionComment}</p>
+                    )}
 
-                  {canWrite && note.status !== 'cleared' && (
-                    <form action={clearReviewNoteAction} className="mt-2 flex items-end gap-2">
-                      <input type="hidden" name="engagementId" value={engagementId} />
-                      <input type="hidden" name="noteId" value={note.id} />
-                      <label className="flex-1 text-caption text-ink-muted">
-                        対応内容
-                        <Input name="resolutionComment" required className="mt-0.5" />
-                      </label>
-                      <SubmitButton size="xs" variant="secondary">
-                        クリア
-                      </SubmitButton>
-                    </form>
-                  )}
-                </li>
-              ))}
+                    {canWrite && note.status !== 'cleared' && (
+                      <form action={clearReviewNoteAction} className="mt-2 flex items-end gap-2">
+                        <input type="hidden" name="engagementId" value={engagementId} />
+                        <input type="hidden" name="noteId" value={note.id} />
+                        <label className="flex-1 text-caption text-ink-muted">
+                          対応内容
+                          <Input
+                            name="resolutionComment"
+                            required
+                            maxLength={limit}
+                            className="mt-0.5"
+                          />
+                        </label>
+                        <SubmitButton size="xs" variant="secondary">
+                          クリア
+                        </SubmitButton>
+                      </form>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Section>

@@ -42,7 +42,6 @@ function tablesInSchema(sql: string): Set<string> {
  * 触らない理由を書いておかないと、単なる対応漏れと区別が付かない。
  */
 const UNMAPPED: Record<string, string> = {
-  ai_feedback: 'Phase 1 未使用（採否は ai_runs と audit_events に残す）',
   roles: 'ロールの定義。読み出しは role_permissions 経由',
   permissions: '権限の定義。同上',
   role_permissions:
@@ -57,6 +56,10 @@ const UNMAPPED: Record<string, string> = {
   ai_jobs: 'Phase 1 未使用。AI は同期実行で ai_runs に残す',
   ai_sources: 'Phase 1 未使用。出典は ai_runs.source_references に持つ',
   workpaper_references: 'Phase 1 未使用。調書番号は assurance_tests.workpaper_ref に持つ',
+  // テナントの終了（削除）の記録（0058）。運営が DB の所有者のロールで保守関数から書くだけで、
+  // アプリ（authenticated・Service Role の画面）からは読み書きしない（docs/operations/tenant-offboarding.md）
+  tenant_lifecycle_records:
+    '運営の保守関数 t4d.offboard_organization だけが書く。アプリから触らない',
 };
 
 describe('スキーマとテーブル対応表の一致', () => {

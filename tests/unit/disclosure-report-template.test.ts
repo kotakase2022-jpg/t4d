@@ -2,12 +2,18 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   DISCLOSURE_REPORT_TEMPLATE_VERSION,
+  EMPTY_EXPORT_CONTEXT,
   coverRows,
   externalMaskedNames,
   issueDisplay,
   metricDisplay,
+  outputParagraphText,
+  paragraphTraceIds,
   renderBlockParagraphs,
+  renderTracedParagraphs,
+  snapshotTrace,
   statusLine,
+  traceTableRows,
 } from '@/lib/exports/disclosure-report';
 import type {
   ReportSnapshotDetail,
@@ -170,30 +176,46 @@ const snapshot: ReportSnapshotDetail = {
 
 function renderAll(): unknown {
   const masked = externalMaskedNames(snapshot, block.maskedFileNames ?? []);
-  return snapshot.frameworkVersions.map((f) => ({
-    cover: {
-      internal: coverRows(snapshot, f, 'internal'),
-      external: coverRows(snapshot, f, 'external'),
-    },
-    status: statusLine(snapshot, f),
-    body: {
-      internal: renderBlockParagraphs(block, snapshot, 'internal', masked),
-      external: renderBlockParagraphs(block, snapshot, 'external', masked),
-    },
-    issues: block.issues.map((i) => [issueDisplay(i, 'internal'), issueDisplay(i, 'external')]),
-    metrics: snapshot.metricValues.map((m) => [
-      metricDisplay(m),
-      metricDisplay(m, { withKind: false }),
-    ]),
-  }));
+  return snapshot.frameworkVersions.map((f) => {
+    // v3: 追跡番号（社内確認用は段落末に付ける・対外用は本文を変えない）と追跡表
+    const trace = snapshotTrace(snapshot, EMPTY_EXPORT_CONTEXT, {
+      frameworkVersionId: f.frameworkVersionId,
+    });
+    const ids = paragraphTraceIds(trace.units);
+    return {
+      cover: {
+        internal: coverRows(snapshot, f, 'internal'),
+        external: coverRows(snapshot, f, 'external'),
+      },
+      status: statusLine(snapshot, f),
+      body: {
+        internal: renderBlockParagraphs(block, snapshot, 'internal', masked),
+        external: renderBlockParagraphs(block, snapshot, 'external', masked),
+      },
+      issues: block.issues.map((i) => [issueDisplay(i, 'internal'), issueDisplay(i, 'external')]),
+      metrics: snapshot.metricValues.map((m) => [
+        metricDisplay(m),
+        metricDisplay(m, { withKind: false }),
+      ]),
+      traced: {
+        internal: renderTracedParagraphs(block, snapshot, 'internal', masked, ids).map((p) =>
+          outputParagraphText(p, 'internal'),
+        ),
+        external: renderTracedParagraphs(block, snapshot, 'external', masked, ids).map((p) =>
+          outputParagraphText(p, 'external'),
+        ),
+      },
+      traceTable: traceTableRows(snapshot, trace.units, EMPTY_EXPORT_CONTEXT),
+    };
+  });
 }
 
 describe('F7 描画の版と描画結果の指紋', () => {
   it('描画を変えたら DISCLOSURE_REPORT_TEMPLATE_VERSION を上げる', () => {
     const fingerprint = createHash('sha256').update(JSON.stringify(renderAll())).digest('hex');
     expect({ version: DISCLOSURE_REPORT_TEMPLATE_VERSION, fingerprint }).toEqual({
-      version: 'disclosure-report-v2',
-      fingerprint: '21d6012f1320d2eaa0fb12a2a9bb3ad651751c7744c6804dad42b75a92801d1f',
+      version: 'disclosure-report-v3',
+      fingerprint: 'fbfb19386104a90675b990a0cca382e357e8d04a00fc31fe35b6234d069f2090',
     });
   });
 
@@ -210,5 +232,24 @@ describe('F7 描画の版と描画結果の指紋', () => {
     expect(externalBody).not.toContain('社外秘の取締役会資料.pdf');
     expect(externalBody).toContain('［出典: 社内資料］');
     expect(rendered[0]!.body.internal.map((p) => p.text).join('')).toContain('委員会議事録.pdf');
+  });
+
+  it('v3 の描画: 社内確認用は段落末に追跡番号、対外用は本文を変えない。追跡表は空のセルを作らない', () => {
+    const rendered = renderAll() as Array<{
+      traced: { internal: string[]; external: string[] };
+      traceTable: string[][];
+      body: { external: Array<{ text: string }> };
+    }>;
+    const first = rendered[0]!;
+    expect(first.traced.internal[0]).toMatch(/［T-M-1］$/);
+    // 対外用の本文は v2 の描画と同じ（追跡番号はブックマークに入れ、文字は変えない）
+    expect(first.traced.external).toEqual(first.body.external.map((p) => p.text));
+    expect(first.traceTable.length).toBeGreaterThan(0);
+    for (const row of first.traceTable) {
+      for (const cell of row) expect(cell.trim().length).toBeGreaterThan(0);
+    }
+    // 要求事項の無い節の段落は「追跡できない」と理由を出す
+    expect(first.traceTable[0]![9]).toBe('追跡できない');
+    expect(first.traceTable[0]![10]).toContain('要求事項');
   });
 });

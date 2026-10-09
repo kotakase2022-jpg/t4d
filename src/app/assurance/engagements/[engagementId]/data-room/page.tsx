@@ -20,6 +20,8 @@ import {
   detectSnapshotChanges,
   loadDataRoom,
   loadEngagementOr404,
+  recordDataRoomView,
+  type DataRoomReportRow,
   type DataRoomRow,
 } from '@/lib/services/assurance';
 import {
@@ -38,6 +40,10 @@ export const metadata = { title: 'Data Room' };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
+/** Data Room の 1 行（取得元: 非財務データ／開示レポート） */
+type DataRoomTableRow =
+  { kind: 'data_point'; row: DataRoomRow } | { kind: 'report'; report: DataRoomReportRow };
+
 export default async function DataRoomPage({
   params,
   searchParams,
@@ -52,7 +58,13 @@ export default async function DataRoomPage({
   const context = await loadEngagementOr404(db, ctx, engagementId);
   const basePath = `/assurance/engagements/${engagementId}/data-room`;
 
-  const { rows, snapshot } = await loadDataRoom(db, ctx, engagementId);
+  // 行は許諾と承認から読み取り時に導出する（NF-22。企業が許諾を足す・承認すると次の表示で出る）
+  const { rows, snapshot, reports } = await loadDataRoom(db, ctx, engagementId);
+  // 閲覧の記録（1 画面 1 件・要約だけ。NF-26）と、この人の前回の表示日時（「前回表示以降」の絞込）
+  const { previousViewedAt } = await recordDataRoomView(db, ctx, engagementId, {
+    dataPoints: rows.length,
+    reports: reports.length,
+  });
   const changes = snapshot ? await detectSnapshotChanges(db, ctx, snapshot.id) : [];
 
   const snapshotItems = snapshot
@@ -73,54 +85,111 @@ export default async function DataRoomPage({
   // 共有データの検索・絞り込み（URL が正。サーバーで絞る）
   const search = typeof query.q === 'string' ? query.q.trim().toLowerCase() : '';
   const changeFilter = typeof query.change === 'string' ? query.change : null;
-  const tableRows = rows
-    .filter((row) => (changeFilter === 'changed' ? row.changedSinceSnapshot : true))
-    .filter((row) => (changeFilter === 'unfixed' ? !row.snapshotIncluded : true))
-    .filter((row) =>
+  const sourceFilter = typeof query.source === 'string' ? query.source : null;
+  // 「前回表示以降に共有された n 件」: URL の since が正。無ければこの人の前回の表示日時を選択肢にする
+  const sinceParam =
+    typeof query.since === 'string' && !Number.isNaN(Date.parse(query.since)) ? query.since : null;
+  const sinceValue = sinceParam ?? previousViewedAt;
+  const allRows: DataRoomTableRow[] = [
+    ...reports.map((report) => ({ kind: 'report' as const, report })),
+    ...rows.map((row) => ({ kind: 'data_point' as const, row })),
+  ];
+  const sharedAtOf = (entry: DataRoomTableRow) =>
+    entry.kind === 'report' ? entry.report.sharedAt : entry.row.sharedAt;
+  const newSince = sinceValue
+    ? allRows.filter((entry) => Date.parse(sharedAtOf(entry)) > Date.parse(sinceValue))
+    : [];
+  const tableRows = allRows
+    .filter((entry) => (sourceFilter ? entry.kind === sourceFilter : true))
+    .filter((entry) =>
+      changeFilter === 'changed'
+        ? entry.kind === 'data_point' && entry.row.changedSinceSnapshot
+        : true,
+    )
+    .filter((entry) =>
+      changeFilter === 'unfixed'
+        ? entry.kind === 'data_point' && !entry.row.snapshotIncluded
+        : true,
+    )
+    .filter((entry) => (sinceParam ? Date.parse(sharedAtOf(entry)) > Date.parse(sinceParam) : true))
+    .filter((entry) =>
       search === ''
         ? true
-        : `${row.metric?.name ?? ''} ${row.unit?.name ?? ''}`.toLowerCase().includes(search),
+        : (entry.kind === 'report'
+            ? `${entry.report.label} ${entry.report.frameworkNames.join(' ')} 開示レポート`
+            : `${entry.row.metric?.name ?? ''} ${entry.row.unit?.name ?? ''}`
+          )
+            .toLowerCase()
+            .includes(search),
     );
+  const reportHref = (copyId: string) => `/assurance/engagements/${engagementId}/reports/${copyId}`;
+  const dash = <span className="text-caption text-ink-muted">—</span>;
 
-  const columns: DataTableColumn<DataRoomRow>[] = [
+  const columns: DataTableColumn<DataRoomTableRow>[] = [
     {
       key: 'metric',
       header: '指標',
       importance: 'primary',
       lockVisible: true,
       pinned: 'left',
-      cell: (row) => <span className="font-medium">{row.metric?.name ?? '—'}</span>,
+      cell: (entry) =>
+        entry.kind === 'report' ? (
+          <Link
+            href={reportHref(entry.report.copyId)}
+            className="font-medium text-brand-700 underline-offset-2 hover:underline"
+          >
+            開示レポート {entry.report.label}
+          </Link>
+        ) : (
+          <span className="font-medium">{entry.row.metric?.name ?? '—'}</span>
+        ),
     },
     {
       key: 'unit',
       header: '組織',
       importance: 'primary',
-      cell: (row) => row.unit?.name ?? '—',
+      cell: (entry) =>
+        entry.kind === 'report'
+          ? entry.report.frameworkNames.join('・') || '—'
+          : (entry.row.unit?.name ?? '—'),
     },
     {
       key: 'value',
       header: '現在値',
       importance: 'primary',
       align: 'right',
-      cell: (row) => (
-        <span className="tnum">
-          {formatNumber(row.currentValue)}
-          <span className="ml-1 text-caption text-ink-muted">{row.currentUnitOfMeasure}</span>
-        </span>
-      ),
+      cell: (entry) =>
+        entry.kind === 'report' ? (
+          dash
+        ) : (
+          <span className="tnum">
+            {formatNumber(entry.row.currentValue)}
+            <span className="ml-1 text-caption text-ink-muted">
+              {entry.row.currentUnitOfMeasure}
+            </span>
+          </span>
+        ),
     },
     {
       key: 'clientStatus',
       header: 'クライアントの承認',
       importance: 'secondary',
-      cell: (row) => <StatusBadge domain="dataPoint" value={row.clientStatus as never} />,
+      cell: (entry) =>
+        entry.kind === 'report' ? (
+          <HonestyBadge kind="internal-approval" />
+        ) : (
+          <StatusBadge domain="dataPoint" value={entry.row.clientStatus as never} />
+        ),
     },
     {
       key: 'snapshot',
       header: 'Snapshot',
       importance: 'primary',
-      cell: (row) =>
-        row.snapshotIncluded ? (
+      cell: (entry) =>
+        entry.kind === 'report' ? (
+          // 写しは共有の時点で固定されている（Snapshot の固定の対象ではない）
+          <SemanticBadge semantic="info" label="写し（固定済み）" />
+        ) : entry.row.snapshotIncluded ? (
           <SemanticBadge semantic="done" label="固定済み" />
         ) : (
           <SemanticBadge semantic="todo" label="未固定" />
@@ -130,40 +199,60 @@ export default async function DataRoomPage({
       key: 'change',
       header: '固定後の変更',
       importance: 'primary',
-      cell: (row) =>
-        row.changedSinceSnapshot ? (
+      cell: (entry) =>
+        entry.kind === 'data_point' && entry.row.changedSinceSnapshot ? (
           <SemanticBadge semantic="error" label="変更あり" />
         ) : (
-          <span className="text-caption text-ink-muted">—</span>
+          dash
         ),
     },
     {
       key: 'source',
       header: '取得元',
-      importance: 'detail',
-      cell: () => <span className="text-caption">非財務データ</span>,
+      // 開示レポートの行が混ざるため既定で見せる（以前は常に「非財務データ」で detail だった）
+      importance: 'secondary',
+      cell: (entry) => (
+        <span className="text-caption" data-source={entry.kind}>
+          {entry.kind === 'report' ? '開示レポート' : '非財務データ'}
+        </span>
+      ),
     },
     {
       key: 'version',
       header: '版',
       importance: 'detail',
       align: 'right',
-      cell: (row) => <span className="tnum">{row.currentVersionNo ?? '—'}</span>,
+      cell: (entry) =>
+        entry.kind === 'report' ? (
+          dash
+        ) : (
+          <span className="tnum">{entry.row.currentVersionNo ?? '—'}</span>
+        ),
     },
     {
       key: 'evidence',
       header: '資料',
       importance: 'detail',
       align: 'right',
-      cell: (row) => <span className="tnum">{row.evidenceCount}</span>,
+      cell: (entry) =>
+        entry.kind === 'report' ? (
+          dash
+        ) : (
+          <span className="tnum">
+            {entry.row.evidenceCount}
+            {!entry.row.includesEvidence && entry.row.evidenceCount > 0 && (
+              <span className="ml-1 text-caption text-ink-muted">（実体は許諾外）</span>
+            )}
+          </span>
+        ),
     },
     {
       key: 'sharedAt',
       header: '共有日時',
       importance: 'detail',
-      cell: (row) => (
+      cell: (entry) => (
         <span className="whitespace-nowrap text-caption text-ink-muted">
-          {formatJst(row.sharedAt)}
+          {formatJst(sharedAtOf(entry))}
         </span>
       ),
     },
@@ -180,10 +269,13 @@ export default async function DataRoomPage({
             <ConfirmDialog
               tier="irreversible"
               title="Snapshot を固定しますか"
-              scope={`${context.engagement.code} の Data Room に共有されている ${rows.length} 件の現在値を固定します。`}
+              scope={`${context.engagement.code} の Data Room に共有されている非財務データ ${rows.length} 件の現在値を固定します。`}
               consequences={[
                 '固定した値は変更できません（追記専用）。以後のクライアント側の変更は「固定後の変更」として検知されます。',
                 '固定した Snapshot から母集団が構成されます。',
+                ...(reports.length > 0
+                  ? ['開示レポートの写しは共有の時点で固定されているため、対象に含めません。']
+                  : []),
               ]}
               extraFields={
                 <label className="block space-y-1">
@@ -355,19 +447,29 @@ export default async function DataRoomPage({
         )}
 
         <Section
-          title={`共有されているクライアントデータ（${rows.length}）`}
+          title={`共有されているクライアントデータ（${allRows.length}）`}
+          summary={`非財務データ ${rows.length} 件・開示レポート ${reports.length} 件`}
           actions={<ReadOnlyBadge />}
         >
-          <DataTable<DataRoomRow>
+          <p className="mb-1.5 text-caption text-ink-muted">
+            クライアントの許諾（指標・組織・期間）と承認から、表示のたびに導いています。許諾の追加・承認は次の表示で反映され、許諾の取消・承認の取り消しで見えなくなります。
+          </p>
+          <DataTable<DataRoomTableRow>
             id="assurance-data-room"
             caption="共有されているクライアントデータ"
             columns={columns}
             rows={tableRows}
-            getRowId={(row) => row.dataPointId}
-            getRowLabel={(row) => `${row.metric?.name ?? '指標'} ${row.unit?.name ?? ''}`}
+            getRowId={(entry) =>
+              entry.kind === 'report' ? `report-${entry.report.copyId}` : entry.row.dataPointId
+            }
+            getRowLabel={(entry) =>
+              entry.kind === 'report'
+                ? `開示レポート ${entry.report.label}`
+                : `${entry.row.metric?.name ?? '指標'} ${entry.row.unit?.name ?? ''}`
+            }
             searchParams={query}
             basePath={basePath}
-            search={{ placeholder: '指標名・組織名で検索' }}
+            search={{ placeholder: '指標名・組織名・開示レポートで検索' }}
             filters={[
               {
                 key: 'change',
@@ -377,12 +479,36 @@ export default async function DataRoomPage({
                   { value: 'unfixed', label: '未固定' },
                 ],
               },
+              ...(sinceValue
+                ? [
+                    {
+                      key: 'since',
+                      label: '共有',
+                      options: [
+                        {
+                          value: sinceValue,
+                          label: `前回表示以降に共有（${newSince.length}）`,
+                        },
+                      ],
+                    },
+                  ]
+                : []),
+            ]}
+            overflowFilters={[
+              {
+                key: 'source',
+                label: '取得元',
+                options: [
+                  { value: 'data_point', label: '非財務データ' },
+                  { value: 'report', label: '開示レポート' },
+                ],
+              },
             ]}
             empty={{
               noData: {
                 title: '共有されているデータがありません',
                 description:
-                  'クライアント側でアクセス許諾（Grant）が設定されると、ここに表示されます。許諾の範囲はスコープで確認できます。',
+                  'クライアント側でアクセス許諾（Grant）が設定され、許諾の範囲のデータが承認されると、ここに表示されます。許諾の範囲はスコープで確認できます。',
                 action: (
                   <Link
                     href={`/assurance/engagements/${engagementId}/scope`}

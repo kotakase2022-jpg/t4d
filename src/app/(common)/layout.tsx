@@ -5,6 +5,8 @@ import { getSelectedPeriodId } from '@/lib/auth/selected-period';
 import { getDb } from '@/lib/repositories';
 import { loadHeaderProjects } from '@/lib/services/disclosure-home';
 import { getFeatureSettings } from '@/lib/services/feature-settings';
+import { hasOption } from '@/lib/services/organization-options';
+import { trialTextLimits } from '@/lib/services/trial-program';
 import { toWorkspaceChoices } from '@/lib/services/shell';
 
 /**
@@ -36,14 +38,17 @@ export default async function CommonLayout({ children }: { children: React.React
         })
       : [];
 
-  const [unreadNotifications, featureSettings, projects, demoRoleChoices] = await Promise.all([
-    db.count('notifications', {
-      where: { organizationId, userId: ctx.userId, readAt: { isNull: true } },
-    }),
-    getFeatureSettings(db, ctx),
-    loadHeaderProjects(db, ctx),
-    listDemoRoleChoices(db, ctx),
-  ]);
+  const [unreadNotifications, featureSettings, projects, demoRoleChoices, cdpOption] =
+    await Promise.all([
+      db.count('notifications', {
+        where: { organizationId, userId: ctx.userId, readAt: { isNull: true } },
+      }),
+      getFeatureSettings(db, ctx),
+      loadHeaderProjects(db, ctx),
+      listDemoRoleChoices(db, ctx),
+      hasOption(db, ctx, 'cdp'),
+    ]);
+  const feedbackLimits = trialTextLimits(db, ctx);
 
   return (
     <AppShell
@@ -63,6 +68,8 @@ export default async function CommonLayout({ children }: { children: React.React
       }))}
       engagements={engagements.map((e) => ({ id: e.id, code: e.code, name: e.name }))}
       unreadNotifications={unreadNotifications}
+      contractedOptions={isEnterprise ? (cdpOption ? ['cdp'] : []) : undefined}
+      feedbackLimits={{ title: feedbackLimits.title, text: feedbackLimits.text }}
     >
       {children}
     </AppShell>

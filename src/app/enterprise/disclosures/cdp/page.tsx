@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
+  Check,
   CircleAlert,
   CircleCheck,
   CircleHelp,
@@ -14,6 +15,7 @@ import {
   Sparkles,
   Upload,
 } from 'lucide-react';
+import { ActionButton } from '@/components/shared/action-button';
 import { AiGeneratedBadge, PriorityBadge, ResponseStatusBadge } from '@/components/shared/badges';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { DisclosureSteps, type DisclosureStep } from '@/components/shared/disclosure-steps';
@@ -27,24 +29,31 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
+import { FRAMEWORK_DIFF_KIND_LABELS } from '@/lib/domain/framework-diff';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import {
   filterDisclosureRows,
+  isFrameworkAvailable,
+  listResponseAssignees,
   loadDisclosureWorkspace,
   type DisclosureQuestionRow,
 } from '@/lib/services/disclosure';
 import { loadApplicability, type Applicability } from '@/lib/services/disclosure-applicability';
 import { loadQuestionMapping } from '@/lib/services/ai-assist';
-import { loadConsistencyCheck } from '@/lib/services/disclosure-check';
+import { loadConsistencyCheck, loadLatestConsistencyIssues } from '@/lib/services/disclosure-check';
 import { loadDisclosureOnboarding } from '@/lib/services/disclosure-onboarding';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { DEFAULT_PAGE_SIZES, parsePage, parsePageSize } from '@/lib/table/columns';
+import { statusLabel } from '@/lib/ui/status/registry';
 import type { ItemChangeType } from '@/types/domain';
 import {
   evaluateApplicabilityAction,
   runConsistencyCheckAction,
   runQuestionMappingAction,
 } from '../../actions';
+import { confirmMappingCandidateAction } from './actions';
+import { CdpBulkAssignBar } from './_components/bulk-assign-bar';
+import { CdpNotContracted } from './_components/cdp-not-contracted';
 
 export const metadata = { title: 'CDP' };
 
@@ -90,6 +99,7 @@ const SEVERITY_ICON: Record<string, typeof CircleAlert> = {
 };
 
 const BASE_PATH = '/enterprise/disclosures/cdp';
+const BULK_FORM_ID = 'cdp-bulk-assign';
 
 /** 増減（%）。色ではなく符号で向きを示す（良し悪しを色で決めない） */
 function deltaOf(row: DisclosureQuestionRow): number | null {
@@ -98,13 +108,25 @@ function deltaOf(row: DisclosureQuestionRow): number | null {
     : null;
 }
 
+/** 不足の内訳（色ではなく文で示す） */
+function gapParts(row: DisclosureQuestionRow): string[] {
+  return [
+    ...(row.gaps.dataMissing > 0 ? [`データ不足 ${row.gaps.dataMissing}`] : []),
+    ...(row.gaps.unmapped ? ['未対応付け'] : []),
+    ...(row.gaps.aiMissing.length > 0 ? [`AI の不足情報 ${row.gaps.aiMissing.length}`] : []),
+  ];
+}
+
 /**
  * CDP 開示対応（plan §2 S18）。
  *
- * - 見出しの操作は「適用判定を実行」（secondary）だけを出し、AI の実行・過去回答の取込・XLSX 出力は「その他」へ。
+ * - CDP は組織ごとに契約するオプション（トライアル対応 NF-38）。契約が無ければ理由だけを出す（404 にしない）
+ * - 見出しの操作は「適用判定を実行」（secondary）だけを出し、AI の実行・過去回答の取込・出力は「その他」へ。
  *   出力は出力の権限があるときだけ（R3。権限の無い役割に押すと 403 になるリンクを見せない）
  * - 主操作は工程（DisclosureSteps）の現在の段の操作（過去回答を取り込む）
- * - 質問の表は DataTable。既定の列は 質問・適用・前年差分・状態・当年値。残りは「列」から出す
+ * - 質問の表は DataTable。既定の列は 質問・適用・前年差分・状態・当年値・担当・不足。残りは「列」から出す
+ * - 版の選択は一覧に効く（その版の質問構成で出す。C-09）。期間の版と違う版は確かめるための表示で、回答は始めない
+ * - 担当の一括割当（C-01）・不足の列と保存ビュー（C-06）・AI の対応付けの候補の確定（不具合 B-3）
  */
 export default async function CdpWorkspacePage({
   searchParams,
@@ -113,6 +135,19 @@ export default async function CdpWorkspacePage({
 }) {
   const params = await searchParams;
   const shell = await loadEnterpriseShell();
+  if (!(await isFrameworkAvailable(shell.db, shell.ctx, 'cdp'))) {
+    return <CdpNotContracted title="CDP 開示対応" />;
+  }
+
+  // 準備段階（版の選択 → 過去データの取込）の到達状況。版の選択（?version=）は一覧にも効かせる
+  const onboarding = await loadDisclosureOnboarding(
+    shell.db,
+    shell.ctx,
+    'cdp',
+    shell.currentPeriod,
+    shell.periods,
+    typeof params.version === 'string' ? params.version : null,
+  );
   const workspace = await loadDisclosureWorkspace(
     shell.db,
     shell.ctx,
@@ -120,21 +155,28 @@ export default async function CdpWorkspacePage({
     shell.currentPeriod,
     shell.periods,
     shell.metrics,
+    { versionId: onboarding?.selectedVersionId ?? null },
   );
   if (!workspace) notFound();
 
   const canWrite = can(shell.ctx, 'enterprise.disclosure.write');
   const canRunAi = can(shell.ctx, 'enterprise.ai.run');
   const canExport = can(shell.ctx, 'enterprise.export.run');
+  const isPeriodVersion = workspace.version.id === workspace.periodVersionId;
+  const periodVersion = workspace.versions.find((v) => v.id === workspace.periodVersionId);
 
   // 整合チェック結果は ?check=<aiRunId> で読み直す（CDP-P0-006）
   const checkRunId = typeof params.check === 'string' ? params.check : null;
   // 質問マッピングの候補は ?mapping=<aiRunId> で読み直す（候補のまま。確定は人が行う）
   const mappingRunId = typeof params.mapping === 'string' ? params.mapping : null;
-  const mapping = mappingRunId
-    ? await loadQuestionMapping(shell.db, shell.ctx, mappingRunId)
-    : null;
-  const check = checkRunId ? await loadConsistencyCheck(shell.db, shell.ctx, checkRunId) : null;
+  const [mapping, check, latestIssues, assignees] = await Promise.all([
+    mappingRunId ? loadQuestionMapping(shell.db, shell.ctx, mappingRunId) : null,
+    checkRunId ? loadConsistencyCheck(shell.db, shell.ctx, checkRunId) : null,
+    loadLatestConsistencyIssues(shell.db, shell.ctx, workspace),
+    listResponseAssignees(shell.db, shell.ctx),
+  ]);
+  const nameOf = (id: string | null | undefined) =>
+    id ? (assignees.nameById.get(id) ?? '—') : null;
 
   // 適用判定（CDP-P0-002）。未実行なら空の Map なので列は「未判定」になる
   const applicability = await loadApplicability(shell.db, shell.ctx, workspace.period.id);
@@ -146,15 +188,6 @@ export default async function CdpWorkspacePage({
   for (const result of applicability.values()) applicabilityCounts[result.applicability] += 1;
   const hasApplicability = applicability.size > 0;
 
-  // 準備段階（版の選択 → 過去データの取込）の到達状況
-  const onboarding = await loadDisclosureOnboarding(
-    shell.db,
-    shell.ctx,
-    'cdp',
-    shell.currentPeriod,
-    shell.periods,
-    typeof params.version === 'string' ? params.version : null,
-  );
   const selectedVersion = onboarding?.versions.find((v) => v.id === onboarding.selectedVersionId);
   const importedPeriods = (onboarding?.periods ?? []).filter((p) => p.responseCount > 0);
   const steps: DisclosureStep[] = [
@@ -193,7 +226,8 @@ export default async function CdpWorkspacePage({
       state: onboarding?.hasPastData ? 'current' : 'todo',
       detail: (
         <span>
-          新規 {workspace.summary.newItems} 件 ／ 未着手 {workspace.summary.notStarted} 件
+          新規 {workspace.summary.newItems} 件 ／ 未着手 {workspace.summary.notStarted} 件 ／
+          不足あり {workspace.summary.withGaps} 件
         </span>
       ),
     },
@@ -205,11 +239,22 @@ export default async function CdpWorkspacePage({
     status: typeof params.status === 'string' ? params.status : undefined,
     search: typeof params.q === 'string' ? params.q : undefined,
     onlyDiff,
+    owner: typeof params.owner === 'string' ? params.owner : undefined,
+    currentUserId: shell.ctx.userId,
+    gap: typeof params.gap === 'string' ? params.gap : undefined,
   });
   const pageSize = parsePageSize(params.size);
   const lastPage = Math.max(1, Math.ceil(rows.length / pageSize));
   const pageNo = Math.min(parsePage(params.page), lastPage);
   const pageRows = rows.slice((pageNo - 1) * pageSize, pageNo * pageSize);
+
+  // 出力は画面と同じ期間・版で（期間を渡さないと常に collecting 期間が出力され、画面の選択と食い違う）
+  const exportQuery = `period=${workspace.period.id}${
+    isPeriodVersion ? '' : `&version=${workspace.version.id}`
+  }`;
+  const mappedCodes = new Set(
+    workspace.rows.flatMap((r) => r.mappedMetrics.map((m) => `${r.item.code}|${m.code}`)),
+  );
 
   const filters: FilterGroup[] = [
     {
@@ -233,6 +278,23 @@ export default async function CdpWorkspacePage({
         { value: 'returned', label: '差戻し' },
         { value: 'approved', label: '承認済み' },
       ],
+    },
+  ];
+  const overflowFilters: FilterGroup[] = [
+    {
+      key: 'owner',
+      label: '担当',
+      multiple: false,
+      options: [
+        { value: 'me', label: '自分の担当' },
+        { value: 'none', label: '作成担当なし' },
+      ],
+    },
+    {
+      key: 'gap',
+      label: '不足',
+      multiple: false,
+      options: [{ value: '1', label: '不足あり' }],
     },
   ];
 
@@ -290,11 +352,75 @@ export default async function CdpWorkspacePage({
       cell: (row) => <ResponseStatusBadge status={row.response?.status ?? 'not_started'} />,
     },
     {
+      key: 'owner',
+      header: '担当',
+      importance: 'secondary',
+      cell: (row) => {
+        const owner = nameOf(row.response?.ownerUserId);
+        return owner ? (
+          <span className="whitespace-nowrap text-small text-ink">{owner}</span>
+        ) : (
+          <span className="text-caption text-ink-muted">未割当</span>
+        );
+      },
+    },
+    {
+      key: 'gaps',
+      header: '不足',
+      importance: 'secondary',
+      cell: (row) => {
+        const parts = gapParts(row);
+        if (parts.length === 0) return <span className="text-caption text-ink-muted">なし</span>;
+        return (
+          <div className="space-y-0.5" data-gap-total={row.gaps.total}>
+            <Badge tone="warning">
+              <TriangleAlert className="size-3" aria-hidden="true" />
+              不足 {row.gaps.total}
+            </Badge>
+            <div className="text-caption text-ink-muted">{parts.join('・')}</div>
+          </div>
+        );
+      },
+    },
+    {
       key: 'current',
       header: '当年値',
       importance: 'secondary',
       align: 'right',
       cell: (row) => <span className="tnum">{formatNumber(row.currentValue)}</span>,
+    },
+    {
+      key: 'reviewer',
+      header: 'レビュー担当',
+      importance: 'detail',
+      cell: (row) => (
+        <span className="whitespace-nowrap text-small text-ink">
+          {nameOf(row.response?.reviewerUserId) ?? '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'evidence',
+      header: '根拠',
+      importance: 'detail',
+      align: 'right',
+      cell: (row) => <span className="tnum">{row.evidenceCount} 件</span>,
+    },
+    {
+      key: 'issues',
+      header: '整合チェックの指摘',
+      importance: 'detail',
+      cell: (row) => {
+        const issues = latestIssues?.byItemId.get(row.item.id) ?? [];
+        return issues.length === 0 ? (
+          <span className="text-caption text-ink-muted">—</span>
+        ) : (
+          <Badge tone="warning">
+            <ShieldCheck className="size-3" aria-hidden="true" />
+            指摘 {issues.length}
+          </Badge>
+        );
+      },
     },
     {
       key: 'section',
@@ -343,6 +469,8 @@ export default async function CdpWorkspacePage({
     },
   ];
 
+  const diff = workspace.versionDiff;
+
   return (
     <>
       <PageHeader
@@ -390,8 +518,27 @@ export default async function CdpWorkspacePage({
                 group: 'export',
                 label: 'XLSX で出力',
                 icon: <Download aria-hidden="true" />,
-                // 期間を渡さないと常に collecting 期間が出力され、画面の選択と食い違う
-                href: `/api/exports/cdp?period=${workspace.period.id}&format=xlsx`,
+                href: `/api/exports/cdp?${exportQuery}&format=xlsx`,
+                download: true,
+                hidden: !canExport,
+              },
+              {
+                kind: 'link',
+                id: 'export-xlsx-approved',
+                group: 'export',
+                label: '承認済みだけ XLSX で出力',
+                icon: <Download aria-hidden="true" />,
+                href: `/api/exports/cdp?${exportQuery}&format=xlsx&approvedOnly=1`,
+                download: true,
+                hidden: !canExport,
+              },
+              {
+                kind: 'link',
+                id: 'export-docx',
+                group: 'export',
+                label: 'DOCX（回答原稿）で出力',
+                icon: <Download aria-hidden="true" />,
+                href: `/api/exports/cdp?${exportQuery}&format=docx`,
                 download: true,
                 hidden: !canExport,
               },
@@ -422,6 +569,11 @@ export default async function CdpWorkspacePage({
 
       <div className="space-y-3 p-4">
         <DisclosureSteps steps={steps} />
+        {/* 提供範囲（スライド 15 の「含まない」）は画面にも書く。閉じない */}
+        <p className="text-caption text-ink-muted" data-cdp-scope="">
+          CDP ポータルへの自動送信・API
+          連携・スコアの保証は含みません。回答は出力して内容を確認のうえ転記してください。
+        </p>
 
         {onboarding && onboarding.versions.length > 1 && (
           <nav
@@ -453,6 +605,17 @@ export default async function CdpWorkspacePage({
           </nav>
         )}
 
+        {!isPeriodVersion && (
+          <Notice tone="info" title="期間の質問書と違う版を表示しています">
+            {workspace.versionLabel} の質問構成を表示しています。{workspace.period.label}{' '}
+            の回答の対象は {periodVersion?.label ?? '期間の版'}{' '}
+            です。この表示は版の確認用で、ここから回答は始められません。
+            <Link href={BASE_PATH} className="ml-2 underline">
+              {workspace.period.label} の質問書に戻る
+            </Link>
+          </Notice>
+        )}
+
         <MetricStrip label="回答の進み具合">
           <MetricTile
             label="準備度"
@@ -479,6 +642,12 @@ export default async function CdpWorkspacePage({
             href="/enterprise/disclosures/cdp?status=not_started"
           />
           <MetricTile
+            label="不足あり"
+            value={workspace.summary.withGaps}
+            denominator={workspace.summary.total}
+            href="/enterprise/disclosures/cdp?gap=1"
+          />
+          <MetricTile
             label="新規質問"
             value={workspace.summary.newItems}
             unit="件"
@@ -491,6 +660,49 @@ export default async function CdpWorkspacePage({
             href="/enterprise/disclosures/cdp?change=changed"
           />
         </MetricStrip>
+
+        {diff && workspace.previousVersion && (
+          <Section
+            id="cdp-version-diff"
+            collapsible
+            title={`前の版（${workspace.previousVersion.label}）との比較`}
+            summary={`${FRAMEWORK_DIFF_KIND_LABELS.added} ${diff.added.length}・${FRAMEWORK_DIFF_KIND_LABELS.changed} ${diff.changed.length}・${FRAMEWORK_DIFF_KIND_LABELS.renumbered} ${diff.renumbered.length}・${FRAMEWORK_DIFF_KIND_LABELS.removed} ${diff.removed.length}・${FRAMEWORK_DIFF_KIND_LABELS.unchanged} ${diff.unchangedCount} 件`}
+          >
+            <p className="pb-1 text-caption text-ink-muted">
+              版どうしの質問を比べた結果です（前の版の項番を手掛かりに改番も区別します）。表の「前年差分」は質問書の記載です。回答の引継ぎは自動では行いません。
+            </p>
+            {diff.entries.filter((e) => e.kind !== 'unchanged').length === 0 ? (
+              <p className="pb-2 text-small text-ink-muted">前の版から変わった質問はありません。</p>
+            ) : (
+              <div className="t4d-scroll-x">
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>区分</TH>
+                      <TH>前の版</TH>
+                      <TH>この版</TH>
+                      <TH>質問</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {diff.entries
+                      .filter((e) => e.kind !== 'unchanged')
+                      .map((entry) => (
+                        <TR key={`${entry.fromItemId ?? ''}-${entry.toItemId ?? ''}`}>
+                          <TD className="whitespace-nowrap text-small">
+                            {FRAMEWORK_DIFF_KIND_LABELS[entry.kind]}
+                          </TD>
+                          <TD className="font-mono text-caption">{entry.fromCode ?? '—'}</TD>
+                          <TD className="font-mono text-caption">{entry.toCode ?? '—'}</TD>
+                          <TD className="text-small text-ink">{entry.title}</TD>
+                        </TR>
+                      ))}
+                  </TBody>
+                </Table>
+              </div>
+            )}
+          </Section>
+        )}
 
         {hasApplicability && (
           <div className="flex flex-wrap items-center gap-2 rounded-t4d border border-line bg-surface px-3 py-1.5 text-small">
@@ -533,17 +745,53 @@ export default async function CdpWorkspacePage({
                     <TH>指標コード</TH>
                     <TH>根拠</TH>
                     <TH align="right">確信度</TH>
+                    <TH>確定</TH>
                   </TR>
                 </THead>
                 <TBody>
-                  {mapping.mappings.map((row) => (
-                    <TR key={row.itemCode}>
-                      <TD className="font-medium">{row.itemCode}</TD>
-                      <TD>{row.metricCode ?? '—'}</TD>
-                      <TD className="text-small text-ink-muted">{row.rationale}</TD>
-                      <TD align="right">{Math.round(row.confidence * 100)}%</TD>
-                    </TR>
-                  ))}
+                  {mapping.mappings.map((row) => {
+                    const confirmed = row.metricCode
+                      ? mappedCodes.has(`${row.itemCode}|${row.metricCode}`)
+                      : false;
+                    return (
+                      <TR key={row.itemCode}>
+                        <TD className="font-medium">{row.itemCode}</TD>
+                        <TD>{row.metricCode ?? '—'}</TD>
+                        <TD className="text-small text-ink-muted">{row.rationale}</TD>
+                        <TD align="right">{Math.round(row.confidence * 100)}%</TD>
+                        <TD>
+                          {!row.metricCode ? (
+                            <span className="text-caption text-ink-muted">対応する指標なし</span>
+                          ) : confirmed ? (
+                            <Badge tone="success">
+                              <Check className="size-3" aria-hidden="true" />
+                              確定済み
+                            </Badge>
+                          ) : canWrite ? (
+                            <ActionButton
+                              size="xs"
+                              action={{
+                                kind: 'submit',
+                                id: `confirm-mapping-${row.itemCode}`,
+                                label: `${row.itemCode} の対応付けを確定`,
+                                action: confirmMappingCandidateAction,
+                                fields: {
+                                  aiRunId: mapping.run.id,
+                                  itemCode: row.itemCode,
+                                  metricCode: row.metricCode,
+                                },
+                                pendingLabel: '確定中…',
+                              }}
+                            />
+                          ) : (
+                            <span className="text-caption text-ink-muted">
+                              確定は開示の編集権限が必要です
+                            </span>
+                          )}
+                        </TD>
+                      </TR>
+                    );
+                  })}
                 </TBody>
               </Table>
             </div>
@@ -627,10 +875,11 @@ export default async function CdpWorkspacePage({
             rows={pageRows}
             getRowId={(row) => row.item.id}
             getRowLabel={(row) => row.item.code}
-            getRowStatus={(row) => row.response?.status ?? 'not_started'}
+            getRowStatus={(row) => statusLabel('response', row.response?.status ?? 'not_started')}
             searchParams={params}
             basePath={BASE_PATH}
             filters={filters}
+            overflowFilters={overflowFilters}
             search={{ placeholder: '質問コード・質問文で検索' }}
             savedViews={[
               {
@@ -638,11 +887,32 @@ export default async function CdpWorkspacePage({
                 query: 'diff=1',
                 description: '新規・変更のあった質問だけを表示します',
               },
+              {
+                label: '自分の担当',
+                query: 'owner=me',
+                description: '自分が作成担当かレビュー担当の質問',
+              },
+              {
+                label: '不足あり',
+                query: 'gap=1',
+                description: 'データ不足・未対応付け・AI の不足情報のある質問',
+              },
               { label: '未着手のみ', query: 'status=not_started' },
               { label: '承認済み', query: 'status=approved' },
             ]}
             userViews
             page={{ page: pageNo, pageSize, total: rows.length, sizes: DEFAULT_PAGE_SIZES }}
+            selection={canWrite && isPeriodVersion ? { formId: BULK_FORM_ID } : undefined}
+            bulkBar={
+              canWrite && isPeriodVersion ? (
+                <CdpBulkAssignBar
+                  formId={BULK_FORM_ID}
+                  periodId={workspace.period.id}
+                  owners={assignees.owners}
+                  reviewers={assignees.reviewers}
+                />
+              ) : undefined
+            }
             empty={{
               noData: {
                 title: onlyDiff ? '前年から変わった質問はありません' : 'この版の質問がありません',

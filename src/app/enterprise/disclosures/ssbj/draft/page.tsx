@@ -12,12 +12,14 @@ import { SubmitButton } from '@/components/ui/submit-button';
 import { can } from '@/lib/authorization/can';
 import { formatJst } from '@/lib/format/datetime';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import { DRAFT_IMPORT_NOTE, listDraftImportOptions } from '@/lib/services/draft-import';
 import { loadSsbjDrafts } from '@/lib/services/ssbj-draft';
 import {
   confirmSsbjDraftAction,
   generateSsbjDraftAction,
   saveSsbjDraftAction,
 } from '../../../actions';
+import { draftImportMenuItems } from './import-menu';
 
 export const metadata = { title: 'SSBJ 開示ドラフト' };
 
@@ -38,6 +40,13 @@ export default async function SsbjDraftPage({
   const shell = await loadEnterpriseShell();
   const overview = await loadSsbjDrafts(shell.db, shell.ctx, shell.currentPeriod);
   const canExport = can(shell.ctx, 'enterprise.export.run');
+  // 確定本文を開示プロジェクトの原稿へ取り込む（NF-19）。取り込み先と取り込めない理由（読むだけ）
+  const importOptions = overview
+    ? await listDraftImportOptions(shell.db, shell.ctx, {
+        source: 'ssbj',
+        periodId: shell.currentPeriod.id,
+      })
+    : [];
 
   if (!overview) {
     return (
@@ -66,7 +75,7 @@ export default async function SsbjDraftPage({
     <>
       <PageHeader
         title="SSBJ 開示ドラフト"
-        description={`${shell.currentPeriod.label} ／ 節ごとに草案を作り、担当者が直して確定します`}
+        description={`対象年度×基準版: ${shell.currentPeriod.label} × ${overview.versionLabel}${overview.versionPinned ? '（設定で固定）' : '（公開中の版・未固定）'} ／ 節ごとに草案を作り、担当者が直して確定します`}
         autoBreadcrumbs
         actions={
           <PageActions
@@ -80,6 +89,7 @@ export default async function SsbjDraftPage({
               // 出力の権限が無い役割に、押すと 403 になるリンクを見せない（R3）
               hidden: !canExport,
             }}
+            more={draftImportMenuItems(importOptions, overview.canWrite)}
           />
         }
       />
@@ -92,6 +102,9 @@ export default async function SsbjDraftPage({
         <Card className="space-y-1 p-3">
           <p className="text-small text-ink">
             生成されるのは草案です。そのまま開示せず、内容を確認し、必要な修正を加えてから確定してください。
+          </p>
+          <p className="text-small text-ink" data-draft-import-note="">
+            {DRAFT_IMPORT_NOTE}
           </p>
           <MoreInfo label="人工知能が書ける範囲">
             <p>

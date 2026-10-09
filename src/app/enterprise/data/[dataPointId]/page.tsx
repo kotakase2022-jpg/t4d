@@ -38,7 +38,7 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { requireEnterpriseContext } from '@/lib/auth/session';
-import { can } from '@/lib/authorization/can';
+import { AuthorizationError, can } from '@/lib/authorization/can';
 import { COMMENT_MAX_LENGTH } from '@/lib/domain/comment-limits';
 import { AGGREGATION_METHOD_LABEL, METRIC_CATEGORY_LABEL } from '@/lib/domain/metrics';
 import { formatJst, formatJstDate, formatNumber } from '@/lib/format/datetime';
@@ -49,6 +49,9 @@ import {
   loadApprovalTimeline,
 } from '@/lib/services/approval-route';
 import { loadActiveValidations } from '@/lib/services/validation-store';
+import { BLOCK_USAGE_LABELS, listDataPointUsage, type DataPointUsage } from '@/lib/services/impact';
+import { hasOption } from '@/lib/services/organization-options';
+import { SNAPSHOT_KIND_DISPLAY } from '@/lib/services/report-snapshot';
 import { listMentionCandidates } from '@/lib/services/comments';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { summarizeValidations } from '@/lib/validation/data-point-rules';
@@ -80,6 +83,8 @@ import {
   SOURCE_TYPE_LABEL,
   ValidationStatusBadge,
 } from '../_components/data-badges';
+import { ApprovedValueSaveConfirm } from './approved-value-confirm';
+import { confirmedMappings, usageItemCount, usageSummaryText, visibleMappedItems } from './usage';
 
 /**
  * タブの題名は「{指標} — {組織}」（plan S3）。題名の決定で画面を落とさない（権限外・見つからないときは既定の名前）
@@ -117,6 +122,10 @@ export async function generateMetadata({
  * - AI の補助（原因の説明・資料候補）と承認済みの値の修正は「その他」（L2）
  * - 本文 L1: 値・検証・根拠資料・コメント。L2（閉じた節）: 値の編集（入力中・差戻しでは開く）・
  *   算定内訳・承認フロー（経路が進行中なら開く）・開示マッピング・履歴（版・承認と修正・監査ログ）
+ * - トライアル対応（NF-16）: L2 に「この数値を使っている原稿・レポート」（引用している節・固定した
+ *   スナップショット・保証側への共有。読むだけで保存しない）。承認済みの値の修正は、保存の前に
+ *   影響（節・承認済みレポート・保証側へ共有中の件数）を確認ダイアログで示す
+ * - NF-38: CDP 対応オプションの契約が無い組織では、開示マッピングに CDP の項目を出さない
  */
 export default async function DataPointDetailPage({
   params,
@@ -240,14 +249,16 @@ export default async function DataPointDetailPage({
       ? await db.select('files', { where: { id: { in: evidenceFileIds } } })
       : [];
 
-  const disclosureItems =
-    mappings.length > 0
-      ? await db.select('disclosureItems', { where: { id: { in: mappings.map((m) => m.itemId) } } })
+  const mappedItems =
+    confirmedMappings(mappings).length > 0
+      ? await db.select('disclosureItems', {
+          where: { id: { in: confirmedMappings(mappings).map((m) => m.itemId) } },
+        })
       : [];
 
   // 開示項目は CDP だけとは限らない（SSBJ にも紐づく）。
   // リンク先を framework から決めるために key を解決する。
-  const mappedVersionIds = [...new Set(disclosureItems.map((i) => i.frameworkVersionId))];
+  const mappedVersionIds = [...new Set(mappedItems.map((i) => i.frameworkVersionId))];
   const mappedVersions =
     mappedVersionIds.length > 0
       ? await db.select('frameworkVersions', { where: { id: { in: mappedVersionIds } } })
@@ -260,6 +271,18 @@ export default async function DataPointDetailPage({
   const frameworkKeyByVersionId = new Map(
     mappedVersions.map((v) => [v.id, mappedFrameworks.find((f) => f.id === v.frameworkId)?.key]),
   );
+  // CDP 対応オプションの契約が無い組織では、CDP の項目を出さない（NF-38）
+  const disclosureItems = visibleMappedItems(mappedItems, frameworkKeyByVersionId, {
+    cdpContracted: mappedItems.length > 0 ? await hasOption(db, ctx, 'cdp') : true,
+  });
+
+  // この数値を使っている原稿・レポート（NF-16。読むだけ）。データの閲覧権限が無ければ出さない
+  let usage: DataPointUsage | null = null;
+  try {
+    usage = await listDataPointUsage(db, ctx, dataPoint.id);
+  } catch (error) {
+    if (!(error instanceof AuthorizationError)) throw error;
+  }
 
   /**
    * 開示項目へのリンク先。
@@ -564,7 +587,7 @@ export default async function DataPointDetailPage({
               summary="値を編集する（更新すると新しい版が追加されます）"
               open={editOpen}
             >
-              <form action={updateDataPointAction} className="space-y-2 pt-1">
+              <form id="dp-value-form" action={updateDataPointAction} className="space-y-2 pt-1">
                 <input type="hidden" name="dataPointId" value={dataPoint.id} />
                 <FormSection title="値と変更理由" kind="required">
                   <div className="grid grid-cols-4 gap-2">
@@ -640,14 +663,30 @@ export default async function DataPointDetailPage({
                     )}
                   </Field>
                 </FormSection>
-                <SubmitButton
-                  variant={valueSaveIsPrimary ? 'primary' : 'secondary'}
-                  size="sm"
-                  data-t4d-shortcut="save"
-                  pendingLabel="保存中…"
-                >
-                  保存
-                </SubmitButton>
+                {dataPoint.status === 'approved' && usage ? (
+                  // 承認済みの値の修正は、保存の前に影響を確かめる（NF-16。上書きの確認）
+                  <div className="space-y-1">
+                    <p className="text-caption text-ink-muted">
+                      承認済みの値です。保存の前に影響（{usageSummaryText(usage.counts)}
+                      ）を確認します。
+                    </p>
+                    <ApprovedValueSaveConfirm
+                      formId="dp-value-form"
+                      scope={scopeLine}
+                      impact={usageSummaryText(usage.counts)}
+                      variant={valueSaveIsPrimary ? 'primary' : 'secondary'}
+                    />
+                  </div>
+                ) : (
+                  <SubmitButton
+                    variant={valueSaveIsPrimary ? 'primary' : 'secondary'}
+                    size="sm"
+                    data-t4d-shortcut="save"
+                    pendingLabel="保存中…"
+                  >
+                    保存
+                  </SubmitButton>
+                )}
               </form>
             </Section>
           )}
@@ -726,6 +765,8 @@ export default async function DataPointDetailPage({
               </ul>
             </Section>
           )}
+
+          {usage && <DataPointUsageSection usage={usage} />}
         </div>
 
         {/* 右: 検証・根拠資料・承認フロー・コメント */}
@@ -1188,5 +1229,103 @@ function PreviousValue({
         （{statusLabel('dataPoint', previous.status)}）
       </span>
     </>
+  );
+}
+
+/**
+ * この数値を使っている原稿・レポート（NF-16）。引用している節（現在の版・作業中の本文・承認済みの版の別）、
+ * この数値を固定したスナップショット（保証側へ共有中か）、Data Room で共有中の案件を示す。読むだけ
+ */
+function DataPointUsageSection({ usage }: { usage: DataPointUsage }) {
+  const count = usageItemCount(usage);
+  return (
+    <Section
+      id="data-usage"
+      collapsible
+      title={`この数値を使っている原稿・レポート（${count}）`}
+      summary={usageSummaryText(usage.counts)}
+    >
+      {usage.disclosureHidden ? (
+        <p className="flex items-start gap-1 text-small text-ink-muted">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          開示の閲覧権限が無いため、引用している原稿・レポートは表示しません（保証側へ共有中{' '}
+          {usage.counts.sharedWithAssurance} 件）。
+        </p>
+      ) : count === 0 && usage.dataRoomEngagementIds.length === 0 ? (
+        <EmptyState
+          kind="not-applicable"
+          size="compact"
+          title="この数値を使っている原稿・レポートはありません"
+          description="原稿の節が数値を引用すると、ここに影響先として表示します。"
+        />
+      ) : (
+        <div className="space-y-2">
+          {usage.blocks.length > 0 && (
+            <div>
+              <h3 className="text-small font-semibold text-ink">
+                原稿の節（{usage.blocks.length}）
+              </h3>
+              <ul className="divide-y divide-line">
+                {usage.blocks.map((b) => (
+                  <li key={b.blockId} className="py-1.5">
+                    <Link
+                      href={`/enterprise/disclosure-projects/${b.projectId}/blocks/${b.blockId}`}
+                      className="text-small text-brand-700 hover:underline"
+                    >
+                      {b.title}
+                    </Link>
+                    <span className="ml-1 text-caption text-ink-muted">
+                      {b.projectName}・{b.statusLabel}・
+                      {b.usage.map((u) => BLOCK_USAGE_LABELS[u]).join('・')}
+                    </span>
+                    <div className="mt-0.5">
+                      {b.upToDate ? (
+                        <SemanticBadge semantic="done" label="引用中の版は現在の版" />
+                      ) : (
+                        <SemanticBadge semantic="blocked" label="引用中の版より新しい版あり" />
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {usage.snapshots.length > 0 && (
+            <div>
+              <h3 className="text-small font-semibold text-ink">
+                固定したレポート（{usage.snapshots.length}）
+              </h3>
+              <ul className="divide-y divide-line">
+                {usage.snapshots.map((s) => (
+                  <li key={s.snapshotId} className="py-1.5 text-small">
+                    <Link
+                      href={`/enterprise/disclosure-projects/${s.projectId}/snapshots/${s.snapshotId}`}
+                      className="text-brand-700 hover:underline"
+                    >
+                      {SNAPSHOT_KIND_DISPLAY[s.snapshotKind]} No.{s.snapshotNo}
+                    </Link>
+                    <span className="ml-1 text-caption text-ink-muted">
+                      {formatJst(s.createdAt)}
+                      {s.sharedEngagementIds.length > 0
+                        ? `・保証側へ共有中 ${s.sharedEngagementIds.length} 案件`
+                        : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-caption text-ink-muted">
+                固定したレポートの内容は、この数値を修正しても変わりません。
+              </p>
+            </div>
+          )}
+          {usage.dataRoomEngagementIds.length > 0 && (
+            <p className="text-small text-ink">
+              Data Room（許諾と承認から導いた共有）で保証側へ共有中:{' '}
+              {usage.dataRoomEngagementIds.length} 案件
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { fid } from '@/lib/fixtures/ids';
 import { getDb } from '@/lib/repositories';
 import { readEvidenceFileBytes } from '@/lib/storage';
 
@@ -12,6 +13,8 @@ import { readEvidenceFileBytes } from '@/lib/storage';
  *   Demo Mode ではこれが唯一の防御なので、URL 直打ちでも他社ファイル・権限外は 404）。
  * - 表示を許すのは画像と PDF だけ。それ以外（HTML 等）は inline にすると
  *   XSS の持ち込み口になるため拒否する。
+ * - 画面で表示した記録を storage_access_events（action='viewed'）に残す（トライアル対応 NF-26。
+ *   企業側の監査ログ画面に出る）。記録の失敗で表示を止めない。
  */
 const INLINE_TYPES = new Set([
   'image/png',
@@ -47,6 +50,28 @@ export async function GET(request: Request) {
     return NextResponse.json(
       { error: 'unsupported_inline_type', message: 'この形式は画面内表示に対応していません。' },
       { status: 415 },
+    );
+  }
+
+  // 読めたのは自組織の資料だけ（readEvidenceFileBytes が所有を確かめる）。本人名義で記録する
+  try {
+    const now = new Date().toISOString();
+    await db.insert('storageAccessEvents', [
+      {
+        id: fid('storage_access_event', `${fileVersionId}/viewed/${now}/${session.context.userId}`),
+        organizationId: session.context.workspace.organizationId,
+        actorUserId: session.context.userId,
+        fileVersionId,
+        action: 'viewed',
+        engagementId: null,
+        expiresAt: null,
+        createdAt: now,
+      },
+    ]);
+  } catch (error) {
+    console.error(
+      '[t4d] 資料の表示の記録に失敗しました',
+      error instanceof Error ? error.message : error,
     );
   }
 

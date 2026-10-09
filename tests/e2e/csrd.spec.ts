@@ -127,7 +127,7 @@ test('CSRD 設定: インパクト重要性と財務的重要性の 2 観点・�
   await expect(
     main.getByText(/改正 ESRS（2026-07-03 採択）は未発効・本サンプルに未反映/),
   ).toBeVisible();
-  const law = main.getByText(/官報掲載まで未発効/);
+  const law = main.getByText(/官報掲載の報道あり（一次資料で確認中）・未発効/);
   await expect(law).toBeHidden();
   await openCollapsible(main, /^考え方の詳細/);
   await expect(law).toBeVisible();
@@ -178,7 +178,7 @@ test('CSRD 要求事項: 適用になった観点を行ごとに示し、URL で
   const note = main.getByRole('note').filter({ hasText: 'SSBJ は財務的重要性のみ（シングル）' });
   await expect(note).toBeVisible();
   await expect(note.getByText(/改正 ESRS（2026-07-03 採択）は未発効/)).toBeVisible();
-  const law = note.getByText(/官報掲載まで未発効/);
+  const law = note.getByText(/官報掲載の報道あり（一次資料で確認中）・未発効/);
   await expect(law).toBeHidden();
   await openCollapsible(note, '考え方の根拠と注記');
   await expect(law).toBeVisible();

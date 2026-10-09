@@ -2,6 +2,7 @@ import 'server-only';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, NotFoundError } from '@/lib/authorization/can';
+import { assertFrameworkAvailable } from '@/lib/services/disclosure';
 import { fid } from '@/lib/fixtures/ids';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
@@ -114,6 +115,8 @@ export async function evaluateApplicability(
   if (period.organizationId !== organizationId) {
     throw new NotFoundError('報告期間が見つかりません。');
   }
+  // 契約オプションの基準（CDP）は契約の無い組織で判定しない（結果を書かない。plan NF-38）
+  await assertFrameworkAvailable(db, ctx, frameworkKey);
 
   const items = await loadFrameworkItems(db, frameworkKey);
   if (items.length === 0) throw new NotFoundError('開示フレームワークが見つかりません。');

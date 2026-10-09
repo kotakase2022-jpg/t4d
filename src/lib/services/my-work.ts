@@ -11,11 +11,15 @@ import {
   type MyWorkModel,
 } from '@/lib/ui/my-work';
 import type { DbClient, Where } from '@/lib/repositories/types';
+import { loadClientAssuranceComments } from '@/lib/services/assurance';
 import {
   loadDisclosureHome,
   type DisclosureHome,
   type MyTaskKind,
 } from '@/lib/services/disclosure-home';
+import { listDerivedAttention } from '@/lib/services/impact';
+import { listPendingExclusions } from '@/lib/services/requirement-exclusion';
+import { summarizeOpenIssues } from '@/lib/services/trial-feedback';
 import type {
   AuthorizationContext,
   DataPoint,
@@ -294,6 +298,66 @@ export async function loadMyWork(
         count: home.progress.notAssessedCount,
         href: `${home.project.href}?tab=settings`,
         semantic: 'pending',
+      });
+    }
+  }
+
+  // ---- トライアル対応（plan §4.3-3）。どれも保存せず、読み取りから導く（K7） -------
+  if (can(ctx, 'enterprise.disclosure.read')) {
+    // 自分が担当の節・最終承認者のプロジェクトの節で、上流の新版・根拠失効・承認後の変更があるもの
+    // （通知センターの「要再確認」と同じ導出。件数だけ出し、一覧は通知センターで見る）
+    const derived = await listDerivedAttention(db, ctx);
+    if (derived.length > 0) {
+      attention.push({
+        key: 'derived-recheck',
+        label: '上流の変更で再確認が必要な節（自分の担当・最終承認）',
+        count: derived.length,
+        href: '/notifications#derived-recheck',
+        semantic: 'blocked',
+      });
+    }
+  }
+  if (can(ctx, 'enterprise.disclosure.approve')) {
+    // 対象外・非重要の承認待ち。自分の申請は自分で承認できない（職務分離）ので数えない
+    const pending = (await listPendingExclusions(db, ctx)).filter(
+      (p) => p.requestedBy !== ctx.userId,
+    );
+    if (pending.length > 0) {
+      attention.push({
+        key: 'exclusion-pending',
+        label: '承認待ちの対象外・非重要の申請',
+        count: pending.length,
+        // 承認・差戻しはその要求事項の詳細で人が押す（最も古い申請から）
+        href: pending[0]!.href,
+        semantic: 'pending',
+      });
+    }
+  }
+  if (can(ctx, 'enterprise.disclosure.write')) {
+    // 保証側がクライアントへ共有したコメントのうち、まだ回答していないもの
+    const unanswered = (await loadClientAssuranceComments(db, ctx)).filter(
+      (row) => row.state === 'unanswered',
+    ).length;
+    if (unanswered > 0) {
+      attention.push({
+        key: 'assurance-comments-unanswered',
+        label: '未回答の保証側のコメント',
+        count: unanswered,
+        href: '/enterprise/assurance-comments?state=unanswered',
+        semantic: 'pending',
+      });
+    }
+  }
+  if (can(ctx, 'enterprise.org.manage')) {
+    // 本導入の条件（必須要件に重大な未解決が無い）。改善管理表の見出しと同じ規則
+    const { summary } = await summarizeOpenIssues(db, ctx);
+    if (summary.mandatoryCriticalOpen > 0) {
+      attention.push({
+        key: 'trial-mandatory-critical',
+        label: 'トライアル: 必須要件 × 重大 × 未解決',
+        count: summary.mandatoryCriticalOpen,
+        href: '/enterprise/trial?tab=feedback',
+        semantic: 'error',
       });
     }
   }

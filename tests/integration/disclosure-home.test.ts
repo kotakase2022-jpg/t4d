@@ -294,8 +294,9 @@ describe('自分が次に行う作業（利用者ごとに違う）', () => {
     expect(missing!.dueDate).toBe(day(20));
     expect(missing!.daysUntilDue).toBe(20);
     expect(missing!.cta.href).toBe(blockHref(projectId, risk.block));
-    // ESRS-40a は草案・適用判断が未確定であることを項目に添える（正式準拠と見せない: A22）
-    expect(ready!.frameworkNote).toContain('公開草案に基づく準備');
+    // ESRS-40a は試行用サンプル（架空）・適用判断が未確定であることを項目に添える（正式準拠と見せない: A22。
+    // FY2026 の ESRS-40a は公開草案ではなく試行用サンプルの版に固定した: トライアル対応 K5）
+    expect(ready!.frameworkNote).toContain('サンプル（架空）');
     expect(ready!.frameworkNote).toContain('適用判断が未確定');
     expect(ready!.blockerReason).toBeNull();
   });
@@ -403,7 +404,9 @@ describe('進捗は分母を明示する（率にまとめない）', () => {
     expect(progress!.excludedItemCount).toBe(overview.excludedDecided);
     expect(progress!.notAssessedItemCount).toBe(overview.notAssessed);
     expect(progress!.confirmedItemCount).toBe(104);
-    expect(progress!.excludedItemCount).toBe(9);
+    // SSBJ の評価で対象外・非重要と判断した 9 項目のうち、承認済みの 8 項目だけを分母から外す。
+    // 1 項目は承認待ち（Fixture。トライアル対応 NF-02）で、未判定として分母に残る
+    expect(progress!.excludedItemCount).toBe(8);
     expect(
       progress!.confirmedItemCount + progress!.excludedItemCount + progress!.notAssessedItemCount,
     ).toBe(133);
@@ -411,16 +414,21 @@ describe('進捗は分母を明示する（率にまとめない）', () => {
     expect(progress!.approvedItemCount).toBeLessThanOrEqual(progress!.assignedItemCount);
     expect(progress!.notAssessedCount).toBe(1);
     expect(progress!.excludedFrameworkCount).toBe(0);
+    // 5 区分（NF-03）はプロジェクトの概要・要求事項タブと同じ関数の件数。分母は適用すると確定した基準の収録件数
+    expect(progress!.coverageCounts).toEqual(overview.coverageCounts);
+    expect(progress!.coverageTotal).toBe(133);
+    expect(Object.values(progress!.coverageCounts).reduce((sum, n) => sum + n, 0)).toBe(133);
 
     const esrs = progress!.rows.find((r) => r.frameworkVersionId === IDS.esrs40aVersion);
     expect(esrs).toMatchObject({
       decided: false,
       inScope: false,
       applicabilityLabel: '適用候補',
-      // 「草案」だけでなく、プロジェクト画面・出力の表紙と同じ「公開草案に基づく準備」と示す（§8.1）
-      legalStatusLabel: '公開草案に基づく準備',
-      coverageStatusLabel: '要求事項は未収録',
-      itemCount: 0,
+      // プロジェクト画面・出力の表紙と同じ表記（§8.1）。FY2026 の ESRS-40a は試行用サンプル（架空・
+      // 条文ではない）の版に固定した（トライアル対応 K5）ため、位置付けも収録も「サンプル（架空）」
+      legalStatusLabel: 'サンプル（架空）',
+      coverageStatusLabel: 'サンプル（架空）',
+      itemCount: 8,
       blockCount: 1,
     });
     const ssbj = progress!.rows.find(

@@ -188,7 +188,8 @@ describe('レポートの確定', () => {
     expect(readiness.draftStandardPrep).toBe(true);
 
     await expect(confirmReport(db, approver(), FY2026)).rejects.toBeInstanceOf(ValidationError);
-    expect(fixture.reportSnapshots).toHaveLength(0);
+    // FY2026 のスナップショットは作られない（FY2025 の社内承認済み版は Fixture にある）
+    expect(fixture.reportSnapshots.filter((s) => s.projectId === FY2026)).toHaveLength(0);
   });
 
   it('承認権限の無い作成者は確定できない（職務分離・A28 相当）', async () => {
@@ -271,9 +272,10 @@ describe('レポートの確定', () => {
     const text = await docxText(docx.bytes);
     expect(text).toContain('草案基準による準備');
     expect(text).toContain('法定準拠の確定ではありません');
-    // 表紙の「基準の位置付け」も画面と同じ文言（「草案」だけにしない。§8.1）
-    expect(text).toMatch(/基準の位置付け\s*公開草案に基づく準備/);
-    expect(text).toContain('要求事項は未収録');
+    // 表紙の「基準の位置付け」も画面と同じ文言（§8.1）。FY2026 の ESRS-40a は試行用サンプル（架空）の版（K5）
+    expect(text).toMatch(/基準の位置付け\s*サンプル（架空）/);
+    expect(text).toMatch(/要求事項の収録\s*サンプル（架空）/);
+    expect(text).toContain('要求事項への準拠を示す原稿ではありません');
   });
 });
 
@@ -468,7 +470,7 @@ describe('スナップショットからの出力', () => {
     const artifacts = await listExportArtifacts(db, approver(), [snapshot.id]);
     expect(artifacts).toHaveLength(2);
     for (const artifact of artifacts) {
-      expect(artifact.templateVersion).toBe('disclosure-report-v2');
+      expect(artifact.templateVersion).toBe('disclosure-report-v3');
       expect(artifact.fileSha256).toMatch(/^[0-9a-f]{64}$/);
       expect(artifact.byteSize).toBeGreaterThan(0);
       expect(artifact.fileName).not.toContain('提出済み');

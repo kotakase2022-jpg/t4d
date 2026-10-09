@@ -7,6 +7,14 @@ import { B3_DANGEROUS_OPS } from './fixtures/dangerous-ops/B3';
 import { B4_DANGEROUS_OPS } from './fixtures/dangerous-ops/B4';
 import { B5_DANGEROUS_OPS } from './fixtures/dangerous-ops/B5';
 import { B6_DANGEROUS_OPS } from './fixtures/dangerous-ops/B6';
+import { T1_DANGEROUS_OPS } from './fixtures/dangerous-ops/T1';
+import { T2_DANGEROUS_OPS } from './fixtures/dangerous-ops/T2';
+import { T3_DANGEROUS_OPS } from './fixtures/dangerous-ops/T3';
+import { T4_DANGEROUS_OPS } from './fixtures/dangerous-ops/T4';
+import { T5_DANGEROUS_OPS } from './fixtures/dangerous-ops/T5';
+import { T6_DANGEROUS_OPS } from './fixtures/dangerous-ops/T6';
+import { T7_DANGEROUS_OPS } from './fixtures/dangerous-ops/T7';
+import { T8_DANGEROUS_OPS } from './fixtures/dangerous-ops/T8';
 import type { DangerousOp } from './fixtures/dangerous-ops/types';
 
 /**
@@ -15,11 +23,12 @@ import type { DangerousOp } from './fixtures/dangerous-ops/types';
  *  - 不可逆（irreversible）・一括／上書き（bulk）: 起点の部品が ConfirmDialog か、確認付きの操作
  *    （kind: 'confirm'・BulkActionSpec の confirm）で Server Action を起動する
  *  - 可逆（reversible）: 実行後の通知に「元に戻す」（FlashMessage の undo）を置く、または確認を通す
- * 表はスライスごと（tests/unit/fixtures/dangerous-ops/B1〜B6.ts）。移したら status を done にする。
+ * 表はスライスごと（tests/unit/fixtures/dangerous-ops/B1〜B6.ts、トライアル対応は T1〜T8.ts）。移したら status を done にする。
  * 表と実装の食い違い（done なのに確認が無い・確認を付けたのに pending のまま）は失敗にする。
  */
 
-const ALL: Array<[string, DangerousOp[]]> = [
+/** UI 再設計（plan §1.16）の表 */
+const REDESIGN: Array<[string, DangerousOp[]]> = [
   ['B1', B1_DANGEROUS_OPS],
   ['B2', B2_DANGEROUS_OPS],
   ['B3', B3_DANGEROUS_OPS],
@@ -27,6 +36,20 @@ const ALL: Array<[string, DangerousOp[]]> = [
   ['B5', B5_DANGEROUS_OPS],
   ['B6', B6_DANGEROUS_OPS],
 ];
+
+/** トライアル対応（2026-10）の新しい危険な操作（スライスごと。機能 ID は F145 以降） */
+const TRIAL: Array<[string, DangerousOp[]]> = [
+  ['T1', T1_DANGEROUS_OPS],
+  ['T2', T2_DANGEROUS_OPS],
+  ['T3', T3_DANGEROUS_OPS],
+  ['T4', T4_DANGEROUS_OPS],
+  ['T5', T5_DANGEROUS_OPS],
+  ['T6', T6_DANGEROUS_OPS],
+  ['T7', T7_DANGEROUS_OPS],
+  ['T8', T8_DANGEROUS_OPS],
+];
+
+const ALL: Array<[string, DangerousOp[]]> = [...REDESIGN, ...TRIAL];
 
 /** plan §1.16 の 3 区分に割り当てた機能 ID（漏れなく表にあること） */
 const PLAN_IDS = [
@@ -73,7 +96,18 @@ describe('危険な操作の確認', () => {
   const ops = ALL.flatMap(([, list]) => list);
 
   it('plan §1.16 の全機能が表にあり、重複しない', () => {
-    expect(ops.map((op) => op.id).sort()).toEqual([...PLAN_IDS].sort());
+    const redesign = REDESIGN.flatMap(([, list]) => list);
+    expect(redesign.map((op) => op.id).sort()).toEqual([...PLAN_IDS].sort());
+  });
+
+  it('トライアル対応の操作は既存の機能 ID と重ならず、全体でも ID が重複しない', () => {
+    const trial = TRIAL.flatMap(([, list]) => list);
+    for (const op of trial) {
+      expect(PLAN_IDS, op.id).not.toContain(op.id);
+      expect(op.id, op.label).toMatch(/^F\d{3,}$/);
+    }
+    const ids = ops.map((op) => op.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it.each(ops.map((op) => [op.id, op] as const))('%s: Server Action が実在する', (_id, op) => {

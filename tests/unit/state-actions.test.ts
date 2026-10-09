@@ -3,6 +3,7 @@ import { permissionsFor } from '@/lib/authorization/can';
 import { MAX_SECONDARY_ACTIONS } from '@/lib/ui/actions';
 import {
   AI_DRAFT_APPROVAL_REASON,
+  RESPONSE_AUTHOR_APPROVAL_REASON,
   SELF_REVIEW_REASON,
   SUBMIT_WITHOUT_VALUE_REASON,
   blockStateActions,
@@ -203,6 +204,50 @@ describe('回答', () => {
       disabledReason: AI_DRAFT_APPROVAL_REASON,
     });
     expect(p.secondary.map((a) => a.id)).toEqual(['return']);
+  });
+
+  it('職務分離: 現在の版を作った人には下書きの承認を出さず、レビュー中の承認は理由つきで押せない', () => {
+    const draft = responseStateActions({
+      status: 'draft',
+      can: all,
+      hasResponse: true,
+      isCurrentVersionAuthor: true,
+    });
+    expect(ids(draft)).toEqual({
+      primary: 'save-draft',
+      secondary: ['request-review'],
+      more: ['generate-ai-draft'],
+    });
+    const inReview = responseStateActions({
+      status: 'in_review',
+      can: all,
+      hasResponse: true,
+      isCurrentVersionAuthor: true,
+    });
+    expect(inReview.primary).toEqual({
+      id: 'approve',
+      label: '承認',
+      disabledReason: RESPONSE_AUTHOR_APPROVAL_REASON,
+    });
+    // AI が生成したままなら、AI の理由を優先する（どちらでも承認できない）
+    expect(
+      responseStateActions({
+        status: 'in_review',
+        can: all,
+        hasResponse: true,
+        isAiDraft: true,
+        isCurrentVersionAuthor: true,
+      }).primary?.disabledReason,
+    ).toBe(AI_DRAFT_APPROVAL_REASON);
+    // 作成者でない承認者には、下書きの承認を「その他」に出す（単段の承認）
+    expect(
+      responseStateActions({
+        status: 'draft',
+        can: canOf('approver', 'reviewer'),
+        hasResponse: true,
+        isCurrentVersionAuthor: false,
+      }).more.map((a) => a.id),
+    ).toContain('approve');
   });
 
   it('採否の決まっていない AI 下書きがあれば「この下書きを不採用にする」を確認つきで出す', () => {

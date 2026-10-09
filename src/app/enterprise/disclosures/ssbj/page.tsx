@@ -8,10 +8,12 @@ import {
   FlaskConical,
   Info,
   ListChecks,
+  Lock,
   ScrollText,
   ShieldCheck,
   Target,
   Clock,
+  Unlock,
   Upload,
 } from 'lucide-react';
 import { StatusBreakdown } from '@/components/charts/status-breakdown';
@@ -283,9 +285,18 @@ export default async function SsbjPage({
         title="SSBJ 対応状況"
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <span>
-              {overview.versionLabel} ／ {shell.currentPeriod.label}
+            {/* 対象年度×基準版（NF-12）。設定の確定で版を固定した年度は、新しい版を足しても変わらない */}
+            <span data-ssbj-version-stamp="">
+              対象年度×基準版: {shell.currentPeriod.label} × {overview.versionLabel}
             </span>
+            <Badge tone={overview.versionPinned ? 'brand' : 'neutral'}>
+              {overview.versionPinned ? (
+                <Lock className="size-3" aria-hidden="true" />
+              ) : (
+                <Unlock className="size-3" aria-hidden="true" />
+              )}
+              {overview.versionPinned ? '設定で固定' : '公開中の版（未固定）'}
+            </Badge>
             {overview.isFixture ? (
               <Badge tone="warning">
                 <FlaskConical className="size-3" aria-hidden="true" />

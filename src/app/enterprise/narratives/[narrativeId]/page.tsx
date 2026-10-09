@@ -8,22 +8,37 @@ import {
   Tag,
 } from 'lucide-react';
 import { FlashMessage } from '@/components/shared/flash';
+import { SubmitButton } from '@/components/ui/submit-button';
 import { PageHeader } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleSection } from '@/components/ui/collapsible';
-import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
+import { AuthorizationError, NotFoundError, can } from '@/lib/authorization/can';
 import { NARRATIVE_THEME_LABELS } from '@/lib/domain/disclosure-status';
 import { NARRATIVE_TEMPLATE_FIELDS } from '@/lib/domain/narrative-template';
 import { formatJst } from '@/lib/format/datetime';
 import {
+  IRO_REF_THEMES,
   NARRATIVE_DETAIL_FIELDS,
   NO_AMOUNT_NOTE,
   getNarrativeEditor,
   type NarrativeEditorData,
 } from '@/lib/services/narrative';
+import { loadContentCoverage } from '@/lib/services/content-coverage';
+import {
+  listLinkableRequirements,
+  loadNarrativeMappingCandidates,
+} from '@/lib/services/narrative-requirement-links';
 import { listDocumentsForCitation } from '@/lib/services/source-anchor';
 import { loadEnterpriseShell } from '@/lib/services/shell';
+import {
+  addNarrativeLinkAction,
+  adoptNarrativeLinksAction,
+  rejectNarrativeLinksAction,
+  removeNarrativeLinkAction,
+  suggestNarrativeLinksAction,
+} from '../actions';
+import { CoveragePanel } from '../_components/coverage-panel';
 import { NarrativeEditor } from '../_components/narrative-editor';
 import { CandidateBadge, NarrativeStatusBadge } from '../_components/narrative-badges';
 import type { DocumentPayload } from '../_components/types';
@@ -32,6 +47,9 @@ export const metadata = { title: '定性情報の編集' };
 
 /**
  * 定性情報の編集（§6.6）。左にテンプレート項目と本文、右に資料の該当箇所、下に版の履歴。
+ * 「基準別の対応状況」（トライアル対応 NF-06）: 基準ごとの 5 区分（要求事項タブと同じ区分）、要求事項の行
+ * （折りたたみ）、直接の対応付け（外した後は通知に「元に戻す」）、AI の対応付けの候補（NF-11。採用は人）。
+ * リスク・機会／財務的影響のテーマは「関連するインパクト・リスク・機会」を選べる（NF-10。台帳の SSBJ 列）。
  */
 export default async function NarrativeDetailPage({
   params,
@@ -72,6 +90,24 @@ export default async function NarrativeDetailPage({
 
   const record = data.record;
   const current = data.currentVersion;
+  // 基準別の対応状況（NF-06）・直接の対応付けの選択肢・AI の候補（NF-11。?mappingRun= で読み直す）
+  const mappingRunId = typeof query.mappingRun === 'string' ? query.mappingRun : null;
+  const [coverage, linkable, candidates] = await Promise.all([
+    loadContentCoverage(db, ctx, { narrativeRecordId: record.id }),
+    data.canWrite
+      ? listLinkableRequirements(db, ctx, { narrativeRecordId: record.id })
+      : Promise.resolve([]),
+    mappingRunId
+      ? loadNarrativeMappingCandidates(db, ctx, {
+          narrativeRecordId: record.id,
+          runId: mappingRunId,
+        })
+      : Promise.resolve(null),
+  ]);
+  const candidateDecidedBy = candidates?.run.reviewedBy
+    ? (data.members.find((m) => m.userId === candidates.run.reviewedBy)?.displayName ?? null)
+    : null;
+  const undoItem = typeof query.undoItem === 'string' ? query.undoItem : null;
   const docs = await listDocumentsForCitation(db, ctx);
   const documents: DocumentPayload[] = docs.map((d) => ({
     fileId: d.file.id,
@@ -124,7 +160,22 @@ export default async function NarrativeDetailPage({
         }
       />
       <div className="space-y-3 p-4">
-        <FlashMessage searchParams={query} />
+        <FlashMessage
+          searchParams={query}
+          undo={{
+            // 外した対応付けを結び直す（plan §1.16 区分 3「元に戻す」）
+            narrativeLinkRemoved:
+              data.canWrite && undoItem ? (
+                <form action={addNarrativeLinkAction}>
+                  <input type="hidden" name="narrativeId" value={record.id} />
+                  <input type="hidden" name="itemId" value={undoItem} />
+                  <SubmitButton variant="secondary" size="xs" pendingLabel="戻しています…">
+                    元に戻す
+                  </SubmitButton>
+                </form>
+              ) : null,
+          }}
+        />
         {data.versionMissing && (
           <p
             role="alert"
@@ -194,6 +245,28 @@ export default async function NarrativeDetailPage({
               record.status === 'confirmed' && record.confirmedVersionId === record.currentVersionId
             }
             isCandidate={data.isCandidate}
+            iroSelectable={IRO_REF_THEMES.includes(record.theme)}
+            iroOptions={data.iroOptions}
+            iroOptionsPeriodId={data.iroOptionsPeriodId}
+            initialIroRefs={current?.iroRefs ?? []}
+            coverage={
+              <CoveragePanel
+                narrativeId={record.id}
+                coverage={coverage}
+                linkable={linkable}
+                candidates={candidates}
+                candidateDecidedBy={candidateDecidedBy}
+                canWrite={data.canWrite}
+                canRunAi={can(ctx, 'enterprise.ai.run')}
+                actions={{
+                  add: addNarrativeLinkAction,
+                  remove: removeNarrativeLinkAction,
+                  suggest: suggestNarrativeLinksAction,
+                  adopt: adoptNarrativeLinksAction,
+                  reject: rejectNarrativeLinksAction,
+                }}
+              />
+            }
           />
         )}
 

@@ -3197,3 +3197,111 @@ commit・push・deploy はしていない。`docs/ui-redesign/plan.md` は編集
 - 最終: E2E 372/372（単独）・stateless 27/27・unit+integration 2,543・RLS 311・build 合格。本番（terrast-t4d）は旧 UI のまま。
 - 2026-10-08 本番反映: `vercel deploy --prod` → `vercel alias set … terrast-t4d.vercel.app` → 本番スモーク 32/32（1 件はテストの競合: リスク・機会の保存は画面遷移しないため、
   networkidle 待ちでは送信前に再読込しうる。Server Action の応答を待つ形に直し、再試行なしで 4＋3 回合格）→ 本番で主デモ＋CSRD の流れ 17/17 → 同じコードを再デプロイして共有メモリを初期化。
+
+## 2026-10-09 トライアル対応 Stage A（土台: スキーマ・中核サービス・登録簿）の実装（単独・未コミット）
+
+正はトライアル対応の計画（提案フォルダの plan.md。Git 管理外で、この記録には写さない。編集していない）。
+Stage B（T1〜T8）・Stage C が使う API と注意は同じフォルダの `handoff/A.md`。commit・push・deploy はしていない。
+権限キー・役割（roles.ts・0002_identity.sql）は変えていない。設定画面は管理者だけのまま。
+
+### 変更
+
+- スキーマ（追加のみ・DROP なし）: 0048（監査ログの種類 +10）、0049（プロジェクトの要求事項の判断と履歴・対象外の申請と承認〔二者・理由のダイジェスト〕・
+  定性情報と要求事項の対応付け・横断対応のマスター・節の要求事項のガード）、0050（承認済みレポートの保証側への共有〔写し〕・保証側のコメントの対象列・
+  企業の回答・Sign-off の写しの列）、0051（出力の突合・XBRL の 2 形式）、0052（IRO の根拠・定性情報の IRO 参照）、0053〜0054（XBRL の SAMPLE マスター・対応付け〔確定は承認権限・本人・作成者と別人〕）、
+  0055（トライアルの評価 6 表）、0056（招待の担当拠点・データ取扱条件・過年度確定値の経路・返却用バケット）、0057（契約オプション・CDP 回答の対応付け・回答の承認の職務分離）、
+  0058（テナントの終了の保守関数・削除の記録・`forbid_mutation` の差し替え）。すべて RLS 有効・ポリシーあり。ロールバックは `docs/known-limitations.md` §6。
+- 型・表名・Fixture（すべて架空）: ESRS-40a 試行用サンプル版（FY2026 のプロジェクトの 40a はこの版。公開草案の版は要求事項未収録のまま）・判断と対象外の申請・
+  横断対応のサンプル・XBRL の SAMPLE・FY2025 の承認済みスナップショット（v2）・トライアルの記録・データ取扱条件・CDP オプション・架空メンバー 2 名。seed 再生成。
+- 中核サービス（server-only）・純関数: 要求事項の判断の読み分け（`requirement-decisions.ts`。`buildRequirementRows` を置換）、5 区分（`domain/requirement-coverage.ts`）、
+  要求事項・情報対応表（`requirement-matrix.ts`）、版の差分と改番（`domain/framework-diff.ts`）、スナップショット v2（承認者・日時・根拠資料・判断の状態を固定。v1 は v1 の規則で検査）、
+  トレースと追跡率（`domain/report-trace.ts`）、保証側への共有（`report-share.ts`・`domain/report-copy.ts`）、保証側のコメントと回答（`assurance-notes.ts`）、
+  Data Room の導出（`data-room-sync.ts`。Fixture の data_room_items・SNAP-1 と一致をテストで固定）、影響先と保存しない通知（`impact.ts`）・資料の新版の検知（`disclosure-recheck.ts`）、
+  契約オプション（`organization-options.ts`）、権限で断った操作の監査ログ（`errors/access-denied.ts`。`withUserFacingError` と出力 API 8 本の 403）、環境の版（`build-info.ts`・`next.config.ts` の env）、
+  AI の候補の不採用の理由（`ai/feedback.ts`・`CandidateDecision` の「採用しない」）。
+- AI（候補だけ）: `requirementMappingSuggestion`・`xbrlTagSuggestion`（スキーマ・Prompt の版・指示・決定論的 Mock）、`requirement-mapping-ai.ts`、
+  `cdpDraftGeneration`・`csrdDisclosureDraft` の Prompt の版を更新、OpenAI の `store` を明示（既定は保存しない。`OPENAI_STORE`）。
+- 登録簿・誠実さ・ルート: 状態の登録簿 16 領域、HonestyBadge の「提出用ではない」「社内承認版」、ROUTE_CATALOG のスライス別の拡張ファイル（t1〜t8）、
+  危険操作のスライス別ファイル（T1〜T8）、開示プロジェクトのタブ「横断対応」「XBRL」（中身はスライスが置き換える仮の空状態）。
+- Demo の持ち回し: 新しい表 22 表を `demo-trial-checks.ts` の検査（組織・権限・職務分離・本人名義・大きさ）つきで Cookie に載せる。共有した写しは目録だけ。
+  メンバーシップは架空メンバーの担当拠点・状態だけ。開示デモのリセットは新しい表と、共有した写し・回答・写しを指すコメントも戻す。
+
+### テスト結果（2026-10-09 ローカル。E2E は単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` / `pnpm check:rls`（130 表・ポリシー 293）/ `pnpm check:colors` 合格。
+- `pnpm test`: 206 ファイル・**2,739 件**合格（2,543 件から増）。
+- `pnpm test:rls`: 2 ファイル・**344 件**合格（311 件＋トライアル対応 33 件）。
+- `E2E_PORT=3217 pnpm test:e2e`: **372 件すべて合格・15.9 分**（件数は以前と同じ。Stage A の画面の変化は仮タブ 2 つだけ）。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: **27 件すべて合格**（実演の流れの最大: Cookie ヘッダー 8,905B・操作の記録 8,757B）。
+- Demo の Cookie（stateless-demo-chain）: 実演の流れの最大 8,572B（以前 8,529B）、実演＋CSRD の流れの最大 11,077B（上限の目安 11,200B 以内・押し出しなし）。
+
+### 未解決・次作業
+
+- Stage B（T1〜T8）・Stage C: 提案フォルダの `handoff/A.md`。新しいページ・Action・画面の誠実さの注記はスライスが作る（Stage A は空状態の仮タブだけ）。
+- 資料の新版は再確認の判断（recheck_decisions は数値・定性情報だけ）に記録できないため、節の鮮度・承認の可否は変えず「上流に新版あり（資料）」の表示と差戻しの導線に留めた。
+- 対象外の申請・承認を Cookie から戻すときは、記録した時点の理由が分からないためダイジェストの形だけを見る（承認が効くのは今の理由と一致するときだけ）。
+- `membership_roles` は主キーが無いため持ち回さない（架空メンバーの役割の変更は同じインスタンスのメモリだけ）。
+- 本番は未反映（デプロイは統括の判断）。
+
+## 2026-10-09 トライアル対応 Stage C（統合）の実装（単独・未コミット）
+
+正はトライアル対応の計画（提案フォルダの plan.md。Git 管理外で、この記録には写さない。編集していない）。T1〜T8 の依頼（同じフォルダの
+`handoff/T*.md`）をすべて適用し、Stage C の結線・試行の流れ・本番スモーク・文書を足して全ゲートを通した。回帰の判定は
+`docs/ui-redesign/regression.md` §6（画面 89・機能 F001〜F201・出力 API E01〜E17。Missing・Broken 0）。要件ごとの結果は提案フォルダの
+`traceability-result.md`（Git 管理外。N01〜N178: 実装済み 143・一部 13・未実装 0・対象外 22）。commit・push・deploy はしていない。
+権限キー・役割（roles.ts・0002_identity.sql）は変えていない。設定画面は企業管理者だけのまま（R1 は不採用のまま）。
+
+### 変更
+
+- **スライス間の依頼（crossSliceNeeds）**: 対象外の判断の時刻を前の記録より必ず 1 ms 後に（`nextEventTime`。同じ時刻で並びが崩れ、取り下げの検査が揺れた）、
+  承認待ちの対象外の一覧（`listPendingExclusions`）、要求事項の行の `exclusionDecision`（表示の文言の解析をやめた）、再確認の印に資料の新版・根拠の無効、
+  承認版の要求事項の状態の読み出しを出力と共有（`loadRequirementState`）、CDP の対応付けの持ち回し（`disclosureMappings`。検査つき）と回答の承認の職務分離の戻しの検査、
+  同じセッションで付けて外した対応付けの戻し、SSBJ の DOCX に「対象年度×基準版」・要求事項 CSV のファイル名に基準版、取込んだ基準マスター（`IMPORTED_FRAMEWORK_MASTERS`）を Fixture に読む、
+  要求事項の詳細・横断対応表の「その他」から IRO の台帳へ、Data Room の導出を `data-room-sync.ts` へ移し、保証側の資料の閲覧（`canReadEvidence`）を DB と同じ規則に
+  （共有中の写しが引用する版・許諾内のデータに紐付く資料。許諾が Evidence を含むときだけ）。
+- **CDP 対応オプション（NF-38）の結線**: メニューの葉（`NavItem.option`・`missingNavOptions`・`visibleNavTree` の 4 番目の引数）、パンくず・パレットの画面と CDP の質問の検索、
+  レポートの CDP のカード、過去回答の取込（資料を保存する前）・適用判定・質問マッピングで止める。規制対応度の CDP 行は算定せず理由を出す。
+- **ヘッダー・ホーム・通知・パレット**: ヘッダーに「ご意見・不具合」（ghost。企業の利用者）、ユーザーメニューに「トライアルの評価」、ヘルプに用語 11・トライアルの評価へのリンク・
+  「この環境の版」。開示優先のホームに区分の内訳と「すべての基準」へのリンク、Attention に上流の変更（要再確認）・対象外の承認待ち（自分の申請を除く）・保証側の未回答・
+  重大な必須要件の未解決。通知センターに「要再確認（上流の変更）」の節（保存しない）。パレットに設定の 3 タブ・タスク動詞 6（ご意見・対応表の出力・トレース・保証側のコメント・
+  XBRL の対応付け・監査ログ）。監査法人ツリーの「実施」に「開示レポート」。
+- **欠陥の修正（E2E・unit で見つけたもの）**: 拠点担当で SSBJ の要求事項の詳細が 500（開示の閲覧権限が無いと対象外の状態を読まない）、ホームの「対象外の承認待ち」の SSBJ の行き先が、分析条件で適用しない基準（実務対応基準など）の要求事項だと 404（詳細が開ける要求事項だけを数え、行き先に申請の年度 `?period=` を付けた。`isSsbjItemInScope`）、「その他 ▾」の確認ダイアログが
+  確定の後に項目が再び出ると勝手に開き直す（開いた印を捨てる）、共有した開示レポートの本文中のリンクの下線（axe）。
+- **Demo の Cookie**: 出力の記録の突合の件数を、不一致 0 件・既定の検査版のとき 1 つの配列（`rc`）に詰めた（実演＋CSRD の流れを 11,200B 以下に保つため）。
+  試行の流れを service 層（`tests/integration/stateless-trial-chain.test.ts`）と画面（`tests/e2e/zzzzz-trial-chain.stateless.ts`）で通す。
+- **採番・検査**: 危険操作のスライスの仮番号（F1101 など）を F145〜F201 の通し番号へ振り直し、`feature-coverage.ts`・`inventory-features.md` §2.3・§3.14・§4 と揃えた。
+  `NO_E2E_YET` は 22 → 26（F162・F184・F194・F196。理由と代わりの integration を記載。上限 33 は変えていない）。到達性に新しい詳細画面の入口（`TRIAL_DETAIL_ENTRIES`）。
+- **E2E**: trial-* の 403 の確認を画面の中の fetch（`apiStatusAsViewer`）へ（`page.request` はログインの Cookie を送らず 401 になる）。追加: 対象外の差戻し・取り下げ、
+  原稿エディタの要求事項と AI 候補、横断対応の AI 候補の不採用、共有の取り下げ、評価の計画・選定ケース・判断・定例会・対応・再検証・作業時間、ヘッダーのご意見、
+  XBRL の対応付けの作成 → 確定 → 対象外 → 取り消し → 削除・AI 候補・タクソノミの設定（最後に開示デモを戻す）、CDP の対応付けの付け直し・回答の無い年度、
+  定性情報の AI 候補の採用。既存の `disclosure-check` は結果の節の表に絞った（閉じた「前の版との比較」の表が先に並ぶため）。
+- **本番スモーク（+4）**: 要求事項タブ「すべての基準」と 5 区分・横断対応表、トレースの追跡率・出力の「不一致 0 件」・XBRL プレビューの「提出用ではありません」、
+  トライアルの評価の架空の注記とヘッダーから送ったご意見が管理者の改善管理表に出ること、共有後の保証側「開示レポート」（最後に取り下げる）。
+  利用者を替えるときは Demo の操作の記録（`t4d.demo-*`）を残す（`prodLogin(..., { keepDemoState: true })`）。
+- **文書**: `docs/ui-redesign/regression.md` §6、`inventory-features.md`（P82〜P89・F145〜F201・E13〜E17）、`known-limitations.md` §13、`assumptions.md`、
+  `disclosure-first.md` §11、`REQUIREMENTS_TRACEABILITY.csv`（TRIAL-001〜014 ほか）、README（手順 7・ライブラリ追加なし・コマンド）。
+
+### テスト結果（2026-10-09 ローカル。E2E は単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` / `pnpm check:colors` 合格。`pnpm check:rls`: 130 表・RLS 有効 130・ポリシー 293 で合格。
+- `pnpm test`: 256 ファイル・**3,239 件**合格（Stage A 後 2,739 件）。`pnpm test:rls`: 2 ファイル・**344 件**合格。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: **40 件すべて合格**（1.8 分。27 件から増）。最大: 実演の流れ Cookie ヘッダー 8,899B（操作の記録 8,751B）、
+  CSRD の流れ 3,485B（3,375B）、試行の流れ 4,297B（4,064B。目安 9,000B 以下）。押し出し 0。
+- Demo の Cookie（integration。実行ごとに ID・時刻で数十 B 揺れる）: 実演の流れ 8,572〜8,611B、実演＋CSRD の流れ 11,099〜11,145B（上限の目安 11,200B）、試行の流れ 3,949〜3,953B、実演 → リセット → 試行の流れ 5,695〜5,703B。押し出し 0。
+- `E2E_PORT=3217 pnpm test:e2e`（全件・単独・retries 0）: **447 件すべて合格・18.0 分**（skip 0。Stage A 後 372 件）。
+- `PROD_BASE_URL=http://127.0.0.1:3217 pnpm test:e2e:prod`（ローカルの `next start`・Demo Mode・単独）: **36 件すべて合格**（既存 32＋トライアル対応 4。再試行なし）。本番（Vercel）には流していない（デプロイしていない）。
+- 途中の失敗と直したもの: 1 回目の全件（418 合格・2 失敗）で disclosure-check（表の取り違え）と screen-audit（共有した開示レポートの axe）、
+  trial-xbrl で FY2025 に未対応付けが無い前提・確定後のダイアログの開き直し・AI 候補を出す対象が無い（節の対応付けを 1 件削除してから出す）を直した。
+  2 回目の全件は、止めたはずの古い `next start`（別のビルド）が 3217 に残り、`pnpm build` 後に再利用されて画面のチャンクが合わず失敗したため、プロセスを止めて流し直した。
+  3 回目の全件（440 合格・1 失敗・6 未実行）は screen-audit で承認者のホームの「対象外の承認待ち」から SSBJ の詳細が 404
+  （前の spec が分析条件で実務対応基準を外していた）。行き先を作る前に詳細が開けるかを確かめるよう直し（integration に再現の 1 件）、4 回目で全件合格。
+
+### 未解決・次作業
+
+- E2E の無い機能 4 件（F162 Sign-off と共有レポート・F184 提出者の識別子・F194 CSRD ドラフトの取り込み・F196 SSBJ の版の固定し直し）は integration で確認。
+  Fixture に抑止条件の無い案件・CSRD を持つプロジェクト・SSBJ の 2 つ目の版を足せば E2E にできる。
+- 計画の任意の項目で入れていないもの: 削減目標の Fixture、XBRL の decimals、写しへの定性情報の根拠（引用位置）、FY2025 の出典印。
+  ドラフトから取り込んだ段落の AI 由来の印は段落 ID の接頭辞だけ（原稿エディタに「AI 由来」の表示は出していない）。
+- 資料の新版・失効した根拠は「要再確認」に数えるが、再確認の判断（`recheck_decisions`）に記録できないため、区分と承認の可否には使わない（known-limitations §13.2）。
+- 判断事項（D1 実データ環境・D10 CDP の 3 段階承認・D3 写しの伏せ字・D4 指摘の企業側表示）は発注者の判断待ち。
+- 本番は未反映（デプロイは統括の判断。手順はメモリ「本番デプロイのエイリアス手順」。反映後は本番スモークと本番チェーンで確認し、最後に再デプロイして共有メモリを初期化）。

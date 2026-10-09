@@ -16,6 +16,7 @@ import { CreatePanel, createPanelHref, isCreatePanelOpen } from '@/components/sh
 import { FlashMessage } from '@/components/shared/flash';
 import { HonestyBadge } from '@/components/shared/honesty-badge';
 import { Notice } from '@/components/shared/notice';
+import { PageActions } from '@/components/shared/page-actions';
 import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
@@ -28,7 +29,8 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
-import { can } from '@/lib/authorization/can';
+import { Collapsible } from '@/components/ui/collapsible';
+import { NotFoundError, can } from '@/lib/authorization/can';
 import {
   ACTION_TYPE_LABEL,
   APPLICABILITY_LABEL,
@@ -45,6 +47,16 @@ import { formatJst } from '@/lib/format/datetime';
 import { listMentionCandidates } from '@/lib/services/comments';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import { loadSsbjRequirementDetail } from '@/lib/services/ssbj-gap';
+import {
+  exclusionNoteLimit,
+  loadExclusionStatus,
+  type ExclusionStatus,
+} from '@/lib/services/requirement-exclusion';
+import type { ActionSpec } from '@/lib/ui/actions';
+import {
+  exclusionActions,
+  reasonHead,
+} from '@/app/enterprise/disclosure-projects/[projectId]/requirements/_components/exclusion-action-specs';
 import type { SsbjActionType, SsbjCoverageStatus, SsbjGapKind } from '@/types/domain';
 import {
   createSsbjActionPlanAction,
@@ -136,7 +148,54 @@ export default async function SsbjRequirementDetailPage({
 
   const { view, metrics } = detail;
   const { item, assessment: a, priority } = view;
-  const members = await listMentionCandidates(shell.db, shell.ctx);
+  const [members, exclusion] = await Promise.all([
+    listMentionCandidates(shell.db, shell.ctx),
+    // 対象外・非重要の申請と承認（トライアル対応 NF-02）。評価の行が無ければ出さない。
+    // SSBJ の画面は開示の閲覧権限を求めない（拠点担当も開ける）。申請・承認の状態は開示の閲覧権限が
+    // あるときだけ読む（読めない役割に例外を投げて画面ごと落とさない）
+    can(shell.ctx, 'enterprise.disclosure.read')
+      ? loadExclusionStatus(shell.db, shell.ctx, {
+          source: 'ssbj_assessment',
+          itemId: item.id,
+          reportingPeriodId: period.id,
+        }).catch((error: unknown): ExclusionStatus | null => {
+          if (error instanceof NotFoundError) return null;
+          throw error;
+        })
+      : Promise.resolve(null),
+  ]);
+  const canApprove = can(shell.ctx, 'enterprise.disclosure.approve');
+  const exclusionCurrent = exclusion?.target.current ?? null;
+  const exclusionOps =
+    exclusion && exclusionCurrent
+      ? exclusionActions({
+          fields: {
+            source: 'ssbj_assessment',
+            itemId: item.id,
+            reportingPeriodId: period.id,
+            returnTo: 'ssbj',
+          },
+          state: exclusion.state.state,
+          requestedBy: exclusion.state.requestedBy,
+          decision: exclusionCurrent.decision,
+          reason: exclusionCurrent.reason,
+          frameworkLabel: 'SSBJ',
+          code: item.code,
+          viewerId: shell.ctx.userId,
+          canWrite,
+          canApprove,
+          noteLimit: exclusionNoteLimit(shell.ctx),
+        })
+      : {};
+  // 主操作は 1 つ: 編集者には既存の確定・対応計画が主操作。承認だけを持つ人には「対象外を承認」を主操作にする
+  const exclusionPrimary: ActionSpec | undefined = canWrite ? undefined : exclusionOps.approve;
+  const exclusionSecondary = [
+    canWrite ? exclusionOps.approve : undefined,
+    exclusionOps.returnBack,
+    exclusionOps.request,
+  ].filter((op): op is ActionSpec => op !== undefined);
+  const memberName = (userId: string | null) =>
+    members.find((m) => m.userId === userId)?.displayName ?? '—';
 
   const basePath = `/enterprise/disclosures/ssbj/requirements/${item.id}`;
   const decided = a.finalStatus !== null;
@@ -356,6 +415,72 @@ export default async function SsbjRequirementDetailPage({
                 ownerDepartment: a.ownerDepartment,
               }}
             />
+          </Section>
+        )}
+
+        {exclusion && exclusionCurrent && (
+          <Section
+            title="対象外・非重要の申請と承認"
+            summary={
+              <span className="text-caption text-ink-muted">
+                申請した人は承認できません。承認は理由に結び付き、理由を変えると承認し直しです。
+              </span>
+            }
+            actions={
+              <PageActions
+                primary={exclusionPrimary}
+                secondary={exclusionSecondary}
+                more={exclusionOps.withdraw ? [exclusionOps.withdraw] : undefined}
+              />
+            }
+          >
+            <div className="space-y-1.5 text-small">
+              <p className="flex flex-wrap items-center gap-2">
+                <StatusBadge domain="exclusionApproval" value={exclusion.state.state} />
+                <span className="text-ink">
+                  {exclusionCurrent.decision === 'not_applicable' ? '対象外' : '非重要'}:{' '}
+                  {reasonHead(exclusionCurrent.reason)}
+                </span>
+              </p>
+              {exclusion.state.requestedBy && (
+                <p className="text-caption text-ink-muted">
+                  申請 {memberName(exclusion.state.requestedBy)}（
+                  {formatJst(exclusion.state.requestedAt)}）
+                  {exclusion.state.decidedBy &&
+                    ` ／ ${exclusion.state.state === 'approved' ? '承認' : '差戻し'} ${memberName(exclusion.state.decidedBy)}（${formatJst(exclusion.state.decidedAt)}）`}
+                </p>
+              )}
+              {exclusion.state.returnNote && (
+                <p className="text-ink">差戻しの理由: {exclusion.state.returnNote}</p>
+              )}
+              <p className="text-caption text-ink-muted">
+                承認されるまで、開示プロジェクトの要求事項では「未判定」として分母に残します（承認は社内の記録です）。
+              </p>
+              {exclusion.events.length > 0 && (
+                <Collapsible
+                  variant="plain"
+                  summary={`申請・承認の記録（${exclusion.events.length} 件）`}
+                >
+                  <ol className="space-y-0.5 text-caption">
+                    {exclusion.events.map((event) => (
+                      <li key={event.id}>
+                        {formatJst(event.createdAt)}{' '}
+                        {
+                          {
+                            requested: '申請',
+                            approved: '承認',
+                            returned: '差戻し',
+                            withdrawn: '取り下げ',
+                          }[event.event]
+                        }{' '}
+                        {memberName(event.actorUserId)}
+                        {event.note ? ` ／ ${event.note}` : ''}
+                      </li>
+                    ))}
+                  </ol>
+                </Collapsible>
+              )}
+            </div>
           </Section>
         )}
 

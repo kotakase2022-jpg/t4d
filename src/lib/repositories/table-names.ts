@@ -88,6 +88,36 @@ export const SQL_TABLE_NAMES: Record<TableName, string> = {
   ingestionJobFiles: 'ingestion_job_files',
   ingestionRows: 'ingestion_rows',
   aiRuns: 'ai_runs',
+  // AI の候補の採否と理由（0008。トライアル対応で不採用の理由を残すために使い始める）
+  aiFeedback: 'ai_feedback',
+
+  // トライアル対応（2026-10）: 要求事項の判断・対象外の承認・対応付け・横断対応（0049）
+  projectRequirementAssessments: 'project_requirement_assessments',
+  projectRequirementAssessmentEvents: 'project_requirement_assessment_events',
+  requirementExclusionEvents: 'requirement_exclusion_events',
+  narrativeRequirementLinks: 'narrative_requirement_links',
+  requirementCrosswalks: 'requirement_crosswalks',
+  // 保証側への共有・回答（0050）・出力の突合（0051）
+  sharedReportCopies: 'shared_report_copies',
+  reviewNoteResponses: 'review_note_responses',
+  exportReconciliations: 'export_reconciliations',
+  // XBRL（0053・0054）
+  xbrlTaxonomyPackages: 'xbrl_taxonomy_packages',
+  xbrlConcepts: 'xbrl_concepts',
+  xbrlConceptRequirements: 'xbrl_concept_requirements',
+  organizationFilingIdentifiers: 'organization_filing_identifiers',
+  xbrlTagMappings: 'xbrl_tag_mappings',
+  xbrlTagMappingEvents: 'xbrl_tag_mapping_events',
+  // トライアルの評価（0055）・データ取扱条件（0056）・オプションと回答の対応付け（0057）
+  trialPrograms: 'trial_programs',
+  trialScenarios: 'trial_scenarios',
+  trialScenarioRuns: 'trial_scenario_runs',
+  trialScenarioJudgements: 'trial_scenario_judgements',
+  trialFeedbackItems: 'trial_feedback_items',
+  trialTaskTimings: 'trial_task_timings',
+  organizationDataTerms: 'organization_data_terms',
+  organizationOptions: 'organization_options',
+  responseContentLinks: 'response_content_links',
 
   engagements: 'engagements',
   engagementMembers: 'engagement_members',

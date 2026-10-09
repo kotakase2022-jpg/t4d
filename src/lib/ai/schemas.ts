@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CSRD_SECTIONS, DMA_PERSPECTIVES } from '@/types/domain';
+import { CSRD_SECTIONS, DMA_PERSPECTIVES, XBRL_PERIOD_ROLES } from '@/types/domain';
 
 /**
  * AI の構造化出力スキーマ（指示書 14 章）。
@@ -27,6 +27,8 @@ export const aiSourceSchema = z.object({
     // CSRD のギャップ分析・草案が根拠にした DMA の事項・IRO（docs/disclosure-first.md §9.4）
     'dma_matter',
     'dma_iro',
+    // トライアル対応（2026-10）: XBRL のタグの候補が根拠にした概念（SAMPLE の架空の概念）
+    'xbrl_concept',
   ]),
   id: z.string().nullable(),
   label: z.string(),
@@ -361,6 +363,54 @@ export const disclosureBlockDraftSchema = z.object({
 });
 export type DisclosureBlockDraftOutput = z.infer<typeof disclosureBlockDraftSchema>;
 
+// 4.9 requirementMappingSuggestion — 要求事項の対応付けの候補（トライアル対応 NF-11）
+//
+// 定性情報の版・原稿の節・SSBJ の要求事項に対して、対応しうる要求事項（権限内・同じ組織の基準の版）の候補を返す。
+// 結果は ai_runs にだけ残す。採用は人の操作（節の対応付け・定性情報の直接対応）で行い、横断対応のマスターには書かない。
+// itemId は入力の候補一覧にある ID だけ（入力に無い ID を作らない。サービスが入力の一覧と照らして落とす）
+export const REQUIREMENT_MAPPING_TARGET_KINDS = [
+  'narrative_version',
+  'disclosure_block',
+  'requirement_item',
+] as const;
+export type RequirementMappingTargetKind = (typeof REQUIREMENT_MAPPING_TARGET_KINDS)[number];
+
+export const requirementMappingSuggestionSchema = z.object({
+  targetKind: z.enum(REQUIREMENT_MAPPING_TARGET_KINDS),
+  candidates: z.array(
+    z.object({
+      itemId: z.string(),
+      itemCode: z.string(),
+      /** 横断の対応（要求事項どうし）のときの関係。節・定性情報への対応付けでは null */
+      relation: z.enum(['equivalent', 'partial', 'related']).nullable(),
+      rationale: z.string(),
+      confidence: z.number().min(0).max(1),
+    }),
+  ),
+  ...base,
+});
+export type RequirementMappingSuggestionOutput = z.infer<typeof requirementMappingSuggestionSchema>;
+
+// 4.10 xbrlTagSuggestion — XBRL の概念の対応付けの候補（トライアル対応 NF-44 の P1）
+//
+// 指標・節に対して、SAMPLE（架空）タクソノミの概念の候補を返す。候補は xbrl_tag_mappings に candidate として
+// 入り、確定は承認権限者が人の操作で行う（AI は確定しない）。概念は入力の concepts にある local_name だけ
+export const xbrlTagSuggestionSchema = z.object({
+  candidates: z.array(
+    z.object({
+      targetKind: z.enum(['metric', 'block']),
+      /** 指標の ID か、節の基準の版の ID と節のキー（"<frameworkVersionId>:<sectionKey>"） */
+      targetRef: z.string(),
+      conceptLocalName: z.string(),
+      periodRole: z.enum(XBRL_PERIOD_ROLES),
+      rationale: z.string(),
+      confidence: z.number().min(0).max(1),
+    }),
+  ),
+  ...base,
+});
+export type XbrlTagSuggestionOutput = z.infer<typeof xbrlTagSuggestionSchema>;
+
 export const AI_SCHEMAS = {
   importMapping: importMappingSchema,
   anomalyExplanation: anomalyExplanationSchema,
@@ -377,6 +427,8 @@ export const AI_SCHEMAS = {
   assuranceEvidenceSummary: assuranceEvidenceSummarySchema,
   assuranceChangeSummary: assuranceChangeSummarySchema,
   disclosureBlockDraft: disclosureBlockDraftSchema,
+  requirementMappingSuggestion: requirementMappingSuggestionSchema,
+  xbrlTagSuggestion: xbrlTagSuggestionSchema,
 } as const;
 
 export type AiFeature = keyof typeof AI_SCHEMAS;
@@ -387,11 +439,13 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   importMapping: 'import-mapping@2026-08-14.1',
   anomalyExplanation: 'anomaly-explanation@2026-08-14.1',
   cdpQuestionMapping: 'cdp-question-mapping@2026-08-14.1',
-  cdpDraftGeneration: 'cdp-draft-generation@2026-08-14.1',
+  // 2026-10-09: 確認済みの定性情報・承認済みの原稿の版・根拠の引用位置を入力に足す（トライアル対応 NF-41）
+  cdpDraftGeneration: 'cdp-draft-generation@2026-10-09.1',
   ssbjGapAnalysis: 'ssbj-gap-analysis@2026-08-26.1',
   ssbjDisclosureDraft: 'ssbj-disclosure-draft@2026-08-27.1',
   csrdGapAnalysis: 'csrd-gap-analysis@2026-10-01.2',
-  csrdDisclosureDraft: 'csrd-disclosure-draft@2026-10-01.2',
+  // 2026-10-09: ESRS2（SBM-3）の節に重要と判断した事項の IRO を入力・出典として渡す（トライアル対応 NF-10 の P1）
+  csrdDisclosureDraft: 'csrd-disclosure-draft@2026-10-09.1',
   evidenceMapping: 'evidence-mapping@2026-08-14.1',
   inconsistencyCheck: 'inconsistency-check@2026-08-17.1',
   insightDiscovery: 'insight-discovery@2026-08-17.1',
@@ -399,4 +453,6 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   assuranceEvidenceSummary: 'assurance-evidence-summary@2026-08-14.1',
   assuranceChangeSummary: 'assurance-change-summary@2026-08-14.1',
   disclosureBlockDraft: 'disclosure-block-draft@2026-09-29.1',
+  requirementMappingSuggestion: 'requirement-mapping-suggestion@2026-10-09.1',
+  xbrlTagSuggestion: 'xbrl-tag-suggestion@2026-10-09.1',
 };

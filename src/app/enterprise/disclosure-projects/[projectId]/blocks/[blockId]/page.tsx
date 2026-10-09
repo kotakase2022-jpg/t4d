@@ -5,19 +5,29 @@ import { PageHeader } from '@/components/shared/page-header';
 import { PermissionDeniedState } from '@/components/shared/states';
 import { Badge } from '@/components/ui/badge';
 import { getAiProvider } from '@/lib/ai';
-import { AuthorizationError, NotFoundError } from '@/lib/authorization/can';
+import { AI_FEEDBACK_REASON_MAX, AI_FEEDBACK_REASON_MAX_DEMO } from '@/lib/ai/feedback';
+import { AuthorizationError, NotFoundError, can } from '@/lib/authorization/can';
 import { describeReferenceDate } from '@/lib/clock';
-import { diffParagraphs, paragraphText } from '@/lib/domain/disclosure-block';
+import { paragraphText } from '@/lib/domain/disclosure-block';
 import { formatJstDate } from '@/lib/format/datetime';
+import { listNotesForClient } from '@/lib/services/assurance-notes';
+import {
+  blockNeedsMappingReason,
+  listRequirementOptions,
+  loadBlockMappingSuggestion,
+  mappingReasonLimit,
+} from '@/lib/services/block-requirements';
 import { loadBlockDraftRuns, type DraftRunView } from '@/lib/services/disclosure-ai-draft';
 import { getBlockEditorData, type BlockEditorData } from '@/lib/services/disclosure-block';
 import { reviewActionsFor, type ReviewActionState } from '@/lib/services/disclosure-review';
 import { loadEnterpriseShell } from '@/lib/services/shell';
-import type { ParagraphDiff } from '@/lib/domain/disclosure-block';
 import type { BlockParagraph } from '@/types/domain';
 import { BlockStatusBadge, FreshnessBadge } from '../status-badges';
 import { BlockEditor } from './block-editor';
 import { paragraphLabelOf } from './editor-model';
+import type { PaneTab } from './editor-right-pane';
+import type { AssuranceNoteView, RequirementMappingPaneData } from './requirement-mapping-panel';
+import { loadReviewDiff, parseReviewDiffMode, type ReviewDiffResult } from './review-diff';
 import { ReviewPanel } from './review-panel';
 
 export const metadata = { title: '原稿編集' };
@@ -55,7 +65,7 @@ export default async function BlockEditorPage({
 
   let actions: ReviewActionState | null = null;
   let reviewParagraphs: Array<{ id: string; label: string }> = [];
-  let reviewDiff: ParagraphDiff[] | null = null;
+  let reviewDiff: ReviewDiffResult | null = null;
   let reviewTargetParagraphs: BlockParagraph[] = [];
   if (data.activeRequest) {
     const request = await db.findById('reviewRequests', data.activeRequest.id);
@@ -68,10 +78,12 @@ export default async function BlockEditorPage({
           id: p.id,
           label: `${paragraphLabelOf(target.body.paragraphs, p.id)}: ${paragraphText(p).slice(0, 30)}`,
         }));
-        const base = target.baseVersionId
-          ? await db.findById('disclosureBlockVersions', target.baseVersionId)
-          : null;
-        reviewDiff = diffParagraphs(base?.body ?? null, target.body);
+        // 再承認では前回承認した版との差分を既定にする（?diff=previous で直前の版。NF-17）
+        reviewDiff = await loadReviewDiff(db, ctx, {
+          target,
+          approvedVersionId: data.block.approvedVersionId,
+          requested: parseReviewDiffMode(sp.diff),
+        });
       }
     }
   }
@@ -86,6 +98,64 @@ export default async function BlockEditorPage({
 
   const reference = describeReferenceDate();
   const projectHref = `/enterprise/disclosure-projects/${projectId}`;
+  const blockHref = `${projectHref}/blocks/${blockId}`;
+
+  // 要求事項の対応付けの編集と AI の候補（NF-05・NF-11）。読めなくても原稿の編集はできるようにする
+  const canWriteDisclosure = can(ctx, 'enterprise.disclosure.write');
+  const canRunAi = can(ctx, 'enterprise.ai.run');
+  const [options, suggestion, clientNotes] = await Promise.all([
+    canWriteDisclosure
+      ? listRequirementOptions(db, ctx, {
+          projectId,
+          frameworkVersionId: data.framework.versionId,
+        }).catch(() => [])
+      : Promise.resolve([]),
+    canWriteDisclosure && canRunAi
+      ? loadBlockMappingSuggestion(db, ctx, blockId).catch(() => null)
+      : Promise.resolve(null),
+    listNotesForClient(db, ctx).catch(() => []),
+  ]);
+  const requirementMapping: RequirementMappingPaneData = {
+    projectId,
+    blockId,
+    frameworkVersionId: data.framework.versionId,
+    canEdit: canWriteDisclosure,
+    canRunAi: canRunAi && canWriteDisclosure,
+    reasonRequired: blockNeedsMappingReason({
+      status: data.block.status,
+      approvedVersionId: data.block.approvedVersionId,
+    }),
+    reasonMaxLength: mappingReasonLimit(ctx),
+    rejectReasonMaxLength: ctx.demo ? AI_FEEDBACK_REASON_MAX_DEMO : AI_FEEDBACK_REASON_MAX,
+    options,
+    selectedIds: data.requirements.map((r) => r.id),
+    suggestion: suggestion
+      ? {
+          runId: suggestion.run.id,
+          source: suggestion.run.provider,
+          createdAt: suggestion.run.createdAt,
+          confidence: suggestion.run.confidence,
+          candidates: suggestion.candidates,
+          warnings: suggestion.warnings,
+        }
+      : null,
+  };
+  // 保証側のコメントのうち、この節（共有した写しの段落・数値）を指すもの（NF-21。読み取りは中核サービス）
+  const assuranceNotes: AssuranceNoteView[] = clientNotes
+    .filter((entry) => entry.note.targetBlockId === blockId)
+    .map((entry) => ({
+      id: entry.note.id,
+      engagementLabel: `${entry.engagement.code} ${entry.engagement.name}`,
+      body: entry.note.body,
+      state: entry.state,
+      paragraphId: entry.note.targetParagraphId,
+      createdAt: entry.note.createdAt,
+      responseCount: entry.responses.length,
+    }));
+  const pane = typeof sp.pane === 'string' ? sp.pane : null;
+  const initialPaneTab: PaneTab | undefined =
+    pane === 'requirements' || pane === 'comments' ? pane : undefined;
+  const diffMode = reviewDiff?.mode ?? null;
 
   return (
     <>
@@ -169,7 +239,20 @@ export default async function BlockEditorPage({
           actions={actions}
           paragraphs={reviewParagraphs}
           paragraphNames={paragraphNames}
-          diff={reviewDiff}
+          diff={reviewDiff?.diff ?? null}
+          diffBase={
+            reviewDiff
+              ? {
+                  label: reviewDiff.baseLabel,
+                  switchHref: reviewDiff.canSwitch
+                    ? `${blockHref}?diff=${diffMode === 'approved' ? 'previous' : 'approved'}`
+                    : null,
+                  switchLabel:
+                    diffMode === 'approved' ? '直前の版と比べる' : '前回承認した版と比べる',
+                  openByDefault: typeof sp.diff === 'string',
+                }
+              : null
+          }
           history={data.reviewHistory}
         />
       )}
@@ -181,6 +264,9 @@ export default async function BlockEditorPage({
         runs={runs}
         aiMode={aiMode}
         viewerId={ctx.userId}
+        requirementMapping={requirementMapping}
+        assuranceNotes={assuranceNotes}
+        initialPaneTab={initialPaneTab}
       />
     </>
   );

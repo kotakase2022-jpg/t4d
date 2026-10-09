@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   AlertTriangle,
   CircleCheck,
+  CircleHelp,
   CircleDashed,
   Eye,
   FilePen,
@@ -44,6 +45,7 @@ const ICONS: Record<StatusIconName, LucideIcon> = {
   'x-circle': XCircle,
   info: Info,
   'minus-circle': MinusCircle,
+  'circle-help': CircleHelp,
 };
 
 export type StatusBadgeSize = 'sm' | 'md';

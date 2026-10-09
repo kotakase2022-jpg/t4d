@@ -4,7 +4,7 @@ import {
   resolveRouteHref,
   type RouteCatalogEntry,
 } from '@/components/shared/route-catalog';
-import type { PermissionKey } from '@/types/domain';
+import type { OrganizationOptionKey, PermissionKey } from '@/types/domain';
 import type { Can, HomeProfile } from './home-profile';
 import {
   RECOMMENDATIONS,
@@ -69,6 +69,8 @@ export interface PaletteContext {
   engagementId?: string | null;
   /** 描画中のメニューの全項目（経路ラベル）。メニューにある画面はこの経路で出す */
   navPaths: readonly NavPathEntry[];
+  /** 契約オプションが無いため出さない画面のオプション（AppShell の hiddenOptions。省略時は絞らない） */
+  hiddenOptions?: readonly OrganizationOptionKey[];
 }
 
 // ----------------------------------------------------------------------
@@ -117,6 +119,25 @@ const ENTERPRISE_SETTINGS_ITEMS: readonly SettingsItem[] = [
     href: '/enterprise/settings?tab=grants',
     permission: ['enterprise.grant.manage'],
     keywords: ['許諾', 'Grant', '監査法人'],
+  },
+  // トライアル対応（2026-10）の設定のタブ（設定の画面は企業管理者だけ。行き先のゲートでも絞る）
+  {
+    label: '設定 / 承認ルート',
+    href: '/enterprise/settings?tab=approval',
+    permission: ['enterprise.org.manage'],
+    keywords: ['承認ルート', '承認階層', '3 段階', '過年度確定値'],
+  },
+  {
+    label: '設定 / 役割と権限',
+    href: '/enterprise/settings?tab=roles',
+    permission: ['enterprise.org.manage'],
+    keywords: ['役割', '権限', 'できること', 'ロール'],
+  },
+  {
+    label: '設定 / データの取扱い',
+    href: '/enterprise/settings?tab=data-handling',
+    permission: ['enterprise.org.manage'],
+    keywords: ['データ取扱条件', '保管場所', '保存期間', '再学習', '返却', '書き出し'],
   },
   {
     label: '組織・拠点 / 組織・拠点',
@@ -294,6 +315,7 @@ export function buildPaletteEntries(c: PaletteContext): {
     if (entry.entryOnly) continue;
     if (entry.workspace !== c.workspace && entry.workspace !== 'common') continue;
     if (!canOpenRoute(entry, c.can)) continue;
+    if (entry.option && c.hiddenOptions?.includes(entry.option)) continue;
     const href = resolveRouteHref(entry, c.engagementId ?? null);
     if (!href || seen.has(href)) continue;
     seen.add(href);

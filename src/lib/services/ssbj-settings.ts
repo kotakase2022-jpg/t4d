@@ -5,6 +5,7 @@ import { assertCan, can } from '@/lib/authorization/can';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import { isMaterial, loadMateriality } from '@/lib/services/materiality';
+import { resolveSsbjVersion } from '@/lib/services/ssbj-gap';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -63,6 +64,16 @@ export interface SsbjSettingsView {
   /** 適用する基準から決まる、評価対象の要求事項の節 */
   includedSections: string[];
   canEdit: boolean;
+  /**
+   * この年度で使う SSBJ の基準の版（NF-12）。pinned は設定の確定で固定済みか。
+   * newerVersions は固定した版より新しい版（切り替えは人が明示して行う）
+   */
+  frameworkVersion: {
+    id: Uuid;
+    label: string;
+    pinned: boolean;
+    newerVersions: Array<{ id: Uuid; label: string }>;
+  } | null;
 }
 
 const CONSOLIDATION_LABEL: Record<SsbjConsolidationScope, string> = {
@@ -181,6 +192,24 @@ export async function loadSsbjSettings(
     confirmedByName = profile?.displayName ?? null;
   }
 
+  const resolved = await resolveSsbjVersion(db, organizationId, period.id);
+  const frameworkVersion = resolved
+    ? {
+        id: resolved.version.id,
+        label: resolved.version.label,
+        pinned: resolved.pinned,
+        newerVersions: resolved.versions
+          .filter(
+            (v) =>
+              v.id !== resolved.version.id &&
+              v.status !== 'superseded' &&
+              (v.year > resolved.version.year ||
+                (v.year === resolved.version.year && v.createdAt > resolved.version.createdAt)),
+          )
+          .map((v) => ({ id: v.id, label: v.label })),
+      }
+    : null;
+
   return {
     period,
     settings,
@@ -194,6 +223,7 @@ export async function loadSsbjSettings(
     totalTopicCount: materiality.topics.length,
     includedSections: includedSectionPrefixes(settings),
     canEdit: can(ctx, 'enterprise.disclosure.write'),
+    frameworkVersion,
   };
 }
 
@@ -277,6 +307,8 @@ export async function saveSsbjSettings(
     organizationId,
     reportingPeriodId: input.reportingPeriodId,
     ...patch,
+    // 確定時点の基準の版（0049）は確定の操作で入れる（confirmSsbjSettings）。未確定の間は公開中の版（null）
+    frameworkVersionId: null,
     createdAt: now,
     createdBy: ctx.userId,
   };
@@ -319,10 +351,16 @@ export async function confirmSsbjSettings(
     throw new ValidationError(`まだ決まっていない項目があります: ${remaining.join(' ／ ')}`);
   }
 
+  // 確定した時点の基準の版をこの年度に固定する（NF-12。既に固定していればその版のまま。
+  // 新しい版へ移すのは「基準の版を切り替える」の明示の操作だけ）
+  const resolved = await resolveSsbjVersion(db, organizationId, period.id);
+  const frameworkVersionId = resolved?.version.id ?? view.settings.frameworkVersionId ?? null;
+
   const now = new Date().toISOString();
   const updated = await db.update('ssbjAnalysisSettings', view.settings.id, {
     confirmedAt: now,
     confirmedBy: ctx.userId,
+    frameworkVersionId,
     updatedAt: now,
     updatedBy: ctx.userId,
   });
@@ -331,7 +369,53 @@ export async function confirmSsbjSettings(
     eventType: 'data_updated',
     resourceType: 'ssbj_analysis_settings',
     resourceId: view.settings.id,
-    afterSummary: `SSBJ の分析条件を確定（${view.materialTopicCount} 件の課題を重要性ありと判断）`,
+    afterSummary: `SSBJ の分析条件を確定（${view.materialTopicCount} 件の課題を重要性ありと判断${resolved ? `・基準の版 ${resolved.version.label}` : ''}）`,
+  });
+  return updated;
+}
+
+/**
+ * この年度の SSBJ の基準の版を切り替える（新しい版の公表後に、人が明示して移す。NF-12・§5 D11）。
+ * 版が変わると評価対象の要求事項が変わるため、設定の確定は外れる（確定し直しが必要）
+ */
+export async function pinSsbjFrameworkVersion(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  input: { reportingPeriodId: Uuid; frameworkVersionId: Uuid },
+): Promise<SsbjAnalysisSettings> {
+  assertCan(ctx, 'enterprise.disclosure.write');
+  const organizationId = ctx.workspace.organizationId;
+  const period = await db.findById('periods', input.reportingPeriodId);
+  if (!period || period.organizationId !== organizationId) {
+    throw new ValidationError('報告期間が見つかりません。');
+  }
+  const resolved = await resolveSsbjVersion(db, organizationId, period.id);
+  const target = resolved?.versions.find((v) => v.id === input.frameworkVersionId);
+  if (!resolved || !target || target.status === 'superseded') {
+    throw new ValidationError('切り替えられる SSBJ の基準の版ではありません。');
+  }
+  const [settings] = await db.select('ssbjAnalysisSettings', {
+    where: { organizationId, reportingPeriodId: period.id },
+    limit: 1,
+  });
+  if (!settings) throw new ValidationError('先に分析条件を保存してください。');
+  if (settings.frameworkVersionId === target.id && resolved.pinned) {
+    throw new ValidationError('この年度は既にその版に固定しています。');
+  }
+  const now = new Date().toISOString();
+  const updated = await db.update('ssbjAnalysisSettings', settings.id, {
+    frameworkVersionId: target.id,
+    confirmedAt: null,
+    confirmedBy: null,
+    updatedAt: now,
+    updatedBy: ctx.userId,
+  });
+  await recordAuditEvent(db, ctx, {
+    eventType: 'data_updated',
+    resourceType: 'ssbj_analysis_settings',
+    resourceId: settings.id,
+    beforeSummary: `基準の版: ${resolved.version.label}${resolved.pinned ? '' : '（公開中の版）'}`,
+    afterSummary: `基準の版を ${target.label} に切り替え（設定の確定は取り消し）`,
   });
   return updated;
 }

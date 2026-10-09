@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { Loader2 } from 'lucide-react';
 import {
+  CDP_OPTION_STATES,
+  CLIENT_NOTE_STATES,
   CSRD_DRAFT_STATES,
+  DATA_TERMS_STATES,
+  RECONCILIATION_STATES,
+  SHARED_REPORT_STATES,
+  TRIAL_JUDGEMENT_STATES,
+  XBRL_MAPPING_STATES,
+  XBRL_VALIDATION_STATES,
   SEMANTIC_STYLE,
   STATUS,
   STATUS_SEMANTICS,
@@ -20,14 +28,23 @@ import {
 import { DataPointStatusBadge, TaskStatusBadge } from '@/components/shared/badges';
 import { SCAN_STATUS_LABELS } from '@/lib/domain/evidence-limits';
 import {
+  EXCLUSION_STATES,
+  REQUIREMENT_COVERAGE_CATEGORIES,
+} from '@/lib/domain/requirement-coverage';
+import {
   AI_RUN_STATUSES,
   APPLICABILITY_STATUSES,
   APPROVAL_STEP_STATUSES,
   BLOCK_STATUSES,
+  COST_CLASSES,
+  CROSSWALK_RELATIONS,
   CSRD_APPLICABILITY_KINDS,
   DATA_POINT_STATUSES,
   DMA_OUTCOMES,
   ENGAGEMENT_STATUSES,
+  FEEDBACK_KINDS,
+  FEEDBACK_SEVERITIES,
+  FEEDBACK_STATUSES,
   ISSUE_STATUSES,
   JOB_STATUSES,
   MEMBERSHIP_STATUSES,
@@ -44,6 +61,7 @@ import {
   SSBJ_COVERAGE_STATUSES,
   TASK_STATUSES,
   TEST_STATUSES,
+  TRIAL_COMPLETIONS,
 } from '@/types/domain';
 
 /**
@@ -81,6 +99,23 @@ const ENUMS: Record<StatusDomain, readonly string[]> = {
   scan: Object.keys(SCAN_STATUS_LABELS),
   approvalStep: APPROVAL_STEP_STATUSES,
   samplingMethod: SAMPLING_METHODS,
+  // トライアル対応（2026-10。付録 C）
+  requirementCoverage: REQUIREMENT_COVERAGE_CATEGORIES,
+  exclusionApproval: EXCLUSION_STATES,
+  crosswalkRelation: CROSSWALK_RELATIONS,
+  sharedReport: SHARED_REPORT_STATES,
+  clientNote: CLIENT_NOTE_STATES,
+  reconciliation: RECONCILIATION_STATES,
+  xbrlMapping: XBRL_MAPPING_STATES,
+  xbrlValidation: XBRL_VALIDATION_STATES,
+  trialJudgement: TRIAL_JUDGEMENT_STATES,
+  trialCompletion: TRIAL_COMPLETIONS,
+  feedbackKind: FEEDBACK_KINDS,
+  feedbackStatus: FEEDBACK_STATUSES,
+  severity: FEEDBACK_SEVERITIES,
+  costClass: COST_CLASSES,
+  dataTerms: DATA_TERMS_STATES,
+  cdpOption: CDP_OPTION_STATES,
 };
 
 const domains = Object.keys(STATUS) as StatusDomain[];

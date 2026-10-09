@@ -3,6 +3,7 @@ import 'server-only';
 import { can } from '@/lib/authorization/can';
 import { frameworkLegalLabel } from '@/lib/domain/disclosure-status';
 import { normalizePaletteText, type PaletteEntry } from '@/lib/ui/palette';
+import { hasOption } from '@/lib/services/organization-options';
 import type { DbClient } from '@/lib/repositories/types';
 import type { AuthorizationContext, FrameworkKey, Uuid } from '@/types/domain';
 
@@ -127,6 +128,8 @@ export async function searchPalette(
     );
     tasks.push(
       (async () => {
+        // CDP 対応オプションの無い組織には CDP の質問を出さない（plan NF-38。画面も理由を出して止める）
+        if (!(await hasOption(db, ctx, 'cdp'))) return;
         const { kind, items } = await frameworkItems(db, 'cdp', 'CDP 質問');
         for (const item of items
           .filter((i) => matches(query, i.code, i.questionText))

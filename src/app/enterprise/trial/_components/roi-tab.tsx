@@ -6,18 +6,25 @@ import { Section } from '@/components/shared/section';
 import { Field } from '@/components/ui/field';
 import { FormSection } from '@/components/ui/form-section';
 import { Input } from '@/components/ui/input';
+import { NativeCheckbox } from '@/components/ui/native-checkbox';
 import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import {
   estimateRoi,
+  includesReferenceTiming,
   missingRoiFields,
   monthlyHoursFromSavedMinutes,
   parseRoiParams,
+  roiTimingBasis,
   ROI_COST_FIELDS,
   ROI_MAX_MONTHS,
   ROI_PARAM,
 } from '@/lib/domain/roi-estimate';
-import { TRIAL_TASK_LABELS, type TaskReduction } from '@/lib/domain/trial-metrics';
+import {
+  TRIAL_TASK_LABELS,
+  TRIAL_TIMING_METHOD_LABELS,
+  type TaskReduction,
+} from '@/lib/domain/trial-metrics';
 import { formatNumber } from '@/lib/format/datetime';
 import { TRIAL_BASE } from '../_lib/tabs';
 
@@ -31,20 +38,43 @@ const hours = (value: number) => `${formatNumber(Math.round(value * 10) / 10)} �
  *  - 入力は URL（GET のフォーム）だけに載せ、保存しない（財務影響分析と同じ）
  *  - 単価・比較する費用は利用者が入れる。製品に価格・単価を埋め込まない（例の値も初期値にしない）
  *  - 「試算（実測効果ではない）」「人件費の現金削減を意味しない」を常に表示する（折りたたまない）
- *  - 月あたりの削減時間は手入力か、作業時間の記録（両方 n ≥ 3 の作業の短縮分）× 月あたりの件数から換算する
+ *  - 月あたりの削減時間は手入力か、作業時間の記録（両方 n ≥ 3 の作業 1 つの短縮分）× 月あたりの件数から換算する。
+ *    作業ごとに単位が違うため短縮分を合計しない。換算に使った作業の n と測り方を結果に添え（K10）、
+ *    記録からの推定（参考値）は利用者が含めると選んだときだけ使い、使ったら警告する
  */
+
+/** 測り方の並び（例「自己申告・同席観察」） */
+function methodsText(methods: readonly string[]): string {
+  return (
+    methods
+      .map((m) => TRIAL_TIMING_METHOD_LABELS[m as keyof typeof TRIAL_TIMING_METHOD_LABELS] ?? m)
+      .join('・') || '—'
+  );
+}
+
+/** 換算に使った作業の n と測り方（K10） */
+function basisText(task: TaskReduction): string {
+  return `${TRIAL_TASK_LABELS[task.taskKey]}: 現行 n=${task.baseline.n}（${methodsText(task.baseline.methods)}）・T4D n=${task.t4d.n}（${methodsText(task.t4d.methods)}）・1 単位あたり ${Math.round((task.savedMinutesPerUnit ?? 0) * 10) / 10} 分短縮`;
+}
+
 export function RoiTab({ params, tasks }: { params: Params; tasks: TaskReduction[] }) {
   const parsed = parseRoiParams(params);
-  const measurable = tasks.filter((t) => t.savedMinutesPerUnit !== null);
-  const savedPerUnit = measurable.reduce((sum, t) => sum + (t.savedMinutesPerUnit ?? 0), 0);
+  const includeReference = parsed.raw[ROI_PARAM.includeReference] === '1';
+  const basis = roiTimingBasis(tasks, {
+    task: parsed.raw[ROI_PARAM.task] ?? '',
+    includeReference,
+  });
+  const selected = basis.selected;
   const monthlyHours =
     parsed.source === 'timing'
-      ? parsed.unitsPerMonth === null || measurable.length === 0
+      ? parsed.unitsPerMonth === null || !selected
         ? null
-        : monthlyHoursFromSavedMinutes(savedPerUnit, parsed.unitsPerMonth)
+        : monthlyHoursFromSavedMinutes(selected.savedMinutesPerUnit ?? 0, parsed.unitsPerMonth)
       : parsed.monthlyHours;
   const missing = missingRoiFields(parsed);
-  const timingUnavailable = parsed.source === 'timing' && measurable.length === 0;
+  const timingUnavailable = parsed.source === 'timing' && basis.reason !== null;
+  const usesReference =
+    parsed.source === 'timing' && selected !== null && includesReferenceTiming(selected);
   const ready =
     parsed.errors.length === 0 &&
     missing.length === 0 &&
@@ -147,14 +177,36 @@ export function RoiTab({ params, tasks }: { params: Params; tasks: TaskReduction
                 )}
               </Field>
               <Field
+                label="換算する作業（記録から換算するとき）"
+                id="roi-task"
+                hint="作業ごとに単位が違うため、1 つの作業の短縮分だけで換算します（合計しません）。"
+                className="col-span-6"
+              >
+                {(p) => (
+                  <NativeSelect
+                    {...p}
+                    name={ROI_PARAM.task}
+                    defaultValue={selected?.taskKey ?? parsed.raw[ROI_PARAM.task] ?? ''}
+                  >
+                    <option value="">選んでください</option>
+                    {basis.candidates.map((t) => (
+                      <option key={t.taskKey} value={t.taskKey}>
+                        {TRIAL_TASK_LABELS[t.taskKey]}
+                        {includesReferenceTiming(t) ? '（参考値を含む）' : ''}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                )}
+              </Field>
+              <Field
                 label="月あたりの件数（1 部門あたり。記録から換算するとき）"
                 id="roi-volume"
                 hint={
-                  measurable.length > 0
-                    ? `1 単位あたりの短縮分の合計 ${Math.round(savedPerUnit * 10) / 10} 分（${measurable
-                        .map((t) => TRIAL_TASK_LABELS[t.taskKey])
-                        .join('・')}）`
-                    : '短縮率を出せる作業（両方 3 件以上）がまだありません'
+                  selected
+                    ? `選んだ作業の単位で数えます（${basisText(selected)}）`
+                    : basis.candidates.length > 0
+                      ? '換算する作業を選ぶと、その作業の n と測り方を示します'
+                      : '短縮率を出せる作業（両方 3 件以上）がまだありません'
                 }
                 className="col-span-6"
               >
@@ -167,6 +219,17 @@ export function RoiTab({ params, tasks }: { params: Params; tasks: TaskReduction
                   />
                 )}
               </Field>
+              {basis.referenceOnly.length > 0 && (
+                <NativeCheckbox
+                  name={ROI_PARAM.includeReference}
+                  value="1"
+                  defaultChecked={includeReference}
+                  className="col-span-12"
+                  label={`記録からの推定（参考値。待ち時間を含む）を含む作業も換算に使う（${basis.referenceOnly
+                    .map((t) => TRIAL_TASK_LABELS[t.taskKey])
+                    .join('・')}）`}
+                />
+              )}
             </div>
           </FormSection>
           <FormSection
@@ -211,14 +274,19 @@ export function RoiTab({ params, tasks }: { params: Params; tasks: TaskReduction
             </ul>
           </Notice>
         )}
-        {timingUnavailable && (
-          <Notice tone="warning">
-            作業時間の記録から換算できる作業がありません（現行と T4D の両方が 3
-            件以上の作業が必要です）。手入力で試算してください。
-          </Notice>
-        )}
+        {timingUnavailable && <Notice tone="warning">{basis.reason}</Notice>}
         {result ? (
           <div className="space-y-2">
+            {parsed.source === 'timing' && selected && (
+              <p className="text-small text-ink" data-testid="roi-timing-basis">
+                換算に使った作業時間の記録: {basisText(selected)}
+              </p>
+            )}
+            {usesReference && (
+              <Notice tone="warning" title="参考値を含む試算">
+                記録からの推定（参考値。待ち時間を含みます）を使った換算です。自己申告・同席観察の記録より大きく出ることがあります。
+              </Notice>
+            )}
             <MetricStrip label="試算の数値">
               <MetricTile
                 label="創出時間（期間の合計）"

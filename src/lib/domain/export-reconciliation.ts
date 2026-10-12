@@ -9,9 +9,10 @@
  * 比べ方:
  *  - 文字列は空白の正規化だけを行う（連続する空白・改行を 1 つの空白にし、前後を落とす）。
  *    それ以外（全角・半角・句読点）は変えない（1 文字の違いも不一致にする）
- *  - DOCX は節の見出しを手掛かりに節ごとに段落を順に照合する（余計な段落が 1 つ入っても、次の節から
- *    照合し直す）。表（付表の数値・追跡表）は空のセルを読み戻せないため、空でないセルを順に照合する
- *  - 表計算・CSV はセル単位で照合する（行の数が違えば足りない／余分な行として数える）
+ *  - DOCX は表紙から末尾までを照合する。節は見出しを手掛かりに順に照合し（余計な段落が 1 つ入っても、
+ *    次の節から照合し直す）、照合しなかった段落（節の末尾・表の前後・末尾に足した記述）は余分として数える。
+ *    表（付表の数値・追跡表）は空のセルを読み戻せないため、空でないセルを順に照合する
+ *  - 表計算・CSV はセル単位で照合する（行の数が違えば足りない／余分な行、期待値に無いシートは余分として数える）
  *  - 承認の照合（承認済みスナップショットなら全節が承認版・引用した数値が承認済み）も不一致に数える
  *  - 固定後の上流の変更（現行との違い）は不一致に数えない（呼び出し側が別欄で示す）
  */
@@ -19,8 +20,12 @@
 import type { ReportSnapshotDetail } from '@/lib/domain/report-snapshot-content';
 import type { ExportArtifact, ExportReconciliationMismatch, Uuid } from '@/types/domain';
 
-/** 照合の規則の版（export_artifacts.checker_version・export_reconciliations.checker_version） */
-export const RECONCILIATION_CHECKER_VERSION = 'export-reconciliation-v1';
+/**
+ * 照合の規則の版（export_artifacts.checker_version・export_reconciliations.checker_version）。
+ * v2: DOCX は表紙から末尾まで照合し、期待値に無い段落（節の末尾・表の前後・末尾）と XLSX の期待値に無い
+ * シートを余分として数える（v1 は見出しの間を読み飛ばしていた）
+ */
+export const RECONCILIATION_CHECKER_VERSION = 'export-reconciliation-v2';
 
 /** 不一致の明細の上限（Supabase は先頭 50 件。Demo は Cookie の都合で DEMO_RECONCILIATION_MISMATCH_MAX） */
 export const RECONCILIATION_MISMATCH_LIMIT = 50;
@@ -132,11 +137,15 @@ export interface DocxExpectedTable {
 }
 
 export interface DocxExpectation {
+  /** 本文より前（表紙・草稿の未承認箇所）。読み戻した先頭から順に照合する */
+  preamble: DocxExpectedParagraph[];
   blocks: DocxExpectedBlock[];
   /** 付表（本文で引用した数値）。引用が無ければ null */
   numberTable: DocxExpectedTable | null;
   /** 追跡表（社内確認用だけ）。無ければ null */
   traceTable: DocxExpectedTable | null;
+  /** 追跡表より後ろ（社内確認用の節の版と承認状態・社内コメント）。順に照合する */
+  trailer: DocxExpectedParagraph[];
 }
 
 function emptyResult(): ReconciliationResult {
@@ -148,11 +157,61 @@ function push(result: ReconciliationResult, item: ExportReconciliationMismatch):
   result.mismatches.push(item);
 }
 
-/** 表の空でないセルを、読み戻した段落の並びと順に照合する。戻り値は表の後ろの位置 */
+/**
+ * 期待値に無い段落（読み戻した並びの from 〜 to の手前）を、1 段落ずつ「余分」として数える。
+ * 節の末尾・表の前後・文書の末尾に外部で足した記述を、照合を飛ばして「一致」にしないため
+ */
+function pushExtras(
+  actual: readonly string[],
+  from: number,
+  to: number,
+  after: string,
+  result: ReconciliationResult,
+): void {
+  for (let k = from; k < to; k += 1) {
+    push(result, mismatch('extra', `${after}の後`, '（なし）', actual[k] ?? ''));
+  }
+}
+
+/**
+ * 段落の並びを読み戻した位置から順に照合する。余計な段落が 1 つ入っている（次が期待どおり）なら
+ * 余分として数えて続ける。戻り値は照合した次の位置
+ */
+function compareSequence(
+  expected: readonly DocxExpectedParagraph[],
+  actual: readonly string[],
+  from: number,
+  result: ReconciliationResult,
+  count: () => void,
+): number {
+  let i = from;
+  for (const paragraph of expected) {
+    count();
+    const want = normalizeText(paragraph.text);
+    if (actual[i] === want) {
+      i += 1;
+      continue;
+    }
+    if (actual[i + 1] === want) {
+      push(result, mismatch('extra', paragraph.location, '（なし）', actual[i] ?? ''));
+      i += 2;
+      continue;
+    }
+    push(result, mismatch('paragraph', paragraph.location, want, actual[i] ?? MISSING));
+    i += 1;
+  }
+  return i;
+}
+
+/**
+ * 表の空でないセルを、読み戻した段落の並びと順に照合する。表の見出しより前に残った段落は余分として数える。
+ * 戻り値は表の後ろの位置
+ */
 function compareDocxTable(
   table: DocxExpectedTable,
   actual: readonly string[],
   from: number,
+  after: string,
   kind: MismatchKind,
   result: ReconciliationResult,
   count: (n: number) => void,
@@ -163,6 +222,7 @@ function compareDocxTable(
     count(table.rows.length);
     return from;
   }
+  pushExtras(actual, from, headingIndex, after, result);
   let i = headingIndex + 1;
   for (const cell of table.header.map(normalizeText).filter((c) => c !== '')) {
     if (actual[i] === cell) i += 1;
@@ -186,7 +246,9 @@ function compareDocxTable(
 
 /**
  * DOCX の読み戻し（段落の並び。表のセルも 1 段落として並ぶ）と期待値を照合する。
- * 段落は節の見出しを手掛かりに順に比べる
+ * 表紙から文書の末尾まで、期待値の並びを順にたどる。節は見出しを手掛かりに照合し直す（余計な段落が
+ * 入っても次の節から合わせる）が、飛ばした段落（前の節の末尾・表の前後・文書の末尾に足した記述）は
+ * すべて余分として数える。読み戻した段落を 1 つも照合せずに残さない（外部で足した主張を「一致」にしない）
  */
 export function compareDocx(
   expectation: DocxExpectation,
@@ -194,7 +256,9 @@ export function compareDocx(
 ): ReconciliationResult {
   const result = emptyResult();
   const actual = paragraphs.map(normalizeText).filter((p) => p !== '');
-  let cursor = 0;
+  // 表紙・草稿の未承認箇所は件数に数えない（照合はする）
+  let cursor = compareSequence(expectation.preamble, actual, 0, result, () => {});
+  let after = '表紙';
   for (const block of expectation.blocks) {
     const titleIndex = actual.indexOf(normalizeText(block.title), cursor);
     if (titleIndex < 0) {
@@ -202,6 +266,7 @@ export function compareDocx(
       push(result, mismatch('missing', `節「${block.title}」`, block.title, MISSING));
       continue;
     }
+    pushExtras(actual, cursor, titleIndex, after, result);
     let i = titleIndex + 1;
     if (block.marker !== null) {
       const marker = normalizeText(block.marker);
@@ -209,34 +274,43 @@ export function compareDocx(
       else
         push(result, mismatch('paragraph', `${block.title} の注記`, marker, actual[i] ?? MISSING));
     }
-    for (const paragraph of block.paragraphs) {
+    cursor = compareSequence(block.paragraphs, actual, i, result, () => {
       result.paragraphs += 1;
-      const expected = normalizeText(paragraph.text);
-      if (actual[i] === expected) {
-        i += 1;
-        continue;
-      }
-      // 余計な段落が 1 つ入っている（次が期待どおり）なら、余分として数えて続ける
-      if (actual[i + 1] === expected) {
-        push(result, mismatch('extra', paragraph.location, '（なし）', actual[i] ?? ''));
-        i += 2;
-        continue;
-      }
-      push(result, mismatch('paragraph', paragraph.location, expected, actual[i] ?? MISSING));
-      i += 1;
-    }
-    cursor = i;
+    });
+    after = `節「${block.title}」`;
   }
   if (expectation.numberTable) {
-    cursor = compareDocxTable(expectation.numberTable, actual, cursor, 'number', result, (n) => {
-      result.numbers += n;
-    });
+    cursor = compareDocxTable(
+      expectation.numberTable,
+      actual,
+      cursor,
+      after,
+      'number',
+      result,
+      (n) => {
+        result.numbers += n;
+      },
+    );
+    after = expectation.numberTable.heading;
   }
   if (expectation.traceTable) {
-    compareDocxTable(expectation.traceTable, actual, cursor, 'row', result, (n) => {
+    cursor = compareDocxTable(expectation.traceTable, actual, cursor, after, 'row', result, (n) => {
       result.rows += n;
     });
+    after = expectation.traceTable.heading;
   }
+  if (expectation.trailer.length > 0) {
+    const first = normalizeText(expectation.trailer[0]!.text);
+    // 巻末の最初の見出しまでに残った段落（追跡表の後ろに足した行など）は余分
+    const start = actual.indexOf(first, cursor);
+    if (start >= 0) {
+      pushExtras(actual, cursor, start, after, result);
+      cursor = start;
+    }
+    cursor = compareSequence(expectation.trailer, actual, cursor, result, () => {});
+    after = '巻末';
+  }
+  pushExtras(actual, cursor, actual.length, after, result);
   return result;
 }
 
@@ -323,6 +397,12 @@ export function compareSheets(
         ),
       );
     }
+  }
+  // 期待値に無いシート（外部で足したシート）は余分。照合しないまま「一致」にしない
+  const expectedNames = new Set(expected.map((s) => s.name));
+  for (const [name, rows] of actual) {
+    if (expectedNames.has(name)) continue;
+    push(result, mismatch('extra', `シート「${name}」`, '（なし）', `${rows.length} 行`));
   }
   return result;
 }
@@ -445,14 +525,39 @@ export function withApprovalCheck(
 // 表示の補助（画面・出力で同じ言い方にする）
 // ======================================================================
 
-export type ReconciliationStateKey = 'matched' | 'mismatched' | 'not_reconciled';
+export type ReconciliationStateKey =
+  'matched' | 'mismatched' | 'nothing_checked' | 'not_reconciled';
+
+/**
+ * 照合の結果の状態。不一致が 0 件でも、照合した段落・数値・行が 1 つも無ければ「一致」とは言わない
+ * （節の無い基準の原稿など。何も比べていないのに一致と示さない）
+ */
+export function reconciliationOutcomeOf(
+  mismatchCount: number,
+  counts: { paragraphs: number | null; numbers: number | null; rows: number | null },
+): Exclude<ReconciliationStateKey, 'not_reconciled'> {
+  if (mismatchCount > 0) return 'mismatched';
+  const checked = (counts.paragraphs ?? 0) + (counts.numbers ?? 0) + (counts.rows ?? 0);
+  return checked > 0 ? 'matched' : 'nothing_checked';
+}
 
 /** 出力の記録の突合の状態。列が null の出力（突合の列を足す前の出力）は未突合 */
 export function reconciliationStateOf(
-  artifact: Pick<ExportArtifact, 'mismatchCount' | 'checkerVersion'>,
+  artifact: Pick<
+    ExportArtifact,
+    | 'mismatchCount'
+    | 'checkerVersion'
+    | 'reconciledParagraphs'
+    | 'reconciledNumbers'
+    | 'reconciledRows'
+  >,
 ): ReconciliationStateKey {
   if (artifact.mismatchCount === null || artifact.checkerVersion === null) return 'not_reconciled';
-  return artifact.mismatchCount === 0 ? 'matched' : 'mismatched';
+  return reconciliationOutcomeOf(artifact.mismatchCount, {
+    paragraphs: artifact.reconciledParagraphs,
+    numbers: artifact.reconciledNumbers,
+    rows: artifact.reconciledRows,
+  });
 }
 
 /** 件数の内訳（例「段落 12・数値 4」）。0 件の区分は省く。全部 0 なら「照合対象なし」 */

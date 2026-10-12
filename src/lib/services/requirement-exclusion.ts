@@ -12,6 +12,7 @@ import {
 import { ValidationError } from '@/lib/errors/user-facing';
 import { DEMO_TEXT_LIMITS } from '@/lib/repositories/demo-trial-checks';
 import type { DbClient } from '@/lib/repositories/types';
+import { ssbjReasonRecorderOf } from '@/lib/services/requirement-decisions';
 import { isSsbjItemInScope } from '@/lib/services/ssbj-gap';
 import { isUuid } from '@/lib/validation/uuid';
 import type {
@@ -28,7 +29,10 @@ import type {
  *
  *  - 担当者（enterprise.disclosure.write）が理由付きの対象外・非重要を「申請」する
  *  - 別の人（enterprise.disclosure.approve）が「承認」または「差し戻す」（差戻しは理由必須）
- *  - 申請者・理由を記録した人は承認できない（職務分離。DB の t4d.requirement_exclusion_event_guard と同じ規則）
+ *  - 申請者・理由を記録した人は承認できない（職務分離。DB の t4d.requirement_exclusion_event_guard と同じ規則）。
+ *    理由を記録した人は、プロジェクトの判断は決定者（decided_by）、SSBJ の評価は区分・理由を最後に
+ *    記録した人（reason_recorded_by。以前の行は最後に更新した人）
+ *  - 承認・差戻し・取り下げは、同じ内容の最後の記録が「申請」のときだけ（差し戻した・取り下げた申請は承認できない）
  *  - 承認は理由のダイジェスト（区分＋理由の sha256）に結び付く。理由・区分を変えると承認は無効になり、
  *    承認されるまで分母から外さない（requirement-coverage.ts の exclusionStateOf が導く）
  *  - 記録は追記専用（requirement_exclusion_events）。取り消しは「取り下げ」の行を足す
@@ -56,7 +60,10 @@ export interface ExclusionTarget {
   item: DisclosureItem;
   /** 今の判断（対象外・非重要で理由があるときだけ。それ以外は null） */
   current: { decision: ExclusionDecision; reason: string } | null;
-  /** 理由を記録した人（プロジェクトの判断の決定者。SSBJ の評価は列が混ざるため null） */
+  /**
+   * 理由を記録した人（承認できない人）。プロジェクトの判断は決定者、SSBJ の評価は適用区分・重要性と
+   * その理由を最後に記録した人（reason_recorded_by。以前の行は最後に更新した人）
+   */
   recorder: Uuid | null;
 }
 
@@ -136,7 +143,7 @@ export async function resolveExclusionTarget(
       projectFrameworkId: null,
       item,
       current,
-      recorder: null,
+      recorder: ssbjReasonRecorderOf(assessment),
     };
   }
 
@@ -204,10 +211,17 @@ export async function loadExclusionStatus(
   return { target, events, state: exclusionStateFor(events, target.current) };
 }
 
-/** 承認・差戻しの可否と、できない理由（画面の disabledReason と同じ規則） */
+/** 理由を記録した人が承認しようとしたときの理由（画面の disabledReason と decideExclusion で同じ文言） */
+export const RECORDER_CANNOT_APPROVE = '理由を記録した人は承認できません（職務分離）。';
+
+/**
+ * 承認・差戻しの可否と、できない理由（decideExclusion・画面の disabledReason と同じ規則）。
+ * 理由を記録した人は承認だけができない（差し戻すことはできる）
+ */
 export function exclusionDecisionBlocker(
   ctx: AuthorizationContext,
   status: Pick<ExclusionStatus, 'state' | 'target'>,
+  decision: 'approved' | 'returned' = 'approved',
 ): string | null {
   if (!can(ctx, 'enterprise.disclosure.approve')) {
     return '承認・差戻しには開示の承認権限が必要です。';
@@ -215,6 +229,9 @@ export function exclusionDecisionBlocker(
   if (status.state.state !== 'requested') return '承認待ちの申請がありません。';
   if (status.state.requestedBy === ctx.userId) {
     return '申請した人は承認・差戻しできません（職務分離）。';
+  }
+  if (decision === 'approved' && status.target.recorder === ctx.userId) {
+    return RECORDER_CANNOT_APPROVE;
   }
   return null;
 }
@@ -312,7 +329,7 @@ export async function decideExclusion(
     throw new ValidationError('申請した人は承認・差戻しできません（職務分離）。');
   }
   if (input.decision === 'approved' && target.recorder && target.recorder === ctx.userId) {
-    throw new ValidationError('理由を記録した人は承認できません（職務分離）。');
+    throw new ValidationError(RECORDER_CANNOT_APPROVE);
   }
   const note = (input.note ?? '').trim();
   if (input.decision === 'returned') {

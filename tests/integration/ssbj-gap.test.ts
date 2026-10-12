@@ -9,6 +9,8 @@ import {
   filterRequirements,
   loadActionPlans,
   loadDataCollection,
+  isInScope,
+  loadSsbjHeadline,
   loadSsbjOverview,
   loadSsbjRequirementDetail,
   loadSsbjRequirementViews,
@@ -18,6 +20,8 @@ import {
   saveSsbjReview,
   saveSsbjScope,
 } from '@/lib/services/ssbj-gap';
+import { pendingSsbjExclusionItemId } from '@/lib/fixtures/trial-case';
+import { decideExclusion } from '@/lib/services/requirement-exclusion';
 import type { AuthorizationContext, ReportingPeriod, RoleKey } from '@/types/domain';
 
 /**
@@ -50,6 +54,7 @@ function ctxFor(email: string, roleKeys: RoleKey[]): AuthorizationContext {
 
 const manager = () =>
   ctxFor('sustainability@demo.local', ['sustainability_manager', 'enterprise_admin']);
+const approver = () => ctxFor('approver@demo.local', ['approver']);
 /** 閲覧のみのロール（開示対応の編集権限を持たない） */
 const viewerCtx = () => ctxFor('site-user@demo.local', ['site_contributor']);
 
@@ -106,6 +111,73 @@ describe('全体状況', () => {
     // 点数の降順
     const scores = overview.topPriorities.map((v) => v.priority.score);
     expect([...scores].sort((a, b) => b - a)).toEqual(scores);
+  });
+});
+
+describe('対象外・非重要の承認と整備度の分母（NF-02）', () => {
+  it('承認されていない対象外は分母に残し（未判定）、別の人の承認で外れる。ホームの見出しも同じ', async () => {
+    const itemId = pendingSsbjExclusionItemId(fixture)!;
+    const viewOf = async () =>
+      (await loadSsbjRequirementViews(db, manager(), period))!.views.find(
+        (v) => v.item.id === itemId,
+      )!;
+    const pending = await viewOf();
+    expect(
+      pending.assessment.applicability === 'not_applicable' ||
+        pending.assessment.materiality === 'not_material',
+    ).toBe(true);
+    expect(pending.excluded).toBe(false);
+    expect(isInScope(pending)).toBe(true);
+
+    const before = (await loadSsbjOverview(db, manager(), period, '出所'))!;
+    const headlineBefore = (await loadSsbjHeadline(db, manager(), period))!;
+    expect(before.counts.exclusionPending).toBe(1);
+    const statusSum = (o: typeof before) =>
+      o.counts.covered + o.counts.mostlyCovered + o.counts.partial + o.counts.notCovered;
+    expect(statusSum(before) + before.counts.notApplicable + before.counts.notMaterial).toBe(
+      before.counts.total,
+    );
+
+    await decideExclusion(db, approver(), {
+      source: 'ssbj_assessment',
+      itemId,
+      reportingPeriodId: period.id,
+      decision: 'approved',
+    });
+    expect((await viewOf()).excluded).toBe(true);
+    const after = (await loadSsbjOverview(db, manager(), period, '出所'))!;
+    expect(after.counts.exclusionPending).toBe(0);
+    expect(after.counts.notApplicable + after.counts.notMaterial).toBe(
+      before.counts.notApplicable + before.counts.notMaterial + 1,
+    );
+    expect(statusSum(after)).toBe(statusSum(before) - 1);
+    // ホームの見出しの整備度も、全体状況と同じ分母（承認の前後で同じ規則）
+    const headlineAfter = (await loadSsbjHeadline(db, manager(), period))!;
+    for (const [headline, overview] of [
+      [headlineBefore, before],
+      [headlineAfter, after],
+    ] as const) {
+      expect(headline.disclosureRate).toBe(overview.disclosureRate);
+      expect(headline.dataRate).toBe(overview.dataRate);
+      expect(headline.processRate).toBe(overview.processRate);
+    }
+
+    // 新たに対象外と記録しただけ（申請していない）のものは分母に残す
+    const other = (await loadSsbjRequirementViews(db, manager(), period))!.views.find(
+      (v) =>
+        v.assessment.applicability === 'applicable' && v.assessment.materiality !== 'not_material',
+    )!;
+    await saveSsbjScope(db, manager(), {
+      assessmentId: other.assessment.id,
+      applicability: 'not_applicable',
+      applicabilityReason: 'テスト: 対象外と記録しただけ（未申請）',
+      materiality: other.assessment.materiality,
+      materialityReason: other.assessment.materialityReason,
+      ownerDepartment: other.assessment.ownerDepartment,
+    });
+    const recorded = (await loadSsbjOverview(db, manager(), period, '出所'))!;
+    expect(recorded.counts.notApplicable).toBe(after.counts.notApplicable);
+    expect(recorded.counts.exclusionPending).toBe(1);
   });
 });
 
@@ -199,8 +271,9 @@ describe('要求事項とのマッピング（対象の検算）', () => {
     const loaded = (await loadSsbjRequirementViews(db, manager(), period))!;
     const mapping = await loadSsbjScopeMapping(db, manager(), period, loaded.views);
 
+    // 紐づけの母集団は、承認済みの対象外を除いた要求事項（承認されていない対象外は対象に残す。NF-02）
     const applicableOnly = (views: typeof loaded.views) =>
-      views.filter((v) => v.assessment.applicability === 'applicable');
+      views.filter((v) => !(v.excluded && v.assessment.applicability === 'not_applicable'));
 
     expect(mapping.linkage.document).toBe(
       applicableOnly(filterRequirements(loaded.views, { linkage: ['document'] })).length,
@@ -323,8 +396,10 @@ describe('対象判定・重要性判断', () => {
       (e) => e.resourceType === 'ssbj_assessment' && e.resourceId === target.assessment.id,
     );
     expect(events.length).toBeGreaterThan(0);
-    expect(events.at(-1)?.beforeSummary).toContain('適用区分 applicable');
-    expect(events.at(-1)?.afterSummary).toContain('適用区分 not_applicable');
+    // 前後は画面の言葉で残す（生の enum を監査ログの画面・CSV に出さない）
+    expect(events.at(-1)?.beforeSummary).toContain('適用区分 対象 /');
+    expect(events.at(-1)?.afterSummary).toContain('適用区分 対象外');
+    expect(events.at(-1)?.afterSummary).not.toContain('not_applicable');
   });
 
   it('閲覧者は判定を保存できない', async () => {

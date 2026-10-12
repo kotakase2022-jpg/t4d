@@ -260,12 +260,40 @@ export async function loadDataRoom(
   return { rows, snapshot, reports };
 }
 
+/** 続けて表示した記録をひとまとまりの閲覧とみなす間隔（これより空いたら別の閲覧） */
+export const DATA_ROOM_SESSION_GAP_MS = 30 * 60 * 1000;
+
 /**
- * Data Room を表示したことを監査ログに残し、この人の前回の表示日時を返す（NF-26 の閲覧記録の補完）。
+ * 前回の閲覧の最後の表示日時。検索・絞込・ページ送り・再読込のたびに表示を記録するため、直前の記録は
+ * 数秒前の同じ閲覧の記録になる。間が DATA_ROOM_SESSION_GAP_MS 以内で続く記録を今回の閲覧として飛ばし、
+ * その前の閲覧の最後の時刻を返す（無ければ null）。previousDesc は新しい順
+ */
+export function previousSessionViewAt(
+  previousDesc: readonly IsoDateTime[],
+  now: IsoDateTime,
+  gapMs: number = DATA_ROOM_SESSION_GAP_MS,
+): IsoDateTime | null {
+  let boundary = Date.parse(now);
+  for (const at of previousDesc) {
+    const time = Date.parse(at);
+    if (boundary - time <= gapMs) {
+      boundary = time;
+      continue;
+    }
+    return at;
+  }
+  return null;
+}
+
+/**
+ * Data Room を表示したことを監査ログ（監査法人の記録）に残し、この人の前回の閲覧の日時を返す
+ * （NF-26 の閲覧記録の補完）。
  *
- * 1 画面の表示につき 1 件・要約だけ（件数）を残す（個々の値・指標名は入れない）。企業側は監査ログで
- * 「監査法人が何をいつ見たか」を確かめられる。前回の表示日時は「前回表示以降に共有された n 件」の絞込に使う
- * （Demo Mode の監査ログは同じインスタンスの記録だけのため、別のインスタンスでは前回が分からないことがある）。
+ * 1 画面の表示につき 1 件・要約だけ（件数）を残す（個々の値・指標名は入れない）。記録は監査法人の
+ * 監査ログに残る（企業側の監査ログには出ない。企業側が辿れるのは資料のダウンロード・閲覧の記録
+ * storage_access_events だけ。known-limitations §13）。前回の閲覧の日時は「前回表示以降に共有された n 件」の
+ * 絞込に使う（続けて表示した記録は 1 回の閲覧にまとめる。Demo Mode の監査ログは同じインスタンスの記録
+ * だけのため、別のインスタンスでは前回が分からないことがある）。
  */
 export async function recordDataRoomView(
   db: DbClient,
@@ -285,8 +313,9 @@ export async function recordDataRoomView(
       { column: 'createdAt', dir: 'desc' },
       { column: 'id', dir: 'desc' },
     ],
-    limit: 1,
+    limit: 200,
   });
+  const now = new Date().toISOString();
   await recordAuditEvent(db, ctx, {
     eventType: 'record_viewed',
     resourceType: DATA_ROOM_VIEW_RESOURCE,
@@ -294,7 +323,12 @@ export async function recordDataRoomView(
     engagementId,
     afterSummary: `Data Room を表示（非財務データ ${summary.dataPoints} 件・開示レポート ${summary.reports} 件）`,
   });
-  return { previousViewedAt: previous[0]?.createdAt ?? null };
+  return {
+    previousViewedAt: previousSessionViewAt(
+      previous.map((e) => e.createdAt),
+      now,
+    ),
+  };
 }
 
 /** 閲覧記録の対象の種類（監査ログの resource_type） */
@@ -1087,7 +1121,9 @@ export function signoffReportAttentionOf(
     (c) =>
       c.withdrawnAt === null && c.id !== linked.sharedReportCopyId && c.sharedAt > linked.createdAt,
   );
-  const linkedWithdrawn = linkedCopy !== null && linkedCopy.withdrawnAt !== null;
+  // 保証側は取り下げた写しを読めない（0059 の SELECT ポリシー）。写しは消えないため、案件の写しの中に
+  // 見当たらない結び付け先は取り下げられたもの
+  const linkedWithdrawn = linkedCopy === null || linkedCopy.withdrawnAt !== null;
   if (newerCopies.length === 0 && !linkedWithdrawn) return null;
   return { signoff: linked, linkedCopy, newerCopies, linkedWithdrawn };
 }
@@ -1101,7 +1137,8 @@ export async function loadSignoffReportAttention(
   assertEngagementMember(ctx, engagementId);
   const [signoffs, copies] = await Promise.all([
     db.select('signoffs', { where: { engagementId } }),
-    db.select('sharedReportCopies', { where: { engagementId } }),
+    // 保証側が読めるのは共有中の写しだけ（DB の SELECT ポリシーと同じ条件を Demo でも当てる）
+    db.select('sharedReportCopies', { where: { engagementId, withdrawnAt: { isNull: true } } }),
   ]);
   return signoffReportAttentionOf(signoffs, copies);
 }
@@ -1265,8 +1302,8 @@ export async function loadSharedReportView(
 }
 
 /**
- * 開示レポートの内容を表示したことを監査ログに残す（1 画面 1 件・要約だけ。NF-26）。
- * 企業側は「監査法人がどの承認版をいつ見たか」を監査ログで確かめられる
+ * 開示レポートの内容を表示したことを監査ログ（監査法人の記録）に残す（1 画面 1 件・要約だけ。NF-26）。
+ * 企業側の監査ログには出ない（監査ログの読み取りは記録した組織の範囲。known-limitations §13）
  */
 export async function recordSharedReportView(
   db: DbClient,
@@ -1446,8 +1483,11 @@ export async function loadEngagementReviewNotes(
           orderBy: [{ column: 'respondedAt' }, { column: 'id' }],
         })
       : [],
+    // 取り下げた写しの本文（段落の抜粋）は保証側に出さない（DB の SELECT ポリシーと同じ。0059）
     copyIds.length > 0
-      ? db.select('sharedReportCopies', { where: { engagementId, id: { in: copyIds } } })
+      ? db.select('sharedReportCopies', {
+          where: { engagementId, id: { in: copyIds }, withdrawnAt: { isNull: true } },
+        })
       : [],
   ]);
   const contentById = new Map<Uuid, SharedReportCopyContent | null>(

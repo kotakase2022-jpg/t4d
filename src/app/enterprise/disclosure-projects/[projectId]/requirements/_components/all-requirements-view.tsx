@@ -234,6 +234,9 @@ export async function AllRequirementsView({
                 ).join('／')}
               </span>
             )}
+            {f.mode !== 'not_loaded' && f.coverage && (
+              <span className="basis-full text-caption text-ink-muted">{f.coverage}</span>
+            )}
           </li>
         ))}
       </ul>

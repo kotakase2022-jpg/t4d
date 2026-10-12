@@ -16,7 +16,6 @@ import {
   DISCLOSURE_CLIENT_RESET_TABLES,
   DISCLOSURE_DEMO_RESET_TABLES,
   DISCLOSURE_RESET_AI_FEATURES,
-  isClientCopyNote,
   isDataPointApproval,
   isDisclosureNotification,
   planCsrdCollectionReset,
@@ -235,18 +234,15 @@ export async function resetDisclosureDemoData(
   removedRows += removedAssignments + removedMetrics;
   restoredRows += collectionReset.metricRestores.length;
 
-  // 保証側へ共有した写し・企業の回答と、写しを指す保証側のコメント（トライアル対応 NF-20・NF-21）。
-  // 共有したスナップショットを消すため、デモ中に作った写し・回答・コメントも消す（Fixture の行は消さない）
+  // 保証側へ共有した写し・企業の回答（トライアル対応 NF-20・NF-21）。共有したスナップショットを消すため、
+  // デモ中に作った写し・回答も消す（Fixture の行は消さない）。写しを指す保証側のコメント（review_notes）は
+  // 監査法人の行なので、企業のリセットでは消さない・戻さない（CLAUDE.md §0.2・§0.3。写しが消えたコメントは
+  // 保証側の画面で「写しが見つかりません」と出る）
   const copies = await db.select('sharedReportCopies', {
     where: { clientOrganizationId: organizationId },
   });
-  const copyIds = new Set(
-    [...copies, ...pristine.sharedReportCopies]
-      .filter((c) => c.clientOrganizationId === organizationId)
-      .map((c) => c.id),
-  );
   const clientScoped: Array<{
-    table: 'reviewNotes' | (typeof DISCLOSURE_CLIENT_RESET_TABLES)[number];
+    table: (typeof DISCLOSURE_CLIENT_RESET_TABLES)[number];
     rows: Array<{ id: string }>;
     fixture: Array<{ id: string }>;
   }> = [
@@ -258,14 +254,6 @@ export async function resetDisclosureDemoData(
       fixture: pristine.reviewNoteResponses.filter(
         (r) => r.clientOrganizationId === organizationId,
       ),
-    },
-    {
-      table: 'reviewNotes',
-      rows:
-        copyIds.size > 0
-          ? await db.select('reviewNotes', { where: { targetCopyId: { in: [...copyIds] } } })
-          : [],
-      fixture: pristine.reviewNotes.filter((n) => isClientCopyNote(n, copyIds)),
     },
     {
       table: 'sharedReportCopies',

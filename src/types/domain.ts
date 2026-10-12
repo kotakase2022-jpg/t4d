@@ -1144,6 +1144,11 @@ export interface SsbjAssessment extends AuditColumns {
   applicabilityReason: string;
   materiality: SsbjMateriality;
   materialityReason: string;
+  /**
+   * 適用区分・重要性とその理由を最後に記録した人（0059）。対象外・非重要の承認の職務分離で
+   * 「理由を記録した人」として承認者から外す。null は以前の行（最後の更新者で代える）
+   */
+  reasonRecordedBy: Uuid | null;
 
   /** ③ 対応状況を 3 観点で持つ */
   disclosureStatus: SsbjCoverageStatus;

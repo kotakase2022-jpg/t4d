@@ -11,9 +11,29 @@ export interface UsageCountsLike {
   sharedWithAssurance: number;
 }
 
-/** 影響の要約（承認済みの値を修正する確認ダイアログ・節の要点で同じ言い方） */
-export function usageSummaryText(counts: UsageCountsLike): string {
+/** 開示の閲覧権限が無い人に、件数（0）の代わりに出す文（影響が無いと取り違えさせない） */
+export const USAGE_HIDDEN_TEXT = '開示の閲覧権限が無いため、影響先（原稿・レポート）は表示しません';
+
+/**
+ * 影響の要約（承認済みの値を修正する確認ダイアログ・節の要点で同じ言い方）。開示の閲覧権限が無い人には
+ * 件数を出さない（読めないものを 0 件と書くと、影響が無いと誤解させる）
+ */
+export function usageSummaryText(
+  counts: UsageCountsLike,
+  options: { disclosureHidden?: boolean } = {},
+): string {
+  if (options.disclosureHidden) return USAGE_HIDDEN_TEXT;
   return `影響する節 ${counts.blocks}・承認済みレポート ${counts.approvedReports}・保証側へ共有中 ${counts.sharedWithAssurance}`;
+}
+
+/** 節の見出し（件数付き。開示の閲覧権限が無ければ件数を出さない） */
+export function usageSectionTitle(
+  subject: '資料' | '数値',
+  count: number,
+  disclosureHidden: boolean,
+): string {
+  const base = `この${subject}を使っている原稿・レポート`;
+  return disclosureHidden ? `${base}（権限が無いため表示しません）` : `${base}（${count}）`;
 }
 
 /** 節の見出しの件数（引用している節と、固定したスナップショット） */

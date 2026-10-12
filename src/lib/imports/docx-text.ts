@@ -6,8 +6,15 @@
  * （server-only を import すると Next.js の外では読み込めないため）。
  */
 
+/**
+ * 展開した word/document.xml の大きさの上限。10 MB の .docx でも圧縮率の高い本文（deflate の爆弾）は
+ * 数 GB に展開できるため、展開の途中で止める（照合・取込のどちらでも同じ上限）
+ */
+export const DOCX_XML_MAX_BYTES = 32 * 1024 * 1024;
+
 export interface ParsedDocx {
-  status: 'parsed' | 'empty';
+  /** too_large: 本文（document.xml）が上限を超える大きさに展開されるため読まなかった */
+  status: 'parsed' | 'empty' | 'too_large';
   message: string | null;
   /** 段落単位のテキスト（表のセルも 1 段落として並ぶ） */
   paragraphs: string[];
@@ -21,7 +28,14 @@ export interface ParsedDocx {
  * 書式は捨て、段落（`<w:p>`）区切りのプレーンテキストだけを返す。
  */
 export async function parseDocx(buffer: Uint8Array): Promise<ParsedDocx> {
-  const xml = await extractZipEntry(buffer, 'word/document.xml');
+  const xml = await extractZipEntry(buffer, 'word/document.xml', DOCX_XML_MAX_BYTES);
+  if (xml === 'too_large') {
+    return {
+      status: 'too_large',
+      message: `Word ファイルの本文が大きすぎるため読み取れません（展開後 ${Math.round(DOCX_XML_MAX_BYTES / 1024 / 1024)} MB まで）。`,
+      paragraphs: [],
+    };
+  }
   if (!xml) {
     return {
       status: 'empty',
@@ -65,7 +79,11 @@ function decodeXmlEntities(s: string): string {
  * ZIP から 1 エントリを取り出す（Store / Deflate のみ対応）。
  * End of Central Directory → Central Directory → Local File Header の順に辿る。
  */
-async function extractZipEntry(buffer: Uint8Array, entryName: string): Promise<Uint8Array | null> {
+async function extractZipEntry(
+  buffer: Uint8Array,
+  entryName: string,
+  maxOutputLength: number,
+): Promise<Uint8Array | 'too_large' | null> {
   const { inflateRawSync } = await import('node:zlib');
   const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
@@ -102,8 +120,16 @@ async function extractZipEntry(buffer: Uint8Array, entryName: string): Promise<U
       const lExtraLen = view.getUint16(localOffset + 28, true);
       const dataStart = localOffset + 30 + lNameLen + lExtraLen;
       const raw = buffer.subarray(dataStart, dataStart + compressedSize);
-      if (method === 0) return raw;
-      if (method === 8) return new Uint8Array(inflateRawSync(raw));
+      if (method === 0) return raw.length > maxOutputLength ? 'too_large' : raw;
+      if (method === 8) {
+        try {
+          return new Uint8Array(inflateRawSync(raw, { maxOutputLength }));
+        } catch (error) {
+          // 上限を超えると RangeError（ERR_BUFFER_TOO_LARGE）。壊れた圧縮データは読めないものとして扱う
+          if (error instanceof RangeError) return 'too_large';
+          return null;
+        }
+      }
       return null; // 未対応の圧縮方式
     }
     offset += 46 + nameLen + extraLen + commentLen;

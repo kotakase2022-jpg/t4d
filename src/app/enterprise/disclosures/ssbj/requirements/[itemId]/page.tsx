@@ -177,6 +177,7 @@ export default async function SsbjRequirementDetailPage({
           },
           state: exclusion.state.state,
           requestedBy: exclusion.state.requestedBy,
+          recordedBy: exclusion.target.recorder,
           decision: exclusionCurrent.decision,
           reason: exclusionCurrent.reason,
           frameworkLabel: 'SSBJ',

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Reply } from 'lucide-react';
 import { CreatePanel, createPanelHref, isCreatePanelOpen } from '@/components/shared/create-panel';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { FlashMessage } from '@/components/shared/flash';
 import { Notice } from '@/components/shared/notice';
@@ -204,7 +205,7 @@ export default async function AssuranceCommentsPage({
               )}
               <p className="text-ink">{respondTarget.note.body}</p>
             </div>
-            <form action={respondToAssuranceNoteAction} className="space-y-2">
+            <PreservingForm action={respondToAssuranceNoteAction} className="space-y-2">
               <input type="hidden" name="noteId" value={respondTarget.note.id} />
               <Field label="回答" name="body" required hint={`${limit} 字まで`}>
                 {(p) => <Textarea {...p} name="body" rows={3} maxLength={limit} />}
@@ -217,7 +218,7 @@ export default async function AssuranceCommentsPage({
               >
                 回答を送る
               </SubmitButton>
-            </form>
+            </PreservingForm>
           </CreatePanel>
         )}
 

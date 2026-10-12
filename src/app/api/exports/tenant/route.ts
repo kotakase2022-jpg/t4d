@@ -11,6 +11,12 @@ import {
   type TenantExportPart,
 } from '@/lib/services/tenant-export';
 
+/** 画面（設定のデータの取扱い）から送ったときの印。失敗したら JSON ではなく画面へ理由を戻す */
+const TENANT_EXPORT_FROM_SETTINGS = 'settings';
+
+/** 画面へ戻すときの失敗の種類（画面は決まった文だけを出す。URL の文をそのまま出さない） */
+type TenantExportError = 'part' | 'storage' | 'link';
+
 /**
  * 全データの返却書き出し（トライアル対応 NF-29）。`?part=data`（表の CSV）・`?part=files`（資料の実体）。
  *
@@ -33,9 +39,18 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
+  // 設定の画面のフォームから送ったときは、失敗を生の JSON ではなく画面（データの取扱いのタブ）へ戻す
+  const fromSettings = url.searchParams.get('from') === TENANT_EXPORT_FROM_SETTINGS;
+  const failure = (kind: TenantExportError, body: Record<string, string>, status: number) => {
+    if (!fromSettings) return NextResponse.json(body, { status });
+    const back = new URL('/enterprise/settings', url.origin);
+    back.searchParams.set('tab', 'data-handling');
+    back.searchParams.set('exportError', kind);
+    return NextResponse.redirect(back, 303);
+  };
   const part = (url.searchParams.get('part') ?? 'data') as TenantExportPart;
   if (!(TENANT_EXPORT_PARTS as readonly string[]).includes(part)) {
-    return NextResponse.json({ error: 'unsupported_part' }, { status: 400 });
+    return failure('part', { error: 'unsupported_part' }, 400);
   }
 
   const result = await buildTenantExport(db, ctx, part);
@@ -50,12 +65,13 @@ export async function GET(request: Request) {
       .storage.from('tenant-exports-private')
       .upload(path, result.zip, { contentType: 'application/zip', upsert: false });
     if (uploadError) {
-      return NextResponse.json(
+      return failure(
+        'storage',
         {
           error: 'export_failed',
           message: '書き出しを保管できませんでした。時間をおいて再試行してください。',
         },
-        { status: 500 },
+        500,
       );
     }
     // 読むのは利用者の権限で（RLS が組織の管理者かを確かめる）
@@ -65,9 +81,10 @@ export async function GET(request: Request) {
       .from('tenant-exports-private')
       .createSignedUrl(path, 600, { download: result.fileName });
     if (error || !data) {
-      return NextResponse.json(
+      return failure(
+        'link',
         { error: 'export_failed', message: '書き出しのリンクを発行できませんでした。' },
-        { status: 500 },
+        500,
       );
     }
     return NextResponse.redirect(data.signedUrl, { headers: { 'Cache-Control': 'no-store' } });

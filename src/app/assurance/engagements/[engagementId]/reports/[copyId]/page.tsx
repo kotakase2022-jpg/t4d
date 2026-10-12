@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { MessageSquarePlus, Search } from 'lucide-react';
 import { FractionBar } from '@/components/charts/fraction-bar';
 import { CreatePanel, createPanelHref, isCreatePanelOpen } from '@/components/shared/create-panel';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { FlashMessage } from '@/components/shared/flash';
 import { SegmentedFilter } from '@/components/shared/nav-tabs';
 import { Notice } from '@/components/shared/notice';
@@ -107,7 +108,7 @@ export default async function SharedReportContentPage({
     }
     throw error;
   }
-  // 閲覧の記録（1 画面 1 件・要約だけ）。企業側は監査ログで「どの承認版をいつ見たか」を確かめられる
+  // 閲覧の記録（1 画面 1 件・要約だけ。監査法人の監査ログに残る。企業側の監査ログには出ない）
   await recordSharedReportView(db, ctx, { engagementId, copyId, label: view.label });
 
   const { content, integrityOk, notes } = view;
@@ -236,7 +237,7 @@ export default async function SharedReportContentPage({
                 closeHref={createPanelHref(basePath, query, { open: false })}
                 description="段落・数値を選んでコメントします。既定は法人内部限定で、「クライアントへ共有」にしたものだけが企業側に表示されます。"
               >
-                <form action={createReportNoteAction} className="space-y-2">
+                <PreservingForm action={createReportNoteAction} className="space-y-2">
                   <input type="hidden" name="engagementId" value={engagementId} />
                   <input type="hidden" name="copyId" value={copyId} />
                   {selected && <input type="hidden" name="unit" value={selected.traceId} />}
@@ -291,7 +292,7 @@ export default async function SharedReportContentPage({
                       追加
                     </SubmitButton>
                   </div>
-                </form>
+                </PreservingForm>
               </CreatePanel>
             )}
 

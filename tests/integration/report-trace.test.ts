@@ -115,6 +115,29 @@ describe('FY2025 の承認済みスナップショットのトレース', () => 
     expect(byText.search?.hits.map((u) => u.traceId)).toContain(unit.traceId);
   });
 
+  it('定性情報だけを引用した段落も、根拠の欄に定性情報の根拠（台帳への行き先）を返す', async () => {
+    const draft = await createReviewDraftSnapshot(db, author(), IDS.projects.fy2026);
+    const trace = await loadSnapshotTrace(db, author(), {
+      projectId: IDS.projects.fy2026,
+      snapshotId: draft.id,
+    });
+    let found = false;
+    for (const unit of trace.units.filter((u) => u.kind === 'paragraph')) {
+      const view = await loadSnapshotTrace(db, author(), {
+        projectId: IDS.projects.fy2026,
+        snapshotId: draft.id,
+        unit: unit.traceId,
+      });
+      for (const n of view.selected?.narratives ?? []) {
+        found = true;
+        const version = fixture.narrativeVersions.find((v) => v.id === n.versionId)!;
+        // 画面の根拠の欄は定性情報の台帳へ辿る（版の ID ではなく台帳の ID）
+        expect(n.recordId).toBe(version.narrativeRecordId);
+      }
+    }
+    expect(found).toBe(true);
+  });
+
   it('追跡番号は画面・社内確認用 DOCX・XLSX のトレースで一致する', async () => {
     const view = await loadSnapshotTrace(db, approver(), {
       projectId: FY2025,

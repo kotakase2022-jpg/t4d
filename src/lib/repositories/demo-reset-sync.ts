@@ -46,12 +46,28 @@ export const DISCLOSURE_DEMO_RESET_TABLES = [
   'exportReconciliations',
   'xbrlTagMappings',
   'xbrlTagMappingEvents',
+  // トライアルの評価・管理（2026-10。plan 付録 B「リセットは新しい表の組織の行も取り除く」）。
+  // 入れないと、リハーサルのたびに前の判定・実施記録・ご意見・承認ルートの保存が残り、Cookie も増え続ける。
+  // 保証側のコメント（reviewNotes）は監査法人の行なので入れない（DISCLOSURE_CLIENT_RESET_TABLES の注記）
+  'trialPrograms',
+  'trialScenarioRuns',
+  'trialScenarioJudgements',
+  'trialFeedbackItems',
+  'trialTaskTimings',
+  'aiFeedback',
+  'approvalRoutes',
+  'approvalRouteStages',
+  'organizationDataTerms',
+  'memberships',
+  'responseContentLinks',
+  'responseEvidenceLinks',
+  'disclosureMappings',
 ] as const satisfies readonly TableName[];
 
 /**
  * 開示デモのリセットで戻す、クライアント組織の列（client_organization_id）で範囲を決める表
- * （保証側へ共有した写しと企業の回答）。共有したスナップショットを消すため、写しと、その写しを指す
- * 保証側のコメント（reviewNotes の target_copy_id）も一緒に消す（消えた写しを指し続けないため）
+ * （保証側へ共有した写しと企業の回答）。写しを指す保証側のコメント（reviewNotes）は監査法人の行なので、
+ * 企業のリセットでは消さない・戻さない（消えた写しを指すコメントは「写しが見つかりません」と出る）
  */
 export const DISCLOSURE_CLIENT_RESET_TABLES = [
   'reviewNoteResponses',
@@ -63,21 +79,8 @@ interface ClientRow {
   clientOrganizationId?: string;
 }
 
-/** 写しを指す保証側のコメントのうち、その組織の写しを指すもの */
-export function isClientCopyNote(
-  row: { targetCopyId?: string | null },
-  copyIds: ReadonlySet<string>,
-): boolean {
-  return typeof row.targetCopyId === 'string' && copyIds.has(row.targetCopyId);
-}
-
-/** 組織の写し・回答と、写しを指すコメントを Fixture の初期値へ戻す（メモリに対して） */
+/** 組織の写し・回答を Fixture の初期値へ戻す（メモリに対して。保証側のコメントには触れない） */
 function restoreClientScoped(target: FixtureDb, pristine: FixtureDb, organizationId: string): void {
-  const copyIds = new Set(
-    [...target.sharedReportCopies, ...pristine.sharedReportCopies]
-      .filter((c) => c.clientOrganizationId === organizationId)
-      .map((c) => c.id),
-  );
   const restoreBy = <T extends { id: string }>(
     rows: T[],
     pristineRows: readonly T[],
@@ -95,7 +98,6 @@ function restoreClientScoped(target: FixtureDb, pristine: FixtureDb, organizatio
       else rows[index] = structuredClone(fixtureRow);
     }
   };
-  restoreBy(target.reviewNotes, pristine.reviewNotes, (n) => isClientCopyNote(n, copyIds));
   for (const table of DISCLOSURE_CLIENT_RESET_TABLES) {
     restoreBy(
       target[table] as unknown as ClientRow[],

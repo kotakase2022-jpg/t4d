@@ -92,6 +92,14 @@ export function SnapshotDiffView({ diff }: { diff: SnapshotDiff }) {
         {diff.summary.metricChanges}／要求事項の付け替え {diff.summary.requirementChanges}
         ／判断の変更 {diff.summary.decisionChanges}
       </p>
+      {!diff.summary.decisionsComparable && (
+        <p
+          className="text-caption text-ink-muted"
+          data-testid="snapshot-diff-decisions-not-comparable"
+        >
+          判断（要求事項の判断・対象外の承認）は比べていません。どちらかのスナップショットが判断の状態を固定する前の形式のため、判断が同じかどうかは分かりません。
+        </p>
+      )}
       {diff.summary.identical ? (
         <EmptyState
           kind="done"
@@ -99,6 +107,13 @@ export function SnapshotDiffView({ diff }: { diff: SnapshotDiff }) {
           title="違いはありません"
           description="2 つのスナップショットの本文・数値・要求事項・判断は同じです。"
         />
+      ) : diff.blocks.every((b) => b.kind === 'unchanged') &&
+        diff.metrics.length === 0 &&
+        diff.requirements.length === 0 &&
+        diff.decisions.length === 0 ? (
+        <p className="text-small text-ink">
+          本文・数値・要求事項の付け替えに違いはありません（判断は比べられないため、「違いはありません」とは示しません）。
+        </p>
       ) : (
         <>
           {changedBlocks.length > 0 && (

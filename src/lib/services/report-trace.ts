@@ -115,6 +115,7 @@ export async function loadTraceContext(
         {
           title: records.find((r) => r.id === v.narrativeRecordId)?.title ?? '（定性情報）',
           versionNo: v.versionNo,
+          recordId: v.narrativeRecordId,
         },
       ]),
     ),
@@ -188,6 +189,8 @@ export interface TraceUnitDetail {
   metrics: TraceMetricView[];
   narratives: Array<{
     versionId: Uuid;
+    /** 定性情報の台帳の ID（画面のリンク。分からなければ null） */
+    recordId: Uuid | null;
     title: string;
     versionNo: number | null;
     hasEvidence: boolean;
@@ -274,6 +277,7 @@ function detailOf(
         const nv = context.narratives.get(inline.narrativeVersionId);
         narratives.push({
           versionId: inline.narrativeVersionId,
+          recordId: nv?.recordId ?? null,
           title: nv?.title ?? '（定性情報）',
           versionNo: nv?.versionNo ?? null,
           hasEvidence: context.narrativeVersionsWithEvidence.has(inline.narrativeVersionId),

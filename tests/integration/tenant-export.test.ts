@@ -245,6 +245,15 @@ describe('権限', () => {
     state.ctx = admin();
     const bad = await route.GET(new Request('http://localhost/api/exports/tenant?part=all'));
     expect(bad.status).toBe(400);
+    // 設定の画面のフォームから送ったときは、生の JSON ではなく画面へ理由（種類だけ）を戻す
+    const fromSettings = await route.GET(
+      new Request('http://localhost/api/exports/tenant?part=all&from=settings'),
+    );
+    expect(fromSettings.status).toBe(303);
+    const back = new URL(fromSettings.headers.get('location')!);
+    expect(back.pathname).toBe('/enterprise/settings');
+    expect(back.searchParams.get('tab')).toBe('data-handling');
+    expect(back.searchParams.get('exportError')).toBe('part');
     const ok = await route.GET(new Request('http://localhost/api/exports/tenant?part=data'));
     expect(ok.status).toBe(200);
     expect(ok.headers.get('content-type')).toBe('application/zip');

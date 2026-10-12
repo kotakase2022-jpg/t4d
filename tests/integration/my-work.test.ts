@@ -67,6 +67,23 @@ describe('トライアル対応の Attention（plan §4.3-3。保存せず導出
   const keysOf = (work: Awaited<ReturnType<typeof loadMyWork>>) =>
     new Map(work.attention.map((a) => [a.key, a]));
 
+  it('従来ホーム（開示優先 OFF の組織）でも、同じ Attention を出す（regression.md §6.3 に記録した変更）', async () => {
+    // 既定の Demo の組織は開示優先が OFF（従来ホーム）。ホームの従来の分岐も loadMyWork を使う
+    expect(
+      fixture.organizationFeatureSettings.find((s) => s.organizationId === ORG_IDS.aomi)
+        ?.disclosureFirst,
+    ).toBe(false);
+    const approver = ctxFor('approver@demo.local', ['approver', 'reviewer']);
+    expect(keysOf(await loadMyWork(db, approver, input())).has('exclusion-pending')).toBe(true);
+    const admin = ctxFor('enterprise-admin@demo.local', ['enterprise_admin']);
+    const open = openIssueSummary(
+      fixture.trialFeedbackItems.filter((f) => f.organizationId === ORG_IDS.aomi),
+    ).mandatoryCriticalOpen;
+    expect(keysOf(await loadMyWork(db, admin, input())).has('trial-mandatory-critical')).toBe(
+      open > 0,
+    );
+  });
+
   it('最終承認者: 自分が承認できる対象外の申請（自分の申請は除く）を、承認する画面への行き先付きで出す', async () => {
     const approver = ctxFor('approver@demo.local', ['approver', 'reviewer']);
     const pending = (await listPendingExclusions(db, approver)).filter(

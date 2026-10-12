@@ -44,7 +44,11 @@ import {
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import { listMembers } from '@/lib/services/identity';
-import { computeBlockFreshness, type BlockFreshness } from '@/lib/services/disclosure-recheck';
+import {
+  computeBlockFreshness,
+  detectFileUpdates,
+  type BlockFreshness,
+} from '@/lib/services/disclosure-recheck';
 import type { DbClient } from '@/lib/repositories/types';
 import { isUuid } from '@/lib/validation/uuid';
 import type {
@@ -2188,6 +2192,7 @@ export const MANUSCRIPT_FILTERS = [
   'review',
   'returned',
   'recheck',
+  'upstream',
   'changed_after_approval',
   'mine',
 ] as const;
@@ -2199,6 +2204,7 @@ export const MANUSCRIPT_FILTER_LABELS: Record<ManuscriptFilter, string> = {
   review: 'レビュー中',
   returned: '差戻し',
   recheck: '再確認が必要',
+  upstream: '上流の変更（資料の新版を含む）',
   changed_after_approval: '承認後に変更が発生',
   mine: '自分の担当',
 };
@@ -2227,6 +2233,8 @@ export interface ManuscriptRow {
   narrativeNotes: Array<{ title: string; note: string }>;
   freshness: BlockFreshness['status'];
   freshnessLabel: string;
+  /** 引用した資料に新しい版がある（数値・定性情報の新版とは別に数える。NF-16） */
+  fileUpdated: boolean;
   blockers: BlockBlocker[];
   ownerUserId: Uuid | null;
   ownerName: string;
@@ -2256,6 +2264,13 @@ function matchesFilter(row: ManuscriptRow, filter: ManuscriptFilter, userId: Uui
       return row.status === 'returned';
     case 'recheck':
       return row.freshness === 'upstream_updated' || row.freshness === 'evidence_invalid';
+    case 'upstream':
+      // 概要の「上流の変更で再確認が必要な節」と同じ集合（数値・定性情報の新版・根拠の失効・資料の新版）
+      return (
+        row.freshness === 'upstream_updated' ||
+        row.freshness === 'evidence_invalid' ||
+        row.fileUpdated
+      );
     case 'mine':
       return row.ownerUserId === userId;
   }
@@ -2315,6 +2330,10 @@ export async function listProjectBlocks(
       ? await db.findById('disclosureBlockVersions', block.approvedVersionId)
       : null;
     const freshness = await computeBlockFreshness(db, ctx, block);
+    // 資料の新版（引用位置の版より新しい版がある。NF-16）。読めなければ数えない
+    const fileUpdated = await detectFileUpdates(db, ctx, block)
+      .then((items) => items.length > 0)
+      .catch(() => false);
     const blockComments = comments.filter((c) => c.blockId === block.id);
     const fv = frameworkVersions.find((v) => v.id === block.frameworkVersionId);
     const blockers = await evaluateBlockBlockersFor(db, ctx, block, editing.body);
@@ -2361,6 +2380,7 @@ export async function listProjectBlocks(
       }),
       freshness: freshness.status,
       freshnessLabel: freshness.label,
+      fileUpdated,
       blockers,
       ownerUserId: block.ownerUserId,
       ownerName: nameOf(members, block.ownerUserId),

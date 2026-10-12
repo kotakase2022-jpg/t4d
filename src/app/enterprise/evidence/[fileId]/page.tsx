@@ -37,7 +37,11 @@ import {
   usagePurposeLabel,
 } from '@/lib/services/source-anchor';
 import { readEvidenceFileBytes } from '@/lib/storage';
-import { usageItemCount, usageSummaryText } from '../../data/[dataPointId]/usage';
+import {
+  usageItemCount,
+  usageSectionTitle,
+  usageSummaryText,
+} from '../../data/[dataPointId]/usage';
 import { evidenceTitles } from '../titles';
 import { ManualExcerptForm } from './manual-excerpt-form';
 
@@ -669,12 +673,13 @@ export default async function EvidenceViewerPage({
  */
 function FileUsageSection({ usage }: { usage: FileUsage }) {
   const count = usageItemCount(usage) + usage.narratives.length;
+  // 開示の閲覧権限が無い人には件数（0）を出さず、理由は折りたたまずに見せる（section.tsx の規則）
   return (
     <Section
       id="file-usage"
-      collapsible
-      title={`この資料を使っている原稿・レポート（${count}）`}
-      summary={usageSummaryText(usage.counts)}
+      collapsible={!usage.disclosureHidden}
+      title={usageSectionTitle('資料', count, usage.disclosureHidden)}
+      summary={usageSummaryText(usage.counts, { disclosureHidden: usage.disclosureHidden })}
     >
       {usage.disclosureHidden ? (
         <p className="flex items-start gap-1 text-small text-ink-muted">

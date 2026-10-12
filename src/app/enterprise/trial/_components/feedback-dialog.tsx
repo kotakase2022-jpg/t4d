@@ -103,11 +103,18 @@ export function FeedbackDialog({
     }
   }, [state, router]);
 
-  React.useLayoutEffect(() => {
-    const form = formRef.current;
-    if (form && state.status === 'error' && state.values) restoreFormValues(form, state.values);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 作り直した直後（generation が変わったとき）だけ戻す
-  }, [generation]);
+  // 送った値を戻すのは、フォームの要素ができたとき（断られて作り直したとき・閉じて開き直したとき）だけ。
+  // ダイアログの中身は開いた後の描画で作られる（Portal）ため、効果ではなく要素の ref で受け取る
+  const restoredForm = React.useRef<HTMLFormElement | null>(null);
+  const attachForm = React.useCallback(
+    (form: HTMLFormElement | null) => {
+      formRef.current = form;
+      if (!form || restoredForm.current === form) return;
+      restoredForm.current = form;
+      if (state.status === 'error' && state.values) restoreFormValues(form, state.values);
+    },
+    [state],
+  );
 
   const failed = state.status === 'error' && state.message;
   const sent = showResult && state.status === 'sent';
@@ -166,7 +173,7 @@ export function FeedbackDialog({
           ) : (
             <form
               key={`${generation}-${state.nonce}`}
-              ref={formRef}
+              ref={attachForm}
               action={formAction}
               className="space-y-2 px-4 py-3"
               aria-describedby={failed ? errorId : undefined}

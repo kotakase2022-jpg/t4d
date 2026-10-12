@@ -257,6 +257,16 @@ function eventsByItem(
 // 基準ごとの読み分け
 // ======================================================================
 
+/**
+ * SSBJ の評価で適用区分・重要性とその理由を記録した人（対象外・非重要の承認者になれない人。0059 の
+ * reason_recorded_by。以前の行は最後に更新した人で代える）
+ */
+export function ssbjReasonRecorderOf(
+  assessment: Pick<SsbjAssessment, 'reasonRecordedBy' | 'updatedBy' | 'createdBy'>,
+): Uuid | null {
+  return assessment.reasonRecordedBy ?? assessment.updatedBy ?? assessment.createdBy ?? null;
+}
+
 /** SSBJ の評価行（ssbj_assessments）から判断を読む（既存の規則に、対象外の承認を足したもの） */
 export function ssbjDecisionOf(
   assessment: SsbjAssessment | undefined,
@@ -266,7 +276,7 @@ export function ssbjDecisionOf(
   if (!assessment) {
     return { ...NOT_ASSESSED_BASE, source: 'none', note: '評価の行がありません。' };
   }
-  const decider = assessment.updatedBy ?? assessment.createdBy;
+  const decider = ssbjReasonRecorderOf(assessment);
   if (assessment.applicability === 'not_applicable') {
     const reason = clean(assessment.applicabilityReason);
     if (!reason) {

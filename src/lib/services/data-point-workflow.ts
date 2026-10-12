@@ -10,6 +10,7 @@ import {
 } from '@/lib/authorization/can';
 import { availabilityAfterValueChange } from '@/lib/domain/disclosure-status';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { statusLabel } from '@/lib/ui/status/registry';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import {
   assertValidCommentBody,
@@ -219,8 +220,8 @@ export async function transitionDataPoint(
             : 'data_updated',
     resourceType: 'data_point',
     resourceId: dp.id,
-    beforeSummary: `status=${dp.status}`,
-    afterSummary: `status=${input.to}`,
+    beforeSummary: `状態「${statusLabel('dataPoint', dp.status)}」`,
+    afterSummary: `状態「${statusLabel('dataPoint', input.to)}」`,
   });
 
   // 提出したら承認の道筋を開始する。差し戻し後の再提出なら次の巡が始まる
@@ -417,6 +418,7 @@ export async function linkEvidence(
     eventType: 'data_updated',
     resourceType: 'evidence_link',
     resourceId: dp.id,
-    afterSummary: `Evidence を紐付け（file_version=${input.fileVersionId.slice(0, 8)}）`,
+    // 内部 ID は要約に書かない（対象は resourceId・metadata で辿る）
+    afterSummary: '根拠資料を紐付け',
   });
 }

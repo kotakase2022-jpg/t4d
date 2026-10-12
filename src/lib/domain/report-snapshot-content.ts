@@ -368,8 +368,28 @@ export function requirementStateDigest(values: unknown): string {
 }
 
 /**
- * SSBJ の評価行（可変）の値のダイジェスト。要求事項ごとに適用区分・理由・重要性・理由・人の最終判定を並べる
- * （評価の無い要求事項も [id, null] として並べ、行が増えたことも差分になる）
+ * SSBJ の評価行が、システムが作った既定のままか（人が判断していない）。画面を開いたときに評価行を
+ * 一括で作る（ssbj-gap.ts の ensureAssessments）ため、「行が無い」と「既定の行」を同じ状態として扱う
+ */
+function isUntouchedSsbjRow(
+  r: Pick<
+    SsbjAssessment,
+    'applicability' | 'applicabilityReason' | 'materiality' | 'materialityReason' | 'finalStatus'
+  >,
+): boolean {
+  return (
+    r.applicability === 'applicable' &&
+    r.applicabilityReason === '' &&
+    r.materiality === 'not_assessed' &&
+    r.materialityReason === '' &&
+    r.finalStatus === null
+  );
+}
+
+/**
+ * SSBJ の評価行（可変）の値のダイジェスト。要求事項ごとに適用区分・理由・重要性・理由・人の最終判定を並べる。
+ * 評価の無い要求事項と、既定のまま（人が判断していない）の行は同じ [id, null] にする（画面を開いて
+ * 既定の行が作られただけで「確定後に変更あり」「判断の変更」にしない）
  */
 export function ssbjRequirementDigest(
   itemIds: readonly Uuid[],
@@ -389,7 +409,7 @@ export function ssbjRequirementDigest(
   return requirementStateDigest(
     [...itemIds].sort().map((id) => {
       const r = byItem.get(id);
-      return r
+      return r && !isUntouchedSsbjRow(r)
         ? [
             id,
             r.applicability,

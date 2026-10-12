@@ -14,7 +14,8 @@ import {
   noteBodyLimit,
   respondToNote,
 } from '@/lib/services/assurance-notes';
-import { shareReportSnapshot } from '@/lib/services/report-share';
+import { loadEngagementReviewNotes } from '@/lib/services/assurance';
+import { shareReportSnapshot, withdrawSharedReport } from '@/lib/services/report-share';
 import type { AuthorizationContext, RoleKey, SharedReportCopy } from '@/types/domain';
 
 /**
@@ -117,6 +118,31 @@ describe('起票（保証側）', () => {
     expect(metric.targetDataPointVersionId).toBe(firstMetric());
     const listed = await listNotesForCopy(db, manager(), { engagementId: ENG, copyId: copy.id });
     expect(listed.map((n) => n.note.id).sort()).toEqual([note.id, metric.id].sort());
+  });
+
+  it('企業が共有を取り下げると、保証側のコメント一覧に写しの本文（段落の抜粋）を出さない', async () => {
+    const paragraph = firstParagraph();
+    const note = await createReportNote(db, manager(), {
+      engagementId: ENG,
+      copyId: copy.id,
+      target: { kind: 'report_paragraph', ...paragraph },
+      body: '根拠資料の版を確認させてください。',
+      sharedWithClient: false,
+    });
+    const before = (await loadEngagementReviewNotes(db, manager(), ENG)).find(
+      (e) => e.note.id === note.id,
+    )!;
+    expect(before.target!.excerpt).not.toBe('');
+    expect(before.target!.reportLabel).not.toBeNull();
+
+    await withdrawSharedReport(db, admin(), { copyId: copy.id });
+    const after = (await loadEngagementReviewNotes(db, manager(), ENG)).find(
+      (e) => e.note.id === note.id,
+    )!;
+    // コメント自体は保証側の記録として残るが、取り下げた写しの本文は出さない（DB の SELECT ポリシーと同じ）
+    expect(after.target!.excerpt).toBe('');
+    expect(after.target!.reportLabel).toBeNull();
+    expect(after.target!.place).toContain('見つかりません');
   });
 
   it('写しに無い段落・数値は対象にできない', async () => {

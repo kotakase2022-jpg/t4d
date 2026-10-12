@@ -89,7 +89,12 @@ export interface SnapshotDiff {
     metricChanges: number;
     requirementChanges: number;
     decisionChanges: number;
-    /** どこにも違いが無い */
+    /**
+     * 判断（要求事項の判断・対象外の承認の記録）を比べられたか。両方にある基準のどちらかが
+     * 要求事項の状態を固定していない（以前の形式のスナップショット）なら false
+     */
+    decisionsComparable: boolean;
+    /** どこにも違いが無い（判断を比べられなかったときは「同じ」と言わない） */
     identical: boolean;
   };
 }
@@ -305,6 +310,12 @@ export function diffSnapshots(from: ReportSnapshotDetail, to: ReportSnapshotDeta
   const decisions = frameworkIds
     .map((id) => decisionDiffOf(fromFrameworks.get(id), toFrameworks.get(id)))
     .filter((d): d is DecisionDiff => d !== null);
+  // 片方が要求事項の状態を固定していない基準は、判断の違いを比べられない（「同じ」とは言わない）
+  const decisionsComparable = frameworkIds.every((id) => {
+    const a = fromFrameworks.get(id);
+    const b = toFrameworks.get(id);
+    return !a || !b || (Boolean(a.requirementState) && Boolean(b.requirementState));
+  });
 
   const summary = {
     addedBlocks: blocks.filter((b) => b.kind === 'added').length,
@@ -314,15 +325,17 @@ export function diffSnapshots(from: ReportSnapshotDetail, to: ReportSnapshotDeta
     metricChanges: metrics.length,
     requirementChanges: requirements.length,
     decisionChanges: decisions.length,
+    decisionsComparable,
     identical: false,
   };
   summary.identical =
+    decisionsComparable &&
     summary.addedBlocks +
       summary.removedBlocks +
       summary.changedBlocks +
       summary.metricChanges +
       summary.requirementChanges +
       summary.decisionChanges ===
-    0;
+      0;
   return { from: refOf(from), to: refOf(to), blocks, metrics, requirements, decisions, summary };
 }

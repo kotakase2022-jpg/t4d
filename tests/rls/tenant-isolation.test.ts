@@ -4017,24 +4017,27 @@ describe('トライアル対応（0048〜0058）の越権・追記専用・職�
       ];
     }
 
-    it('許諾の管理の権限が無い役割・別の人の名義では共有できない', async () => {
+    it('利用者の JWT では写しを作れない（自分で書いた内容・ハッシュの写しで保証側を欺けない。0059）', async () => {
       const hash = await snapshotHash();
-      const [sql, params] = shareSql(ENT_A_REVIEWER, hash);
-      await expect(h.asUser(ENT_A_REVIEWER, sql, params)).rejects.toThrow(RLS);
-      const [sql2, params2] = shareSql(ENT_A_REVIEWER, hash);
-      await expect(h.asUser(ENT_A_ADMIN, sql2, params2)).rejects.toThrow(
-        /row-level security|T4D_ACTOR_MUST_BE_SELF/,
-      );
+      // 許諾の管理の権限が無い役割も、ある管理者も、PostgREST から直接は作れない
+      for (const actor of [ENT_A_REVIEWER, ENT_A_ADMIN]) {
+        const [sql, params] = shareSql(actor, hash);
+        await expect(h.asUser(actor, sql, params)).rejects.toThrow(
+          /row-level security|T4D_SHARE_SERVER_ONLY/,
+        );
+      }
     });
 
-    it('内容ハッシュが承認版と違えば共有できない', async () => {
+    it('サーバー（Service Role）でも、内容ハッシュが承認版と違う・権限の無い人の名義では共有できない', async () => {
       const [sql, params] = shareSql(ENT_A_ADMIN, 'not-the-hash');
-      await expect(h.asUser(ENT_A_ADMIN, sql, params)).rejects.toThrow(/T4D_SHARE_SCOPE/);
+      await expect(h.asSuperuser(sql, params)).rejects.toThrow(/T4D_SHARE_SCOPE/);
+      const [sql2, params2] = shareSql(ENT_A_REVIEWER, await snapshotHash());
+      await expect(h.asSuperuser(sql2, params2)).rejects.toThrow(/T4D_SHARE_SCOPE/);
     });
 
-    it('企業の管理者が共有すると、案件のメンバーだけが読める', async () => {
+    it('サーバーが企業の管理者の名義で共有すると、案件のメンバーだけが読める', async () => {
       const [sql, params] = shareSql(ENT_A_ADMIN, await snapshotHash());
-      const [row] = await h.asUser<{ id: string }>(ENT_A_ADMIN, sql, params);
+      const [row] = await h.asSuperuser<{ id: string }>(sql, params);
       copyId = row!.id;
       expect(
         await h.asUser(FIRM_A_MANAGER, 'select id from shared_report_copies where id = $1', [
@@ -4109,6 +4112,15 @@ describe('トライアル対応（0048〜0058）の越権・追記専用・職�
         [ENT_A_ADMIN, copyId],
       );
       expect(withdrawn).toHaveLength(1);
+      // 取り下げると保証側（案件のメンバー）からは見えない。企業（クライアント）は記録として読める（0059）
+      expect(
+        await h.asUser(FIRM_A_MANAGER, 'select id, copy from shared_report_copies where id = $1', [
+          copyId,
+        ]),
+      ).toHaveLength(0);
+      expect(
+        await h.asUser(ENT_A_ADMIN, 'select id from shared_report_copies where id = $1', [copyId]),
+      ).toHaveLength(1);
       await expect(
         h.asUser(
           ENT_A_ADMIN,
@@ -4129,6 +4141,53 @@ describe('トライアル対応（0048〜0058）の越権・追記専用・職�
           [ENG, ORG_IDS.aoba, copyId, FIRM_A_MANAGER],
         ),
       ).rejects.toThrow(/T4D_SHARE_SCOPE/);
+    });
+
+    it('写しが他社の資料の版を引用していても、保証側はその版・資料を読めない（0059）', async () => {
+      // 他社（企業 B）の資料と版（UUID を知っている前提）
+      const [file] = await h.asSuperuser<{ id: string }>(
+        `insert into files (organization_id, bucket, original_name, mime_type)
+         values ($1, 'evidence-private', '他社の取締役会資料（架空）.pdf', 'application/pdf')
+         returning id`,
+        [ORG_B],
+      );
+      const [foreign] = await h.asSuperuser<{ id: string; file_id: string }>(
+        `insert into file_versions (file_id, organization_id, version_no, storage_key, size_bytes, sha256)
+         values ($1, $2, 1, $3, 1, $4) returning id, file_id`,
+        [file!.id, ORG_B, `enterprise/${ORG_B}/evidence/${file!.id}/rls-test.bin`, 'a'.repeat(64)],
+      );
+      expect(foreign).toBeDefined();
+      const copy = JSON.stringify({
+        copyVersion: 'report-copy-v1',
+        anchors: [{ fileVersionId: foreign!.id }],
+      });
+      const [shared] = await h.asSuperuser<{ id: string }>(
+        `insert into shared_report_copies
+           (engagement_id, assurance_firm_id, client_organization_id, snapshot_id,
+            snapshot_content_hash, copy, copy_hash, shared_by)
+         values ($1, $2, $3, $4, $5, $6::jsonb, 'h', $7)
+         returning id`,
+        [
+          ENG,
+          ORG_IDS.aoba,
+          ORG_A,
+          FY2025_APPROVED_SNAPSHOT_ID,
+          await snapshotHash(),
+          copy,
+          ENT_A_ADMIN,
+        ],
+      );
+      expect(shared).toBeDefined();
+      expect(
+        await h.asUser(FIRM_A_MANAGER, 'select id from file_versions where id = $1', [foreign!.id]),
+      ).toHaveLength(0);
+      expect(
+        await h.asUser(FIRM_A_MANAGER, 'select id from files where id = $1', [foreign!.file_id]),
+      ).toHaveLength(0);
+      await h.asSuperuser(
+        'update shared_report_copies set withdrawn_at = now(), withdrawn_by = $1 where id = $2',
+        [ENT_A_ADMIN, shared!.id],
+      );
     });
 
     it('回答は追記専用', async () => {
@@ -4372,6 +4431,281 @@ describe('トライアル対応（0048〜0058）の越権・追記専用・職�
           [ORG_B],
         ),
       ).rejects.toThrow(RLS);
+    });
+  });
+
+  describe('0059 レビュー指摘: 職務分離・記録の順序の抜け道', () => {
+    const S07_ITEM = esrs40aSampleItemId('40A-S07');
+    const S07_REASON = '（RLS テスト）従業員の労働条件は別の開示で扱うため対象外と判断。';
+    let s07Id = '';
+
+    async function digestOf(decision: string, reason: string): Promise<string> {
+      const [row] = await h.asSuperuser<{ d: string }>(
+        'select t4d.exclusion_reason_digest($1, $2) as d',
+        [decision, reason],
+      );
+      return row!.d;
+    }
+
+    function projectEvent(actor: string, event: string, digest: string, createdAt?: string) {
+      return h.asUser<{ id: string; created_at: string }>(
+        actor,
+        `insert into requirement_exclusion_events
+           (organization_id, framework_version_id, item_id, reporting_period_id, project_framework_id,
+            source, event, decision, reason_digest, reason_excerpt, note, actor_user_id, created_at)
+         values ($1, $2, $3, $4, $5, 'project_assessment', $6, 'not_applicable', $7, '', $8, $9,
+                 coalesce($10::timestamptz, now()))
+         returning id, created_at`,
+        [
+          ORG_A,
+          ESRS_40A_SAMPLE_VERSION_ID,
+          S07_ITEM,
+          PERIOD_IDS.fy2026,
+          PF_40A,
+          event,
+          digest,
+          event === 'returned' ? '理由（テスト）' : '',
+          actor,
+          createdAt ?? null,
+        ],
+      );
+    }
+
+    it('対象外の判断は決定者を外せず、区分・理由を変えた人が決定者になる', async () => {
+      const [row] = await h.asUser<{ id: string }>(
+        T_AUTHOR,
+        `insert into project_requirement_assessments
+           (organization_id, project_framework_id, item_id, applicability, applicability_reason,
+            decided_by, decided_at, created_by, updated_by)
+         values ($1, $2, $3, 'not_applicable', $4, $5, now(), $5, $5)
+         returning id`,
+        [ORG_A, PF_40A, S07_ITEM, S07_REASON, T_AUTHOR],
+      );
+      s07Id = row!.id;
+      // 決定者を外して「理由を記録した人」の検査を逃れる
+      await expect(
+        h.asUser(
+          T_AUTHOR,
+          `update project_requirement_assessments set decided_by = null, decided_at = null where id = $1`,
+          [s07Id],
+        ),
+      ).rejects.toThrow(/T4D_DECIDER_REQUIRED/);
+      // 別の人が理由だけを書き換え、決定者を元の人のままにする
+      await expect(
+        h.asUser(
+          ENT_A_REVIEWER,
+          `update project_requirement_assessments set applicability_reason = $2 where id = $1`,
+          [s07Id, `${S07_REASON}（書き換え）`],
+        ),
+      ).rejects.toThrow(/T4D_ACTOR_MUST_BE_SELF/);
+      // 別の人が他人の名義で作る
+      await expect(
+        h.asUser(
+          ENT_A_REVIEWER,
+          `insert into project_requirement_assessments
+             (organization_id, project_framework_id, item_id, applicability, applicability_reason,
+              decided_by, decided_at, created_by, updated_by)
+           values ($1, $2, $3, 'not_material', '理由', $4, now(), $5, $5)`,
+          [ORG_A, PF_40A, esrs40aSampleItemId('40A-S02'), T_AUTHOR, ENT_A_REVIEWER],
+        ),
+      ).rejects.toThrow(/T4D_ACTOR_MUST_BE_SELF/);
+    });
+
+    it('差し戻した・取り下げた申請は、申請し直さずに承認できない。時刻はサーバーが決める', async () => {
+      const digest = await digestOf('not_applicable', S07_REASON);
+      // 過去の時刻を名乗っても、前の記録より後の時刻になる
+      const [requested] = await projectEvent(T_AUTHOR, 'requested', digest, '2000-01-01T00:00:00Z');
+      expect(new Date(requested!.created_at).getFullYear()).toBeGreaterThan(2000);
+      await projectEvent(ENT_A_APPROVER, 'returned', digest);
+      await expect(projectEvent(ENT_A_APPROVER, 'approved', digest)).rejects.toThrow(
+        /T4D_EXCLUSION_NO_REQUEST/,
+      );
+      // 取り下げた申請も承認できない
+      await projectEvent(ENT_A_REVIEWER, 'requested', digest);
+      await projectEvent(ENT_A_REVIEWER, 'withdrawn', digest);
+      await expect(projectEvent(ENT_A_APPROVER, 'approved', digest)).rejects.toThrow(
+        /T4D_EXCLUSION_NO_REQUEST/,
+      );
+      // 申請し直せば、申請者・理由を記録した人と別の承認者が承認できる
+      await projectEvent(ENT_A_REVIEWER, 'requested', digest);
+      expect(await projectEvent(ENT_A_APPROVER, 'approved', digest)).toHaveLength(1);
+      // 承認済みのものをもう一度承認・差し戻しはできない
+      await expect(projectEvent(ENT_A_APPROVER, 'returned', digest)).rejects.toThrow(
+        /T4D_EXCLUSION_NO_REQUEST/,
+      );
+    });
+
+    it('SSBJ の評価でも、理由を記録した人は承認できない（記録した人の列は本人に固定される）', async () => {
+      const [target] = await h.asSuperuser<{ id: string; item_id: string; fv: string }>(
+        `select a.id, a.item_id, i.framework_version_id as fv
+           from ssbj_assessments a join disclosure_items i on i.id = a.item_id
+          where a.organization_id = $1 and a.reporting_period_id = $2
+            and a.applicability = 'applicable' and a.materiality <> 'not_material'
+          order by a.item_id limit 1`,
+        [ORG_A, PERIOD_IDS.fy2026],
+      );
+      const reason = '（RLS テスト）承認者が対象外の理由を記録した。';
+      await h.asUser(
+        ENT_A_APPROVER,
+        `update ssbj_assessments set applicability = 'not_applicable', applicability_reason = $2
+          where id = $1`,
+        [target!.id, reason],
+      );
+      // 理由を変えずに記録した人を書き換えても、元の人のまま
+      await h.asUser(
+        T_AUTHOR,
+        `update ssbj_assessments set owner_department = '経営企画部', reason_recorded_by = $2
+          where id = $1`,
+        [target!.id, T_AUTHOR],
+      );
+      const [after] = await h.asSuperuser<{ reason_recorded_by: string }>(
+        'select reason_recorded_by from ssbj_assessments where id = $1',
+        [target!.id],
+      );
+      expect(after!.reason_recorded_by).toBe(ENT_A_APPROVER);
+
+      const digest = await digestOf('not_applicable', reason);
+      const ssbjEvent = (actor: string, event: string) =>
+        h.asUser(
+          actor,
+          `insert into requirement_exclusion_events
+             (organization_id, framework_version_id, item_id, reporting_period_id, project_framework_id,
+              source, event, decision, reason_digest, reason_excerpt, note, actor_user_id)
+           values ($1, $2, $3, $4, null, 'ssbj_assessment', $5, 'not_applicable', $6, '', '', $7)
+           returning id`,
+          [ORG_A, target!.fv, target!.item_id, PERIOD_IDS.fy2026, event, digest, actor],
+        );
+      await ssbjEvent(T_AUTHOR, 'requested');
+      await expect(ssbjEvent(ENT_A_APPROVER, 'approved')).rejects.toThrow(/T4D_EXCLUSION_SOD/);
+    });
+
+    it('XBRL の対応付けは本人の名義で候補として作り、作った人・最後に変えた人・内容の変更と同時には確定できない', async () => {
+      const source = TRIAL_XBRL_MAPPING_IDS.scope2Candidate;
+      const insertMapping = (
+        actor: string,
+        status: string,
+        createdBy: string | null,
+        confirmedBy: string | null,
+      ) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into xbrl_tag_mappings
+             (organization_id, project_id, package_id, concept_id, target_kind, metric_id, unit_id,
+              boundary, framework_version_id, section_key, disclosure_item_id, dimensions, period_role,
+              decimals, scale, status, origin, created_by, updated_by, confirmed_by, confirmed_at)
+           select organization_id, project_id, package_id, concept_id, target_kind, metric_id, unit_id,
+                  boundary, framework_version_id, section_key, disclosure_item_id, dimensions, period_role,
+                  decimals, scale, $2::text, 'human', $3::uuid, $3::uuid, $4::uuid,
+                  case when $4::uuid is null then null else now() end
+             from xbrl_tag_mappings where id = $1
+           returning id`,
+          [source, status, createdBy, confirmedBy],
+        );
+      // 別の人を作成者にして、自分で確定済みの行を作る
+      await expect(
+        insertMapping(ENT_A_APPROVER, 'confirmed', T_AUTHOR, ENT_A_APPROVER),
+      ).rejects.toThrow(/row-level security|T4D_/);
+      // 作成者を空にする
+      await expect(insertMapping(ENT_A_APPROVER, 'candidate', null, null)).rejects.toThrow(
+        /row-level security|T4D_/,
+      );
+      // 本人の名義でも、作成と同時に確定しない
+      await expect(
+        insertMapping(ENT_A_APPROVER, 'confirmed', ENT_A_APPROVER, ENT_A_APPROVER),
+      ).rejects.toThrow(/T4D_XBRL_FORBIDDEN|xbrl_tag_mappings_confirm_sod/);
+
+      // 作成担当が作った候補を、承認者が書き換えてから確定する
+      const [edited] = await insertMapping(T_AUTHOR, 'candidate', T_AUTHOR, null);
+      await h.asUser(
+        ENT_A_APPROVER,
+        'update xbrl_tag_mappings set decimals = 1, updated_by = $1 where id = $2',
+        [ENT_A_APPROVER, edited!.id],
+      );
+      const confirm = (id: string, extra = '') =>
+        h.asUser<{ id: string }>(
+          ENT_A_APPROVER,
+          `update xbrl_tag_mappings set status = 'confirmed', confirmed_by = $1, confirmed_at = now(),
+                  updated_by = $1${extra}
+            where id = $2 returning id`,
+          [ENT_A_APPROVER, id],
+        );
+      await expect(confirm(edited!.id)).rejects.toThrow(/T4D_XBRL_SOD/);
+      // 内容の変更と確定を同じ操作で行う
+      const [other] = await insertMapping(T_AUTHOR, 'candidate', T_AUTHOR, null);
+      await expect(confirm(other!.id, ', decimals = 2')).rejects.toThrow(/T4D_XBRL_SOD/);
+      // 作った人・最後に変えた人と別の承認者は、確定の列だけを変えて確定できる
+      expect(await confirm(other!.id)).toHaveLength(1);
+    });
+
+    it('開示回答: 版は本人の名義だけ。承認と同時の版の差し替え・版と違う本文の承認・版を外すことはできない', async () => {
+      const [response] = await h.asSuperuser<{ id: string }>(
+        `select id from disclosure_responses
+          where organization_id = $1 and reporting_period_id = $2 and status <> 'approved'
+          order by id limit 1`,
+        [ORG_A, PERIOD_IDS.fy2026],
+      );
+      const responseId = response!.id;
+      const colleagueText = '（RLS テスト）同僚が書いた回答。';
+      const [colleague] = await h.asSuperuser<{ id: string }>(
+        `insert into disclosure_response_versions
+           (response_id, organization_id, version_no, answer_text, status, content_hash, created_by)
+         values ($1, $2, 901, $3, 'draft', 'h', $4) returning id`,
+        [responseId, ORG_A, colleagueText, T_AUTHOR],
+      );
+      // 別の人の名義・名義なしの版は作れない
+      for (const createdBy of [T_AUTHOR, null]) {
+        await expect(
+          h.asUser(
+            ENT_A_APPROVER,
+            `insert into disclosure_response_versions
+               (response_id, organization_id, version_no, answer_text, status, content_hash, created_by)
+             values ($1, $2, 902, '自分の回答', 'draft', 'h', $3)`,
+            [responseId, ORG_A, createdBy],
+          ),
+        ).rejects.toThrow(/T4D_ACTOR_MUST_BE_SELF/);
+      }
+      const [own] = await h.asUser<{ id: string }>(
+        ENT_A_APPROVER,
+        `insert into disclosure_response_versions
+           (response_id, organization_id, version_no, answer_text, status, content_hash, created_by)
+         values ($1, $2, 903, '自分の回答', 'draft', 'h', $3) returning id`,
+        [responseId, ORG_A, ENT_A_APPROVER],
+      );
+      await h.asSuperuser(
+        `update disclosure_responses set current_version_id = $2, answer_text = '自分の回答', status = 'in_review'
+          where id = $1`,
+        [responseId, own!.id],
+      );
+      const approve = (set: string, params: unknown[] = []) =>
+        h.asUser(
+          ENT_A_APPROVER,
+          `update disclosure_responses
+              set status = 'approved', approved_by = $2, approved_at = now()${set}
+            where id = $1 returning id`,
+          [responseId, ENT_A_APPROVER, ...params],
+        );
+      // 自分の版の回答を、同僚の版に差し替えると同時に承認する
+      await expect(approve(', current_version_id = $3', [colleague!.id])).rejects.toThrow(
+        /T4D_RESPONSE_SOD/,
+      );
+      // 同僚の版を指したまま、本文だけ自分の文にして承認する
+      await h.asSuperuser(
+        `update disclosure_responses set current_version_id = $2, answer_text = $3 where id = $1`,
+        [responseId, colleague!.id, colleagueText],
+      );
+      await expect(approve(", answer_text = '自分の文に書き換え'")).rejects.toThrow(
+        /T4D_RESPONSE_SOD/,
+      );
+      // 版を外す
+      await expect(
+        h.asUser(
+          ENT_A_APPROVER,
+          'update disclosure_responses set current_version_id = null where id = $1',
+          [responseId],
+        ),
+      ).rejects.toThrow(/T4D_RESPONSE_SOD/);
+      // 同僚の版の本文のままなら承認できる
+      expect(await approve('')).toHaveLength(1);
     });
   });
 

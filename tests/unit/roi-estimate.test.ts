@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   estimateRoi,
+  includesReferenceTiming,
   missingRoiFields,
   monthlyHoursFromSavedMinutes,
   parseRoiParams,
   ROI_MAX_MONTHS,
+  roiTimingBasis,
 } from '@/lib/domain/roi-estimate';
 
 /**
@@ -108,5 +110,59 @@ describe('parseRoiParams（URL の入力。保存しない）', () => {
     const parsed = parseRoiParams({ src: 'timing', price: '1', depts: '1', months: '1' });
     expect(parsed.source).toBe('timing');
     expect(missingRoiFields(parsed)).toEqual(['月あたりの件数']);
+  });
+});
+
+describe('作業時間の記録から換算する作業（K10: n と測り方・参考値の扱い）', () => {
+  const task = (
+    taskKey: string,
+    saved: number | null,
+    methods: { baseline: string[]; t4d: string[] } = {
+      baseline: ['self_report'],
+      t4d: ['self_report'],
+    },
+  ) => ({
+    taskKey,
+    savedMinutesPerUnit: saved,
+    baseline: {
+      n: 3,
+      methods: methods.baseline,
+      includesLogEstimate: methods.baseline.includes('log_estimate'),
+    },
+    t4d: { n: 3, methods: methods.t4d, includesLogEstimate: methods.t4d.includes('log_estimate') },
+  });
+  const transcription = task('transcription', 2, {
+    baseline: ['self_report'],
+    t4d: ['log_estimate'],
+  });
+  const drafting = task('drafting', 60);
+  const review = task('review', null);
+
+  it('作業ごとに単位が違うため短縮分を合計せず、換算する作業を 1 つ選ばせる', () => {
+    const tasks = [drafting, task('evidence', 5), review];
+    const none = roiTimingBasis(tasks, { task: '', includeReference: false });
+    expect(none.selected).toBeNull();
+    expect(none.reason).toContain('1 つ選んでください');
+    const chosen = roiTimingBasis(tasks, { task: 'drafting', includeReference: false });
+    expect(chosen.selected?.taskKey).toBe('drafting');
+    expect(chosen.reason).toBeNull();
+    // n が足りない作業（短縮分なし）は選べない
+    expect(roiTimingBasis(tasks, { task: 'review', includeReference: false }).selected).toBeNull();
+  });
+
+  it('記録からの推定（参考値）を含む作業は、含めると選んだときだけ使う', () => {
+    const tasks = [transcription, drafting];
+    const basis = roiTimingBasis(tasks, { task: 'transcription', includeReference: false });
+    expect(basis.candidates.map((t) => t.taskKey)).toEqual(['drafting']);
+    expect(basis.referenceOnly.map((t) => t.taskKey)).toEqual(['transcription']);
+    // 選べる作業が 1 つなら、それで換算する（参考値の作業は使わない）
+    expect(basis.selected?.taskKey).toBe('drafting');
+    const withReference = roiTimingBasis(tasks, { task: 'transcription', includeReference: true });
+    expect(withReference.selected?.taskKey).toBe('transcription');
+    expect(includesReferenceTiming(withReference.selected!)).toBe(true);
+    // 参考値を含む作業しか無ければ、換算せず理由を返す
+    const onlyReference = roiTimingBasis([transcription], { task: '', includeReference: false });
+    expect(onlyReference.selected).toBeNull();
+    expect(onlyReference.reason).toContain('参考値');
   });
 });

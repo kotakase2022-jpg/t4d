@@ -171,6 +171,13 @@ describe('要求事項・情報対応表の出力（NF-04。XLSX・CSV）', () =
     const sum = [3, 4, 5, 6, 7].reduce((n, i) => n + Number(sample[i]), 0);
     expect(denominator).toBe(8);
     expect(sum).toBe(denominator);
+    // SSBJ は一部だけ収録した版。分母（133）を基準の全件と取り違えさせないよう、備考・注記・画面に収録範囲を出す
+    const ssbj = matrix.frameworks.find((f) => f.label.startsWith('SSBJ'))!;
+    expect(ssbj.coverage).toContain('一部のみ収録');
+    expect(ssbj.coverage).toContain('ユニバーサル基準（適用）は未収録');
+    const ssbjCounts = (counts.getRow(2).values as unknown[]).slice(1).map(String);
+    expect(ssbjCounts[0]).toContain('SSBJ');
+    expect(ssbjCounts.at(-1)).toContain('ユニバーサル基準（適用）は未収録');
 
     // 基準横断（NF-09）はサンプル 6 件
     expect(workbook.getWorksheet('基準横断')!.rowCount).toBe(7);
@@ -179,6 +186,11 @@ describe('要求事項・情報対応表の出力（NF-04。XLSX・CSV）', () =
     const notes: string[] = [];
     workbook.getWorksheet('注記')!.eachRow((row) => notes.push(JSON.stringify(row.values)));
     expect(notes.some((n) => n.includes('第三者による保証ではありません'))).toBe(true);
+    expect(
+      notes.some(
+        (n) => n.includes('基準の位置付け') && n.includes('ユニバーサル基準（適用）は未収録'),
+      ),
+    ).toBe(true);
   });
 
   it('企業が入力した文字列は数式にならない（CSV・XLSX とも先頭を無害化する）', async () => {

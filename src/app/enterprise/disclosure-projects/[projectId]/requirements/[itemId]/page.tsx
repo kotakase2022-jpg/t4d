@@ -135,6 +135,7 @@ export default async function ProjectRequirementDetailPage({
           fields: exclusionFields,
           state: exclusion.state.state,
           requestedBy: exclusion.state.requestedBy,
+          recordedBy: exclusion.target.recorder,
           decision: current.decision,
           reason: current.reason,
           frameworkLabel: framework.label,

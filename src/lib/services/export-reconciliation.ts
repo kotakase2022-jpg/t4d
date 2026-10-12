@@ -86,15 +86,72 @@ function cellValueOf(value: unknown): unknown {
   return String(value);
 }
 
-/** XLSX をシート名 → 行（セルの値）に読み戻す */
-export async function readXlsxSheets(bytes: Uint8Array): Promise<Map<string, ActualSheet>> {
+/**
+ * 読み戻す表計算の大きさの上限。シートの寸法（最後のセルの位置）は数 KB のファイルでも
+ * 1,048,576 行 × 16,384 列にできるため、セルを読む前に寸法で止める（巨大な範囲を総当たりしない）
+ */
+export interface XlsxReadLimits {
+  maxSheets: number;
+  maxRows: number;
+  maxColumns: number;
+  maxCells: number;
+}
+
+/** 既定の上限（照合の期待値が無いとき。出力する対応表・追跡表の大きさの数倍） */
+export const DEFAULT_XLSX_READ_LIMITS: XlsxReadLimits = {
+  maxSheets: 50,
+  maxRows: 20_000,
+  maxColumns: 200,
+  maxCells: 1_000_000,
+};
+
+/** 照合の期待値から上限を決める（期待する行・列の 2 倍に余裕を足す。足りない・余分な行は照合で数える） */
+export function xlsxReadLimitsFor(sheets: readonly SheetExpectation[]): XlsxReadLimits {
+  const rows = Math.max(1, ...sheets.map((s) => s.rows.length + 1));
+  const columns = Math.max(
+    1,
+    ...sheets.flatMap((s) => [s.header.length, ...s.rows.map((r) => r.cells.length)]),
+  );
+  const cells = sheets.reduce((sum, s) => sum + (s.rows.length + 1) * columns, 0);
+  return {
+    maxSheets: sheets.length + 20,
+    maxRows: rows * 2 + 100,
+    maxColumns: columns * 2 + 10,
+    maxCells: Math.max(50_000, cells * 2),
+  };
+}
+
+/** XLSX をシート名 → 行（セルの値）に読み戻す。上限を超える寸法のシートは読まずに断る */
+export async function readXlsxSheets(
+  bytes: Uint8Array,
+  limits: XlsxReadLimits = DEFAULT_XLSX_READ_LIMITS,
+): Promise<Map<string, ActualSheet>> {
   const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
   );
+  if (workbook.worksheets.length > limits.maxSheets) {
+    throw new ValidationError(
+      `照合できるシートの数（${limits.maxSheets}）を超えています。出力したファイルを照合してください。`,
+    );
+  }
+  let cells = 0;
+  for (const ws of workbook.worksheets) {
+    cells += ws.rowCount * ws.columnCount;
+    if (ws.rowCount > limits.maxRows || ws.columnCount > limits.maxColumns) {
+      throw new ValidationError(
+        `シート「${ws.name}」の大きさ（${ws.rowCount} 行 × ${ws.columnCount} 列）が照合できる範囲を超えています。出力したファイルを照合してください。`,
+      );
+    }
+    if (cells > limits.maxCells) {
+      throw new ValidationError(
+        '表計算のセルの数が照合できる範囲を超えています。出力したファイルを照合してください。',
+      );
+    }
+  }
   const sheets = new Map<string, ActualSheet>();
-  workbook.eachSheet((ws) => {
+  for (const ws of workbook.worksheets) {
     const width = ws.columnCount;
     const rows: unknown[][] = [];
     for (let n = 1; n <= ws.rowCount; n += 1) {
@@ -102,7 +159,7 @@ export async function readXlsxSheets(bytes: Uint8Array): Promise<Map<string, Act
       rows.push(Array.from({ length: width }, (_, i) => cellValueOf(row.getCell(i + 1).value)));
     }
     sheets.set(ws.name, rows);
-  });
+  }
   return sheets;
 }
 
@@ -114,10 +171,16 @@ export async function reconcileFile(
   switch (expectation.format) {
     case 'docx': {
       const parsed = await parseDocx(bytes);
+      if (parsed.status === 'too_large') {
+        throw new ValidationError(parsed.message ?? 'Word ファイルの本文が大きすぎます。');
+      }
       return compareDocx(expectation.docx, parsed.paragraphs);
     }
     case 'xlsx':
-      return compareSheets(expectation.sheets, await readXlsxSheets(bytes));
+      return compareSheets(
+        expectation.sheets,
+        await readXlsxSheets(bytes, xlsxReadLimitsFor(expectation.sheets)),
+      );
     case 'csv': {
       const rows = parseCsv(new TextDecoder('utf-8').decode(bytes));
       return compareSheets([expectation.csv], new Map([[expectation.csv.name, rows]]));

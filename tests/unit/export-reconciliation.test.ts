@@ -7,6 +7,7 @@ import {
   normalizeText,
   parseCsv,
   reconciledCountsText,
+  reconciliationOutcomeOf,
   reconciliationStateOf,
   withApprovalCheck,
   type DocxExpectation,
@@ -145,9 +146,9 @@ const snapshot: ReportSnapshotDetail = {
   createdBy: 'u',
 };
 
-/** 期待値どおりに読み戻した段落の並び（表紙などの前置きを含む） */
+/** 期待値どおりに読み戻した段落の並び（表紙・巻末を含む。表のセルも 1 段落） */
 function paragraphsOf(expectation: DocxExpectation): string[] {
-  const out = ['FY2026 統合開示', '開示原稿 — SSBJ 2026', '報告主体', '架空株式会社'];
+  const out = expectation.preamble.map((p) => p.text);
   for (const b of expectation.blocks) {
     out.push(b.title);
     if (b.marker) out.push(b.marker);
@@ -158,8 +159,32 @@ function paragraphsOf(expectation: DocxExpectation): string[] {
     out.push(table.heading, ...table.header);
     for (const row of table.rows) out.push(...row.cells.filter((c) => c.trim() !== ''));
   }
+  out.push(...expectation.trailer.map((p) => p.text));
   return out;
 }
+
+/** 2 つ目の節（引用なしの本文）を足したスナップショット（節の末尾・節の間の検査用） */
+const twoBlocks: ReportSnapshotDetail = {
+  ...snapshot,
+  blocks: [
+    {
+      ...block,
+      blockId: 'b-0',
+      versionId: 'bv-0',
+      approvedVersionId: 'bv-0',
+      sortOrder: 0,
+      title: 'ガバナンス',
+      sectionKey: 'governance',
+      maskedFileNames: [],
+      body: {
+        paragraphs: [
+          { id: 'g-1', kind: 'paragraph', children: [{ t: 'text', text: '取締役会が監督する。' }] },
+        ],
+      },
+    },
+    block,
+  ],
+};
 
 describe('正規化', () => {
   it('空白（改行・連続する空白）だけを正規化し、それ以外の文字は変えない', () => {
@@ -236,6 +261,65 @@ describe('DOCX の照合', () => {
     expect(extraResult.mismatches.map((m) => m.kind)).toEqual(['extra']);
   });
 
+  it('期待値に無い段落は、どこに足しても余分として数える（節の末尾・表紙の後・付表の前・表の後ろ・末尾）', () => {
+    const CLAIM = '当社は2030年にネットゼロを達成済みです。';
+    for (const audience of ['internal', 'external'] as const) {
+      const expectation = docxExpectation(
+        twoBlocks,
+        { audience, frameworkVersionId: 'fv-ssbj', nonPublicFileNames: [] },
+        EMPTY_EXPORT_CONTEXT,
+      );
+      const base = paragraphsOf(expectation);
+      expect(compareDocx(expectation, base).mismatchCount, audience).toBe(0);
+      const insertAt = (index: number) => {
+        const out = [...base];
+        out.splice(index, 0, CLAIM);
+        return compareDocx(expectation, out);
+      };
+      const firstBlockEnd = base.indexOf('取締役会が監督する。') + 1;
+      const lastBlockEnd = base.indexOf(expectation.blocks[1]!.paragraphs.at(-1)!.text) + 1;
+      const positions = {
+        節の末尾: firstBlockEnd,
+        表紙の後: base.indexOf('ガバナンス'),
+        付表の前: lastBlockEnd,
+        付表の行の後: base.indexOf(expectation.numberTable!.rows.at(-1)!.cells.at(-1)!) + 1,
+        末尾: base.length,
+      };
+      for (const [label, index] of Object.entries(positions)) {
+        const result = insertAt(index);
+        expect(result.mismatchCount, `${audience} ${label}`).toBeGreaterThan(0);
+        expect(
+          result.mismatches.some((m) => m.kind === 'extra' && m.actual === CLAIM),
+          `${audience} ${label}`,
+        ).toBe(true);
+      }
+      // 付表に行を足す（セルを並べる）のも余分
+      const appended = [...base];
+      appended.splice(positions.付表の行の後, 0, 'Scope3 排出量', '本社', '99,999 t-CO2e');
+      expect(compareDocx(expectation, appended).mismatchCount, audience).toBeGreaterThanOrEqual(3);
+    }
+    // 社内確認用は巻末（節の版と承認状態・社内コメント）まで照合する
+    const internalTwo = docxExpectation(
+      twoBlocks,
+      { audience: 'internal', frameworkVersionId: 'fv-ssbj', nonPublicFileNames: [] },
+      EMPTY_EXPORT_CONTEXT,
+    );
+    expect(internalTwo.trailer.map((p) => p.text)).toContain('未解決のコメントはありません。');
+    const tail = paragraphsOf(internalTwo).map((p) =>
+      p === '未解決のコメントはありません。' ? '外部で書き換えたコメント' : p,
+    );
+    expect(compareDocx(internalTwo, tail).mismatches.map((m) => m.kind)).toEqual(['paragraph']);
+  });
+
+  it('表紙の記述（区分・内容ハッシュ）を書き換えても不一致になる', () => {
+    const paragraphs = paragraphsOf(external).map((p) =>
+      p === snapshot.contentHash ? 'd'.repeat(64) : p,
+    );
+    const result = compareDocx(external, paragraphs);
+    expect(result.mismatches.map((m) => m.kind)).toEqual(['paragraph']);
+    expect(result.mismatches[0]!.location).toMatch(/^表紙/);
+  });
+
   it('社内確認用の段落と追跡番号の文字列は出力と同じ関数で作る', () => {
     expect(
       outputParagraphText(
@@ -295,6 +379,25 @@ describe('表計算・CSV の照合', () => {
 
     const noSheet = compareSheets(expected, new Map());
     expect(noSheet.mismatches.map((m) => m.kind)).toEqual(['missing']);
+
+    // 期待値に無いシート（外部で足したシート）は余分として数える
+    const extraSheet = compareSheets(
+      expected,
+      new Map<string, unknown[][]>([
+        [
+          '数値',
+          [
+            ['指標', '値'],
+            ['Scope1', 1240.5],
+            ['Scope2', 800],
+          ],
+        ],
+        ['Scope3 合計', [['合計', 99999]]],
+      ]),
+    );
+    expect(extraSheet.mismatches.map((m) => [m.kind, m.location])).toEqual([
+      ['extra', 'シート「Scope3 合計」'],
+    ]);
   });
 
   it('CSV は書き出しと同じ数式の無害化を通した値で照合する（読み戻して 0 件）', () => {
@@ -344,11 +447,30 @@ describe('承認の照合と表示', () => {
   });
 
   it('出力の記録の突合の状態と件数の言い方', () => {
-    expect(reconciliationStateOf({ mismatchCount: null, checkerVersion: null })).toBe(
+    const counts = { reconciledParagraphs: 3, reconciledNumbers: 1, reconciledRows: 0 };
+    expect(reconciliationStateOf({ mismatchCount: null, checkerVersion: null, ...counts })).toBe(
       'not_reconciled',
     );
-    expect(reconciliationStateOf({ mismatchCount: 0, checkerVersion: 'v' })).toBe('matched');
-    expect(reconciliationStateOf({ mismatchCount: 2, checkerVersion: 'v' })).toBe('mismatched');
+    expect(reconciliationStateOf({ mismatchCount: 0, checkerVersion: 'v', ...counts })).toBe(
+      'matched',
+    );
+    expect(reconciliationStateOf({ mismatchCount: 2, checkerVersion: 'v', ...counts })).toBe(
+      'mismatched',
+    );
+    // 照合した段落・数値・行が無ければ、不一致 0 件でも「一致」とは言わない
+    expect(
+      reconciliationStateOf({
+        mismatchCount: 0,
+        checkerVersion: 'v',
+        reconciledParagraphs: 0,
+        reconciledNumbers: 0,
+        reconciledRows: 0,
+      }),
+    ).toBe('nothing_checked');
+    expect(reconciliationOutcomeOf(0, { paragraphs: 0, numbers: null, rows: 0 })).toBe(
+      'nothing_checked',
+    );
+    expect(reconciliationOutcomeOf(1, { paragraphs: 0, numbers: 0, rows: 0 })).toBe('mismatched');
     expect(reconciledCountsText({ paragraphs: 12, numbers: 4, rows: 0 })).toBe('段落 12・数値 4');
     expect(reconciledCountsText({ paragraphs: 0, numbers: 0, rows: 0 })).toBe('照合対象なし');
   });

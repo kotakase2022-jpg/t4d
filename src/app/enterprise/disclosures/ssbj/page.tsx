@@ -184,7 +184,7 @@ export default async function SsbjPage({
       state: counts.awaitingReview > 0 || remaining > 0 ? 'current' : 'done',
       // 優先度「高」は下の「上位 N 件」から数えない（以前は 8 件を超えなかった。W0 O1）。
       // 母集団（評価対象・未対応）を件数の横に書き、要求事項画面の工程 4 と同じ数にする
-      detail: `対象外 ${counts.notApplicable} 件／確認待ち ${counts.awaitingReview} 件／優先度「高」${counts.highPriority} 件（評価対象・未対応）`,
+      detail: `対象外 ${counts.notApplicable} 件${counts.exclusionPending > 0 ? `（ほかに承認されていない対象外・非重要 ${counts.exclusionPending} 件は未判定として分母に含む）` : ''}／確認待ち ${counts.awaitingReview} 件／優先度「高」${counts.highPriority} 件（評価対象・未対応）`,
       href: `${SSBJ}/requirements`,
     },
     {

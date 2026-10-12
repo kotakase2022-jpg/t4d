@@ -11,6 +11,7 @@ import {
 import { assertCan, AuthorizationError, can, NotFoundError } from '@/lib/authorization/can';
 import { RETURN_REASON_MAX_LENGTH, RETURN_REASON_PREFIX } from '@/lib/domain/comment-limits';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { statusLabel } from '@/lib/ui/status/registry';
 import { contentHash, fid } from '@/lib/fixtures/ids';
 import { addComment, assertValidCommentBody } from '@/lib/services/comments';
 import {
@@ -511,8 +512,8 @@ export async function transitionDisclosureResponse(
     eventType: to === 'approved' ? 'data_approved' : 'data_updated',
     resourceType: 'disclosure_response',
     resourceId: responseId,
-    beforeSummary: `status=${response.status}`,
-    afterSummary: `status=${to}`,
+    beforeSummary: `状態「${statusLabel('response', response.status)}」`,
+    afterSummary: `状態「${statusLabel('response', to)}」`,
   });
 
   return updated;

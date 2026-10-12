@@ -62,7 +62,10 @@ export const DEMO_TEXT_LIMITS = {
   trialTitle: 60,
 } as const;
 
-/** 持ち回すトライアル対応の表（PERSISTED_TABLES と DISCLOSURE_DEMO_RESET_TABLES に入れる） */
+/**
+ * 持ち回すトライアル対応の表（PERSISTED_TABLES に入れる）。開示デモのリセット（DISCLOSURE_DEMO_RESET_TABLES・
+ * DISCLOSURE_CLIENT_RESET_TABLES）は、監査法人の行（reviewNotes）を除くすべてを組織の範囲で戻す
+ */
 export const TRIAL_PERSISTED_TABLES = [
   'projectRequirementAssessments',
   'projectRequirementAssessmentEvents',
@@ -290,7 +293,10 @@ function acceptAssessmentEvent(
   return smallJson(next.before) && smallJson(next.after);
 }
 
-/** 判断の行があるか（無ければ null）と、理由を記録した人（プロジェクトの判断だけ） */
+/**
+ * 判断の行があるか（無ければ null）と、理由を記録した人（プロジェクトの判断は決定者、SSBJ の評価は
+ * 最後に更新した人。サービスの resolveExclusionTarget と同じ）
+ */
 function currentExclusionOf(db: FixtureDb, next: Row): { recorder: unknown } | null {
   if (next.source === 'ssbj_assessment') {
     const a = db.ssbjAssessments.find(
@@ -300,7 +306,7 @@ function currentExclusionOf(db: FixtureDb, next: Row): { recorder: unknown } | n
         x.itemId === next.itemId,
     );
     if (!a) return null;
-    return { recorder: null };
+    return { recorder: a.reasonRecordedBy ?? a.updatedBy ?? a.createdBy ?? null };
   }
   const pf = db.projectFrameworks.find((f) => f.id === next.projectFrameworkId);
   if (
@@ -356,7 +362,9 @@ function acceptExclusionEvent(
   if (next.event === 'requested') {
     return can(next.organizationId, next.actorUserId, 'enterprise.disclosure.write');
   }
-  const requests = db.requirementExclusionEvents
+  // 同じ内容（区分・ダイジェスト）の記録を新しい順に。最後の記録が申請のときだけ決定（承認・差戻し・取り下げ）を
+  // 受け付ける（差し戻した・取り下げた申請を、申請し直さずに承認させない）
+  const sameContent = db.requirementExclusionEvents
     .filter(
       (e) =>
         e.organizationId === next.organizationId &&
@@ -364,10 +372,15 @@ function acceptExclusionEvent(
         e.reportingPeriodId === next.reportingPeriodId &&
         e.projectFrameworkId === next.projectFrameworkId &&
         e.reasonDigest === next.reasonDigest &&
-        e.event === 'requested',
+        e.decision === next.decision,
     )
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  const requester = requests[0]?.actorUserId;
+    .sort((a, b) =>
+      a.createdAt !== b.createdAt ? (a.createdAt < b.createdAt ? 1 : -1) : a.id < b.id ? 1 : -1,
+    );
+  const latest = sameContent[0];
+  if (!latest || latest.event !== 'requested') return false;
+  if (!isString(next.createdAt) || next.createdAt <= latest.createdAt) return false;
+  const requester = latest.actorUserId;
   if (!requester) return false;
   if (next.event === 'withdrawn') {
     return (
@@ -516,14 +529,15 @@ function acceptReviewNote(
   }
   if (!isString(next.targetType)) return false;
   if (oneOf(REPORT_NOTE_TARGET_TYPES, next.targetType)) {
+    if (!isString(next.targetCopyId)) return false;
     const copy = db.sharedReportCopies.find((c) => c.id === next.targetCopyId);
-    if (!copy || copy.engagementId !== engagement.id) return false;
+    // 企業の開示デモのリセットで写しが消えても、保証側のコメントは監査法人の記録として戻す
+    // （写しの本文は無いため、画面は「写しが見つかりません」と出す。書き手・権限は上で確かめた）
+    if (!copy) return reportTargetShapeOk(next);
+    if (copy.engagementId !== engagement.id) return false;
     // 新しいコメントは取り下げていない写しだけに（取り下げた後の状態の変更は受け付ける）
     if (!existing && copy.withdrawnAt !== null) return false;
-    if (next.targetType === 'report_paragraph') {
-      return isString(next.targetBlockId) && isNonEmpty(next.targetParagraphId);
-    }
-    return isString(next.targetDataPointVersionId);
+    return reportTargetShapeOk(next);
   }
   return (
     next.targetCopyId === null &&
@@ -531,6 +545,14 @@ function acceptReviewNote(
     next.targetParagraphId === null &&
     next.targetDataPointVersionId === null
   );
+}
+
+/** 開示レポートの段落・数値を指すコメントの対象の形 */
+function reportTargetShapeOk(next: Row): boolean {
+  if (next.targetType === 'report_paragraph') {
+    return isString(next.targetBlockId) && isNonEmpty(next.targetParagraphId);
+  }
+  return isString(next.targetDataPointVersionId);
 }
 
 function acceptNoteResponse(
@@ -976,12 +998,36 @@ function acceptXbrlMapping(
     return false;
   }
   const writer = writerOf(next);
+  if (!existing) {
+    // 作成は本人の名義で、候補として（DB の 0059 と同じ。別の人を作成者にした行・作成と同時に確定した行を
+    // Cookie から戻さない）
+    if (next.createdBy !== writer) return false;
+    if (next.status !== 'candidate' || next.confirmedBy !== null || next.confirmedAt !== null) {
+      return false;
+    }
+  }
   const confirmChanged =
     next.status === 'confirmed' &&
     (!existing || existing.status !== 'confirmed' || existing.confirmedBy !== next.confirmedBy);
   if (confirmChanged) {
     if (next.confirmedBy !== writer) return false;
     if (!can(next.organizationId, writer, 'enterprise.disclosure.approve')) return false;
+    // 職務分離: 最後に内容を変えた人は確定しない。内容の変更と確定を同じ書込で行わない（DB の 0059 と同じ）
+    if (existing && existing.updatedBy !== null && existing.updatedBy === next.confirmedBy) {
+      return false;
+    }
+    if (
+      existing &&
+      !onlyChanged(existing, next, [
+        'status',
+        'confirmedBy',
+        'confirmedAt',
+        'updatedAt',
+        'updatedBy',
+      ])
+    ) {
+      return false;
+    }
   }
   if (can(next.organizationId, writer, 'enterprise.disclosure.write')) return true;
   // 承認権限だけの人は確定の列だけを変えられる

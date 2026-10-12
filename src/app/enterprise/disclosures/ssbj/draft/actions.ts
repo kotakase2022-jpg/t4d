@@ -25,6 +25,8 @@ export async function importSsbjDraftToProjectAction(formData: FormData): Promis
       source: 'ssbj',
       draftId: String(formData.get('draftId') ?? ''),
       projectId,
+      baseVersionId: String(formData.get('baseVersionId') ?? '') || null,
+      knownWorkingSavedAt: String(formData.get('knownWorkingSavedAt') ?? '') || null,
     });
     target = `/enterprise/disclosure-projects/${result.block.projectId}/blocks/${result.block.id}?flash=draftImported&ai=${result.aiParagraphs}`;
   });

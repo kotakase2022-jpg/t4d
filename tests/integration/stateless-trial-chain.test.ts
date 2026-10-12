@@ -39,6 +39,8 @@ import { judgeScenario, recordScenarioRun } from '@/lib/services/trial-evaluatio
 import { submitFeedback } from '@/lib/services/trial-feedback';
 import { recordTaskTiming } from '@/lib/services/trial-timing';
 import { previewXbrl } from '@/lib/services/xbrl-export';
+import { suggestMappings } from '@/lib/services/xbrl-tagging';
+import { suggestRequirementMappings } from '@/lib/services/requirement-mapping-ai';
 import type { AuthorizationContext, Uuid } from '@/types/domain';
 import { admin, approver, author, playMainDemoFlow } from '../support/demo-flows';
 import { WriteDetectingDbClient } from '../support/write-detecting-db';
@@ -149,10 +151,14 @@ interface TrialChainResult {
 }
 
 /** 試行の流れ（リセットから 3 段階の承認ルートまで）。手順ごとに別インスタンス */
-async function playTrialChain(step: (label: string) => void): Promise<TrialChainResult> {
+async function playTrialChain(
+  step: (label: string) => void,
+  hooks: { afterReset?: () => Promise<void> } = {},
+): Promise<TrialChainResult> {
   // 0. 開示デモを初期状態に戻してから始める（K8。CSRD の流れと同じ扱い）
   await resetDisclosureDemoData((await fresh()).db, author());
   step('リセット');
+  await hooks.afterReset?.();
 
   // 1. 40a の判断（S02 を適用・3 観点）と対象外の申請（S07）・承認（別の人）
   {
@@ -460,5 +466,83 @@ describe('試行の流れ（plan §4.3-6）は、すべてのリクエストが�
       `[stateless-main→reset→trial] Cookie（操作の記録）: ${sizes.map((s) => `${s.step}=${s.bytes}B`).join(' / ')}（最大 ${peak}B・上限 ${COOKIE_CHUNKS}×${MAX_BYTES_PER_COOKIE}B）`,
     );
     expect(peak).toBeLessThanOrEqual(COOKIE_CHUNKS * MAX_BYTES_PER_COOKIE);
+  });
+
+  it('実演の流れの後に XBRL の候補・要求事項の候補を出しても押し出しが起きず、AI の実行は読み直す列だけを持ち回す', async () => {
+    await playMainDemoFlow(fresh, () => undefined);
+    const base = editsBytes();
+    {
+      const { db } = await fresh();
+      await suggestMappings(db, author(), { projectId: IDS.projects.fy2026 });
+    }
+    const afterXbrl = editsBytes();
+    {
+      const { db } = await fresh();
+      await suggestRequirementMappings(db, author(), {
+        target: { kind: 'disclosure_block', id: IDS.blocks.fy2026RiskOpportunity.block },
+      });
+    }
+    const afterMapping = editsBytes();
+    expect(await demoEditsWereEvicted()).toBe(false);
+    console.warn(
+      `[stateless-main→ai] Cookie（操作の記録）: 実演の流れ=${base}B / XBRL の候補=${afterXbrl}B / 要求事項の候補=${afterMapping}B`,
+    );
+
+    const edits = await readDemoEdits();
+    const runs = edits.filter((e) => e.t === 'aiRuns').map((e) => e.v as Record<string, unknown>);
+    const xbrl = runs.find((r) => r.featureType === 'xbrlTagSuggestion')!;
+    // XBRL の候補の出力は候補の行へ写したので持ち回さない（提供元・状態は残す）
+    expect(xbrl.outputJson).toEqual({});
+    expect(xbrl.inputReferenceIds).toEqual([]);
+    expect(xbrl.provider).toBe('mock');
+    const mapping = runs.find((r) => r.featureType === 'requirementMappingSuggestion')!;
+    // 要求事項の候補は対象（先頭）と候補だけ。探した要求事項の一覧（最大 49 件）は持ち回さない
+    expect(mapping.inputReferenceIds).toEqual([IDS.blocks.fy2026RiskOpportunity.block]);
+    expect(Array.isArray((mapping.outputJson as { candidates?: unknown }).candidates)).toBe(true);
+
+    // 別のインスタンスでも、節の候補を読めて、XBRL の候補の行は AI 由来として残る
+    const { db, fixture } = await fresh();
+    expect(
+      fixture.xbrlTagMappings.some((m) => m.origin === 'ai_adopted' && m.status === 'candidate'),
+    ).toBe(true);
+    const { loadBlockMappingSuggestion } = await import('@/lib/services/block-requirements');
+    expect(
+      await loadBlockMappingSuggestion(db, author(), IDS.blocks.fy2026RiskOpportunity.block),
+    ).not.toBeNull();
+  });
+
+  it('リハーサルを繰り返しても（リセット → 試行の流れ ×2）、リセット直後に前の試行の流れの操作は残らない', async () => {
+    await playMainDemoFlow(fresh, () => undefined);
+    const afterReset: string[][] = [];
+    const capture = async () => {
+      afterReset.push((await readDemoEdits()).map((e) => `${e.t}:${e.id}`));
+    };
+    await playTrialChain(measure, { afterReset: capture });
+    const second = await playTrialChain(measure, { afterReset: capture });
+    const [first, again] = afterReset as [string[], string[]];
+    // 前の試行の流れ（判断・対象外・共有・回答・突合・評価の記録・承認ルート）は Cookie に残らない。
+    // 残るのは監査法人が書いたコメント（企業のリセットでは消さない保証側の記録）だけ
+    const extra = again.filter((key) => !first.includes(key));
+    expect(extra.every((key) => key.startsWith('reviewNotes:'))).toBe(true);
+    expect(extra).toHaveLength(1);
+    expect(first.filter((key) => !again.includes(key))).toEqual([]);
+    expect(await demoEditsWereEvicted()).toBe(false);
+    await expectTrialResultsPersist(second);
+    // 前のリハーサルの記録が別インスタンスに二重に残らない
+    const { fixture } = await fresh();
+    expect(
+      fixture.trialFeedbackItems.filter((f) => f.title === '（試行）対応表の列を選びたい'),
+    ).toHaveLength(1);
+    expect(
+      fixture.trialScenarioJudgements.filter(
+        (j) => j.reason === '（試行）選定ケースの追跡を確認。',
+      ),
+    ).toHaveLength(1);
+    expect(fixture.approvalRoutes.filter((r) => r.name === second.routeName)).toHaveLength(1);
+    expect(
+      fixture.approvalRouteStages.filter(
+        (s) => fixture.approvalRoutes.find((r) => r.name === second.routeName)?.id === s.routeId,
+      ),
+    ).toHaveLength(3);
   });
 });

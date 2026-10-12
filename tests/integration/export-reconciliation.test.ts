@@ -8,6 +8,8 @@ import { RECONCILIATION_CHECKER_VERSION } from '@/lib/domain/export-reconciliati
 import { computeSnapshotContentHash } from '@/lib/domain/report-snapshot-content';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { buildDisclosureDocx } from '@/lib/exports/disclosure-report';
+import { buildZip } from '@/lib/exports/zip';
+import { parseDocx } from '@/lib/imports/docx-text';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { DEMO_RECONCILIATION_MISMATCH_MAX } from '@/lib/repositories/demo-trial-checks';
 import {
@@ -15,7 +17,9 @@ import {
   exportReportSnapshot,
   exportSnapshotReconciliation,
   reconcileUploadedFile,
+  requirementStateChanges,
 } from '@/lib/services/disclosure-export';
+import { loadSsbjRequirementViews, saveSsbjScope } from '@/lib/services/ssbj-gap';
 import {
   ExportReconciliationBlockedError,
   listReconciliations,
@@ -119,6 +123,49 @@ async function editedDocx(snapshotId: Uuid, frameworkVersionId: Uuid): Promise<U
                       ),
                     },
               ),
+            },
+          },
+    ),
+  };
+  const context = await buildExportContext(db, approver(), detail, { requirements: false });
+  return buildDisclosureDocx(
+    edited,
+    {
+      audience: 'external',
+      frameworkVersionId,
+      nonPublicFileNames: frozenMaskedFileNames(detail) ?? [],
+    },
+    context,
+  );
+}
+
+/** 節の最後の段落の後ろに主張を 1 段落足したファイル（Word で節の末尾に書き足したのと同じ） */
+async function appendedClaimDocx(
+  snapshotId: Uuid,
+  frameworkVersionId: Uuid,
+  claim: string,
+): Promise<Uint8Array> {
+  const row = fixture.reportSnapshots.find((s) => s.id === snapshotId)!;
+  const detail = asSnapshotDetail(row);
+  const target = detail.blocks.find(
+    (b) => b.frameworkVersionId === frameworkVersionId && b.body.paragraphs.length > 0,
+  )!;
+  const edited = {
+    ...detail,
+    blocks: detail.blocks.map((b) =>
+      b.blockId !== target.blockId
+        ? b
+        : {
+            ...b,
+            body: {
+              paragraphs: [
+                ...b.body.paragraphs,
+                {
+                  id: 'external-claim',
+                  kind: 'paragraph' as const,
+                  children: [{ t: 'text' as const, text: claim }],
+                },
+              ],
             },
           },
     ),
@@ -282,6 +329,84 @@ describe('外部で編集したファイルの照合（ファイルは保存し�
     expect(edited.fileSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(fixture.exportReconciliations)).not.toContain('UEsDB');
     expect(fixture.exportArtifacts).toHaveLength(1);
+  });
+
+  it('節の末尾に足した主張・期待値に無いシートは「一致」にしない（読み飛ばさない）', async () => {
+    const snapshotId = FY2025_APPROVED_SNAPSHOT_ID;
+    const frameworkVersionId = asSnapshotDetail(
+      fixture.reportSnapshots.find((s) => s.id === snapshotId)!,
+    ).frameworkVersions[0]!.frameworkVersionId;
+    const claim = '当社は2030年にネットゼロを達成済みです。';
+    const docx = await reconcileUploadedFile(db, approver(), {
+      snapshotId,
+      fileName: '原稿（節の末尾に追記）.docx',
+      bytes: await appendedClaimDocx(snapshotId, frameworkVersionId, claim),
+      audience: 'external',
+      frameworkVersionId,
+    });
+    expect(docx.mismatchCount).toBeGreaterThan(0);
+    expect(docx.mismatches.some((m) => m.kind === 'extra' && m.actual === claim)).toBe(true);
+
+    const original = await exportReportSnapshot(db, approver(), {
+      snapshotId,
+      format: 'xlsx',
+      audience: 'internal',
+    });
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(original.bytes as unknown as ArrayBuffer);
+    workbook.addWorksheet('Scope3 合計').addRow(['Scope3 合計', 99999]);
+    const xlsx = await reconcileUploadedFile(db, approver(), {
+      snapshotId,
+      fileName: '対応表（シートを追加）.xlsx',
+      bytes: new Uint8Array(await workbook.xlsx.writeBuffer()),
+      audience: 'internal',
+    });
+    expect(xlsx.mismatches.map((m) => [m.kind, m.location])).toEqual([
+      ['extra', 'シート「Scope3 合計」'],
+    ]);
+  });
+
+  it('寸法だけ巨大な XLSX・展開すると巨大になる DOCX は、セルを総当たりせず・展開し切らずに断る', async () => {
+    const snapshotId = FY2025_APPROVED_SNAPSHOT_ID;
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('対応表');
+    sheet.getCell('A1').value = 'x';
+    sheet.getCell('XFD1048576').value = 'y';
+    const huge = new Uint8Array(await workbook.xlsx.writeBuffer());
+    expect(huge.byteLength).toBeLessThan(64 * 1024);
+    const started = Date.now();
+    await expect(
+      reconcileUploadedFile(db, approver(), {
+        snapshotId,
+        fileName: '巨大.xlsx',
+        bytes: huge,
+        audience: 'internal',
+      }),
+    ).rejects.toThrow(/照合できる範囲を超えています/);
+    expect(Date.now() - started).toBeLessThan(10_000);
+
+    // document.xml が展開すると 33 MB（上限 32 MB）になる .docx（圧縮後は数十 KB）
+    const bomb = buildZip([
+      { name: '[Content_Types].xml', bytes: new TextEncoder().encode('<Types/>') },
+      { name: 'word/document.xml', bytes: new Uint8Array(33 * 1024 * 1024).fill(0x20) },
+    ]);
+    expect(bomb.byteLength).toBeLessThan(1024 * 1024);
+    expect((await parseDocx(bomb)).status).toBe('too_large');
+    const frameworkVersionId = asSnapshotDetail(
+      fixture.reportSnapshots.find((s) => s.id === snapshotId)!,
+    ).frameworkVersions[0]!.frameworkVersionId;
+    await expect(
+      reconcileUploadedFile(db, approver(), {
+        snapshotId,
+        fileName: '爆弾.docx',
+        bytes: bomb,
+        audience: 'external',
+        frameworkVersionId,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(fixture.exportReconciliations).toHaveLength(0);
   });
 
   it('XLSX の数値を変えたファイルは、シートとセルの位置で検出する', async () => {
@@ -467,5 +592,43 @@ describe('承認版から出力する対応表（NF-04・NF-13）', () => {
     expect(new Set(rows.map((r) => r[changed]))).toEqual(
       new Set(['確定後に変更あり（判断は現在の値）']),
     );
+  });
+
+  it('SSBJ の画面を開いて既定の評価行が作られただけでは「確定後に変更あり」にしない', async () => {
+    const snapshot = asSnapshotDetail(
+      fixture.reportSnapshots.find((s) => s.id === FY2025_APPROVED_SNAPSHOT_ID)!,
+    );
+    const project = fixture.disclosureProjects.find((p) => p.id === IDS.projects.fy2025)!;
+    const period = fixture.periods.find((p) => p.id === project.reportingPeriodId)!;
+    const ssbj = snapshot.frameworkVersions.find((f) => f.frameworkKey === 'ssbj')!;
+    const rowsOfPeriod = () =>
+      fixture.ssbjAssessments.filter(
+        (a) => a.organizationId === ORG_IDS.aomi && a.reportingPeriodId === period.id,
+      );
+    expect(rowsOfPeriod()).toHaveLength(0);
+
+    // 編集の権限を持つ人が SSBJ の画面を開く（既定の評価行が一括で作られる）
+    await loadSsbjRequirementViews(db, author(), period);
+    expect(rowsOfPeriod().length).toBeGreaterThan(0);
+    expect(
+      (await requirementStateChanges(db, approver(), snapshot)).get(ssbj.frameworkVersionId),
+    ).toBe(false);
+    const { header, rows } = await mappingRowsOf(FY2025_APPROVED_SNAPSHOT_ID);
+    const changed = header.indexOf('固定後の変更');
+    expect(rows.some((r) => r[changed] === '確定後に変更あり（判断は現在の値）')).toBe(false);
+
+    // 人が判断を変えたときだけ「変更あり」
+    const target = rowsOfPeriod()[0]!;
+    await saveSsbjScope(db, author(), {
+      assessmentId: target.id,
+      applicability: 'applicable',
+      applicabilityReason: '',
+      materiality: 'material',
+      materialityReason: 'テスト: 重要と判断',
+      ownerDepartment: '',
+    });
+    expect(
+      (await requirementStateChanges(db, approver(), snapshot)).get(ssbj.frameworkVersionId),
+    ).toBe(true);
   });
 });

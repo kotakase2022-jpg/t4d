@@ -6,7 +6,12 @@ import { CSRD_SECTION_LABEL } from '@/lib/domain/csrd';
 import { BLOCK_STATUS_LABELS } from '@/lib/domain/disclosure-status';
 import { AREA_LABEL } from '@/lib/domain/ssbj';
 import { ValidationError } from '@/lib/errors/user-facing';
-import { createBlock, saveBlockVersion } from '@/lib/services/disclosure-block';
+import {
+  BlockConflictError,
+  createBlock,
+  isForeignWorkingBody,
+  saveBlockVersion,
+} from '@/lib/services/disclosure-block';
 import { isUuid } from '@/lib/validation/uuid';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
@@ -19,6 +24,7 @@ import type {
   DisclosureBlockVersion,
   DisclosureProject,
   FrameworkKey,
+  IsoDateTime,
   SsbjDisclosureDraft,
   Uuid,
 } from '@/types/domain';
@@ -37,6 +43,9 @@ import type {
  *  - AI 由来の段落の印を保つ: AI の草案の段落と同じ段落は段落 ID を `draft-ai-` で始め、版の変更理由に件数を書く。
  *    段落の aiRunId は原稿の AI 下書き（disclosureBlockDraft）専用の検査があるため付けない
  *  - 権限: enterprise.disclosure.write（節の作成・版の保存と同じ）
+ *  - 取り込み先の節は、確認ダイアログで見せた版（baseVersionId）と自動保存の時刻（knownWorkingSavedAt）を
+ *    持ち回し、その後に別の版が保存された・別の人が自動保存した節には取り込まない（原稿エディタと同じ
+ *    競合の規則。見ていない版を置き換えず、別の人の作業中の本文を黙って消さない）
  */
 
 export type DraftImportSource = 'ssbj' | 'csrd';
@@ -74,6 +83,10 @@ export interface DraftImportTarget {
     status: BlockStatus;
     statusLabel: string;
     versionNo: number | null;
+    /** 確認した時点の版（取り込みの操作に持ち回し、その後の版の保存を競合として止める） */
+    currentVersionId: Uuid | null;
+    /** 確認した時点の自動保存の時刻（別の人の自動保存を競合として止める） */
+    workingSavedAt: IsoDateTime | null;
   } | null;
   /** 取り込めない理由（取り込めるなら null） */
   blockedReason: string | null;
@@ -218,7 +231,15 @@ async function existingBlockOf(
   return { block, version };
 }
 
-function blockedReasonOf(d: AnyDraft, existing: DisclosureBlock | null): string | null {
+/** 別の人が自動保存した作業中の本文（版になっていない）が取り込み先の節にあるときの理由 */
+export const FOREIGN_WORKING_BODY_REASON =
+  '取り込み先の節に、ほかの人が自動保存した作業中の本文（版になっていない）があります。原稿で版として保存するか破棄してから取り込んでください（取り込むと、その本文は消えます）。';
+
+function blockedReasonOf(
+  d: AnyDraft,
+  existing: DisclosureBlock | null,
+  actorId: Uuid,
+): string | null {
   if (!d.draft.confirmedAt)
     return '確定した本文だけを取り込めます（ドラフトで「確定」してください）。';
   if (d.draft.body.trim() === '') return '本文が空のため取り込めません。';
@@ -228,6 +249,9 @@ function blockedReasonOf(d: AnyDraft, existing: DisclosureBlock | null): string 
   ) {
     return '取り込み先の節がレビュー中です。依頼を取り下げてから取り込んでください。';
   }
+  // 取り込みは節の新しい版を作り、作業中の本文を空にする（saveBlockVersion）。別の人の自動保存が
+  // 残っていれば、確認ダイアログでは見えないその本文を消してしまうため取り込まない
+  if (existing && isForeignWorkingBody(existing, actorId, null)) return FOREIGN_WORKING_BODY_REASON;
   return null;
 }
 
@@ -270,9 +294,11 @@ export async function listDraftImportOptions(
               status: existing.block.status,
               statusLabel: BLOCK_STATUS_LABELS[existing.block.status],
               versionNo: existing.version?.versionNo ?? null,
+              currentVersionId: existing.block.currentVersionId,
+              workingSavedAt: existing.block.workingSavedAt ?? null,
             }
           : null,
-        blockedReason: blockedReasonOf(d, existing?.block ?? null),
+        blockedReason: blockedReasonOf(d, existing?.block ?? null, ctx.userId),
       });
     }
     options.push({
@@ -300,7 +326,15 @@ export interface DraftImportResult {
 export async function importDraftToProject(
   db: DbClient,
   ctx: AuthorizationContext,
-  input: { source: DraftImportSource; draftId: Uuid; projectId: Uuid },
+  input: {
+    source: DraftImportSource;
+    draftId: Uuid;
+    projectId: Uuid;
+    /** 確認ダイアログで見せた取り込み先の節の版（節が無かった・版が無かったなら null） */
+    baseVersionId: Uuid | null;
+    /** 確認ダイアログで見せた時点の自動保存の時刻（無ければ null） */
+    knownWorkingSavedAt?: IsoDateTime | null;
+  },
 ): Promise<DraftImportResult> {
   assertCan(ctx, 'enterprise.disclosure.write');
   const d = await loadDraft(db, ctx, input.source, input.draftId);
@@ -313,8 +347,17 @@ export async function importDraftToProject(
   }
   const sectionKey = sectionKeyOf(d);
   const existing = await existingBlockOf(db, ctx, target.project.id, sectionKey);
-  const blocked = blockedReasonOf(d, existing?.block ?? null);
+  const blocked = blockedReasonOf(d, existing?.block ?? null, ctx.userId);
   if (blocked) throw new ValidationError(blocked);
+  // 確認した後に、取り込み先の節に別の版が保存された（または節が作られた・消えた）。見ていない版を置き換えない
+  const baseVersionId = input.baseVersionId ?? null;
+  if ((existing?.block.currentVersionId ?? null) !== baseVersionId) {
+    throw new BlockConflictError(
+      existing?.block.currentVersionId ?? null,
+      existing?.version?.body ?? { paragraphs: [] },
+      { paragraphs: [] },
+    );
+  }
 
   // 要求事項はドラフトの根拠にした要求事項のコードから（取り込み先の版に無いコードは飛ばす）
   const items = await db.select('disclosureItems', {
@@ -348,7 +391,9 @@ export async function importDraftToProject(
   }`;
   const saved = await saveBlockVersion(db, ctx, {
     blockId: block.id,
-    baseVersionId: block.currentVersionId,
+    // 確認した版と自動保存の時刻を渡し、版の保存の競合検査（BlockConflictError）を効かせる
+    baseVersionId,
+    knownWorkingSavedAt: input.knownWorkingSavedAt ?? null,
     body,
     changeReason,
   });

@@ -30,7 +30,13 @@ export function draftImportMenuItems(
           option.source === 'ssbj'
             ? importSsbjDraftToProjectAction
             : importCsrdDraftToProjectAction,
-        fields: { draftId: option.draftId, projectId: target.projectId },
+        // 確認ダイアログで見せた節の版と自動保存の時刻を持ち回す（その後の変更は競合として止める）
+        fields: {
+          draftId: option.draftId,
+          projectId: target.projectId,
+          baseVersionId: existing?.currentVersionId ?? '',
+          knownWorkingSavedAt: existing?.workingSavedAt ?? '',
+        },
         group: 'advanced',
         confirm: {
           tier: 'bulk',

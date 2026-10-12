@@ -25,6 +25,8 @@ export interface ExclusionActionInput {
   fields: Record<string, string>;
   state: ExclusionState;
   requestedBy: string | null;
+  /** 理由を記録した人（承認だけができない。差し戻すことはできる） */
+  recordedBy: string | null;
   decision: ExclusionDecision;
   reason: string;
   /** 基準の名前と要求事項のコード（確認ダイアログの範囲） */
@@ -65,6 +67,7 @@ export function exclusionActions(input: ExclusionActionInput): ExclusionActions 
   const suffix = input.idSuffix ? `-${input.idSuffix}` : '';
   if (input.state === 'requested' && input.canApprove) {
     const selfRequest = input.requestedBy === input.viewerId;
+    const recorder = input.recordedBy !== null && input.recordedBy === input.viewerId;
     out.approve = {
       kind: 'confirm',
       id: `approve-exclusion${suffix}`,
@@ -72,7 +75,12 @@ export function exclusionActions(input: ExclusionActionInput): ExclusionActions 
       icon: <BadgeCheck aria-hidden="true" />,
       action: approveExclusionAction,
       fields: input.fields,
-      disabledReason: selfRequest ? '申請した人は承認・差戻しできません（職務分離）。' : undefined,
+      // サーバー（decideExclusion）と同じ規則。押せない操作の確認ダイアログを開かせない
+      disabledReason: selfRequest
+        ? '申請した人は承認・差戻しできません（職務分離）。'
+        : recorder
+          ? '理由を記録した人は承認できません（職務分離）。差し戻すことはできます。'
+          : undefined,
       confirm: {
         tier: 'irreversible',
         title: 'この対象外・非重要の判断を承認しますか',

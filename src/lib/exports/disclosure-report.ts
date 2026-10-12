@@ -19,6 +19,7 @@ import {
   reconciledCountsText,
   reconciliationStateOf,
   type DocxExpectation,
+  type DocxExpectedParagraph,
   type SheetExpectation,
 } from '@/lib/domain/export-reconciliation';
 import {
@@ -121,7 +122,7 @@ export interface ReportExportContext {
   /** 承認者・レビュー者の表示名（社内確認用の追跡表だけに出す） */
   userNames: ReadonlyMap<Uuid, string>;
   /** 定性情報の版 → 題名と版番号 */
-  narratives: ReadonlyMap<Uuid, { title: string; versionNo: number }>;
+  narratives: ReadonlyMap<Uuid, { title: string; versionNo: number; recordId?: Uuid }>;
   /** 根拠資料の版（file_versions.id）→ 資料名・版・機密区分 */
   fileVersions: ReadonlyMap<
     Uuid,
@@ -611,9 +612,35 @@ export const CITED_TABLE_HEADING = '付表 本文で引用した数値';
 export const CITED_TABLE_HEADERS = ['指標', '組織・拠点', '対象期間', '境界', '値', '区分', '版'];
 export const TRACE_TABLE_HEADING = '追跡表（社内確認用）';
 
-/** DOCX の本文・付表・追跡表の中身（描画と突合の期待値で同じものを使う） */
+/** 草稿の「未承認箇所・不足情報」の見出し */
+export const ISSUES_HEADING = '未承認箇所・不足情報';
+/** 草稿で未承認箇所が無いときの文 */
+export const NO_ISSUES_TEXT = 'なし（すべての節が承認済みの版です）';
+/** 社内確認用で追跡の単位が無いときの文（追跡表の代わり） */
+export const NO_TRACE_TEXT = '追跡の対象（本文のある段落・数値）はありません。';
+export const BLOCK_STATE_HEADING = '節の版と承認状態（社内確認用）';
+export const BLOCK_STATE_HEADERS = ['節', '版', '状態', '承認済みの版を固定', '要求事項'];
+export const INTERNAL_COMMENTS_HEADING = '社内コメント（対外用の原稿には含めません）';
+export const NO_INTERNAL_COMMENTS_TEXT = '未解決のコメントはありません。';
+
+/**
+ * DOCX の中身（表紙・本文・付表・追跡表・社内確認用の巻末）。描画と突合の期待値で同じものを使い、
+ * 文書のどこに外部で記述を足しても、期待値に無い段落として見つけられるようにする
+ */
 export interface DocxBodyModel {
   framework: SnapshotFramework;
+  /** 表紙（題名・副題・区分・注意・収録の注記・表紙の表） */
+  cover: {
+    title: string;
+    subtitle: string;
+    statusLine: string;
+    notice: string;
+    /** 要求事項が未収録・サンプルの基準の注記。無ければ null */
+    coverageNotice: string | null;
+    rows: Array<[string, string]>;
+  };
+  /** 草稿だけ: 未承認箇所・不足情報（承認済み版は null） */
+  issues: { heading: string; lines: string[] } | null;
   blocks: Array<{
     block: SnapshotBlock;
     marker: string | null;
@@ -622,6 +649,11 @@ export interface DocxBodyModel {
   citedRows: string[][];
   /** 追跡表の行（社内確認用だけ。対外用は null） */
   traceRows: string[][] | null;
+  /** 社内確認用だけ: 追跡表の後ろの節の版と承認状態・社内コメント（対外用は null） */
+  internalTail: {
+    blockStateRows: string[][];
+    comments: string[];
+  } | null;
 }
 
 export function docxBodyModel(
@@ -648,8 +680,26 @@ export function docxBodyModel(
     ),
   );
   const cited = snapshot.metricValues.filter((mv) => citedVersionIds.has(mv.dataPointVersionId));
+  const issueLines = blocks.flatMap((block) =>
+    blockIssueLines(block, options.audience).map((line) => `・${block.title}: ${line}`),
+  );
   return {
     framework,
+    cover: {
+      title: framework.projectName,
+      subtitle: `開示原稿 — ${framework.label}`,
+      statusLine: statusLine(snapshot, framework),
+      notice: NOT_SUBMISSION_NOTICE,
+      coverageNotice:
+        framework.coverageStatus === 'not_loaded' || framework.coverageStatus === 'sample'
+          ? `この基準の要求事項は「${coverageText(framework)}」です。要求事項への準拠を示す原稿ではありません。${framework.coverageNote ? `（${framework.coverageNote}）` : ''}`
+          : null,
+      rows: coverRows(snapshot, framework, options.audience),
+    },
+    issues:
+      snapshot.snapshotKind === 'review_draft'
+        ? { heading: ISSUES_HEADING, lines: issueLines.length > 0 ? issueLines : [NO_ISSUES_TEXT] }
+        : null,
     blocks: blocks.map((block) => ({
       block,
       marker: unapprovedMarker(block),
@@ -666,7 +716,76 @@ export function docxBodyModel(
     ]),
     traceRows:
       options.audience === 'internal' ? traceTableRows(snapshot, trace.units, context) : null,
+    internalTail:
+      options.audience === 'internal'
+        ? {
+            blockStateRows: blocks.map((b) => [
+              b.title,
+              b.versionNo !== null ? `版 ${b.versionNo}` : '版なし',
+              BLOCK_STATUS_LABELS[b.status],
+              b.isApprovedVersion ? 'はい' : 'いいえ',
+              b.requirements.map((r) => r.code).join('、') || '—',
+            ]),
+            comments: blocks.flatMap((b) =>
+              b.internalComments.map(
+                (c) =>
+                  `・${b.title}${c.paragraphId ? `（段落 ${c.paragraphId}）` : ''}［${REVIEW_COMMENT_SEVERITY_LABELS[c.severity]}］${c.body}`,
+              ),
+            ),
+          }
+        : null,
   };
+}
+
+/** 表のセルを読み戻したときの並び（行ごとに左から。空のセルは読み戻せないため落とす） */
+function tableCellTexts(header: readonly string[] | null, rows: readonly string[][]): string[] {
+  return [...(header ?? []), ...rows.flat()].filter((cell) => cell.trim() !== '');
+}
+
+/** 突合の期待値の段落の並び（位置の名前を付ける） */
+function expectedLines(location: string, texts: readonly string[]): DocxExpectedParagraph[] {
+  return texts.map((text, index) => ({ location: `${location} ${index + 1}`, text }));
+}
+
+/**
+ * 本文より前（表紙・草稿の未承認箇所）の期待値。描画と同じ中身から作る（外部で表紙の後ろに
+ * 足した記述も、期待値に無い段落として見つける）
+ */
+function docxPreamble(model: DocxBodyModel): DocxExpectedParagraph[] {
+  const { cover } = model;
+  return [
+    ...expectedLines('表紙', [
+      cover.title,
+      cover.subtitle,
+      cover.statusLine,
+      cover.notice,
+      ...(cover.coverageNotice ? [cover.coverageNotice] : []),
+      ...tableCellTexts(null, cover.rows),
+    ]),
+    ...(model.issues
+      ? expectedLines(model.issues.heading, [model.issues.heading, ...model.issues.lines])
+      : []),
+  ];
+}
+
+/** 追跡表より後ろ（社内確認用の節の版と承認状態・社内コメント）の期待値 */
+function docxTrailer(model: DocxBodyModel): DocxExpectedParagraph[] {
+  const tail = model.internalTail;
+  if (!tail) return [];
+  return [
+    // 追跡の単位が無い社内確認用は、追跡表の代わりに見出しと文を置く（照合する表が無い）
+    ...(model.traceRows && model.traceRows.length > 0
+      ? []
+      : expectedLines(TRACE_TABLE_HEADING, [TRACE_TABLE_HEADING, NO_TRACE_TEXT])),
+    ...expectedLines(BLOCK_STATE_HEADING, [
+      BLOCK_STATE_HEADING,
+      ...tableCellTexts(BLOCK_STATE_HEADERS, tail.blockStateRows),
+    ]),
+    ...expectedLines(INTERNAL_COMMENTS_HEADING, [
+      INTERNAL_COMMENTS_HEADING,
+      ...(tail.comments.length > 0 ? tail.comments : [NO_INTERNAL_COMMENTS_TEXT]),
+    ]),
+  ];
 }
 
 /** 突合の期待値（DOCX）。描画と同じ中身から作る */
@@ -677,6 +796,7 @@ export function docxExpectation(
 ): DocxExpectation {
   const model = docxBodyModel(snapshot, options, context);
   return {
+    preamble: docxPreamble(model),
     blocks: model.blocks.map(({ block, marker, paragraphs }) => ({
       title: block.title,
       marker,
@@ -708,6 +828,7 @@ export function docxExpectation(
             rows: model.traceRows.map((cells) => ({ location: `追跡表 ${cells[0]}`, cells })),
           }
         : null,
+    trailer: docxTrailer(model),
   };
 }
 
@@ -764,47 +885,33 @@ export async function buildDisclosureDocx(
       ],
     });
 
-  // --- 表紙 ---------------------------------------------------------------
-  children.push(new Paragraph({ text: framework.projectName, heading: HeadingLevel.TITLE }));
-  children.push(
-    new Paragraph({ text: `開示原稿 — ${framework.label}`, heading: HeadingLevel.HEADING_2 }),
-  );
+  // --- 表紙（中身は docxBodyModel。突合の期待値と同じもの） ---------------------------
+  const { cover } = model;
+  children.push(new Paragraph({ text: cover.title, heading: HeadingLevel.TITLE }));
+  children.push(new Paragraph({ text: cover.subtitle, heading: HeadingLevel.HEADING_2 }));
   children.push(
     new Paragraph({
-      children: [new TextRun({ text: statusLine(snapshot, framework), bold: true })],
+      children: [new TextRun({ text: cover.statusLine, bold: true })],
     }),
   );
   children.push(
     new Paragraph({
-      children: [new TextRun({ text: NOT_SUBMISSION_NOTICE, italics: true, size: 18 })],
+      children: [new TextRun({ text: cover.notice, italics: true, size: 18 })],
     }),
   );
-  if (framework.coverageStatus === 'not_loaded' || framework.coverageStatus === 'sample') {
+  if (cover.coverageNotice) {
     children.push(
       new Paragraph({
-        children: [
-          new TextRun({
-            text: `この基準の要求事項は「${coverageText(framework)}」です。要求事項への準拠を示す原稿ではありません。${framework.coverageNote ? `（${framework.coverageNote}）` : ''}`,
-            italics: true,
-            size: 18,
-          }),
-        ],
+        children: [new TextRun({ text: cover.coverageNotice, italics: true, size: 18 })],
       }),
     );
   }
-  children.push(table(null, coverRows(snapshot, framework, audience)));
+  children.push(table(null, cover.rows));
 
   // --- 草稿: 未承認箇所・不足情報 ----------------------------------------------
-  if (snapshot.snapshotKind === 'review_draft') {
-    const lines = model.blocks.flatMap(({ block }) =>
-      blockIssueLines(block, audience).map((line) => `・${block.title}: ${line}`),
-    );
-    children.push(new Paragraph({ text: '未承認箇所・不足情報', heading: HeadingLevel.HEADING_1 }));
-    if (lines.length === 0) {
-      children.push(new Paragraph('なし（すべての節が承認済みの版です）'));
-    } else {
-      for (const line of lines) children.push(new Paragraph(line));
-    }
+  if (model.issues) {
+    children.push(new Paragraph({ text: model.issues.heading, heading: HeadingLevel.HEADING_1 }));
+    for (const line of model.issues.lines) children.push(new Paragraph(line));
   }
 
   // --- 本文 ---------------------------------------------------------------
@@ -856,41 +963,20 @@ export async function buildDisclosureDocx(
   }
 
   // --- 社内確認用だけ: 追跡表・節の版と社内コメント -----------------------------------
-  if (audience === 'internal') {
+  if (model.internalTail) {
     children.push(new Paragraph({ text: TRACE_TABLE_HEADING, heading: HeadingLevel.HEADING_1 }));
     if (model.traceRows && model.traceRows.length > 0) {
       children.push(table(TRACE_TABLE_HEADERS, model.traceRows));
     } else {
-      children.push(new Paragraph('追跡の対象（本文のある段落・数値）はありません。'));
+      children.push(new Paragraph(NO_TRACE_TEXT));
     }
+    children.push(new Paragraph({ text: BLOCK_STATE_HEADING, heading: HeadingLevel.HEADING_1 }));
+    children.push(table(BLOCK_STATE_HEADERS, model.internalTail.blockStateRows));
     children.push(
-      new Paragraph({ text: '節の版と承認状態（社内確認用）', heading: HeadingLevel.HEADING_1 }),
+      new Paragraph({ text: INTERNAL_COMMENTS_HEADING, heading: HeadingLevel.HEADING_1 }),
     );
-    children.push(
-      table(
-        ['節', '版', '状態', '承認済みの版を固定', '要求事項'],
-        model.blocks.map(({ block: b }) => [
-          b.title,
-          b.versionNo !== null ? `版 ${b.versionNo}` : '版なし',
-          BLOCK_STATUS_LABELS[b.status],
-          b.isApprovedVersion ? 'はい' : 'いいえ',
-          b.requirements.map((r) => r.code).join('、') || '—',
-        ]),
-      ),
-    );
-    const comments = model.blocks.flatMap(({ block: b }) =>
-      b.internalComments.map(
-        (c) =>
-          `・${b.title}${c.paragraphId ? `（段落 ${c.paragraphId}）` : ''}［${REVIEW_COMMENT_SEVERITY_LABELS[c.severity]}］${c.body}`,
-      ),
-    );
-    children.push(
-      new Paragraph({
-        text: '社内コメント（対外用の原稿には含めません）',
-        heading: HeadingLevel.HEADING_1,
-      }),
-    );
-    if (comments.length === 0) children.push(new Paragraph('未解決のコメントはありません。'));
+    const comments = model.internalTail.comments;
+    if (comments.length === 0) children.push(new Paragraph(NO_INTERNAL_COMMENTS_TEXT));
     for (const line of comments) children.push(new Paragraph(line));
   }
 
@@ -1400,6 +1486,7 @@ const RECONCILIATION_SOURCE_LABELS: Record<ExportReconciliation['source'], strin
 const RECONCILIATION_STATE_LABELS = {
   matched: '不一致 0 件',
   mismatched: '不一致あり',
+  nothing_checked: '照合対象なし（一致の判定なし）',
   not_reconciled: '未突合',
 } as const;
 

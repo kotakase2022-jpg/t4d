@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  USAGE_HIDDEN_TEXT,
   confirmedMappings,
   usageItemCount,
+  usageSectionTitle,
   usageSummaryText,
   visibleMappedItems,
 } from '@/app/enterprise/data/[dataPointId]/usage';
@@ -71,6 +73,20 @@ describe('データの詳細: この数値を使っている原稿・レポー�
     expect(usageSummaryText(usage.counts)).toBe(
       `影響する節 ${usage.counts.blocks}・承認済みレポート ${usage.counts.approvedReports}・保証側へ共有中 ${usage.counts.sharedWithAssurance}`,
     );
+  });
+
+  it('開示の閲覧権限が無い人には、影響先の件数を 0 と出さず「表示しません」とする', async () => {
+    const siteUser = ctxFor('site-user@demo.local', ['site_contributor']);
+    const usage = await listDataPointUsage(db, siteUser, fy2025DataPointId());
+    expect(usage.disclosureHidden).toBe(true);
+    const text = usageSummaryText(usage.counts, { disclosureHidden: usage.disclosureHidden });
+    expect(text).toBe(USAGE_HIDDEN_TEXT);
+    expect(text).not.toMatch(/影響する節 0/);
+    const title = usageSectionTitle('数値', usageItemCount(usage), usage.disclosureHidden);
+    expect(title).not.toContain('（0）');
+    expect(title).toContain('権限が無いため表示しません');
+    // 閲覧できる人には従来どおり件数を出す
+    expect(usageSectionTitle('資料', 3, false)).toBe('この資料を使っている原稿・レポート（3）');
   });
 
   it('承認済みレポートを保証側へ共有すると「保証側へ共有中」に数え、取り下げると外れる', async () => {

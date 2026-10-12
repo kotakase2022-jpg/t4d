@@ -17,6 +17,10 @@ export const ROI_PARAM = {
   source: 'src',
   /** 作業時間の記録から換算するときの、月あたりの対象作業の件数（1 部門あたり） */
   unitsPerMonth: 'volume',
+  /** 作業時間の記録から換算する作業（1 つ。作業ごとに単位が違うため合計しない） */
+  task: 'task',
+  /** 記録からの推定（参考値）を含む作業も換算に使う（'1' のときだけ） */
+  includeReference: 'ref',
 } as const;
 
 /** 比較する費用（利用者が入れる。製品に価格を持たない） */
@@ -81,6 +85,60 @@ export function monthlyHoursFromSavedMinutes(
   unitsPerMonth: number,
 ): number {
   return (savedMinutesPerUnit * unitsPerMonth) / 60;
+}
+
+/** 換算に使う作業の短縮の要約（trial-metrics.ts の TaskReduction と同じ形の一部） */
+export interface RoiTimingTask {
+  taskKey: string;
+  savedMinutesPerUnit: number | null;
+  baseline: { n: number; methods: readonly string[]; includesLogEstimate: boolean };
+  t4d: { n: number; methods: readonly string[]; includesLogEstimate: boolean };
+}
+
+export interface RoiTimingBasis<T extends RoiTimingTask> {
+  /** 換算に選べる作業（両方 n ≥ 3。参考値を含む作業は、含めると選んだときだけ） */
+  candidates: T[];
+  /** 記録からの推定（参考値）を含むため、既定では選べない作業 */
+  referenceOnly: T[];
+  /** 換算に使う作業（1 つ）。選べない・選んでいなければ null */
+  selected: T | null;
+  /** 換算できない理由（null は換算できる） */
+  reason: string | null;
+}
+
+/** 記録からの推定（待ち時間を含む参考値）を含むか */
+export function includesReferenceTiming(task: RoiTimingTask): boolean {
+  return task.baseline.includesLogEstimate || task.t4d.includesLogEstimate;
+}
+
+/**
+ * 作業時間の記録から月あたり削減時間を換算するときの作業を決める（K10: 率には n と測り方を添える）。
+ *  - 両方 n ≥ 3 の作業だけ。記録からの推定（参考値）を含む作業は、利用者が含めると選んだときだけ
+ *  - 作業ごとに単位（行・節など）が違うため、短縮分を足し合わせない。換算する作業を 1 つ選ぶ
+ *    （選べる作業が 1 つだけならそれを使う）
+ */
+export function roiTimingBasis<T extends RoiTimingTask>(
+  tasks: readonly T[],
+  options: { task: string; includeReference: boolean },
+): RoiTimingBasis<T> {
+  const measurable = tasks.filter((t) => t.savedMinutesPerUnit !== null);
+  const referenceOnly = measurable.filter(includesReferenceTiming);
+  const candidates = options.includeReference
+    ? measurable
+    : measurable.filter((t) => !includesReferenceTiming(t));
+  const chosen = candidates.find((t) => t.taskKey === options.task) ?? null;
+  const selected = chosen ?? (candidates.length === 1 ? candidates[0]! : null);
+  let reason: string | null = null;
+  if (candidates.length === 0) {
+    reason =
+      referenceOnly.length > 0
+        ? '換算できる作業は、記録からの推定（参考値）を含むものだけです。参考値を含めて換算するか、手入力で試算してください。'
+        : '作業時間の記録から換算できる作業がありません（現行と T4D の両方が 3 件以上の作業が必要です）。手入力で試算してください。';
+  } else if (!selected) {
+    reason =
+      '換算する作業を 1 つ選んでください（作業ごとに単位が違うため、短縮分を合計しません）。';
+  }
+  return { candidates, referenceOnly, selected, reason };
 }
 
 type Params = Record<string, string | string[] | undefined>;

@@ -29,6 +29,7 @@ vi.mock('@/lib/repositories', () => ({
 const { listOrganizationAudit, listOrganizationAuditForExport } =
   await import('@/lib/services/audit-log');
 const auditCsv = await import('@/app/api/exports/audit-log/route');
+const { transitionDataPoint } = await import('@/lib/services/data-point-workflow');
 
 let fixture: FixtureDb;
 let db: DemoDbClient;
@@ -199,6 +200,67 @@ describe('出す範囲（RLS と同じ）', () => {
     expect(page.entries[0]!.summary).toContain('「出力」の権限が無いため断りました');
     expect(page.entries[0]!.summary).toContain('/api/exports/data-points');
     expect(page.entries[0]!.summary).not.toContain('enterprise.export.run');
+  });
+});
+
+describe('要約は画面の言葉（生の enum・役割のキー・内部 ID を出さない。§2.0）', () => {
+  it('以前の記録（status=… / ロール … / file_version=… / 適用区分 …）も、読むときに言葉へ置き換える', async () => {
+    fixture.auditEvents.push(
+      event({
+        eventType: 'data_updated',
+        createdAt: at(0, 1),
+        beforeSummary: 'status=draft',
+        afterSummary: 'status=submitted',
+      }),
+      event({
+        eventType: 'data_created',
+        createdAt: at(0, 2),
+        resourceType: 'membership',
+        afterSummary:
+          'メンバーを招待（アプリ内リンク発行・メール送信なし）: ロール sustainability_manager,viewer／全社',
+      }),
+      event({
+        eventType: 'data_updated',
+        createdAt: at(0, 3),
+        afterSummary: 'Evidence を紐付け（file_version=1a2b3c4d）',
+      }),
+      event({
+        eventType: 'data_updated',
+        createdAt: at(0, 4),
+        resourceType: 'ssbj_assessment',
+        beforeSummary: '適用区分 applicable / 重要性 not_assessed',
+        afterSummary: '適用区分 not_applicable / 重要性 material',
+      }),
+    );
+    const page = await listOrganizationAudit(db, admin(), {}, { pageSize: 500, now: NOW });
+    const summaries = page.entries.map((e) => e.summary).join('\n');
+    for (const raw of [
+      'status=',
+      'sustainability_manager',
+      'file_version=',
+      '1a2b3c4d',
+      'not_applicable',
+      'not_assessed',
+    ]) {
+      expect(summaries, raw).not.toContain(raw);
+    }
+    expect(summaries).toContain('状態「入力中」 → 状態「提出済み」');
+    expect(summaries).toContain('役割 本社サステナビリティ担当・閲覧者');
+    expect(summaries).toContain('資料の版');
+    expect(summaries).toContain('適用区分 対象外');
+  });
+
+  it('新しく記録する要約も言葉で書く（データの提出）', async () => {
+    const target = fixture.dataPoints.find(
+      (d) => d.organizationId === ORG_IDS.aomi && d.status === 'draft' && !d.deletedAt,
+    )!;
+    await transitionDataPoint(db, manager(), { dataPointId: target.id, to: 'submitted' });
+    const recorded = fixture.auditEvents.find(
+      (e) => e.resourceId === target.id && e.beforeSummary !== null && e.afterSummary !== null,
+    )!;
+    expect(recorded).toBeDefined();
+    expect(recorded.beforeSummary).not.toContain('status=');
+    expect(recorded.afterSummary).toContain('提出済み');
   });
 });
 

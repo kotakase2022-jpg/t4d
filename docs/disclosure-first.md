@@ -52,6 +52,8 @@ ESRS-40a 草案の重要性はインパクト重要性。
 
 1. **機能設定は組織単位**。`organization_feature_settings.disclosure_first`。既定 false。
    false の組織は従来ナビ・従来ホームのまま（A01・A39）。新画面は URL で常に到達可能。
+   ただし従来ホームの先頭の「自分が次に行う作業」（MyWork）は開示優先と共通で、トライアル対応の Attention
+   （上流の変更・対象外の承認待ち・保証側の未回答・重大な必須要件）も出る（`docs/ui-redesign/regression.md` §6.3）。
 2. **権限キーは新設しない**（parity テストが 0002 しか読まないため）。
    - 下書き編集・レビュー依頼: `enterprise.disclosure.write`
    - レビュー（第 1 段）: `enterprise.disclosure.write` かつ 依頼者・版作成者ではない

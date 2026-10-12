@@ -3,13 +3,19 @@ import 'server-only';
 import { STORAGE_ACTION_LABEL, auditEventLabel } from '@/app/assurance/_components/labels';
 import { assertCan, assertEnterpriseWorkspace, can } from '@/lib/authorization/can';
 import { permissionLabel } from '@/lib/authorization/permission-labels';
+import { roleLabel } from '@/lib/authorization/roles';
+import { APPLICABILITY_LABEL, MATERIALITY_LABEL } from '@/lib/domain/ssbj';
+import { statusEntry, type StatusDomain } from '@/lib/ui/status/registry';
 import type { DbClient } from '@/lib/repositories/types';
 import {
+  ASSURANCE_ROLES,
+  ENTERPRISE_ROLES,
   PERMISSION_KEYS,
   type AuditEvent,
   type AuthorizationContext,
   type IsoDateTime,
   type PermissionKey,
+  type RoleKey,
   type StorageAccessEvent,
   type Uuid,
 } from '@/types/domain';
@@ -187,13 +193,68 @@ function permissionOf(value: unknown): PermissionKey | null {
     : null;
 }
 
+/** 状態の値の言い方（記録の対象ごとの状態の登録簿。知らない対象・値は「状態」とだけ書く） */
+function statusText(resourceType: string | null, value: string): string {
+  const domains: StatusDomain[] =
+    resourceType === 'disclosure_response'
+      ? ['response']
+      : resourceType === 'data_point'
+        ? ['dataPoint']
+        : ['dataPoint', 'response'];
+  for (const domain of domains) {
+    const entry = statusEntry(domain, value);
+    if (entry.label !== statusEntry(domain, '__unknown__').label) return entry.label;
+  }
+  return '（不明な状態）';
+}
+
+function roleText(keys: string): string {
+  return keys
+    .split(',')
+    .map((key) => key.trim())
+    .filter((key) => key !== '')
+    .map((key) =>
+      ([...ENTERPRISE_ROLES, ...ASSURANCE_ROLES] as readonly string[]).includes(key)
+        ? roleLabel(key as RoleKey)
+        : '（不明な役割）',
+    )
+    .join('・');
+}
+
+/**
+ * 記録の要約を画面の言葉にする（生の enum・役割のキー・内部 ID を出さない。§2.0）。
+ * 以前の記録は「status=submitted」「ロール sustainability_manager,viewer」「file_version=1a2b3c4d」
+ * 「適用区分 not_applicable」の形で残っているため、読むときにも置き換える
+ */
+export function humanizeAuditSummary(text: string, resourceType: string | null): string {
+  return text
+    .replace(
+      /status=([a-z_]+)/g,
+      (_, value: string) => `状態「${statusText(resourceType, value)}」`,
+    )
+    .replace(/file_version=[0-9a-f-]+/gi, '資料の版')
+    .replace(/ロール ([a-z_,]+)/g, (_, keys: string) => `役割 ${roleText(keys)}`)
+    .replace(
+      /適用区分 ([a-z_]+)/g,
+      (_, value: string) =>
+        `適用区分 ${APPLICABILITY_LABEL[value as keyof typeof APPLICABILITY_LABEL] ?? '（不明）'}`,
+    )
+    .replace(
+      /重要性 ([a-z_]+)/g,
+      (_, value: string) =>
+        `重要性 ${MATERIALITY_LABEL[value as keyof typeof MATERIALITY_LABEL] ?? '（不明）'}`,
+    );
+}
+
 function eventSummary(event: AuditEvent): string {
   if (event.eventType === 'access_denied') {
     const permission = permissionOf(event.metadata?.permission);
     const route = typeof event.metadata?.route === 'string' ? event.metadata.route : null;
     return `${permission ? `「${permissionLabel(permission)}」の権限が無いため断りました` : '権限が無いため断りました'}${route ? `（${route}）` : ''}`;
   }
-  const parts = [event.beforeSummary, event.afterSummary].filter((s): s is string => !!s);
+  const parts = [event.beforeSummary, event.afterSummary]
+    .filter((s): s is string => !!s)
+    .map((s) => humanizeAuditSummary(s, event.resourceType));
   return parts.length === 2 ? `${parts[0]} → ${parts[1]}` : (parts[0] ?? '—');
 }
 

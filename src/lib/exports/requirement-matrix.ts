@@ -192,7 +192,10 @@ export function countRowsOf(frameworks: readonly RequirementMatrixFramework[]): 
             ...REQUIREMENT_COVERAGE_CATEGORIES.map((c: RequirementCoverageCategory) =>
               String(f.counts[c]),
             ),
-            f.isSample ? 'サンプル（架空）の要求事項です' : '',
+            // 分母は収録した要求事項の件数。一部だけ収録した基準は、その範囲を書く（基準の全件と取り違えさせない）
+            [f.isSample ? 'サンプル（架空）の要求事項です' : '', f.coverage ?? '']
+              .filter((t) => t !== '')
+              .join('／'),
           ],
     ),
   ];
@@ -301,7 +304,10 @@ export async function buildRequirementMatrixXlsx(
   addRow(notes, ['出力日時', formatJst(meta.generatedAt)]);
   addRow(notes, ['形式の版', REQUIREMENT_MATRIX_EXPORT_VERSION]);
   for (const f of matrix.frameworks)
-    addRow(notes, ['基準の位置付け', `${f.label}: ${f.positioning}`]);
+    addRow(notes, [
+      '基準の位置付け',
+      `${f.label}: ${f.positioning}${f.coverage ? `／${f.coverage}` : ''}`,
+    ]);
   for (const note of MATRIX_NOTES) addRow(notes, ['注記', note]);
   notes.getColumn(1).width = 18;
   notes.getColumn(2).width = 100;

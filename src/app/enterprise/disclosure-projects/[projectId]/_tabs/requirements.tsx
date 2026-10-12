@@ -452,6 +452,8 @@ export async function RequirementsTab({
             },
             state: exclusion.state,
             requestedBy: exclusion.requestedBy,
+            // 判断の決定者（SSBJ は評価の行を最後に更新した人）。サーバーの「理由を記録した人」と同じ
+            recordedBy: row.decision.decidedBy,
             // 承認待ちの判断は decision.kind が「未判定」になるため、判断の区分（exclusionDecision）から取る
             decision: row.decision.exclusionDecision ?? 'not_applicable',
             reason: row.decision.reason,

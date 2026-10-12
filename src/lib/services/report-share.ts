@@ -18,6 +18,7 @@ import {
 } from '@/lib/domain/report-copy';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { loadOwnedSnapshot, verifySnapshotIntegrity } from '@/lib/services/report-snapshot';
+import { sharedReportCopyWriter } from '@/lib/repositories/privileged';
 import type { DbClient } from '@/lib/repositories/types';
 import { isUuid } from '@/lib/validation/uuid';
 import type { AuthorizationContext, Engagement, SharedReportCopy, Uuid } from '@/types/domain';
@@ -29,7 +30,10 @@ import type { AuthorizationContext, Engagement, SharedReportCopy, Uuid } from '@
  *    自社がクライアントで有効な許諾のある案件へ共有する。同じ案件へ同じスナップショットを二重に共有しない
  *  - 共有のときに保証側用の写し（社内コメント・社内向け確認事項を除き、対外用と同じ伏せ字）を作る
  *    （domain/report-copy.ts）。report_snapshots に監査法人の SELECT を足さない
- *  - 取り下げると保証側から見えなくなる（写しは消さない。追記専用・取り下げの日時だけを入れる）
+ *  - 写しはサーバーが承認版から作る。利用者の JWT には写しの INSERT を許さず（0059）、Supabase Mode は
+ *    Service Role で書く（利用者が自分で書いた内容・ハッシュの写しを「社内承認済み版」として見せない）
+ *  - 取り下げると保証側から見えなくなる（写しは消さない。追記専用・取り下げの日時だけを入れる。
+ *    DB の SELECT ポリシーも案件のメンバーには共有中の写しだけを返す）
  *  - 保証側は案件のメンバーだけが読める（assurance.engagement.read＋メンバー）。取り下げた写しは「見つからない」
  *  - 社内承認であり第三者保証ではない（画面は internal-approval の注記を常に出す）
  *
@@ -103,13 +107,15 @@ export async function shareReportSnapshot(
     snapshotContentHash: snapshot.contentHash,
     copy: content as unknown as Record<string, unknown>,
     copyHash: sharedReportCopyHash(content),
-    // RLS は shared_by = auth.uid() を求める（クライアントから受け取らない）
+    // 共有した人は本人（クライアントから受け取らない。DB は許諾の管理の権限を確かめる）
     sharedBy: ctx.userId,
     sharedAt: now,
     withdrawnAt: null,
     withdrawnBy: null,
   };
-  const [inserted] = await db.insert('sharedReportCopies', [row]);
+  // 権限・許諾・承認版の整合を確かめ、写しを承認版から作った後にだけ書く
+  const writer = await sharedReportCopyWriter(db);
+  const [inserted] = await writer.insert('sharedReportCopies', [row]);
   await recordAuditEvent(db, ctx, {
     eventType: 'report_shared',
     resourceType: 'shared_report_copy',

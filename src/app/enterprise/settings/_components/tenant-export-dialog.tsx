@@ -31,7 +31,10 @@ export function TenantExportDialog({
           // 送信（ダウンロードの開始）を止めずに、次の描画でダイアログを閉じる
           window.setTimeout(() => setOpen(false), 0);
         }}
-      />
+      >
+        {/* 失敗したら生の JSON ではなく、この画面へ理由を戻してもらう */}
+        <input type="hidden" name="from" value="settings" />
+      </form>
       <ConfirmDialog
         tier="bulk"
         destructive={false}

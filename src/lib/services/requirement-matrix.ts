@@ -127,12 +127,27 @@ export interface RequirementMatrixFramework {
   frameworkVersionId: Uuid;
   label: string;
   positioning: string;
+  /**
+   * 要求事項の収録範囲（例「収録: 一部のみ収録（一般33・気候96・実務対応4 の計133項目。…は未収録）」）。
+   * 分母を基準の全件と取り違えさせないため、件数の横・出力の備考・注記に出す。収録範囲が未設定なら null
+   */
+  coverage: string | null;
   isSample: boolean;
   mode: 'rows' | 'not_loaded';
   /** 未収録のときの理由（0 件として数えない） */
   notCalculatedReason: string | null;
   total: number;
   counts: Record<RequirementCoverageCategory, number>;
+}
+
+/** 収録範囲の表示（画面・出力で同じ文言。全件を収録している版も、そう書く） */
+export function matrixCoverageText(legal: {
+  coverageLabel: string | null;
+  coverageNote: string | null;
+}): string | null {
+  if (!legal.coverageLabel && !legal.coverageNote) return null;
+  const label = legal.coverageLabel ?? '収録範囲は注記のとおり';
+  return `収録: ${label}${legal.coverageNote ? `（${legal.coverageNote}）` : ''}`;
 }
 
 export interface RequirementMatrix {
@@ -330,6 +345,7 @@ export async function loadRequirementMatrix(
       frameworkVersionId: view.version.id,
       label: view.label,
       positioning: view.legal.label,
+      coverage: matrixCoverageText(view.legal),
       isSample: view.legal.isSample,
       mode,
       notCalculatedReason: mode === 'not_loaded' ? MATRIX_NOT_LOADED_REASON : null,

@@ -280,7 +280,15 @@ export async function loadDisclosureWorkspace(
     where: { frameworkId: framework.id },
     orderBy: { column: 'year', dir: 'desc' },
   });
-  const periodVersion = versionForPeriod(versions, period);
+  // SSBJ は年度ごとに設定で固定した版（無ければ公開中の版）を読む（NF-12。SSBJ の画面・設定・要求事項 CSV と
+  // 同じ版にし、出力（DOCX・CSV）の「基準」と「対象年度×基準版」を食い違わせない）
+  const ssbjVersion =
+    frameworkKey === 'ssbj'
+      ? ((await resolveSsbjVersion(db, organizationId, period.id))?.version ?? null)
+      : null;
+  const periodVersion = ssbjVersion
+    ? (versions.find((v) => v.id === ssbjVersion.id) ?? ssbjVersion)
+    : versionForPeriod(versions, period);
   const current =
     (options.versionId ? versions.find((v) => v.id === options.versionId) : undefined) ??
     periodVersion;

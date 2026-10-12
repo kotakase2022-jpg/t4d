@@ -42,6 +42,13 @@ export function dataHandlingHref(extra?: Record<string, string>): string {
   return `${BASE}?${new URLSearchParams({ tab: 'data-handling', ...extra }).toString()}`;
 }
 
+/** 全データの書き出しの失敗（API が戻す種類）ごとの文。URL の文をそのまま出さない */
+const TENANT_EXPORT_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  part: '書き出す内容を選び直してください（データ・資料の実体のどちらか）。',
+  storage: '書き出しを保管できませんでした。時間をおいて、もう一度書き出してください。',
+  link: '書き出しのリンクを発行できませんでした。時間をおいて、もう一度書き出してください。',
+};
+
 export function DataHandlingTab({
   params,
   facts,
@@ -63,6 +70,10 @@ export function DataHandlingTab({
   canExport: boolean;
 }) {
   const current = terms.current;
+  const exportErrorKind = typeof params.exportError === 'string' ? params.exportError : null;
+  const exportError = exportErrorKind
+    ? (TENANT_EXPORT_ERROR_MESSAGES[exportErrorKind] ?? null)
+    : null;
   const columns: DataTableColumn<DataTermsItemView>[] = [
     {
       key: 'item',
@@ -212,6 +223,12 @@ export function DataHandlingTab({
         </Section>
       )}
 
+      {/* 書き出しの失敗の理由は折りたたまない（section.tsx の規則） */}
+      {exportError && (
+        <Notice tone="danger" role="alert" title="全データを書き出せませんでした">
+          {exportError}
+        </Notice>
+      )}
       <Section
         id="data-return-deletion"
         title="終了時の返却・削除"

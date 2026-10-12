@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
+import { runPreservingAction } from '@/lib/errors/form-action';
+import type { FormActionState } from '@/lib/errors/form-action-state';
 import { redirectWithUserError, withUserFacingError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
 import { saveApprovalRoute, type RouteStageInput } from '@/lib/services/approval-route';
@@ -47,14 +49,15 @@ function text(formData: FormData, key: string): string {
 
 /**
  * 承認ルートの保存（トライアル対応 NF-24・NF-44）。段階は 1〜MAX 行の入力（空の段階名の行は使わない）。
- * 保存は既存の saveApprovalRoute（enterprise.org.manage。進行中のデータは写しを持つので経路は変わらない）
+ * 保存は既存の saveApprovalRoute（enterprise.org.manage。進行中のデータは写しを持つので経路は変わらない）。
+ * 断られたとき（同じ名前・権限・入力の誤り）は、入力（ひな形から入れた名称・段階を含む）を残したまま
+ * 理由を編集の欄に示す（PreservingForm）
  */
-export async function saveApprovalRouteAction(formData: FormData): Promise<void> {
-  const ctx = await requireEnterpriseContext();
-  const db = await getDb();
+export async function saveApprovalRouteAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   const routeId = text(formData, 'routeId').trim();
-  // 入力エラーは編集の欄を開いたまま戻す（入力の場所を失わせない）
-  const backTo = `${SETTINGS}?tab=approval&edit=${encodeURIComponent(routeId || 'new')}`;
   const rawPurpose = text(formData, 'purpose');
   const purpose: ApprovalRoutePurpose = (APPROVAL_ROUTE_PURPOSES as readonly string[]).includes(
     rawPurpose,
@@ -68,7 +71,9 @@ export async function saveApprovalRouteAction(formData: FormData): Promise<void>
     department: text(formData, `stageDepartment${index + 1}`),
   }));
   let saved = 0;
-  await withUserFacingError(backTo, async () => {
+  const failure = await runPreservingAction(formData, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
     const result = await saveApprovalRoute(db, ctx, {
       ...(routeId ? { routeId } : {}),
       name: text(formData, 'name'),
@@ -79,6 +84,7 @@ export async function saveApprovalRouteAction(formData: FormData): Promise<void>
     });
     saved = result.stages.length;
   });
+  if (failure) return failure;
   revalidatePath(SETTINGS);
   redirect(`${SETTINGS}?tab=approval&flash=approvalRouteSaved&stages=${saved}`);
 }

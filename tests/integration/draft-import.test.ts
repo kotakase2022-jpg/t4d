@@ -8,8 +8,14 @@ import { fid } from '@/lib/fixtures/ids';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import {
+  BlockConflictError,
+  autosaveWorkingBody,
+  saveBlockVersion,
+} from '@/lib/services/disclosure-block';
+import {
   DRAFT_AI_PARAGRAPH_PREFIX,
   DRAFT_HUMAN_PARAGRAPH_PREFIX,
+  FOREIGN_WORKING_BODY_REASON,
   draftBodyToBlockBody,
   importDraftToProject,
   listDraftImportOptions,
@@ -53,6 +59,10 @@ function ctxFor(
 
 const author = () => ctxFor('sustainability@demo.local', ['sustainability_manager']);
 const contributor = () => ctxFor('site-user@demo.local', ['site_contributor']);
+/** 同じ組織で節を編集する別の人 */
+const colleague = () => ctxFor('reviewer@demo.local', ['reviewer']);
+const COLLEAGUE_TEXT = '別の人が書き直したガバナンスの本文（架空）。';
+const WORKING_TEXT = '別の人が作業中の本文（架空・版になっていない）。';
 const otherTenant = () =>
   ctxFor('other-enterprise-admin@demo.local', ['enterprise_admin'], ORG_IDS.soten);
 
@@ -123,6 +133,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
       source: 'ssbj',
       draftId: DRAFT_ID,
       projectId: IDS.projects.fy2026,
+      baseVersionId: null,
     });
     expect(result.created).toBe(true);
     expect(result.block.sectionKey).toBe('ssbj_draft_governance');
@@ -152,6 +163,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
         source: 'ssbj',
         draftId: DRAFT_ID,
         projectId: IDS.projects.fy2026,
+        baseVersionId: result.version.id,
       }),
     ).rejects.toBeInstanceOf(ValidationError);
 
@@ -162,6 +174,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
       source: 'ssbj',
       draftId: DRAFT_ID,
       projectId: IDS.projects.fy2026,
+      baseVersionId: result.version.id,
     });
     expect(second.created).toBe(false);
     expect(second.block.id).toBe(result.block.id);
@@ -175,6 +188,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
         source: 'ssbj',
         draftId: DRAFT_ID,
         projectId: IDS.projects.fy2026,
+        baseVersionId: null,
       }),
     ).rejects.toThrow(/確定した本文だけ/);
     const options = await listDraftImportOptions(db, author(), {
@@ -192,6 +206,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
       source: 'ssbj',
       draftId: DRAFT_ID,
       projectId: IDS.projects.fy2026,
+      baseVersionId: null,
     });
     const index = fixture.disclosureBlocks.findIndex((b) => b.id === imported.block.id);
     fixture.disclosureBlocks[index] = {
@@ -204,6 +219,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
         source: 'ssbj',
         draftId: DRAFT_ID,
         projectId: IDS.projects.fy2026,
+        baseVersionId: imported.version.id,
       }),
     ).rejects.toThrow(/レビュー中/);
   });
@@ -215,6 +231,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
         source: 'ssbj',
         draftId: DRAFT_ID,
         projectId: IDS.projects.fy2026,
+        baseVersionId: null,
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
     await expect(
@@ -222,6 +239,7 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
         source: 'ssbj',
         draftId: DRAFT_ID,
         projectId: IDS.projects.fy2026,
+        baseVersionId: null,
       }),
     ).rejects.toBeInstanceOf(AuthorizationError);
     // 年度が違うプロジェクト（FY2025）には取り込まない
@@ -230,8 +248,84 @@ describe('SSBJ 開示ドラフト → 開示プロジェクトの原稿', () => 
         source: 'ssbj',
         draftId: DRAFT_ID,
         projectId: IDS.projects.fy2025,
+        baseVersionId: null,
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('確認した後に別の版が保存された節・別の人が自動保存した節には取り込まない（黙って置き換え・破棄しない）', async () => {
+    pushSsbjDraft();
+    const first = await importDraftToProject(db, author(), {
+      source: 'ssbj',
+      draftId: DRAFT_ID,
+      projectId: IDS.projects.fy2026,
+      baseVersionId: null,
+    });
+    // 画面が見せた選択肢（版 1）
+    const [option] = (
+      await listDraftImportOptions(db, author(), { source: 'ssbj', periodId: PERIOD_IDS.fy2026 })
+    ).filter((o) => o.draftId === DRAFT_ID);
+    const shown = option!.targets[0]!.existingBlock!;
+    expect(shown.currentVersionId).toBe(first.version.id);
+
+    // その後に別の人が版 2 を保存した
+    await saveBlockVersion(db, colleague(), {
+      blockId: first.block.id,
+      baseVersionId: first.version.id,
+      body: {
+        paragraphs: [
+          { id: 'c1', kind: 'paragraph', children: [{ t: 'text', text: COLLEAGUE_TEXT }] },
+        ],
+      },
+      changeReason: '別の人の修正（架空）',
+    });
+    const stored = fixture.ssbjDisclosureDrafts.find((d) => d.id === DRAFT_ID)!;
+    stored.body = stored.body + '\n\n追記（架空）。';
+    await expect(
+      importDraftToProject(db, author(), {
+        source: 'ssbj',
+        draftId: DRAFT_ID,
+        projectId: IDS.projects.fy2026,
+        baseVersionId: shown.currentVersionId,
+        knownWorkingSavedAt: shown.workingSavedAt,
+      }),
+    ).rejects.toBeInstanceOf(BlockConflictError);
+    const afterConflict = fixture.disclosureBlocks.find((b) => b.id === first.block.id)!;
+    const v2 = fixture.disclosureBlockVersions.find(
+      (v) => v.id === afterConflict.currentVersionId,
+    )!;
+    expect(v2.versionNo).toBe(2);
+    expect(v2.plainText).toContain(COLLEAGUE_TEXT);
+
+    // 別の人が版 2 の上で作業中の本文を自動保存した（版になっていない）
+    const autosaved = await autosaveWorkingBody(db, colleague(), {
+      blockId: first.block.id,
+      baseVersionId: v2.id,
+      body: {
+        paragraphs: [
+          { id: 'c2', kind: 'paragraph', children: [{ t: 'text', text: WORKING_TEXT }] },
+        ],
+      },
+    });
+    expect(autosaved.status).toBe('saved');
+    const [reloaded] = (
+      await listDraftImportOptions(db, author(), { source: 'ssbj', periodId: PERIOD_IDS.fy2026 })
+    ).filter((o) => o.draftId === DRAFT_ID);
+    const target = reloaded!.targets[0]!;
+    expect(target.blockedReason).toBe(FOREIGN_WORKING_BODY_REASON);
+    await expect(
+      importDraftToProject(db, author(), {
+        source: 'ssbj',
+        draftId: DRAFT_ID,
+        projectId: IDS.projects.fy2026,
+        baseVersionId: target.existingBlock!.currentVersionId,
+        knownWorkingSavedAt: target.existingBlock!.workingSavedAt,
+      }),
+    ).rejects.toThrow(/ほかの人が自動保存した作業中の本文/);
+    // 別の人の作業中の本文は消えていない・版も増えていない
+    const block = fixture.disclosureBlocks.find((b) => b.id === first.block.id)!;
+    expect(JSON.stringify(block.workingBody)).toContain(WORKING_TEXT);
+    expect(block.currentVersionId).toBe(v2.id);
   });
 
   it('選択肢の読込は書かない', async () => {
@@ -263,6 +357,7 @@ describe('CSRD 節ドラフト → 開示プロジェクトの原稿', () => {
         source: 'csrd',
         draftId: draft.id,
         projectId: IDS.projects.fy2026,
+        baseVersionId: null,
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
@@ -287,6 +382,7 @@ describe('CSRD 節ドラフト → 開示プロジェクトの原稿', () => {
       source: 'csrd',
       draftId: draft.id,
       projectId: IDS.projects.fy2026,
+      baseVersionId: null,
     });
     expect(result.block.sectionKey).toBe('csrd_draft_esrs2');
     expect(result.block.frameworkVersionId).toBe(csrdVersion.id);

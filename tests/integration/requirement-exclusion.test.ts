@@ -16,6 +16,7 @@ import {
   type SaveProjectRequirementAssessmentInput,
 } from '@/lib/services/project-requirement-assessment';
 import {
+  RECORDER_CANNOT_APPROVE,
   decideExclusion,
   exclusionDecisionBlocker,
   listPendingExclusions,
@@ -24,7 +25,7 @@ import {
   withdrawExclusion,
   type ExclusionTargetInput,
 } from '@/lib/services/requirement-exclusion';
-import { loadSsbjRequirementDetail } from '@/lib/services/ssbj-gap';
+import { loadSsbjRequirementDetail, saveSsbjScope } from '@/lib/services/ssbj-gap';
 import { saveSsbjSettings } from '@/lib/services/ssbj-settings';
 import { WriteDetectingDbClient } from '../support/write-detecting-db';
 import type { AuthorizationContext, PermissionKey, RoleKey } from '@/types/domain';
@@ -284,6 +285,136 @@ describe('対象外・非重要の申請と承認（NF-02）', () => {
         (e) => e.event === 'approved' && e.itemId === S06.itemId,
       ),
     ).toHaveLength(0);
+  });
+
+  it('理由を記録した人は、承認の操作の前（exclusionDecisionBlocker）で止まる。差し戻すことはできる', async () => {
+    // 編集と承認の両方の権限を持つ人が理由を記録し、別の人が申請した
+    const dual = ctxFor('approver@demo.local', ['approver', 'reviewer']);
+    const s07: ExclusionTargetInput = {
+      source: 'project_assessment',
+      itemId: esrs40aSampleItemId('40A-S07'),
+      projectFrameworkId: PF_40A,
+    };
+    await saveProjectRequirementAssessment(
+      db,
+      dual,
+      input('40A-S07', {
+        applicability: 'not_applicable',
+        applicabilityReason: '（テスト）従業員の労働条件は別の開示で扱うため対象外と判断。',
+        disclosureCoverage: null,
+        dataCoverage: null,
+        processCoverage: null,
+      }),
+    );
+    await requestExclusion(db, author(), s07);
+    const status = await loadExclusionStatus(db, dual, s07);
+    expect(status.target.recorder).toBe(dual.userId);
+    expect(exclusionDecisionBlocker(dual, status)).toBe(RECORDER_CANNOT_APPROVE);
+    expect(exclusionDecisionBlocker(dual, status, 'returned')).toBeNull();
+    await expect(decideExclusion(db, dual, { ...s07, decision: 'approved' })).rejects.toThrow(
+      RECORDER_CANNOT_APPROVE,
+    );
+    const returned = await decideExclusion(db, dual, {
+      ...s07,
+      decision: 'returned',
+      note: '（テスト）別の開示の参照先を理由に書いてください。',
+    });
+    expect(returned.event).toBe('returned');
+  });
+
+  it('SSBJ の評価でも、理由を記録した人（評価の行を最後に更新した人）は承認できない', async () => {
+    const itemId = pendingSsbjExclusionItemId(fixture)!;
+    const target: ExclusionTargetInput = {
+      source: 'ssbj_assessment',
+      itemId,
+      reportingPeriodId: PERIOD_IDS.fy2026,
+    };
+    const assessment = fixture.ssbjAssessments.find(
+      (a) =>
+        a.organizationId === ORG_IDS.aomi &&
+        a.reportingPeriodId === PERIOD_IDS.fy2026 &&
+        a.itemId === itemId,
+    )!;
+    // 編集と承認の両方の権限を持つ人が理由を書き直し、別の人が申請した
+    const dual = ctxFor('approver@demo.local', ['approver', 'reviewer']);
+    const excludedByApplicability = assessment.applicability === 'not_applicable';
+    await saveSsbjScope(db, dual, {
+      assessmentId: assessment.id,
+      applicability: assessment.applicability,
+      applicabilityReason: excludedByApplicability
+        ? '（テスト）理由を承認者が書き直した。'
+        : assessment.applicabilityReason,
+      materiality: assessment.materiality,
+      materialityReason: excludedByApplicability
+        ? assessment.materialityReason
+        : '（テスト）理由を承認者が書き直した。',
+      ownerDepartment: assessment.ownerDepartment,
+    });
+    const requested = await requestExclusion(db, author(), target);
+    const status = await loadExclusionStatus(db, dual, target);
+    expect(status.target.recorder).toBe(dual.userId);
+    expect(exclusionDecisionBlocker(dual, status)).toBe(RECORDER_CANNOT_APPROVE);
+    await expect(decideExclusion(db, dual, { ...target, decision: 'approved' })).rejects.toThrow(
+      RECORDER_CANNOT_APPROVE,
+    );
+    // Cookie から戻すときも、理由を記録した人の承認は受け付けない（DB のトリガと同じ）
+    const forged = {
+      ...requested,
+      id: '7a1c0d6e-0000-4000-8000-00000000f003',
+      event: 'approved' as const,
+      actorUserId: dual.userId,
+      createdAt: new Date(Date.parse(requested.createdAt) + 1000).toISOString(),
+    };
+    expect(acceptedOnReplay('requirementExclusionEvents', forged)).toBe(false);
+    expect(
+      fixture.requirementExclusionEvents.filter(
+        (e) => e.itemId === itemId && e.event === 'approved' && e.actorUserId === dual.userId,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('差し戻した・取り下げた申請は、申請し直さずに承認できない（Cookie から戻すときも同じ）', async () => {
+    const forgedApproval = (after: { createdAt: string; reasonDigest: string }, id: string) => ({
+      ...fixture.requirementExclusionEvents.find((e) => e.itemId === S06.itemId)!,
+      id,
+      event: 'approved' as const,
+      note: '',
+      reasonDigest: after.reasonDigest,
+      actorUserId: userId('approver@demo.local'),
+      createdAt: new Date(Date.parse(after.createdAt) + 1000).toISOString(),
+    });
+    const returned = await decideExclusion(db, approver(), {
+      ...S06,
+      decision: 'returned',
+      note: '（テスト）水ストレスの評価の出典を理由に書いてください。',
+    });
+    await expect(decideExclusion(db, approver(), { ...S06, decision: 'approved' })).rejects.toThrow(
+      /承認待ちの申請がありません/,
+    );
+    expect(
+      acceptedOnReplay(
+        'requirementExclusionEvents',
+        forgedApproval(returned, '7a1c0d6e-0000-4000-8000-00000000f001'),
+      ),
+    ).toBe(false);
+
+    // 申請し直した後なら受け付ける
+    const again = await requestExclusion(db, reviewer(), S06);
+    expect(
+      acceptedOnReplay(
+        'requirementExclusionEvents',
+        forgedApproval(again, '7a1c0d6e-0000-4000-8000-00000000f002'),
+      ),
+    ).toBe(true);
+
+    // 取り下げた申請も承認できない
+    const withdrawn = await withdrawExclusion(db, reviewer(), S06);
+    expect(
+      acceptedOnReplay(
+        'requirementExclusionEvents',
+        forgedApproval(withdrawn, '7a1c0d6e-0000-4000-8000-00000000f004'),
+      ),
+    ).toBe(false);
   });
 
   it('編集の権限しか無い人は承認できない', async () => {

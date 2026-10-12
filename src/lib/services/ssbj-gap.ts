@@ -6,6 +6,8 @@ import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
 import { getReferenceDate } from '@/lib/clock';
 import { suggestMaterialityCategory } from '@/lib/domain/materiality-suggest';
 import {
+  APPLICABILITY_LABEL,
+  MATERIALITY_LABEL,
   areaOfSection,
   combineCoverage,
   coverageRate,
@@ -22,6 +24,7 @@ import {
   type DataCoverage,
 } from '@/lib/services/aggregation';
 import { ensureMetricAssignment } from '@/lib/services/collection-item';
+import { ssbjDecisionOf } from '@/lib/services/requirement-decisions';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
   AuthorizationContext,
@@ -33,6 +36,7 @@ import type {
   MaterialityLevel,
   MetricDefinition,
   ReportingPeriod,
+  RequirementExclusionEvent,
   SsbjActionPlan,
   SsbjActionStatus,
   SsbjActionType,
@@ -85,6 +89,12 @@ export interface SsbjRequirementView {
   missingMetrics: MetricDefinition[];
   /** 人工知能の分析を実行済みか */
   analyzed: boolean;
+  /**
+   * 対象外・非重要として承認済みか（理由があり、申請者・理由を記録した人と別の人が承認した。NF-02）。
+   * 整備度の分母から外すのはこれが true のときだけ。理由の無い・承認待ち・未申請の対象外は分母に残す
+   * （開示プロジェクトの要求事項タブ・対応表と同じ判断。requirement-decisions.ts の ssbjDecisionOf）
+   */
+  excluded: boolean;
 }
 
 export interface SsbjAreaSummary {
@@ -123,8 +133,11 @@ export interface SsbjOverview {
     mostlyCovered: number;
     partial: number;
     notCovered: number;
+    /** 対象外・非重要として承認済みの件数（分母から外す） */
     notMaterial: number;
     notApplicable: number;
+    /** 対象外・非重要と記録したが承認されていない件数（未判定として分母に残す） */
+    exclusionPending: number;
     awaitingReview: number;
     /**
      * 優先度「高」の件数。母集団は「評価対象（対象外・重要性なしを除く）かつ未対応
@@ -303,6 +316,8 @@ async function ensureAssessments(
     applicabilityReason: '',
     materiality: 'not_assessed',
     materialityReason: '',
+    // DB（0059）は利用者の JWT の書込で本人を入れる。同じ値にする
+    reasonRecordedBy: ctx.userId,
     disclosureStatus: 'unconfirmed',
     dataStatus: 'unconfirmed',
     processStatus: 'unconfirmed',
@@ -368,7 +383,49 @@ function buildView(
     dataCoverage: 'not_mapped',
     missingMetrics: [],
     analyzed: assessment.aiEvaluatedAt !== null,
+    excluded: false,
   };
+}
+
+/**
+ * 期間の SSBJ の評価の対象外・非重要の申請・承認の記録（要求事項ごと）。整備度の分母から外せるか
+ * （承認済みか）を、開示プロジェクトの要求事項タブと同じ関数（ssbjDecisionOf）で導くために読む
+ */
+async function ssbjExclusionEventsByItem(
+  db: DbClient,
+  organizationId: Uuid,
+  reportingPeriodId: Uuid,
+): Promise<Map<Uuid, RequirementExclusionEvent[]>> {
+  const events = await db.select('requirementExclusionEvents', {
+    where: { organizationId, reportingPeriodId, source: 'ssbj_assessment' },
+  });
+  const out = new Map<Uuid, RequirementExclusionEvent[]>();
+  for (const e of events) {
+    const list = out.get(e.itemId) ?? [];
+    list.push(e);
+    out.set(e.itemId, list);
+  }
+  return out;
+}
+
+/** 対象外・非重要として承認済み（分母から外す）か */
+function isApprovedExclusion(
+  assessment: SsbjAssessment,
+  eventsByItem: ReadonlyMap<Uuid, RequirementExclusionEvent[]>,
+): boolean {
+  if (assessment.applicability !== 'not_applicable' && assessment.materiality !== 'not_material') {
+    return false;
+  }
+  return ssbjDecisionOf(assessment, eventsByItem.get(assessment.itemId) ?? [], []).excluded;
+}
+
+/** 対象外・非重要と記録したが、承認されていない（未判定として分母に残す） */
+function isPendingExclusion(view: Pick<SsbjRequirementView, 'assessment' | 'excluded'>): boolean {
+  return (
+    !view.excluded &&
+    (view.assessment.applicability === 'not_applicable' ||
+      view.assessment.materiality === 'not_material')
+  );
 }
 
 /**
@@ -414,6 +471,11 @@ export async function loadSsbjRequirementViews(
   });
   const byItem = new Map(assessments.map((a) => [a.itemId, a]));
   const days = deadlineDays(period, options.referenceDate ?? getReferenceDate());
+  const exclusionEvents = await ssbjExclusionEventsByItem(
+    db,
+    ctx.workspace.organizationId,
+    period.id,
+  );
 
   // 要求事項が求める指標に、当期の値が実際にあるか（データとの紐づけ）。
   // 要求事項 → 指標の対応は disclosure_mappings が持つ。
@@ -457,6 +519,7 @@ export async function loadSsbjRequirementViews(
       view.dataCoverage = coverage;
       view.missingMetrics = missing;
       view.hasDataLink = coverage === 'full';
+      view.excluded = isApprovedExclusion(assessment, exclusionEvents);
       return view;
     })
     .filter((v): v is SsbjRequirementView => v !== null);
@@ -602,9 +665,18 @@ export async function loadSsbjScopeMapping(
     };
   });
 
-  const applicable = views.filter((v) => v.assessment.applicability === 'applicable');
-  const notApplicable = views.length - applicable.length;
-  const notMaterial = applicable.filter((v) => v.assessment.materiality === 'not_material').length;
+  // 対象外・非重要は承認済みのものだけを外す（承認待ち・未申請は未判定として評価対象に残す。NF-02）
+  const excludedNotApplicable = views.filter(
+    (v) => v.excluded && v.assessment.applicability === 'not_applicable',
+  );
+  const notApplicable = excludedNotApplicable.length;
+  const notMaterial = views.filter(
+    (v) =>
+      v.excluded &&
+      v.assessment.applicability !== 'not_applicable' &&
+      v.assessment.materiality === 'not_material',
+  ).length;
+  const applicable = views.filter((v) => !excludedNotApplicable.includes(v));
 
   const linkage = { document: 0, data: 0, none: 0, unanalyzed: 0 };
   for (const view of applicable) {
@@ -622,7 +694,7 @@ export async function loadSsbjScopeMapping(
       afterStandards: views.length,
       notApplicable,
       notMaterial,
-      inScope: applicable.length - notMaterial,
+      inScope: views.filter(isInScope).length,
     },
     rows,
     linkage,
@@ -698,10 +770,14 @@ export async function loadSsbjHeadline(
   const assessments = applicableItemIds ? all.filter((a) => applicableItemIds.has(a.itemId)) : all;
   if (assessments.length === 0) return null;
 
-  // 対象外・重要性なしは整備度の分母から外す（対応する必要が無いため）
-  const inScope = assessments.filter(
-    (a) => a.applicability === 'applicable' && a.materiality !== 'not_material',
+  // 対象外・重要性なしは、理由があり別の人が承認したものだけを整備度の分母から外す（NF-02。
+  // 承認待ち・未申請は未判定として分母に残す。全体状況・要求事項タブと同じ判断）
+  const exclusionEvents = await ssbjExclusionEventsByItem(
+    db,
+    ctx.workspace.organizationId,
+    period.id,
   );
+  const inScope = assessments.filter((a) => !isApprovedExclusion(a, exclusionEvents));
   const openCount = inScope.filter((a) => {
     const combined = combineCoverage(a.disclosureStatus, a.dataStatus, a.processStatus);
     return combined === 'not_covered' || combined === 'unconfirmed';
@@ -719,11 +795,12 @@ export async function loadSsbjHeadline(
 /** 全体状況画面に並べる優先ギャップの件数（表示の上限。件数の集計には使わない） */
 export const TOP_PRIORITY_LIMIT = 8;
 
-/** 評価対象（対象外・重要性なしを除く）か。整備度・優先度「高」の件数の母集団 */
-export function isInScope(view: SsbjRequirementView): boolean {
-  return (
-    view.assessment.applicability === 'applicable' && view.assessment.materiality !== 'not_material'
-  );
+/**
+ * 評価対象（承認済みの対象外・重要性なしを除く）か。整備度・優先度「高」の件数の母集団。
+ * 対象外・非重要と記録しただけ（承認待ち・未申請・理由なし）のものは評価対象に残す（NF-02）
+ */
+export function isInScope(view: Pick<SsbjRequirementView, 'excluded'>): boolean {
+  return !view.excluded;
 }
 
 /**
@@ -760,18 +837,21 @@ export async function loadSsbjOverview(
     notCovered: 0,
     notMaterial: 0,
     notApplicable: 0,
+    exclusionPending: 0,
     awaitingReview: 0,
     highPriority: views.filter(isOpenHighPriority).length,
   };
   for (const v of views) {
-    if (v.assessment.applicability === 'not_applicable') {
+    // 承認済みの対象外・非重要だけを分母から外す。承認されていないものは未判定として対応状況に数える
+    if (v.excluded && v.assessment.applicability === 'not_applicable') {
       counts.notApplicable += 1;
       continue;
     }
-    if (v.assessment.materiality === 'not_material') {
+    if (v.excluded) {
       counts.notMaterial += 1;
       continue;
     }
+    if (isPendingExclusion(v)) counts.exclusionPending += 1;
     // AI が判定したのに担当者がまだ確認していないもの
     if (v.assessment.aiStatus !== null && v.assessment.finalStatus === null) {
       counts.awaitingReview += 1;
@@ -906,6 +986,25 @@ export async function loadSsbjRequirementDetail(
 // 書き込み
 // ----------------------------------------------------------------------
 
+/** 適用区分・重要性とその理由が変わるか（理由を記録した人を入れ替えるか。DB の 0059 のトリガと同じ） */
+function reasonChanged(
+  before: Pick<
+    SsbjAssessment,
+    'applicability' | 'applicabilityReason' | 'materiality' | 'materialityReason'
+  >,
+  next: Pick<
+    SsbjAssessment,
+    'applicability' | 'applicabilityReason' | 'materiality' | 'materialityReason'
+  >,
+): boolean {
+  return (
+    before.applicability !== next.applicability ||
+    before.applicabilityReason !== next.applicabilityReason ||
+    before.materiality !== next.materiality ||
+    before.materialityReason !== next.materialityReason
+  );
+}
+
 async function findAssessment(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -942,11 +1041,16 @@ export async function saveSsbjScope(
     throw new ValidationError('重要性なしとする場合は、その理由を入力してください。');
   }
 
-  await db.update('ssbjAssessments', input.assessmentId, {
+  const next = {
     applicability: input.applicability,
     applicabilityReason: input.applicabilityReason.trim(),
     materiality: input.materiality,
     materialityReason: input.materialityReason.trim(),
+  };
+  await db.update('ssbjAssessments', input.assessmentId, {
+    ...next,
+    // 区分・理由を変えた人が「理由を記録した人」（対象外・非重要の承認者になれない。DB の 0059 と同じ）
+    reasonRecordedBy: reasonChanged(before, next) ? ctx.userId : before.reasonRecordedBy,
     ownerDepartment: input.ownerDepartment.trim(),
     updatedAt: new Date().toISOString(),
     updatedBy: ctx.userId,
@@ -956,8 +1060,8 @@ export async function saveSsbjScope(
     eventType: 'data_updated',
     resourceType: 'ssbj_assessment',
     resourceId: input.assessmentId,
-    beforeSummary: `適用区分 ${before.applicability} / 重要性 ${before.materiality}`,
-    afterSummary: `適用区分 ${input.applicability} / 重要性 ${input.materiality}`,
+    beforeSummary: `適用区分 ${APPLICABILITY_LABEL[before.applicability]} / 重要性 ${MATERIALITY_LABEL[before.materiality]}`,
+    afterSummary: `適用区分 ${APPLICABILITY_LABEL[input.applicability]} / 重要性 ${MATERIALITY_LABEL[input.materiality]}`,
     metadata: {
       applicabilityReason: input.applicabilityReason,
       materialityReason: input.materialityReason,
@@ -1484,6 +1588,8 @@ export async function carryOverSsbjAssessments(
       applicabilityReason: prev.applicabilityReason,
       materiality: prev.materiality,
       materialityReason: prev.materialityReason,
+      // 引き継いだ人が今年度の判断（理由）を記録した人になる（DB の 0059 と同じ）
+      reasonRecordedBy: reasonChanged(assessment, prev) ? ctx.userId : assessment.reasonRecordedBy,
       disclosureStatus: prev.disclosureStatus,
       dataStatus: prev.dataStatus,
       processStatus: prev.processStatus,

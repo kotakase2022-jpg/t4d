@@ -41,6 +41,7 @@ import {
 import {
   MISMATCH_KIND_LABELS,
   reconciledCountsText,
+  reconciliationOutcomeOf,
   reconciliationStateOf,
 } from '@/lib/domain/export-reconciliation';
 import { diffSnapshots } from '@/lib/domain/snapshot-diff';
@@ -565,6 +566,14 @@ export async function OutputsTab({
       reconciliationMissing = true;
     }
   }
+  // 不一致 0 件でも、照合した段落・数値・行が無ければ「一致」とは示さない
+  const selectedOutcome = selectedReconciliation
+    ? reconciliationOutcomeOf(selectedReconciliation.mismatchCount, {
+        paragraphs: selectedReconciliation.paragraphsChecked,
+        numbers: selectedReconciliation.numbersChecked,
+        rows: selectedReconciliation.rowsChecked,
+      })
+    : null;
 
   // 外部で編集したファイルの照合（作成パネルと同じ置き場所。?reconcile=1&rs=<スナップショット>）
   const reconcileOpen = canExport && isCreatePanelOpen(searchParams, 'reconcile');
@@ -795,13 +804,12 @@ export async function OutputsTab({
           {selectedReconciliation ? (
             <div className="space-y-1.5" data-testid="reconciliation-result">
               <p className="flex flex-wrap items-center gap-1.5 text-small text-ink">
-                <StatusBadge
-                  domain="reconciliation"
-                  value={selectedReconciliation.mismatchCount === 0 ? 'matched' : 'mismatched'}
-                />
-                {selectedReconciliation.mismatchCount === 0
+                <StatusBadge domain="reconciliation" value={selectedOutcome!} />
+                {selectedOutcome === 'matched'
                   ? '承認版と一致しました'
-                  : `不一致 ${selectedReconciliation.mismatchCount} 件`}
+                  : selectedOutcome === 'nothing_checked'
+                    ? '照合する段落・数値・行がありませんでした（一致の判定はしていません）'
+                    : `不一致 ${selectedReconciliation.mismatchCount} 件`}
                 <span className="text-caption text-ink-muted">
                   （
                   {reconciledCountsText({
@@ -1349,7 +1357,11 @@ export async function OutputsTab({
                       <span className="inline-flex flex-wrap items-center gap-1">
                         <StatusBadge
                           domain="reconciliation"
-                          value={r.mismatchCount === 0 ? 'matched' : 'mismatched'}
+                          value={reconciliationOutcomeOf(r.mismatchCount, {
+                            paragraphs: r.paragraphsChecked,
+                            numbers: r.numbersChecked,
+                            rows: r.rowsChecked,
+                          })}
                         />
                         {r.mismatchCount > 0 && (
                           <span className="text-caption text-ink-muted">{r.mismatchCount} 件</span>

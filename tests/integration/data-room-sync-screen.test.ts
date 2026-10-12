@@ -17,6 +17,7 @@ import {
   DATA_ROOM_VIEW_RESOURCE,
   listDataRoomDataPoints,
   loadDataRoom,
+  previousSessionViewAt,
   recordDataRoomView,
 } from '@/lib/services/assurance';
 import { listSharedDataPoints } from '@/lib/services/data-room-sync';
@@ -249,9 +250,44 @@ describe('Data Room の閲覧記録（NF-26。1 画面 1 件・要約だけ）',
     expect(event.afterSummary).toBe('Data Room を表示（非財務データ 12 件・開示レポート 1 件）');
     expect(event.metadata).toEqual({});
 
+    // 続けて表示した（検索・絞込・ページ送り・再読込）記録は同じ閲覧。「前回」を数秒前の自分の表示にしない
     const second = await recordDataRoomView(db, manager(), ENG, { dataPoints: 12, reports: 1 });
-    expect(second.previousViewedAt).toBe(event.createdAt);
+    expect(second.previousViewedAt).toBeNull();
     expect(viewed()).toHaveLength(2);
+
+    // 前の閲覧（2 時間前）があれば、それが「前回表示」。同じ閲覧の中で何度表示しても変わらない
+    const earlier = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    fixture.auditEvents.push({
+      ...event,
+      id: '7a1c0d6e-0000-4000-8000-0000000d0001',
+      createdAt: earlier,
+    });
+    const third = await recordDataRoomView(db, manager(), ENG, { dataPoints: 12, reports: 1 });
+    expect(third.previousViewedAt).toBe(earlier);
+    const fourth = await recordDataRoomView(db, manager(), ENG, { dataPoints: 12, reports: 1 });
+    expect(fourth.previousViewedAt).toBe(earlier);
+  });
+
+  it('前回の閲覧: 間が 30 分以内で続く表示を 1 回の閲覧にまとめ、その前の閲覧の最後の時刻を返す', () => {
+    const now = '2026-10-12T10:00:00.000Z';
+    expect(previousSessionViewAt([], now)).toBeNull();
+    // 5 分おきに続く表示（今回の閲覧）と、前日の閲覧の最後
+    expect(
+      previousSessionViewAt(
+        [
+          '2026-10-12T09:55:00.000Z',
+          '2026-10-12T09:50:00.000Z',
+          '2026-10-12T09:25:00.000Z',
+          '2026-10-11T17:00:00.000Z',
+          '2026-10-11T16:50:00.000Z',
+        ],
+        now,
+      ),
+    ).toBe('2026-10-11T17:00:00.000Z');
+    // 最後の表示から 30 分を超えて空いていれば、それが前回
+    expect(previousSessionViewAt(['2026-10-12T09:00:00.000Z'], now)).toBe(
+      '2026-10-12T09:00:00.000Z',
+    );
   });
 
   it('前回の表示日時は本人の記録だけから取る（他の人の閲覧で変わらない）', async () => {

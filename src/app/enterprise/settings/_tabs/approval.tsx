@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Route } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { Notice } from '@/components/shared/notice';
 import { Section } from '@/components/shared/section';
@@ -42,7 +43,8 @@ export const APPROVAL_TEMPLATES = {
   three: {
     name: '3 段階の承認（標準）',
     purpose: 'default',
-    isDefault: true,
+    // 既定には入れない（ひな形を保存しただけで、これからの提出の経路を変えない。既定にするのは人が選ぶ）
+    isDefault: false,
     description: '拠点・部署の確認 → 本社の確認 → 最終承認 の 3 段階（ひな形から作成）',
     stages: [
       { name: '拠点・部署の確認', role: 'reviewer', department: '' },
@@ -265,7 +267,7 @@ function ApprovalRouteEditor({ values }: { values: EditorValues }) {
           閉じる
         </Link>
       </div>
-      <form id={FORM_ID} action={saveApprovalRouteAction} className="space-y-3 px-3 py-3">
+      <PreservingForm id={FORM_ID} action={saveApprovalRouteAction} className="space-y-3 px-3 py-3">
         {values.routeId && <input type="hidden" name="routeId" value={values.routeId} />}
         <FormSection title="経路" kind="required">
           <div className="grid gap-2 md:grid-cols-2">
@@ -404,7 +406,7 @@ function ApprovalRouteEditor({ values }: { values: EditorValues }) {
             キャンセル
           </Link>
         </div>
-      </form>
+      </PreservingForm>
     </section>
   );
 }

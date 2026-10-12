@@ -193,7 +193,7 @@ export async function createInvitation(
     eventType: 'data_created',
     resourceType: 'invitation',
     resourceId: invitation.id,
-    afterSummary: `メンバーを招待（アプリ内リンク発行・メール送信なし）: ロール ${roleKeys.join(',')}／${scopeSummary(unitScopeIds)}`,
+    afterSummary: `メンバーを招待（アプリ内リンク発行・メール送信なし）: 役割 ${roleKeys.map(roleLabel).join('・')}／${scopeSummary(unitScopeIds)}`,
   });
   return invitation;
 }

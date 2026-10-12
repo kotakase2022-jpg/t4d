@@ -24,7 +24,6 @@ import {
 import { REQUIREMENT_COVERAGE_CATEGORIES } from '@/lib/domain/requirement-coverage';
 import { daysUntilJst, formatJst, formatJstDate, isOverdue } from '@/lib/format/datetime';
 import { listProjectBlocks, type ManuscriptRow } from '@/lib/services/disclosure-block';
-import { detectFileUpdates } from '@/lib/services/disclosure-recheck';
 import {
   canCreateStatutoryPackage,
   getProject,
@@ -146,19 +145,11 @@ export async function OverviewTab({
   const { db, ctx } = await loadEnterpriseShell();
   const detail = await getProject(db, ctx, projectId);
   const project = detail.project;
-  const [summaries, manuscripts, reviews, transcription, fileUpdated] = await Promise.all([
+  const [summaries, manuscripts, reviews, transcription] = await Promise.all([
     summarizeProject(db, ctx, detail),
     listProjectBlocks(db, ctx, projectId).catch(() => null),
     listProjectReviews(db, ctx, projectId).catch(() => [] as ReviewListItem[]),
     loadTranscriptionCheck(db, ctx, { projectId }).catch(() => null),
-    // 資料の新版（引用位置の版より新しい版がある節。NF-16）。読めなければ数えない
-    Promise.all(
-      detail.blocks.map((block) =>
-        detectFileUpdates(db, ctx, block)
-          .then((items) => (items.length > 0 ? block.id : null))
-          .catch(() => null),
-      ),
-    ),
   ]);
   const packageCheck = canCreateStatutoryPackage({
     purposes: project.purposes,
@@ -179,14 +170,6 @@ export async function OverviewTab({
     const days = daysUntilJst(row.dueDate, today);
     return days !== null && days >= 0 && days <= DUE_SOON_DAYS;
   }).length;
-
-  // 上流の変更（数値・定性情報の新版・根拠の失効・資料の新版）で再確認が必要な節（NF-16。導出・保存しない）
-  const upstreamBlockIds = new Set([
-    ...rows
-      .filter((row) => row.freshness === 'upstream_updated' || row.freshness === 'evidence_invalid')
-      .map((row) => row.id),
-    ...fileUpdated.filter((id): id is string => id !== null),
-  ]);
 
   const attention: AttentionItem[] = [
     {
@@ -221,10 +204,12 @@ export async function OverviewTab({
       semantic: 'blocked',
     },
     {
+      // 上流の変更（数値・定性情報の新版・根拠の失効・資料の新版）で再確認が必要な節（NF-16。導出・保存しない）。
+      // 行き先は同じ集合・同じ単位（節）の原稿タブの絞り込み（件数と一覧を食い違わせない）
       key: 'upstream-recheck',
       label: '上流の変更で再確認が必要な節',
-      count: upstreamBlockIds.size,
-      href: `${base}?tab=requirements&filter=recheck`,
+      count: manuscripts?.counts.upstream ?? 0,
+      href: manuscriptsHref('upstream'),
       semantic: 'blocked',
     },
     {

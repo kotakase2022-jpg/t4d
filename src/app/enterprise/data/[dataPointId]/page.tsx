@@ -84,7 +84,13 @@ import {
   ValidationStatusBadge,
 } from '../_components/data-badges';
 import { ApprovedValueSaveConfirm } from './approved-value-confirm';
-import { confirmedMappings, usageItemCount, usageSummaryText, visibleMappedItems } from './usage';
+import {
+  confirmedMappings,
+  usageItemCount,
+  usageSectionTitle,
+  usageSummaryText,
+  visibleMappedItems,
+} from './usage';
 
 /**
  * タブの題名は「{指標} — {組織}」（plan S3）。題名の決定で画面を落とさない（権限外・見つからないときは既定の名前）
@@ -667,13 +673,18 @@ export default async function DataPointDetailPage({
                   // 承認済みの値の修正は、保存の前に影響を確かめる（NF-16。上書きの確認）
                   <div className="space-y-1">
                     <p className="text-caption text-ink-muted">
-                      承認済みの値です。保存の前に影響（{usageSummaryText(usage.counts)}
+                      承認済みの値です。保存の前に影響（
+                      {usageSummaryText(usage.counts, {
+                        disclosureHidden: usage.disclosureHidden,
+                      })}
                       ）を確認します。
                     </p>
                     <ApprovedValueSaveConfirm
                       formId="dp-value-form"
                       scope={scopeLine}
-                      impact={usageSummaryText(usage.counts)}
+                      impact={usageSummaryText(usage.counts, {
+                        disclosureHidden: usage.disclosureHidden,
+                      })}
                       variant={valueSaveIsPrimary ? 'primary' : 'secondary'}
                     />
                   </div>
@@ -1238,12 +1249,13 @@ function PreviousValue({
  */
 function DataPointUsageSection({ usage }: { usage: DataPointUsage }) {
   const count = usageItemCount(usage);
+  // 開示の閲覧権限が無い人には件数（0）を出さず、理由は折りたたまずに見せる（section.tsx の規則）
   return (
     <Section
       id="data-usage"
-      collapsible
-      title={`この数値を使っている原稿・レポート（${count}）`}
-      summary={usageSummaryText(usage.counts)}
+      collapsible={!usage.disclosureHidden}
+      title={usageSectionTitle('数値', count, usage.disclosureHidden)}
+      summary={usageSummaryText(usage.counts, { disclosureHidden: usage.disclosureHidden })}
     >
       {usage.disclosureHidden ? (
         <p className="flex items-start gap-1 text-small text-ink-muted">

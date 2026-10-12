@@ -126,6 +126,24 @@ describe('承認版どうしの差分', () => {
     expect(diff.blocks.every((x) => x.kind === 'unchanged')).toBe(true);
     expect(diff.from.snapshotNo).toBe(1);
     expect(diff.to.snapshotNo).toBe(2);
+    expect(diff.summary.decisionsComparable).toBe(true);
+  });
+
+  it('片方が判断の状態を固定していない（以前の形式）なら、判断は比べられないとし「違いなし」と言わない', () => {
+    const v1 = snapshot({ frameworkVersions: [framework({ requirementState: undefined })] });
+    const v2 = snapshot({ id: 's-2', snapshotNo: 2 });
+    for (const [from, to] of [
+      [v1, v2],
+      [v2, v1],
+    ] as const) {
+      const diff = diffSnapshots(from, to);
+      expect(diff.summary.decisionsComparable).toBe(false);
+      expect(diff.summary.identical).toBe(false);
+      // 本文・数値・要求事項の付け替えの違いは無い
+      expect(diff.blocks.every((x) => x.kind === 'unchanged')).toBe(true);
+      expect(diff.metrics).toEqual([]);
+      expect(diff.requirements).toEqual([]);
+    }
   });
 
   it('段落の文字差分（変更・追加・削除）を節ごとに出す', () => {

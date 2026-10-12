@@ -44,6 +44,9 @@ function persistedColumns(
   if (isCompactedTable(table)) return compactRow(table, record, db);
   if (table === 'disclosureBlocks') return withoutWorkingBody(record);
   if (isDisclosureReviewNotification(table, row)) return { ...record, body: '' };
+  if (table === 'aiRuns' && record.featureType === 'requirementMappingSuggestion') {
+    return withFirstInputReference(record);
+  }
   if (table !== 'aiRuns' || !OUTPUT_NOT_REREAD.has(String(record.featureType))) return record;
   if (REFERENCES_NOT_REREAD.has(String(record.featureType))) {
     return { ...record, outputJson: {}, sourceReferences: [], inputReferenceIds: [] };
@@ -60,6 +63,9 @@ const OUTPUT_NOT_REREAD: ReadonlySet<string> = new Set([
   'importMapping',
   'csrdGapAnalysis',
   'csrdDisclosureDraft',
+  // XBRL の対応付けの候補は、出力を対応付けの候補の行（origin=ai_adopted）へ写し終えている。
+  // 画面が実行から読むのは提供元（provider）だけ（xbrl-tagging.ts の aiProvider）
+  'xbrlTagSuggestion',
 ]);
 
 /**
@@ -72,7 +78,21 @@ const OUTPUT_NOT_REREAD: ReadonlySet<string> = new Set([
 const REFERENCES_NOT_REREAD: ReadonlySet<string> = new Set([
   'csrdGapAnalysis',
   'csrdDisclosureDraft',
+  'xbrlTagSuggestion',
 ]);
+
+/**
+ * 要求事項の対応付けの候補（requirementMappingSuggestion）は、入力の参照の先頭（対象の節・要求事項・
+ * 定性情報の版）だけを読み直す（block-requirements.ts・crosswalk.ts・narrative-requirement-links.ts）。
+ * 2 番目以降は候補を探した要求事項の一覧（最大 49 件・約 2KB）で、読み直さない。1 回の操作で実演の流れの
+ * 前半を押し出さないよう、Cookie では先頭だけにする（候補 outputJson.candidates は採用の検査に使うため残す）
+ */
+function withFirstInputReference(record: Record<string, unknown>): Record<string, unknown> {
+  const refs = Array.isArray(record.inputReferenceIds)
+    ? (record.inputReferenceIds as unknown[])
+    : [];
+  return { ...record, inputReferenceIds: refs.slice(0, 1) };
+}
 
 /**
  * 節の自動保存本文（workingBody）は Cookie へ載せない。

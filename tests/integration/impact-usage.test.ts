@@ -6,6 +6,7 @@ import { fid } from '@/lib/fixtures/ids';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { detectFileUpdates, FILE_UPDATE_DEFAULT_DECISION } from '@/lib/services/disclosure-recheck';
+import { listProjectBlocks } from '@/lib/services/disclosure-block';
 import { buildRequirementRows, getProject } from '@/lib/services/disclosure-project';
 import { listDataPointUsage, listDerivedAttention, listFileUsage } from '@/lib/services/impact';
 import { WriteDetectingDbClient } from '../support/write-detecting-db';
@@ -193,6 +194,29 @@ describe('資料の新版（P1）', () => {
     expect(attention?.reasons).toContain('file_updated');
     const usageAfter = await listFileUsage(db, author(), fileId);
     expect(usageAfter.blocks.find((b) => b.blockId === GOVERNANCE)!.upToDate).toBe(false);
+  });
+
+  it('概要の「上流の変更で再確認が必要な節」は、行き先の原稿タブの絞り込みと同じ節の集合・件数', async () => {
+    const { version, fileId } = committeeFile();
+    const block = fixture.disclosureBlocks.find((b) => b.id === GOVERNANCE)!;
+    const before = await listProjectBlocks(db, author(), block.projectId, 'upstream');
+    expect(before.rows.map((r) => r.id)).not.toContain(GOVERNANCE);
+
+    fixture.fileVersions.push({
+      ...version,
+      id: fid('file_version', `${fileId}/impact-test/manuscripts`),
+      versionNo: version.versionNo + 1,
+      sha256: 'e'.repeat(64),
+      createdAt: new Date().toISOString(),
+    });
+    const after = await listProjectBlocks(db, author(), block.projectId, 'upstream');
+    // 資料の新版の節が、原稿タブの「上流の変更」の絞り込みに出る（件数＝一覧の行数）
+    expect(after.rows.map((r) => r.id)).toContain(GOVERNANCE);
+    expect(after.counts.upstream).toBe(after.rows.length);
+    expect(after.rows.find((r) => r.id === GOVERNANCE)!.fileUpdated).toBe(true);
+    // 数値・定性情報の新版の節（再確認が必要）は、上流の変更にも含まれる
+    const recheck = await listProjectBlocks(db, author(), block.projectId, 'recheck');
+    expect(recheck.rows.every((r) => after.rows.some((u) => u.id === r.id))).toBe(true);
   });
 
   it('要求事項タブの「要再確認」も資料の新版を数える（概要のチップと同じ集合。区分は変えない）', async () => {

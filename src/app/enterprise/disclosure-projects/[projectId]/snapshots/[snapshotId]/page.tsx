@@ -639,6 +639,27 @@ function TraceDetail({ detail, projectId }: { detail: TraceUnitDetail; projectId
                   </li>
                 )),
               )}
+              {/* 根拠を持つ定性情報（段落が引用した定性情報の版の根拠。定性情報の行の「根拠あり」と同じもの） */}
+              {detail.narratives
+                .filter((n) => n.hasEvidence)
+                .map((n) => (
+                  <li key={`narrative-${n.versionId}`}>
+                    {n.recordId ? (
+                      <Link
+                        href={`/enterprise/narratives/${n.recordId}`}
+                        className="inline-flex items-center gap-1 text-brand-800 underline"
+                      >
+                        <FileSearch className="size-3" aria-hidden="true" />
+                        定性情報「{n.title}」の根拠
+                      </Link>
+                    ) : (
+                      <>定性情報「{n.title}」の根拠</>
+                    )}
+                    <span className="text-caption text-ink-muted">
+                      （版 {n.versionNo ?? '—'}。根拠は定性情報の版に記録）
+                    </span>
+                  </li>
+                ))}
             </ul>
           )}
         </DetailRow>

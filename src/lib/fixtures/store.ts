@@ -1442,6 +1442,7 @@ export function createFixtureDb(): FixtureDb {
         materialityReason: notMaterial
           ? '当社は資産運用・商業銀行・保険のいずれの活動も行っていないため、重要性なしと判断しました。'
           : '',
+        reasonRecordedBy: owner,
         disclosureStatus: disclosure,
         dataStatus: data,
         processStatus: process,

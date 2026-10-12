@@ -6,7 +6,7 @@ import { fid } from '@/lib/fixtures/ids';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { addMaterialityTopic, assessMaterialityTopic } from '@/lib/services/materiality';
-import { buildSsbjDocxSections } from '@/lib/services/disclosure';
+import { buildSsbjDocxSections, loadDisclosureWorkspace } from '@/lib/services/disclosure';
 import {
   loadSsbjOverview,
   loadSsbjRequirementViews,
@@ -213,5 +213,37 @@ describe('SSBJ の基準の版の固定', () => {
     expect(overview.paragraphs).toContain(
       `対象年度×基準版: ${ssbjVersionStamp(fy2026.label, resolved)}`,
     );
+  });
+
+  it('版を切り替えると、Word の「基準」と定量指標・SSBJ の出力の要求事項も固定した版になる（1 つの文書で 2 つの版を名乗らない）', async () => {
+    await confirmFy2026();
+    publishNewSsbjVersion();
+    await pinSsbjFrameworkVersion(db, manager(), {
+      reportingPeriodId: PERIOD_IDS.fy2026,
+      frameworkVersionId: SSBJ_2027,
+    });
+    const fy2026 = period(PERIOD_IDS.fy2026);
+    const periods = fixture.periods.filter((p) => p.organizationId === ORG_IDS.aomi);
+    const built = (await buildSsbjDocxSections(db, manager(), fy2026, periods, metrics()))!;
+    const overview = built.sections.find((s) => s.heading === '概要')!;
+    const standard = overview.paragraphs.find((p) => p.startsWith('基準: '))!;
+    expect(standard).toContain('SSBJ 2027 テスト版（架空）');
+    expect(overview.paragraphs.some((p) => p.startsWith('基準: SSBJ 2026'))).toBe(false);
+    expect(overview.paragraphs).toContain(
+      `対象年度×基準版: ${fy2026.label} × SSBJ 2027 テスト版（架空）（設定で固定）`,
+    );
+    // 定量指標（出力の行）も固定した版の要求事項から作る
+    const workspace = (await loadDisclosureWorkspace(
+      db,
+      manager(),
+      'ssbj',
+      fy2026,
+      periods,
+      metrics(),
+    ))!;
+    expect(workspace.version.id).toBe(SSBJ_2027);
+    expect(workspace.periodVersionId).toBe(SSBJ_2027);
+    expect(workspace.rows.every((r) => r.item.frameworkVersionId === SSBJ_2027)).toBe(true);
+    expect(workspace.rows.some((r) => r.item.code === NEW_CODE)).toBe(true);
   });
 });

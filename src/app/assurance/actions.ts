@@ -11,6 +11,8 @@ import {
   AuthorizationError,
   NotFoundError,
 } from '@/lib/authorization/can';
+import { runPreservingAction } from '@/lib/errors/form-action';
+import type { FormActionState } from '@/lib/errors/form-action-state';
 import { ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
 import { getDb } from '@/lib/repositories';
@@ -654,14 +656,21 @@ function reportNoteTargetOf(value: FormDataEntryValue | null): ReportNoteTarget 
   throw new ValidationError('コメントの対象（段落・数値）を選んでください。');
 }
 
-/** 保証側: 共有された開示レポートの段落・数値にコメントを起票する（既定は法人内部限定） */
-export async function createReportNoteAction(formData: FormData): Promise<void> {
+/**
+ * 保証側: 共有された開示レポートの段落・数値にコメントを起票する（既定は法人内部限定）。
+ * 断られたとき（共有の取り下げ・権限など）は書いた本文を残したまま理由をフォームに示す
+ * （PreservingForm。?error= で戻すと本文が消えるため）
+ */
+export async function createReportNoteAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   const engagementId = String(formData.get('engagementId') ?? '');
   const copyId = String(formData.get('copyId') ?? '');
   const unit = traceParam(formData.get('unit'));
   const path = engagementId && copyId ? reportPath(engagementId, copyId) : '/assurance/engagements';
   const unitQuery = unit ? `&unit=${unit}` : '';
-  await withUserFacingError(`${path}?new=1${unitQuery}`, async () => {
+  const failure = await runPreservingAction(formData, async () => {
     const ctx = await requireAssuranceContext();
     const db = await getDb();
     await createReportNote(db, ctx, {
@@ -677,6 +686,7 @@ export async function createReportNoteAction(formData: FormData): Promise<void> 
     revalidatePath(`${base(engagementId)}/review-notes`);
     revalidatePath('/enterprise/assurance-comments');
   });
+  if (failure) return failure;
   redirect(`${path}?result=note-created${unitQuery}`);
 }
 

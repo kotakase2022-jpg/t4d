@@ -238,6 +238,19 @@ describe('保証側のコメントと企業の回答', () => {
       const other = replay([editOf('sharedReportCopies', copy), editOf('reviewNotes', forged)]);
       expect(other.reviewNotes.some((n) => n.id === note.id)).toBe(false);
     }
+    // 企業の開示デモのリセットで写しが消えても、保証側のコメントは監査法人の記録として戻る
+    const dangling = replay([editOf('reviewNotes', note)]);
+    expect(dangling.reviewNotes.some((n) => n.id === note.id)).toBe(true);
+    // 写しが無くても、書き手の検査（案件のメンバー・権限）は同じ
+    const danglingForged = replay([
+      editOf('reviewNotes', {
+        ...note,
+        raisedBy: SITE_USER,
+        createdBy: SITE_USER,
+        updatedBy: SITE_USER,
+      }),
+    ]);
+    expect(danglingForged.reviewNotes.some((n) => n.id === note.id)).toBe(false);
     const hidden = replay([
       editOf('sharedReportCopies', copy),
       editOf('reviewNotes', { ...note, sharedWithClient: false }),
@@ -390,6 +403,79 @@ describe('架空メンバー・XBRL・評価の記録', () => {
     expect(result.xbrlTagMappings.find((m) => m.id === candidate.id)?.status).toBe(
       other === APPROVER ? 'confirmed' : 'candidate',
     );
+  });
+
+  it('XBRL の対応付けは本人の名義の候補として作る。最後に変えた人・内容の変更と同時の確定は戻さない（0059 と同じ）', () => {
+    const candidate = source.xbrlTagMappings.find(
+      (m) => m.id === TRIAL_XBRL_MAPPING_IDS.scope2Candidate,
+    )!;
+    const fresh = (overrides: Partial<typeof candidate>) => ({
+      ...candidate,
+      id: fid('xbrl_tag_mapping', `test/${JSON.stringify(overrides)}`),
+      origin: 'human' as const,
+      aiRunId: null,
+      confirmedBy: null,
+      confirmedAt: null,
+      createdBy: APPROVER,
+      updatedBy: APPROVER,
+      ...overrides,
+    });
+    const has = (db: FixtureDb, id: string) => db.xbrlTagMappings.some((m) => m.id === id);
+    // 別の人を作成者にして、作成と同時に自分で確定した行
+    const forged = fresh({
+      status: 'confirmed',
+      createdBy: AUTHOR,
+      confirmedBy: APPROVER,
+      confirmedAt: '2026-10-06T00:00:00.000Z',
+    });
+    expect(has(replay([editOf('xbrlTagMappings', forged)]), forged.id)).toBe(false);
+    // 作成者が空の候補
+    const anonymous = fresh({ status: 'candidate', createdBy: null });
+    expect(has(replay([editOf('xbrlTagMappings', anonymous)]), anonymous.id)).toBe(false);
+    // 本人の名義の候補は戻る
+    const own = fresh({ status: 'candidate', createdBy: AUTHOR, updatedBy: AUTHOR });
+    expect(has(replay([editOf('xbrlTagMappings', own)]), own.id)).toBe(true);
+
+    // 承認者が内容を変えてから確定する（最後に変えた人）・内容の変更と確定を同時に行う
+    const edited = { ...own, decimals: 3, updatedBy: APPROVER };
+    const confirmEdited = {
+      ...edited,
+      status: 'confirmed' as const,
+      confirmedBy: APPROVER,
+      confirmedAt: '2026-10-06T00:00:00.000Z',
+    };
+    const afterEdit = replay([
+      editOf('xbrlTagMappings', own),
+      editOf('xbrlTagMappings', edited),
+      editOf('xbrlTagMappings', confirmEdited),
+    ]);
+    expect(afterEdit.xbrlTagMappings.find((m) => m.id === own.id)?.status).toBe('candidate');
+    const confirmWithChange = {
+      ...own,
+      decimals: 4,
+      status: 'confirmed' as const,
+      confirmedBy: APPROVER,
+      confirmedAt: '2026-10-06T00:00:00.000Z',
+      updatedBy: APPROVER,
+    };
+    const changed = replay([
+      editOf('xbrlTagMappings', own),
+      editOf('xbrlTagMappings', confirmWithChange),
+    ]);
+    expect(changed.xbrlTagMappings.find((m) => m.id === own.id)?.status).toBe('candidate');
+    // 作った人・最後に変えた人と別の承認者が確定の列だけを変えれば戻る
+    const confirmOnly = {
+      ...own,
+      status: 'confirmed' as const,
+      confirmedBy: APPROVER,
+      confirmedAt: '2026-10-06T00:00:00.000Z',
+      updatedBy: APPROVER,
+    };
+    const confirmed = replay([
+      editOf('xbrlTagMappings', own),
+      editOf('xbrlTagMappings', confirmOnly),
+    ]);
+    expect(confirmed.xbrlTagMappings.find((m) => m.id === own.id)?.status).toBe('confirmed');
   });
 
   it('AI の不採用の理由・フィードバックの件名は上限まで。トリアージは管理者だけ', () => {

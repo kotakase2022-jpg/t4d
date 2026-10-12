@@ -61,12 +61,14 @@ export default async function SignoffsPage({
   const [reportRows, reportAttention, allCopies] = await Promise.all([
     can(ctx, 'assurance.engagement.read') ? loadSharedReportList(db, ctx, engagementId) : [],
     loadSignoffReportAttention(db, ctx, engagementId),
-    db.select('sharedReportCopies', { where: { engagementId } }),
+    // 保証側が読めるのは共有中の写しだけ（取り下げた写しは DB の SELECT ポリシーでも返らない）
+    db.select('sharedReportCopies', { where: { engagementId, withdrawnAt: { isNull: true } } }),
   ]);
   const linkable = reportRows.filter((row) => row.integrityOk);
   const reportLabelOf = (copyId: string): string => {
     const copy = allCopies.find((c) => c.id === copyId);
     const content = copy ? parseSharedReportCopy(copy.copy) : null;
+    if (!copy) return '（企業が共有を取り下げた写し）';
     return content ? sharedReportLabel(content) : '（写しを読めません）';
   };
   const profileIds = [...new Set(signoffs.map((s) => s.userId))];

@@ -106,6 +106,16 @@ export interface RouteStageInput {
   department: string;
 }
 
+/** 保存しようとする段階が、今の段階と同じ中身か（そのまま使えるか） */
+function sameStage(current: ApprovalRouteStage, next: RouteStageInput): boolean {
+  return (
+    current.name === next.name.trim() &&
+    current.approverRole === next.approverRole.trim() &&
+    (current.approverUserId ?? null) === (next.approverUserId ?? null) &&
+    current.department === next.department.trim()
+  );
+}
+
 export interface SaveRouteInput {
   routeId?: Uuid;
   name: string;
@@ -189,11 +199,26 @@ export async function saveApprovalRoute(
   }
 
   const now = new Date().toISOString();
+  // 新しい経路を作るときに、同じ名前の経路を黙って上書きしない（編集の欄で ID を持ってくるのは既存の編集だけ）
+  if (!input.routeId) {
+    const sameName = await db.select('approvalRoutes', { where: { organizationId, name } });
+    if (sameName.length > 0) {
+      throw new ValidationError(
+        `同じ名前の承認ルート「${name}」があります。一覧の「編集」から変更するか、別の名前を付けてください。`,
+      );
+    }
+  }
   const routeId = input.routeId ?? fid('approval_route', `${organizationId}/${name}`);
 
   const existing = await db.findById('approvalRoutes', routeId);
   if (existing && existing.organizationId !== organizationId) {
     throw new NotFoundError('承認の道筋が見つかりません。');
+  }
+  if (!input.routeId && existing) {
+    // 名前から作る ID が既にある（名前を変えた経路の元の名前など）。上書きしない
+    throw new ValidationError(
+      `同じ名前の承認ルート「${name}」を以前に作っています。一覧の「編集」から変更するか、別の名前を付けてください。`,
+    );
   }
   const purpose: ApprovalRoutePurpose =
     input.purpose ?? (existing ? purposeOf(existing) : 'default');
@@ -201,6 +226,9 @@ export async function saveApprovalRoute(
   const isDefault = purpose === 'default' && input.isDefault;
 
   // 既定はひとつだけ。別の道筋を既定にしたら、元の既定は外す
+  /** 中身を変えずにそのまま使う段階（段階の番号） */
+  const kept = new Set<number>();
+
   if (isDefault) {
     const others = await db.select('approvalRoutes', {
       where: { organizationId, isDefault: true },
@@ -224,12 +252,20 @@ export async function saveApprovalRoute(
       updatedAt: now,
       updatedBy: ctx.userId,
     });
-    // 段階は作り直す。進行中のデータは自分の写しを持っているので影響しない。
-    // 古い段階は消さずに論理削除で残し、その時点の道筋を後から辿れるようにする
+    // 変わった段階だけを作り直す。進行中のデータは自分の写しを持っているので影響しない。
+    // 古い段階は消さずに論理削除で残し、その時点の道筋を後から辿れるようにする。同じ位置で中身が同じ段階は
+    // そのまま使う（保存のたびに同じ段階の行を増やさない。Demo Mode では Cookie の容量を使い続けるため）
     const old = await db.select('approvalRouteStages', {
       where: { organizationId, routeId, deletedAt: { isNull: true } },
     });
-    for (const stage of old) await db.softDelete('approvalRouteStages', stage.id, now);
+    for (const stage of old) {
+      const next = stages[stage.stageNo - 1];
+      if (next && sameStage(stage, next)) {
+        kept.add(stage.stageNo);
+        continue;
+      }
+      await db.softDelete('approvalRouteStages', stage.id, now);
+    }
   } else {
     await db.insert('approvalRoutes', [
       {
@@ -248,23 +284,28 @@ export async function saveApprovalRoute(
     ]);
   }
 
-  await db.insert(
-    'approvalRouteStages',
-    stages.map((stage, index) => ({
-      // 論理削除した段階が同じ id で残っているため、保存時刻も種に混ぜて別の行にする
-      id: fid('approval_route_stage', `${routeId}/${now}/${index + 1}`),
-      organizationId,
-      routeId,
-      stageNo: index + 1,
-      name: stage.name.trim(),
-      approverRole: stage.approverRole.trim(),
-      approverUserId: stage.approverUserId,
-      department: stage.department.trim(),
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    })),
-  );
+  const added = stages
+    .map((stage, index) => ({ stage, index }))
+    .filter(({ index }) => !kept.has(index + 1));
+  if (added.length > 0) {
+    await db.insert(
+      'approvalRouteStages',
+      added.map(({ stage, index }) => ({
+        // 論理削除した段階が同じ id で残っているため、保存時刻も種に混ぜて別の行にする
+        id: fid('approval_route_stage', `${routeId}/${now}/${index + 1}`),
+        organizationId,
+        routeId,
+        stageNo: index + 1,
+        name: stage.name.trim(),
+        approverRole: stage.approverRole.trim(),
+        approverUserId: stage.approverUserId,
+        department: stage.department.trim(),
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      })),
+    );
+  }
 
   await recordAuditEvent(db, ctx, {
     eventType: existing ? 'data_updated' : 'data_created',

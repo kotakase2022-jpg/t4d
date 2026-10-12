@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AuthorizationError } from '@/lib/authorization/can';
 import { ValidationError } from '@/lib/errors/user-facing';
-import { ORG_IDS, PERIOD_IDS, at, dataPointId, userId } from '@/lib/fixtures/dataset';
+import {
+  ENGAGEMENT_IDS,
+  ORG_IDS,
+  PERIOD_IDS,
+  at,
+  dataPointId,
+  userId,
+} from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
 import { fid } from '@/lib/fixtures/ids';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
@@ -12,6 +19,12 @@ import {
   resetDisclosureDemoData,
 } from '@/lib/services/disclosure-demo-reset';
 import { setDisclosureFirst } from '@/lib/services/feature-settings';
+import { loadDefaultRoute, saveApprovalRoute } from '@/lib/services/approval-route';
+import { FY2025_APPROVED_SNAPSHOT_ID } from '@/lib/fixtures/trial-case';
+import { parseSharedReportCopy } from '@/lib/domain/report-copy';
+import { loadEngagementReviewNotes } from '@/lib/services/assurance';
+import { createReportNote } from '@/lib/services/assurance-notes';
+import { shareReportSnapshot } from '@/lib/services/report-share';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
 
 /**
@@ -150,6 +163,83 @@ async function playDemo() {
 beforeEach(() => {
   fixture = createFixtureDb();
   db = new DemoDbClient(fixture);
+});
+
+describe('開示デモのリセットと保証側の記録（CLAUDE.md §0.2・§0.3）', () => {
+  it('企業のリセットは自社の写しを消すが、写しを指す監査法人のコメント（法人内部限定も）は消さない', async () => {
+    const firmManager: AuthorizationContext = {
+      ...ctxFor('assurance-manager@demo.local', ['assurance_manager'], ORG_IDS.aoba),
+      workspace: {
+        organizationId: ORG_IDS.aoba,
+        organizationType: 'assurance_firm',
+        organizationName: 'テスト法人',
+        roleKeys: ['assurance_manager'],
+        unitScopeIds: [],
+      },
+      engagementIds: [ENGAGEMENT_IDS.main],
+    };
+    const copy = await shareReportSnapshot(db, admin(), {
+      snapshotId: FY2025_APPROVED_SNAPSHOT_ID,
+      engagementId: ENGAGEMENT_IDS.main,
+    });
+    const content = parseSharedReportCopy(copy.copy)!;
+    const note = await createReportNote(db, firmManager, {
+      engagementId: ENGAGEMENT_IDS.main,
+      copyId: copy.id,
+      target: {
+        kind: 'report_metric',
+        dataPointVersionId: content.metricValues[0]!.dataPointVersionId,
+      },
+      body: '法人内部の確認メモ（架空）。',
+      sharedWithClient: false,
+    });
+
+    await resetDisclosureDemoData(db, author());
+    // 企業の行（デモ中に作った写し）は戻る
+    expect(fixture.sharedReportCopies.some((c) => c.id === copy.id)).toBe(false);
+    // 監査法人の行（コメント）は残る。写しが無いことは画面の対象の表示で分かる
+    expect(fixture.reviewNotes.some((n) => n.id === note.id)).toBe(true);
+    const entry = (await loadEngagementReviewNotes(db, firmManager, ENGAGEMENT_IDS.main)).find(
+      (e) => e.note.id === note.id,
+    )!;
+    expect(entry.note.body).toBe('法人内部の確認メモ（架空）。');
+    expect(entry.target!.place).toContain('見つかりません');
+  });
+});
+
+describe('開示デモのリセットと承認ルート（§14.2 デモ開始時の状態を再現できる）', () => {
+  it('ひな形の 3 段階を既定にして保存しても、リセットで既定の 5 段階の経路に戻る', async () => {
+    const before = (await loadDefaultRoute(db, admin()))!;
+    expect(before.stages).toHaveLength(5);
+    await saveApprovalRoute(db, admin(), {
+      name: '3 段階の承認（標準）',
+      description: '',
+      isDefault: true,
+      purpose: 'default',
+      stages: [
+        {
+          name: '拠点・部署の確認',
+          approverRole: 'reviewer',
+          approverUserId: null,
+          department: '',
+        },
+        {
+          name: '本社サステナビリティ担当の確認',
+          approverRole: 'sustainability_manager',
+          approverUserId: null,
+          department: '',
+        },
+        { name: '最終承認', approverRole: 'approver', approverUserId: null, department: '' },
+      ],
+    });
+    expect((await loadDefaultRoute(db, admin()))!.stages).toHaveLength(3);
+
+    await resetDisclosureDemoData(db, author());
+    const after = (await loadDefaultRoute(db, admin()))!;
+    expect(after.route.id).toBe(before.route.id);
+    expect(after.stages.map((s) => s.name)).toEqual(before.stages.map((s) => s.name));
+    expect(fixture.approvalRoutes.some((r) => r.name === '3 段階の承認（標準）')).toBe(false);
+  });
 });
 
 describe('開示デモのリセット', () => {

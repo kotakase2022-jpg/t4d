@@ -3370,3 +3370,9 @@ P-F1〜P-F6〔レビューでは F1〜F6 と重複した番号〕）をすべて
 - P-F3: 過去回答の取込は版を作らずに承認済みの本文を書くため、承認済みの回答の本文の書き換えは DB では区別できない（known-limitations §13.3）。
 - F4: 0059 より前に既定の評価行を含めて固定した Supabase のスナップショットは、比べ直すと「変更あり」になりうる（Supabase Mode は未運用）。
 - 本番は未反映（デプロイは統括の判断）。
+
+## 2026-10-13 トライアル提案の機能追加の本番反映（統括）
+
+- a9827d9 を `vercel deploy --prod` → `vercel alias set … terrast-t4d.vercel.app`。本番スモーク 36/36。
+- `playwright.production-chain.config.ts` に試行の流れ（`zzzzz-trial-chain.stateless.ts`）を追加し、本番で主デモ 8・CSRD 9・試行 13 の計 30/30
+  （Cookie ヘッダー最大: 主 8,929B・CSRD 3,494B・試行 4,298B、押し出し 0）。その後、同じコードを再デプロイして共有メモリを初期化。

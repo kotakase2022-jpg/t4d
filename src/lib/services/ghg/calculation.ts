@@ -18,8 +18,14 @@ import {
   type GhgSubstitutions,
 } from '@/lib/domain/ghg/calculate';
 import { dualView, type DualView } from '@/lib/domain/ghg/classification';
-import { inputsForRecordedRun, selectCalculationInputs } from '@/lib/domain/ghg/select-inputs';
+import {
+  inputsForRecordedRun,
+  rebuildRecordedRun,
+  selectCalculationInputs,
+  type GhgSourceRows,
+} from '@/lib/domain/ghg/select-inputs';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { isUuid } from '@/lib/validation/uuid';
 import { DEMO_GHG_LIMITS, GHG_FIXTURE_ROW_IDS } from '@/lib/repositories/demo-ghg-checks';
 import type { DbClient } from '@/lib/repositories/types';
 import type {
@@ -140,6 +146,46 @@ export async function runCalculation(
   return { ok: true, run: inserted ?? run, lines: output.lines };
 }
 
+/**
+ * 記録の要約・算定行を、画面・反映・照合に使える形にする。
+ *  - Demo Mode: Cookie から戻すときに同じ純関数で作り直して照合済み（このインスタンスで作った記録は
+ *    サービスが書いた値）。そのまま返す（lines は null。呼び出し側が保存した行を読む）
+ *  - Supabase Mode: 行は利用者の JWT で書かれる（RLS の上では要約・算定行に任意の値を書ける）。記録した入力から
+ *    同じ純関数で作り直し、要約・算定行は作り直した値を使う。作り直せない（入力が変わった・記録の時点で使えなかった
+ *    入力を名乗る）なら要約を null（「入力が変わった」。数値を出さず、反映・照合もしない）
+ */
+export function trustedRun(
+  db: DbClient,
+  source: GhgSourceRows,
+  run: GhgCalculationRun,
+): { run: GhgCalculationRun; lines: GhgCalculationLine[] | null } {
+  if (db.mode === 'demo') return { run, lines: null };
+  const rebuilt = rebuildRecordedRun(source, run);
+  return rebuilt
+    ? { run: { ...run, summary: rebuilt.summary }, lines: rebuilt.lines }
+    : { run: { ...run, summary: null }, lines: [] };
+}
+
+/** 保存した算定行が作り直した行と同じか（後から足した・書き換えた行があれば false） */
+function sameLines(
+  stored: readonly GhgCalculationLine[],
+  rebuilt: readonly GhgCalculationLine[],
+): boolean {
+  if (stored.length !== rebuilt.length) return false;
+  const byId = new Map(stored.map((l) => [l.id, l]));
+  return rebuilt.every((r) => {
+    const s = byId.get(r.id);
+    return (
+      !!s &&
+      s.unitId === r.unitId &&
+      s.reportedScope === r.reportedScope &&
+      s.protocolScope === r.protocolScope &&
+      Math.abs(Number(s.emissionsUnrounded) - r.emissionsUnrounded) <=
+        1e-9 * Math.max(1, Math.abs(r.emissionsUnrounded))
+    );
+  });
+}
+
 /** 期間の算定の記録（新しい順。入力の状態付き） */
 export async function listRuns(
   db: DbClient,
@@ -154,7 +200,10 @@ export async function listRuns(
       { column: 'id', dir: 'desc' },
     ],
   });
-  return runs.map((run) => ({ run, inputState: inputStateOf(source, run) }));
+  return runs.map((stored) => {
+    const { run } = trustedRun(db, source, stored);
+    return { run, inputState: inputStateOf(source, run) };
+  });
 }
 
 function inputStateOf(
@@ -182,16 +231,28 @@ export async function loadRun(
 ): Promise<LoadedRun> {
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.data.read');
-  const run = await db.findById('ghgCalculationRuns', runId);
-  if (!run || run.organizationId !== ctx.workspace.organizationId) {
+  if (!isUuid(runId)) throw new NotFoundError('算定の記録が見つかりません。');
+  const stored = await db.findById('ghgCalculationRuns', runId);
+  if (!stored || stored.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('算定の記録が見つかりません。');
   }
-  const source = await loadGhgSource(db, ctx, run.reportingPeriodId);
-  const inputState = inputStateOf(source, run);
-  if (!run.summary) return { run, inputState, lines: [], dual: null };
-  const lines = await db.select('ghgCalculationLines', {
+  const source = await loadGhgSource(db, ctx, stored.reportingPeriodId);
+  const trusted = trustedRun(db, source, stored);
+  let run = trusted.run;
+  if (!run.summary) return { run, inputState: 'input_changed', lines: [], dual: null };
+  const storedLines = await db.select('ghgCalculationLines', {
     where: { organizationId: run.organizationId, runId: run.id },
   });
+  let lines = storedLines;
+  if (trusted.lines) {
+    // Supabase Mode: 保存した行が作り直した行と違う（後から足した・書き換えた行）なら数値を出さない
+    if (!sameLines(storedLines, trusted.lines)) {
+      run = { ...run, summary: null };
+      return { run, inputState: 'input_changed', lines: [], dual: null };
+    }
+    lines = [...trusted.lines];
+  }
+  const inputState = inputStateOf(source, run);
   lines.sort((a, b) => {
     const order = run.unitIds.indexOf(a.unitId) - run.unitIds.indexOf(b.unitId);
     if (order !== 0) return order;
@@ -225,6 +286,7 @@ export async function computeWhatIf(
 ): Promise<GhgCalculationOutput> {
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.data.read');
+  if (!isUuid(runId)) throw new NotFoundError('算定の記録が見つかりません。');
   const run = await db.findById('ghgCalculationRuns', runId);
   if (!run || run.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('算定の記録が見つかりません。');
@@ -242,9 +304,12 @@ export async function computeWhatIf(
   }
   const source = await loadGhgSource(db, ctx, run.reportingPeriodId);
   const inputs = inputsForRecordedRun(source, run);
-  if (!inputs) {
+  // 記録の入力を作り直せないとき・作り直した入力が記録と違う（割当など記録が ID を持たない入力が変わった）ときは
+  // 仮説の再計算をしない。いまの割当で算定し直すと、割当の変更による差を仮説（丸め・係数のセットなど）の効果と
+  // 取り違える（自己監査 GHG F2）
+  if (!inputs || computeInputHash(inputs) !== run.inputHash) {
     throw new ValidationError(
-      '記録した算定の入力を読み込めません（入力が変わった可能性があります）。',
+      'この算定の記録の後に入力（係数の割当など）が変わったため、仮説の再計算をできません。算定し直して照合し直してから試してください。',
     );
   }
   return recalculate(inputs, alternative, {

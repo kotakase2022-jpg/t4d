@@ -1,11 +1,7 @@
-import {
-  attribute,
-  attributionLinesFrom,
-  RECONCILIATION_CHECKER_VERSION,
-} from '@/lib/domain/ghg/attribution';
-import { GHG_ENGINE_VERSION, calculateRun } from '@/lib/domain/ghg/calculate';
-import { inputsForRecordedRun, type GhgSourceRows } from '@/lib/domain/ghg/select-inputs';
-import { GHG_FIXTURE_IDS } from '@/lib/fixtures/ghg-verification';
+import { rebuildReconciliationResult } from '@/lib/domain/ghg/attribution';
+import { factorFits } from '@/lib/domain/ghg/factor-resolution';
+import { rebuildRecordedRun, type GhgSourceRows } from '@/lib/domain/ghg/select-inputs';
+import { GHG_FIXTURE_IDS, ghgFixtureAssignmentIds } from '@/lib/fixtures/ghg-verification';
 import type { FixtureDb } from '@/lib/fixtures/store';
 import {
   BASELINE_GRANULARITIES,
@@ -25,6 +21,8 @@ import {
   ROUNDING_METHODS,
   ROUNDING_STAGES,
   VEHICLE_USES,
+  type EmissionBasis,
+  type FactorActivityKind,
   type GhgCalculationLine,
   type GhgCalculationRun,
   type GhgReconciliation,
@@ -134,6 +132,17 @@ export type PermissionCheck = (
   userId: unknown,
   permission: PermissionKey,
 ) => boolean;
+
+/**
+ * 1 回の適用の文脈（demo-edit-codec.ts が渡す）。inCookie: 同じ Cookie にその行の編集があるか。確定・有効にした
+ * 親（活動量のバッチ・係数のセット）へ子の行（活動量の行・係数）を戻すのは、同じ Cookie が親の行も持つときだけ
+ * （親を作った利用者の操作の控え。別の人の確定済みの行へ偽の子を足させない）
+ */
+export interface GhgApplyContext {
+  inCookie: (table: string, id: string) => boolean;
+}
+
+const NO_COOKIE: GhgApplyContext = { inCookie: () => false };
 
 type Row = Record<string, unknown>;
 
@@ -292,6 +301,7 @@ function acceptFactor(
   existing: Row | undefined,
   next: Row,
   can: PermissionCheck,
+  apply: GhgApplyContext,
 ): boolean {
   // Cookie から戻すのはセットに属する係数だけ（Cat.1 の係数はアプリから書かない）
   if (!keysUnchanged(existing, next, ['organizationId', 'factorSetId', 'createdAt'])) return false;
@@ -300,9 +310,12 @@ function acceptFactor(
   if (!can(set.organizationId, set.updatedBy ?? set.createdBy, 'enterprise.metric.manage'))
     return false;
   // セットが下書きのときだけ。Cookie はセットの最後の状態だけを持つため、有効にしたセットでは
-  // 有効にする前に作った係数（作成日時が有効化より前）だけを受け付ける
+  // 有効にする前に作った係数（作成日時が有効化より前）だけを受け付ける。ただし Fixture のセット（有効にした
+  // 不変の行）には足さず、利用者のセットでも同じ Cookie がセットの行を持つときだけ（作成日時は Cookie の値なので、
+  // それだけでは別の人の有効なセットに後から係数を足せてしまう）
   if (set.status !== 'draft') {
     if (existing) return false;
+    if (FIXTURE_SET_IDS.has(set.id) || !apply.inCookie('emissionFactorSets', set.id)) return false;
     if (
       !isTimestamp(next.createdAt) ||
       !set.activatedAt ||
@@ -381,6 +394,22 @@ function acceptAssignment(
   const set = db.emissionFactorSets.find((s) => s.id === factor.factorSetId);
   // 割当てたときに有効だったセット（後で取り下げても、既にある割当は残る）
   if (!set || set.status === 'draft' || factor.activityKind !== next.activityKind) return false;
+  // 種類・活動・基準が合う係数だけ（サービスの割当の保存・解決・DB のトリガ 0066 と同じ規則）
+  if (
+    !factorFits(
+      factor,
+      next.activityKind as FactorActivityKind,
+      next.activityCode as string,
+      (next.basis ?? null) as EmissionBasis | null,
+    )
+  ) {
+    return false;
+  }
+  const targetCountry =
+    next.unitId !== null
+      ? (db.units.find((u) => u.id === next.unitId)?.countryCode ?? null)
+      : (next.countryCode as string | null);
+  if (factor.countryCode && targetCountry && factor.countryCode !== targetCountry) return false;
   const duplicate = db.emissionFactorAssignments.some(
     (a) =>
       a.id !== next.id &&
@@ -683,17 +712,27 @@ function acceptBatch(
   return true;
 }
 
-function acceptActivityLine(db: FixtureDb, _existing: Row | undefined, next: Row): boolean {
+function acceptActivityLine(
+  db: FixtureDb,
+  _existing: Row | undefined,
+  next: Row,
+  apply: GhgApplyContext,
+): boolean {
   const batch = db.ghgActivityBatches.find((b) => b.id === next.batchId);
   if (!batch || batch.organizationId !== next.organizationId) return false;
   // 行は下書きのバッチにだけ足す。Cookie はバッチの最後の状態だけを持つため、確定・破棄したバッチでは
-  // 確定・破棄より前に作った行だけを受け付ける
+  // 確定・破棄より前に作った行だけを受け付ける。ただし Fixture のバッチ（確定済みの不変の行）には足さず、
+  // 利用者のバッチでも同じ Cookie がバッチの行を持つときだけ（作成日時は Cookie の値なので、それだけでは
+  // 別の人の確定済みのバッチに後から行を足せてしまう）
   if (batch.status !== 'draft') {
+    if (batch.source === 'fixture' || !apply.inCookie('ghgActivityBatches', batch.id)) return false;
     const closedAt = batch.confirmedAt ?? batch.updatedAt;
     if (!isTimestamp(next.createdAt) || (next.createdAt as string) > closedAt) return false;
   }
   const siblings = db.ghgActivityLines.filter((l) => l.batchId === next.batchId);
   if (siblings.length >= DEMO_GHG_LIMITS.linesPerBatch) return false;
+  // バッチの行数（取込のときに決まる）を超えて足さない
+  if (siblings.length >= batch.rowCount) return false;
   if (!Number.isInteger(next.lineNo) || (next.lineNo as number) < 1) return false;
   if (siblings.some((l) => l.lineNo === next.lineNo)) return false;
   if (!isString(next.month) || !/^\d{4}-\d{2}-01$/.test(next.month)) return false;
@@ -851,6 +890,14 @@ function acceptBaseline(
   ) {
     return false;
   }
+  // 対応付けた拠点・行の拠点はすべて担当拠点（サービスの取込・RLS 0066 と同じ）
+  const baselineUnits = new Set<unknown>([
+    ...Object.values(next.unitMapping),
+    ...(next.rows as Row[]).map((r) => r.unitId).filter((u) => u !== null),
+  ]);
+  if (![...baselineUnits].every((u) => unitInScope(db, next.organizationId, next.createdBy, u))) {
+    return false;
+  }
   if (next.supersedesId !== null) {
     const previous = db.ghgBaselineResults.find((b) => b.id === next.supersedesId);
     if (!previous || previous.organizationId !== next.organizationId) return false;
@@ -889,6 +936,10 @@ function acceptReconciliation(
   if (run.organizationId !== next.organizationId || baseline.organizationId !== next.organizationId)
     return false;
   if (run.reportingPeriodId !== baseline.reportingPeriodId) return false;
+  // 照合は記録の拠点がすべて担当拠点の人だけ（サービスの reconcile・RLS 0066 と同じ）
+  if (!run.unitIds.every((u) => unitInScope(db, next.organizationId, next.createdBy, u))) {
+    return false;
+  }
   if (!toleranceOk(next.tolerance)) return false;
   if (
     !isStringArray(next.attributionOrder) ||
@@ -965,7 +1016,7 @@ export function ghgSourceRowsFromDb(
 
 /**
  * 記録した算定を作り直す（要約と算定行）。入力ハッシュ・エンジンの版が記録と違えば null
- * （「入力が変わった」。数値を出さない）
+ * （「入力が変わった」。数値を出さない）。規則は select-inputs.ts の rebuildRecordedRun（Supabase Mode の照合と同じ）
  */
 export function rebuildRun(
   db: FixtureDb,
@@ -985,20 +1036,9 @@ export function rebuildRun(
     | 'lineCount'
   >,
 ): { summary: NonNullable<GhgCalculationRun['summary']>; lines: GhgCalculationLine[] } | null {
-  if (run.engineVersion !== GHG_ENGINE_VERSION) return null;
   const source = ghgSourceRowsFromDb(db, run.organizationId, run.reportingPeriodId);
   if (!source) return null;
-  const inputs = inputsForRecordedRun(source, run);
-  if (!inputs) return null;
-  const out = calculateRun(inputs, { runId: run.id, createdAt: run.createdAt });
-  if (
-    out.inputHash !== run.inputHash ||
-    out.errors.length > 0 ||
-    out.lines.length !== run.lineCount
-  ) {
-    return null;
-  }
-  return { summary: out.summary, lines: out.lines };
+  return rebuildRecordedRun(source, run);
 }
 
 /** 記録した照合の結果を作り直す（照合の規則の版が違う・算定の記録が作り直せないなら null） */
@@ -1009,7 +1049,6 @@ export function rebuildReconciliation(
     'runId' | 'baselineId' | 'tolerance' | 'attributionOrder' | 'checkerVersion'
   >,
 ): GhgReconciliation['result'] {
-  if (recon.checkerVersion !== RECONCILIATION_CHECKER_VERSION) return null;
   const run = db.ghgCalculationRuns.find((r) => r.id === recon.runId);
   const baseline = db.ghgBaselineResults.find((b) => b.id === recon.baselineId);
   if (!run || !run.summary || !baseline) return null;
@@ -1017,11 +1056,13 @@ export function rebuildReconciliation(
   if (!policy) return null;
   const lines = db.ghgCalculationLines.filter((l) => l.runId === run.id);
   if (lines.length !== run.lineCount) return null;
-  const shipmentOf = new Map(db.ghgActivityLines.map((l) => [l.id, l.shipmentRef]));
-  return attribute(
-    attributionLinesFrom(lines, (id) => shipmentOf.get(id) ?? null),
+  const batches = new Set(run.activityBatchIds);
+  return rebuildReconciliationResult(
+    recon,
+    lines,
+    db.ghgActivityLines.filter((l) => batches.has(l.batchId)),
     baseline.rows,
-    { t4dRounding: policy.rounding, tolerance: recon.tolerance, order: recon.attributionOrder },
+    policy.rounding,
   );
 }
 
@@ -1029,7 +1070,13 @@ export function rebuildReconciliation(
 // 入口
 // ----------------------------------------------------------------------
 
-type Check = (db: FixtureDb, existing: Row | undefined, next: Row, can: PermissionCheck) => boolean;
+type Check = (
+  db: FixtureDb,
+  existing: Row | undefined,
+  next: Row,
+  can: PermissionCheck,
+  apply: GhgApplyContext,
+) => boolean;
 
 const CHECKS: Readonly<Record<string, Check>> = {
   emissionFactorSets: acceptFactorSet,
@@ -1038,7 +1085,8 @@ const CHECKS: Readonly<Record<string, Check>> = {
   ghgCalculationPolicies: acceptPolicy,
   ghgClassificationRules: acceptRule,
   ghgActivityBatches: acceptBatch,
-  ghgActivityLines: (db, existing, next) => acceptActivityLine(db, existing, next),
+  ghgActivityLines: (db, existing, next, _can, apply) =>
+    acceptActivityLine(db, existing, next, apply),
   ghgCalculationRuns: acceptRun,
   ghgBaselineResults: acceptBaseline,
   ghgReconciliations: acceptReconciliation,
@@ -1056,10 +1104,66 @@ export function acceptGhgEdit(
   existing: Row | undefined,
   next: Row,
   can: PermissionCheck,
+  apply: GhgApplyContext = NO_COOKIE,
 ): boolean {
   if (!isString(next.id) || !isString(next.organizationId)) return false;
   const check = CHECKS[table];
-  return check ? check(db, existing, next, can) : true;
+  return check ? check(db, existing, next, can, apply) : true;
+}
+
+// ----------------------------------------------------------------------
+// 割当を外した控え（Cookie の削除の印）
+// ----------------------------------------------------------------------
+
+/**
+ * Cookie の削除の印の鍵。割当を外すと、その行の編集を Cookie から除くだけでは足りない（別のインスタンスは以前の
+ * リクエストで既に行を戻しており、Cookie から消えても消えない）。外したことを印として持ち回し、各インスタンスが
+ * メモリから同じ行を除く
+ */
+export const DEMO_REMOVED_MARK = '~removed';
+
+/** 削除の印を使える表（利用者の操作で物理削除する表だけ） */
+const REMOVABLE_TABLES: ReadonlySet<string> = new Set(['emissionFactorAssignments']);
+
+/** Cookie の編集が削除の印か */
+export function isDemoRemoval(table: string, v: Row): boolean {
+  return REMOVABLE_TABLES.has(table) && isPlainObject(v[DEMO_REMOVED_MARK]);
+}
+
+/** 削除の印（外した人・時刻）。編集の中身は ID とこれだけ（行の中身は持ち回さない） */
+export function demoRemovalMark(removedBy: string, removedAt: string): Row {
+  return { [DEMO_REMOVED_MARK]: { by: removedBy, at: removedAt } };
+}
+
+/**
+ * 削除の印を受け付けるか（外す操作と同じ規則: Fixture の割当は外さない・外した人は metric.manage・締めた期間は
+ * 外さない）
+ */
+export function acceptGhgRemoval(
+  db: FixtureDb,
+  table: string,
+  existing: Row,
+  mark: Row,
+  can: PermissionCheck,
+): boolean {
+  if (!REMOVABLE_TABLES.has(table)) return false;
+  const removal = mark[DEMO_REMOVED_MARK];
+  if (!isPlainObject(removal) || !isString(removal.by) || !isTimestamp(removal.at)) return false;
+  if (ghgFixtureAssignmentIds().has(existing.id as string)) return false;
+  if (!can(existing.organizationId, removal.by, 'enterprise.metric.manage')) return false;
+  const period = periodOf(db, existing.organizationId, existing.reportingPeriodId);
+  return !!period && period.status !== 'closed';
+}
+
+// ----------------------------------------------------------------------
+// 作り直した算定行の控え（同じ適用の中で作り直しを繰り返さない）
+// ----------------------------------------------------------------------
+
+const rebuiltLinesOf = new WeakMap<object, GhgCalculationLine[]>();
+
+/** 目録から組み立て直した記録の算定行を覚える（demo-compact.ts の expandGhgRun が呼ぶ） */
+export function rememberRebuiltLines(run: object, lines: GhgCalculationLine[]): void {
+  rebuiltLinesOf.set(run, lines);
 }
 
 /**
@@ -1069,6 +1173,12 @@ export function acceptGhgEdit(
 export function restoreRunLines(db: FixtureDb, run: GhgCalculationRun): void {
   if (!run.summary) return;
   if (db.ghgCalculationLines.some((l) => l.runId === run.id)) return;
+  // 目録から組み立て直したときに作った行を使う（同じ純関数をもう一度回さない）
+  const remembered = rebuiltLinesOf.get(run);
+  if (remembered) {
+    db.ghgCalculationLines.push(...remembered);
+    return;
+  }
   const rebuilt = rebuildRun(db, run);
   if (rebuilt) db.ghgCalculationLines.push(...rebuilt.lines);
 }

@@ -1,3 +1,4 @@
+import { isFyReportingUnit } from '@/lib/domain/boundaries';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AuthorizationError } from '@/lib/authorization/can';
 import { ORG_IDS, PERIOD_IDS, userId } from '@/lib/fixtures/dataset';
@@ -163,9 +164,10 @@ describe('データ収集・承認', () => {
     );
   });
 
-  it('拠点別に 承認 n / N を示す（サプライヤーは含めない）', async () => {
+  it('拠点別に 承認 n / N を示す（サプライヤー・連結対象外で当期のデータの無い拠点は含めない）', async () => {
     const collection = area(await diagnose(), 'collection');
-    const reportable = units.filter((u) => u.unitType !== 'supplier');
+    // 年度のデータを集める拠点（Scope1・2 の算定の検証拠点〔連結対象外・FY のデータなし〕は 0/0 の行にしない。R2）
+    const reportable = units.filter(isFyReportingUnit);
     expect(collection.units!.map((u) => u.unitName)).toEqual(reportable.map((u) => u.name));
     for (const row of collection.units!) {
       const rows = fy2026DataPoints().filter((d) => d.unitId === row.unitId);

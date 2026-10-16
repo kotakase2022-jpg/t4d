@@ -8,7 +8,7 @@ import { StatusBadge } from '@/components/shared/status-badge';
 import { formatJst } from '@/lib/format/datetime';
 import { statusLabel } from '@/lib/ui/status/registry';
 import { GHG_SITE_STATUSES } from '@/lib/domain/ghg/verification-status';
-import type { GhgCalcSummaryData } from './calc-data';
+import { showsCompanyRuleBadge, type GhgCalcSummaryData } from './calc-data';
 import { siteResultRows } from './calc-view';
 import { DualViewTable } from './dual-view-table';
 import { SiteResultsTable } from './site-results-table';
@@ -33,7 +33,7 @@ export function CalcSummarySection({ data }: { data: GhgCalcSummaryData }) {
     count: status.units.filter((u) => u.status.overall === s).length,
   })).filter((b) => b.count > 0);
   const overviewHref = `/enterprise/ghg/calculation?period=${encodeURIComponent(period.id)}`;
-  const hasCompanyRule = view.appliedRules.length > 0 || view.pendingRules.length > 0;
+  const hasCompanyRule = showsCompanyRuleBadge(view);
   return (
     <Section
       id="ghg-calculation"

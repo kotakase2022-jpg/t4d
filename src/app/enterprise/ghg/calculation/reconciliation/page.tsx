@@ -18,6 +18,7 @@ import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
 import { can } from '@/lib/authorization/can';
 import { GHG_SCOPE_LABELS } from '@/lib/domain/ghg/calculate';
 import { formatJst, formatJstDate, formatNumber } from '@/lib/format/datetime';
+import { parsePage, parsePageSize } from '@/lib/table/columns';
 import { ghgDemoFileLinks } from '@/lib/fixtures/ghg-demo-files';
 import { DEMO_GHG_LIMITS } from '@/lib/repositories/demo-ghg-checks';
 import {
@@ -57,6 +58,7 @@ import {
   reconciliationListHref,
   toleranceSummary,
 } from './_components/reconcile-options';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { reconcileAction } from './actions';
 
 export const metadata = { title: '既存の算定結果との照合' };
@@ -102,18 +104,26 @@ export default async function GhgReconciliationListPage({
     listReconciliations(db, ctx, { periodId: period.id }),
     listBaselineSiteChoices(db, ctx),
   ]);
-  // 照合の一覧は判定の内訳（確認の記録を反映）を出すため、記録ごとに読み直す（Demo の上限 5 件＋Fixture）
+  // 照合の一覧はページ送りし、見えるページの記録だけ判定の内訳（確認の記録を反映）のために読み直す。
+  // 件数は全件（以前は先頭 20 件に切って「20 件」と出し、古い記録へ辿れなかった）
+  const reconPageSize = parsePageSize(query.size);
+  const reconPage = Math.min(
+    parsePage(query.page),
+    Math.max(1, Math.ceil(reconciliations.length / reconPageSize)),
+  );
   const reconRows: ReconRow[] = await Promise.all(
-    reconciliations.slice(0, 20).map(async (r) => {
-      const loaded = await loadReconciliation(db, ctx, r.id);
-      const entry = runs.find((e) => e.run.id === r.runId);
-      return {
-        loaded,
-        runLabel: entry
-          ? runLabel(entry, entry.run.unitIds.length)
-          : formatJst(loaded.run.createdAt),
-      };
-    }),
+    reconciliations
+      .slice((reconPage - 1) * reconPageSize, reconPage * reconPageSize)
+      .map(async (r) => {
+        const loaded = await loadReconciliation(db, ctx, r.id);
+        const entry = runs.find((e) => e.run.id === r.runId);
+        return {
+          loaded,
+          runLabel: entry
+            ? runLabel(entry, entry.run.unitIds.length)
+            : formatJst(loaded.run.createdAt),
+        };
+      }),
   );
   const userIds = [
     ...new Set([
@@ -455,7 +465,10 @@ export default async function GhgReconciliationListPage({
                 </form>
 
                 {selectedRun && selectedBaseline && (
-                  <form action={reconcileAction} className="space-y-2 border-t border-line pt-2">
+                  <PreservingForm
+                    action={reconcileAction}
+                    className="space-y-2 border-t border-line pt-2"
+                  >
                     <input type="hidden" name="periodId" value={period.id} />
                     <input type="hidden" name="runId" value={selectedRun.run.id} />
                     <input type="hidden" name="baselineId" value={selectedBaseline.id} />
@@ -523,7 +536,7 @@ export default async function GhgReconciliationListPage({
                     >
                       照合する
                     </SubmitButton>
-                  </form>
+                  </PreservingForm>
                 )}
               </>
             )}
@@ -575,12 +588,18 @@ export default async function GhgReconciliationListPage({
           />
         </Section>
 
-        <Section title="照合の記録" summary={`${reconRows.length} 件`}>
+        <Section title="照合の記録" summary={`${reconciliations.length} 件`}>
           <DataTable
             id="ghg-reconciliations"
             caption="照合の記録"
             columns={reconColumns}
             rows={reconRows}
+            page={{
+              page: reconPage,
+              pageSize: reconPageSize,
+              total: reconciliations.length,
+              sizes: [25, 50, 100],
+            }}
             getRowId={(r) => r.loaded.reconciliation.id}
             getRowLabel={(r) => `${formatJst(r.loaded.reconciliation.createdAt)} の照合`}
             searchParams={query}

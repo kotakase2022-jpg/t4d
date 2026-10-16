@@ -10,8 +10,8 @@ import type {
 /**
  * 区分（plan §2.2 classification.ts・CR-07・K7）。純関数。
  *
- *  - 既定区分（GHG プロトコル）: 燃料・ガス・自社便＝scope1、電力＝scope2_location（ロケーション基準）／scope2
- *    （マーケット基準）、熱＝scope2、委託（自社が荷主の外部業者の輸送）＝scope3_cat4
+ *  - 既定区分（GHG プロトコル）: 燃料・ガス・自社便＝scope1、購入した電力・熱＝scope2_location（ロケーション基準）／
+ *    scope2（マーケット基準）、委託（自社が荷主の外部業者の輸送）＝scope3_cat4
  *  - 報告区分: 承認済みかつ適用期間内で条件が一致する区分規則だけが変える（提案中・取り下げは効かない）。
  *    同じ行に 2 つ以上の規則が当てはまれば変えずに conflict を返す（どちらかを黙って選ばない）
  *  - 二重表示の不変条件: Σ(報告の scope1＋scope3) ＝ Σ(既定の scope1＋scope3)（再分類は移動だけ）。
@@ -30,9 +30,10 @@ export interface ClassifiableLine {
 export function protocolScopeOf(line: ClassifiableLine): GhgScope {
   switch (line.activityKind) {
     case 'electricity':
-      return line.method === 'electricity_market' ? 'scope2' : 'scope2_location';
     case 'heat':
-      return 'scope2';
+      return line.method === 'electricity_market' || line.method === 'heat_market'
+        ? 'scope2'
+        : 'scope2_location';
     case 'transport':
       return line.carrierKind === 'contracted' ? 'scope3_cat4' : 'scope1';
     case 'fuel':

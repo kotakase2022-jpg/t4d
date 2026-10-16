@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { z } from 'zod';
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, can, NotFoundError, permissionsFor } from '@/lib/authorization/can';
 import {
@@ -1537,11 +1538,14 @@ export async function findPriorYearBlock(
 } | null> {
   const organizationId = ctx.workspace.organizationId;
   const periods = await db.select('periods', { where: { organizationId } });
-  const currentStart =
-    periods.find((p) => p.id === project.reportingPeriodId)?.startDate ?? project.periodStart;
-  const previous = periods
-    .filter((p) => p.endDate < currentStart)
-    .sort((a, b) => (a.endDate < b.endDate ? 1 : -1))[0];
+  const current = periods.find((p) => p.id === project.reportingPeriodId);
+  const currentStart = current?.startDate ?? project.periodStart;
+  // 前年は決算日が同じ期間（暦年の期間を年度の前年にしない。plan K10）
+  const previous = current
+    ? previousComparablePeriod(current, periods, 'end')
+    : periods
+        .filter((p) => p.endDate < currentStart)
+        .sort((a, b) => (a.endDate < b.endDate ? 1 : -1))[0];
   if (!previous) return null;
 
   const projects = await db.select('disclosureProjects', {

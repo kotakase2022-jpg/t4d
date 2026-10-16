@@ -2,25 +2,34 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { recordAuditEvent } from '@/lib/audit/logger';
-import { assertCan, assertEnterpriseWorkspace, NotFoundError } from '@/lib/authorization/can';
+import {
+  assertCan,
+  assertEnterpriseWorkspace,
+  assertUnitInScope,
+  NotFoundError,
+} from '@/lib/authorization/can';
 import {
   DEFAULT_ATTRIBUTION_ORDER,
   RECONCILIATION_CHECKER_VERSION,
   attribute,
   attributionLinesFrom,
   itemVerdict,
+  rebuildReconciliationResult,
 } from '@/lib/domain/ghg/attribution';
 import { GHG_SCOPE_LABELS } from '@/lib/domain/ghg/calculate';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { DEMO_GHG_LIMITS, GHG_FIXTURE_ROW_IDS } from '@/lib/repositories/demo-ghg-checks';
 import type { DbClient } from '@/lib/repositories/types';
 import { isUuid } from '@/lib/validation/uuid';
+import { trustedRun } from './calculation';
+import { loadGhgSource } from './inputs';
 import {
   GHG_CAUSES,
   GHG_SCOPES,
   type AuthorizationContext,
   type GhgAttributionCause,
   type GhgBaselineResult,
+  type GhgCalculationLine,
   type GhgCalculationRun,
   type GhgReconciliation,
   type GhgReconciliationNote,
@@ -34,7 +43,10 @@ import {
 /**
  * 既存の算定結果との照合（plan §2.3 reconciliation.ts・CR-12）。決定論（AI を使わない）。
  *
- *  - 照合は enterprise.data.write。算定の記録と既存結果は同じ組織・同じ期間
+ *  - 照合は enterprise.data.write かつ記録の拠点がすべて担当拠点（算定の実行と同じ。RLS 0066 と対）。
+ *    算定の記録と既存結果は同じ組織・同じ期間
+ *  - Supabase Mode の記録・照合の行は利用者の JWT で書かれるため、要約・算定行・結果は記録した入力から作り直した
+ *    値を使う（calculation.ts の trustedRun・この trustedReconciliation）
  *  - 許容差（区分ごとの絶対値 t・相対 %）は利用者が入れる。**照合に出てくる区分の許容差が無ければ拒否**（既定値を置かない）
  *  - 照合の規則の版（checker_version）を残す。既存結果のファイルの sha256 は既存結果の行にある
  *  - 判定は確認の記録を反映する（人が原因を記録した項目は「原因を確認済み」）。判定の語に「一致」を使わない
@@ -89,7 +101,12 @@ async function loadPair(
   ctx: AuthorizationContext,
   runId: Uuid,
   baselineId: Uuid,
-): Promise<{ run: GhgCalculationRun; baseline: GhgBaselineResult }> {
+): Promise<{
+  run: GhgCalculationRun;
+  baseline: GhgBaselineResult;
+  /** 作り直した算定行（Supabase Mode）。Demo Mode は null（保存した行を読む） */
+  rebuiltLines: GhgCalculationLine[] | null;
+}> {
   const organizationId = ctx.workspace.organizationId;
   // UUID でない ID は DB に問い合わせない（Supabase Mode では 22P02 の例外＝500 になるため。見つからない扱い）
   if (!isUuid(runId)) throw new NotFoundError('算定の記録が見つかりません。');
@@ -106,7 +123,46 @@ async function loadPair(
   if (run.reportingPeriodId !== baseline.reportingPeriodId) {
     throw new ValidationError('算定の記録と既存の算定結果は同じ期間のものだけを照合できます。');
   }
-  return { run, baseline };
+  // Demo Mode は記録を作り直して照合済み（入力の元を読まない）
+  if (db.mode === 'demo') return { run, baseline, rebuiltLines: null };
+  const source = await loadGhgSource(db, ctx, run.reportingPeriodId);
+  const trusted = trustedRun(db, source, run);
+  return { run: trusted.run, baseline, rebuiltLines: trusted.lines };
+}
+
+/**
+ * 照合の記録の結果を、画面・判定に使える形にする。Demo Mode は Cookie から戻すときに作り直して照合済み。
+ * Supabase Mode は記録の算定行（作り直した行）・既存結果・記録の許容差と原因の順序から作り直した結果を使う
+ * （利用者の JWT で書かれた結果を信じない。記録が作り直せなければ結果は null）
+ */
+export async function trustedReconciliation(
+  db: DbClient,
+  reconciliation: GhgReconciliation,
+  run: GhgCalculationRun,
+  baseline: GhgBaselineResult,
+  rebuiltLines: readonly GhgCalculationLine[] | null,
+): Promise<GhgReconciliation> {
+  if (db.mode === 'demo') return reconciliation;
+  if (!run.summary || !rebuiltLines) return { ...reconciliation, result: null };
+  const [policy, activityLines] = await Promise.all([
+    db.findById('ghgCalculationPolicies', run.policyId),
+    run.activityBatchIds.length > 0
+      ? db.select('ghgActivityLines', {
+          where: { organizationId: run.organizationId, batchId: { in: run.activityBatchIds } },
+        })
+      : Promise.resolve([]),
+  ]);
+  if (!policy) return { ...reconciliation, result: null };
+  return {
+    ...reconciliation,
+    result: rebuildReconciliationResult(
+      reconciliation,
+      rebuiltLines,
+      activityLines,
+      baseline.rows,
+      policy.rounding,
+    ),
+  };
 }
 
 /** 照合する（結果を記録する） */
@@ -117,7 +173,9 @@ export async function reconcile(
 ): Promise<GhgReconciliation> {
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.data.write');
-  const { run, baseline } = await loadPair(db, ctx, input.runId, input.baselineId);
+  const { run, baseline, rebuiltLines } = await loadPair(db, ctx, input.runId, input.baselineId);
+  // 照合の記録は拠点ごとの状況（照合済み・要確認）とホームの要対応を決める。担当外の拠点を含む記録は照合しない
+  for (const unitId of run.unitIds) assertUnitInScope(ctx, unitId);
   if (!run.summary) {
     throw new ValidationError(
       'この算定の記録は入力が変わったため照合できません。算定し直してから照合してください。',
@@ -126,9 +184,11 @@ export async function reconcile(
   const order = input.order ?? DEFAULT_ATTRIBUTION_ORDER;
   checkOrder(order);
   const [lines, policy, activityLines] = await Promise.all([
-    db.select('ghgCalculationLines', {
-      where: { organizationId: run.organizationId, runId: run.id },
-    }),
+    rebuiltLines
+      ? Promise.resolve(rebuiltLines)
+      : db.select('ghgCalculationLines', {
+          where: { organizationId: run.organizationId, runId: run.id },
+        }),
     db.findById('ghgCalculationPolicies', run.policyId),
     db.select('ghgActivityLines', {
       where: { organizationId: run.organizationId, batchId: { in: run.activityBatchIds } },
@@ -214,16 +274,12 @@ export async function loadReconciliation(
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.data.read');
   if (!isUuid(reconciliationId)) throw new NotFoundError('照合の記録が見つかりません。');
-  const reconciliation = await db.findById('ghgReconciliations', reconciliationId);
-  if (!reconciliation || reconciliation.organizationId !== ctx.workspace.organizationId) {
+  const stored = await db.findById('ghgReconciliations', reconciliationId);
+  if (!stored || stored.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('照合の記録が見つかりません。');
   }
-  const { run, baseline } = await loadPair(
-    db,
-    ctx,
-    reconciliation.runId,
-    reconciliation.baselineId,
-  );
+  const { run, baseline, rebuiltLines } = await loadPair(db, ctx, stored.runId, stored.baselineId);
+  const reconciliation = await trustedReconciliation(db, stored, run, baseline, rebuiltLines);
   const notes = await db.select('ghgReconciliationNotes', {
     where: { organizationId: reconciliation.organizationId, reconciliationId: reconciliation.id },
     orderBy: [{ column: 'decidedAt' }, { column: 'id' }],

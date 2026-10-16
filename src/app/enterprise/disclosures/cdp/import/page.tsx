@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Upload } from 'lucide-react';
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
 import { Notice } from '@/components/shared/notice';
 import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
@@ -67,8 +68,9 @@ export default async function DisclosureImportPage({
   const pastPeriods = shell.periods
     .filter((p) => p.id !== shell.currentPeriod.id)
     .sort((a, b) => (a.startDate < b.startDate ? 1 : -1));
+  // 既定は決算日が同じ前年の期間（暦年の期間を年度の前年にしない。plan K10）
   const defaultPeriodId =
-    pastPeriods.find((p) => p.startDate < shell.currentPeriod.startDate)?.id ?? pastPeriods[0]?.id;
+    previousComparablePeriod(shell.currentPeriod, pastPeriods, 'start')?.id ?? pastPeriods[0]?.id;
 
   let preview: ImportPreview | null = null;
   let error: string | null = null;

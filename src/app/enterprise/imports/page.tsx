@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { isFyReportingUnit } from '@/lib/domain/boundaries';
 import {
   Calculator,
   ChevronRight,
@@ -99,9 +100,10 @@ export default async function ImportsPage({
   const page = Math.min(parsePage(params.page), Math.max(1, Math.ceil(rows.length / pageSize)));
   const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
 
+  // 取込の拠点の候補は年度のデータを集める拠点（入力テンプレートと同じ。plan §2.6）
   const editableUnits = shell.units.filter(
     (u) =>
-      u.unitType !== 'supplier' &&
+      isFyReportingUnit(u) &&
       (ctx.workspace.unitScopeIds.length === 0 || ctx.workspace.unitScopeIds.includes(u.id)),
   );
   const canImport = can(ctx, 'enterprise.import.run');

@@ -22,6 +22,7 @@ import { activityLabel, ACTIVITY_CODE_LABELS } from '@/lib/domain/ghg/calculate'
 import type { DecimalSeparator } from '@/lib/domain/ghg/number-format';
 import { latestPolicy, type GhgSourceRows } from '@/lib/domain/ghg/select-inputs';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { isUuid } from '@/lib/validation/uuid';
 import { parseUploadedFile } from '@/lib/imports/parsers';
 import { DEMO_GHG_LIMITS } from '@/lib/repositories/demo-ghg-checks';
 import type { DbClient } from '@/lib/repositories/types';
@@ -512,7 +513,9 @@ async function analyze(
   }
   accepted.forEach((row, index) => {
     const t = trialById.get(virtualLines[index]!.id);
-    const first = t?.results.find((r) => r.method !== 'electricity_market') ?? t?.results[0];
+    const first =
+      t?.results.find((r) => r.method !== 'electricity_market' && r.method !== 'heat_market') ??
+      t?.results[0];
     const trialWarnings = [...new Set((t?.results ?? []).flatMap((r) => r.warnings))].map(
       trialWarningLabel,
     );
@@ -663,6 +666,8 @@ async function loadOwnBatch(
   batchId: Uuid,
 ): Promise<GhgActivityBatch> {
   assertEnterpriseWorkspace(ctx);
+  // UUID でない ID は DB に問い合わせない（Supabase Mode では 22P02 の例外＝500 になるため。見つからない扱い）
+  if (!isUuid(batchId)) throw new NotFoundError('活動量の取込が見つかりません。');
   const batch = await db.findById('ghgActivityBatches', batchId);
   if (!batch || batch.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('活動量の取込が見つかりません。');
@@ -683,6 +688,15 @@ async function assertPeriodOpen(db: DbClient, batch: GhgActivityBatch): Promise<
  * 取込の確定（確認中 → 確定）。差し替えなら元の確定済みのバッチを差し替え済みにする。
  * 行の数がバッチの記録と違う（デモで行の一部が失われた等）なら確定しない
  */
+/** 行の数が取込の記録と合わないときの理由（確定の検査と詳細画面の確定の押せない理由が同じ文を使う） */
+function lineCountMismatchReason(rowCount: number, found: number): string {
+  return `行の数が取込の記録と合いません（記録 ${rowCount} 行・見つかった行 ${found} 行）。破棄して取り込み直してください。`;
+}
+
+/** 差し替える元のバッチが確定済みでないときの理由（同上） */
+const SUPERSEDE_TARGET_GONE_REASON =
+  '差し替える確定済みのバッチは、既に差し替え済みか見つかりません。破棄して取り込み直してください。';
+
 export async function confirmActivityImport(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -698,9 +712,7 @@ export async function confirmActivityImport(
     where: { organizationId: batch.organizationId, batchId: batch.id },
   });
   if (lineCount !== batch.rowCount) {
-    throw new ValidationError(
-      `行の数が取込の記録と合いません（記録 ${batch.rowCount} 行・見つかった行 ${lineCount} 行）。破棄して取り込み直してください。`,
-    );
+    throw new ValidationError(lineCountMismatchReason(batch.rowCount, lineCount));
   }
   let target: GhgActivityBatch | null = null;
   if (batch.supersedesBatchId) {
@@ -710,9 +722,7 @@ export async function confirmActivityImport(
       target.organizationId !== batch.organizationId ||
       target.status !== 'confirmed'
     ) {
-      throw new ValidationError(
-        '差し替える確定済みのバッチは、既に差し替え済みか見つかりません。破棄して取り込み直してください。',
-      );
+      throw new ValidationError(SUPERSEDE_TARGET_GONE_REASON);
     }
   }
   const now = new Date().toISOString();
@@ -965,6 +975,11 @@ export interface ActivityBatchDetail {
   supersededBy: Pick<GhgActivityBatch, 'id' | 'fileName' | 'status'> | null;
   /** 同じ拠点・種類の確定済みの行のうち、このバッチの行と同じ月・活動（輸送は出荷番号）の行 */
   overlaps: number;
+  /**
+   * 確認中のバッチをいまの状態では確定できない理由（確定の検査〔confirmActivityImport〕と同じ: 差し替える元が
+   * 既に確定済みでない・行の数が取込の記録と合わない）。確定できるなら null。画面の「確定する」の押せない理由
+   */
+  confirmBlockedReason: string | null;
 }
 
 /** バッチの詳細（P95）。閲覧の権限だけで見られる */
@@ -1001,6 +1016,14 @@ export async function loadActivityBatch(
     overlaps = lines.filter((l) => existing.has(overlapKey(l))).length;
   }
   const names = await namesOf(db, [batch.createdBy, batch.confirmedBy]);
+  const confirmBlockedReason =
+    batch.status !== 'draft'
+      ? null
+      : batch.supersedesBatchId && (!supersedes || supersedes.status !== 'confirmed')
+        ? SUPERSEDE_TARGET_GONE_REASON
+        : lines.length !== batch.rowCount
+          ? lineCountMismatchReason(batch.rowCount, lines.length)
+          : null;
   return {
     batch,
     unit,
@@ -1021,5 +1044,6 @@ export async function loadActivityBatch(
       ? { id: supersededBy.id, fileName: supersededBy.fileName, status: supersededBy.status }
       : null,
     overlaps,
+    confirmBlockedReason,
   };
 }

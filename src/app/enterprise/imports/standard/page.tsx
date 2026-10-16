@@ -1,3 +1,4 @@
+import { isFyReportingUnit } from '@/lib/domain/boundaries';
 import {
   Equal,
   FileSpreadsheet,
@@ -81,7 +82,7 @@ export default async function StandardImportPage() {
 
   const scope = ctx.workspace.unitScopeIds;
   const units = shell.units
-    .filter((u) => u.unitType !== 'supplier' && (scope.length === 0 || scope.includes(u.id)))
+    .filter((u) => isFyReportingUnit(u) && (scope.length === 0 || scope.includes(u.id)))
     .map((u) => ({ code: u.code, name: u.name }));
   const metrics = shell.metrics
     .filter((m) => m.dataType !== 'text' && m.dataType !== 'boolean')

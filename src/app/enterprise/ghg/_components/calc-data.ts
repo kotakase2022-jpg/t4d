@@ -45,6 +45,15 @@ export interface RunViewContext {
   sets: EmissionFactorSet[];
 }
 
+/**
+ * 「組織の算定ルール（GHG プロトコルの標準区分と異なる区分を含みます）」のバッジを出すか。表示している記録が
+ * 区分規則で報告区分を実際に変えたときだけ（承認待ちの規則だけなら、数値は既定区分のまま。N2 がそれを示す）。
+ * P90・GHG サマリー・算定明細（P96）が同じ規則を使う
+ */
+export function showsCompanyRuleBadge(view: Pick<RunViewContext, 'appliedRules'>): boolean {
+  return view.appliedRules.length > 0;
+}
+
 /** 利用者の氏名（見つからなければ「—」） */
 export async function loadProfileNames(
   db: DbClient,

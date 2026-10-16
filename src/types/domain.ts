@@ -3670,11 +3670,13 @@ export type FactorActivityKind = (typeof FACTOR_ACTIVITY_KINDS)[number];
 export const GHG_ACTIVITY_KINDS = ['fuel', 'electricity', 'gas', 'heat', 'transport'] as const;
 export type GhgActivityKind = (typeof GHG_ACTIVITY_KINDS)[number];
 
-/** 算定方法（燃料の燃焼・電力 2 基準・改良トンキロ法・燃料法〔自社便〕） */
+/** 算定方法（燃料の燃焼・電力 2 基準・購入した熱 2 基準・改良トンキロ法・燃料法〔自社便〕） */
 export const GHG_METHODS = [
   'fuel_combustion',
   'electricity_location',
   'electricity_market',
+  'heat_location',
+  'heat_market',
   'tonkm_improved',
   'fuel_method',
 ] as const;

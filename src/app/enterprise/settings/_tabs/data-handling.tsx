@@ -4,6 +4,7 @@ import { CreatePanel, createPanelHref } from '@/components/shared/create-panel';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { HonestyBadge } from '@/components/shared/honesty-badge';
 import { Notice } from '@/components/shared/notice';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { Section } from '@/components/shared/section';
 import { EmptyState } from '@/components/shared/states';
 import { StatusBadge } from '@/components/shared/status-badge';
@@ -382,7 +383,7 @@ function DataTermsForm({
   const subprocessors = subprocessorDefaults(current);
   const hasSubprocessors = SUBPROCESSOR_CATEGORY_ORDER.some((c) => subprocessors[c] !== '');
   return (
-    <form action={recordDataTermsAction} className="space-y-2">
+    <PreservingForm action={recordDataTermsAction} className="space-y-2">
       <FormSection
         title="秘密保持・データ処理"
         kind="optional"
@@ -567,6 +568,6 @@ function DataTermsForm({
       <SubmitButton variant="primary" size="sm" pendingLabel="記録中…">
         この内容で版を記録
       </SubmitButton>
-    </form>
+    </PreservingForm>
   );
 }

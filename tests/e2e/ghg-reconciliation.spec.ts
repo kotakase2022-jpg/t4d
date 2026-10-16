@@ -121,9 +121,11 @@ test.describe('既存の算定結果との照合', () => {
     const absInputs = reconcile.locator('input[name$=":abs"]');
     await expect(absInputs).toHaveCount(4);
     for (const input of await absInputs.all()) await expect(input).toHaveValue('');
-    // 許容差を入れずに照合すると、既定値を置かずに断る
+    // 許容差を入れずに照合すると、既定値を置かずに断る。入れた値は残る（リダイレクトで消さない）
+    await absInputs.first().fill('0.05');
     await reconcile.getByRole('button', { name: '照合する' }).click();
     await expect(page.getByText(/許容差が入っていない区分があります/)).toBeVisible();
+    await expect(page.locator('#reconcile input[name$=":abs"]').first()).toHaveValue('0.05');
     await page.locator('#reconcile').locator('input[name$=":abs"]').first().waitFor();
     for (const input of await page.locator('#reconcile input[name$=":abs"]').all()) {
       await input.fill('0.05');

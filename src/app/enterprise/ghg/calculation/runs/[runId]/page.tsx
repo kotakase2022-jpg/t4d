@@ -185,10 +185,11 @@ export default async function GhgRunPage({
       header: '活動量→換算後',
       importance: 'secondary',
       align: 'right',
+      // 表示で丸め直さない（plan §2.0）。小さい換算後の量・係数（例 0.000441 t-CO2/kWh）を 0 にしない
       cell: (line) => (
         <span className="whitespace-nowrap">
-          {formatNumber(line.activityAmount)} {line.activityUnit} →{' '}
-          {formatNumber(line.convertedAmount)} {line.convertedUnit}
+          {formatUnrounded(line.activityAmount)} {line.activityUnit} →{' '}
+          {formatUnrounded(line.convertedAmount)} {line.convertedUnit}
         </span>
       ),
     },
@@ -196,9 +197,10 @@ export default async function GhgRunPage({
       key: 'factor',
       header: '係数',
       importance: 'secondary',
+      align: 'right',
       cell: (line) => (
         <span className="text-small">
-          {formatNumber(line.factorValue)} {line.factorUnit}
+          {formatUnrounded(line.factorValue)} {line.factorUnit}
           <span className="block text-caption text-ink-muted">
             {line.factorYear} 年・{line.factorSetCode} {line.factorSetVersion}
           </span>

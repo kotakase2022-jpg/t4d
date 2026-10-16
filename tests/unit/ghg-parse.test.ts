@@ -124,12 +124,53 @@ describe('extractBaselineRows', () => {
       table(['拠点', '区分', '排出量'], [['US1', 'Scope1', '120.5']]),
       { siteCode: '拠点', scope: '区分', emissions: '排出量' },
       { US1: 'u-us' },
+      { defaultEmissionsUnit: 't-CO2e' },
     );
     expect(scopeOnly.granularity).toBe('site_scope');
     expect(scopeOnly.rows[0]!.emissionsUnit).toBe('t-CO2e');
     expect(
       granularityOf([{ ...scopeOnly.rows[0]!, activityKind: 'fuel', activityCode: 'diesel' }]),
     ).toBe('site_activity');
+  });
+});
+
+describe('extractBaselineRows: 排出量の単位は推測しない（自己監査 F5）', () => {
+  const headers = ['拠点', '区分', '排出量', '単位(排出)'];
+  const mapping = {
+    siteCode: '拠点',
+    scope: '区分',
+    emissions: '排出量',
+    emissionsUnit: '単位(排出)',
+    decimalSeparator: 'dot' as const,
+  };
+
+  it('単位の列を選んだら、空の欄は行のエラー（既定の単位・t-CO2e で埋めない）', () => {
+    const result = extractBaselineRows(
+      table(headers, [
+        ['TH1', 'Scope1', '1520', 'kg-CO2e'],
+        ['TH1', 'Scope2', '1520', ''],
+      ]),
+      mapping,
+      { TH1: 'u-th' },
+      // 列を選んだときに画面が送らない既定の単位を渡しても、空の欄には使わない
+      { defaultEmissionsUnit: 't-CO2e' },
+    );
+    expect(result.rows.map((r) => [r.scope, r.emissions, r.emissionsUnit])).toEqual([
+      ['scope1', 1520, 'kg-CO2e'],
+    ]);
+    expect(result.errors).toEqual([
+      { rowNo: 3, message: '排出量の単位が空です（推測しません。単位を入れてください）' },
+    ]);
+  });
+
+  it('単位の列も、ファイル全体の単位も無ければエラー（t-CO2e と見なさない）', () => {
+    const result = extractBaselineRows(
+      table(['拠点', '区分', '排出量'], [['TH1', 'Scope1', '1520']]),
+      { siteCode: '拠点', scope: '区分', emissions: '排出量', decimalSeparator: 'dot' },
+      { TH1: 'u-th' },
+    );
+    expect(result.rows).toEqual([]);
+    expect(result.errors[0]!.message).toContain('排出量の単位がありません');
   });
 });
 
@@ -245,6 +286,7 @@ describe('小数点の記号（取込の列の対応付けで利用者が選ぶ�
       table(headers, rows),
       { siteCode: '拠点', scope: '区分', emissions: '排出量', decimalSeparator: 'dot' },
       { TH1: 'u-th' },
+      { defaultEmissionsUnit: 't-CO2e' },
     );
     expect(withDot.rows[0]?.emissions).toBe(3.741);
 

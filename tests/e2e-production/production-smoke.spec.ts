@@ -1257,10 +1257,12 @@ test('本番: Scope1・2算定の概要に架空の注記・5 拠点（国コー
     await expect(sites.locator(`[data-site-row="${code}"]`)).toContainText(country);
   }
   await expect(sites.locator('tbody tr')).toHaveCount(5);
-  // 報告区分と既定区分の二重表示・組織の算定ルールのバッジ・区分規則の承認待ち（N2）
+  // 報告区分と既定区分の二重表示・区分規則の承認待ち（N2）。組織の算定ルールのバッジは、表示している記録が
+  // 規則で報告区分を変えたとき（N1 があるとき）だけ出る（承認待ちだけでは出さない）
   const dual = main.getByRole('region', { name: '報告区分と既定区分' });
-  await expect(dual.locator('[data-honesty="company-rule"]')).toBeVisible();
   await expect(dual.locator('[data-ghg-notice="N2"]')).toBeVisible();
+  const applied = await dual.locator('[data-ghg-notice="N1"]').count();
+  await expect(dual.locator('[data-honesty="company-rule"]')).toHaveCount(applied > 0 ? 1 : 0);
   const table = dual.getByRole('table', { name: '報告区分と既定区分' });
   for (const row of ['scope1', 'scope3_cat4', 'scope1_scope3_total', 'scope2_location', 'scope2']) {
     await expect(table.locator(`[data-dual-row="${row}"]`)).toBeVisible();

@@ -29,6 +29,7 @@ import {
   loadProfileNames,
   loadRunViewContext,
   loadScope3InputLabels,
+  showsCompanyRuleBadge,
 } from '../_components/calc-data';
 import { RUN_INPUT_STATE_VIEW, siteResultRows, roundingPolicyText } from '../_components/calc-view';
 import { DualViewTable } from '../_components/dual-view-table';
@@ -277,7 +278,7 @@ export default async function GhgCalculationPage({
     },
   ];
 
-  const hasCompanyRule = view.appliedRules.length > 0 || view.pendingRules.length > 0;
+  const hasCompanyRule = showsCompanyRuleBadge(view);
 
   return (
     <>

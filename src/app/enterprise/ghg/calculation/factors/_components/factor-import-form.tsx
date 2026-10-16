@@ -27,6 +27,7 @@ import {
   DECIMAL_SEPARATORS,
   type DecimalSeparator,
 } from '@/lib/domain/ghg/number-format';
+import { factorActivityName } from '@/lib/domain/ghg/labels';
 import { formatNumber } from '@/lib/format/datetime';
 import { confirmFactorSetImportAction, previewFactorSetImportAction } from '../actions';
 import {
@@ -483,7 +484,14 @@ export function FactorImportForm({
                       <TD className="font-mono text-caption">{f.code}</TD>
                       <TD>{f.name}</TD>
                       <TD>{f.activityKind ? FACTOR_KIND_LABELS[f.activityKind] : '—'}</TD>
-                      <TD className="font-mono text-caption">{f.activityCode}</TD>
+                      <TD>
+                        {factorActivityName(f.activityKind, f.activityCode)}
+                        {factorActivityName(f.activityKind, f.activityCode) !== f.activityCode && (
+                          <span className="ml-1 font-mono text-caption text-ink-muted">
+                            {f.activityCode}
+                          </span>
+                        )}
+                      </TD>
                       <TD>{f.countryCode ?? '—'}</TD>
                       <TD>{f.basis ? EMISSION_BASIS_LABELS[f.basis] : '—'}</TD>
                       <TD align="right" className="tnum">

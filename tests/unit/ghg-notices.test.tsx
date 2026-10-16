@@ -75,7 +75,12 @@ describe('ghg-notices の固定文', () => {
   it('N5・N6・N9・N10 の要点', () => {
     expect(GHG_FIXED_NOTICES.N5).toContain('国内のトラック輸送の算定方法です');
     expect(GHG_FIXED_NOTICES.N6).toContain('この画面の Scope 区分とは対応しません');
-    expect(GHG_FIXED_NOTICES.N9).toContain('すべて架空です');
+    // 架空なのはデモの係数セット・活動量・既存結果。公的参照の値（N10）まで架空と言わない（自己監査 R6）
+    expect(GHG_FIXED_NOTICES.N9).toContain(
+      'デモの係数セット（出所「架空」）・活動量・既存の算定結果は架空です',
+    );
+    expect(GHG_FIXED_NOTICES.N9).not.toContain('すべて架空');
+    expect(GHG_FIXED_NOTICES.N9).toContain('公的参照（告示・算定省令）として示す値');
     expect(GHG_FIXED_NOTICES.N10).toContain('令和5年以降の改正の有無は一部未確認です');
   });
 

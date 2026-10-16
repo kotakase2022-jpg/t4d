@@ -26,9 +26,11 @@ import { Badge } from '@/components/ui/badge';
 import {
   CONSOLIDATED_UNIT_TAG,
   isConsolidatedUnit,
+  isFyReportingUnit,
   NO_MATCH_UNIT_ID,
 } from '@/lib/domain/boundaries';
 import { can } from '@/lib/authorization/can';
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
 import { formatJst, formatNumber } from '@/lib/format/datetime';
 import {
   loadDataPointPage,
@@ -157,7 +159,8 @@ export default async function DataListPage({
     sort,
   );
 
-  const reportableUnits = shell.units.filter((u) => u.unitType !== 'supplier');
+  // 絞り込みの拠点は年度のデータを集める拠点（連結対象外の検証拠点などを並べない。plan §2.6）
+  const reportableUnits = shell.units.filter(isFyReportingUnit);
   const scopeNames = shell.units.filter((u) => scope.includes(u.id)).map((u) => u.name);
 
   // 当期の状態の内訳（絞り込みに関係なく、当期の全件）。一覧と同じ条件（組織・期間・削除済み除く）で数える
@@ -184,9 +187,9 @@ export default async function DataListPage({
   const canImport = can(ctx, 'enterprise.import.run');
   const canBulk = canWrite || canReview || canApprove;
 
-  const previousPeriod = shell.periods
-    .filter((p) => p.startDate < shell.currentPeriod.startDate)
-    .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
+  // 複製元は前年度複製（carryForwardFromPreviousPeriod）と同じ選び方（決算日が同じ期間。plan K10）
+  const previousPeriod =
+    previousComparablePeriod(shell.currentPeriod, shell.periods, 'end') ?? undefined;
 
   const exportHref = (format: 'csv' | 'xlsx') =>
     `/api/exports/data-points?period=${shell.currentPeriod.id}&format=${format}`;

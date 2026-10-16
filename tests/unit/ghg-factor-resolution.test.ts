@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { resolveFactor, type FactorNeed } from '@/lib/domain/ghg/factor-resolution';
+import {
+  factorNeedsOfLine,
+  resolveFactor,
+  type FactorNeed,
+} from '@/lib/domain/ghg/factor-resolution';
 import type { EmissionFactor, EmissionFactorAssignment, EmissionFactorSet } from '@/types/domain';
 
 /**
@@ -194,5 +198,86 @@ describe('resolveFactor', () => {
         SETS,
       ),
     ).toEqual({ error: 'unit_dimension' });
+  });
+});
+
+describe('resolveFactor: 割当の係数の活動・基準が合うこと（自己監査 sec F3）', () => {
+  it('同じ種類でも活動（軽油と揮発油）が違えば activity_mismatch（黙って別の燃料の係数を使わない）', () => {
+    const gasoline = factor('F-GASOLINE', 'S25', {
+      activityKind: 'fuel',
+      activityCode: 'gasoline',
+      basis: null,
+    });
+    expect(
+      resolveFactor(
+        need({ activityKind: 'fuel', activityCode: 'diesel', basis: null }),
+        [
+          assignment('A', 'F-GASOLINE', {
+            activityKind: 'fuel',
+            activityCode: 'diesel',
+            basis: null,
+          }),
+        ],
+        [...FACTORS, gasoline],
+        SETS,
+      ),
+    ).toEqual({ error: 'activity_mismatch' });
+  });
+
+  it('マーケット基準の割当がロケーション基準の係数を指していれば activity_mismatch', () => {
+    expect(
+      resolveFactor(
+        need({ basis: 'market' }),
+        [assignment('A', 'F-TH', { unitId: 'u-th', basis: 'market' })],
+        FACTORS,
+        SETS,
+      ),
+    ).toEqual({ error: 'activity_mismatch' });
+  });
+
+  it('電力のマーケット基準は契約の割当に組織の代替値（grid）の係数を当てられる', () => {
+    const residual = factor('F-RESIDUAL', 'S25', { basis: 'market', activityCode: 'grid' });
+    const resolved = resolveFactor(
+      need({ basis: 'market', activityCode: 'PLANT-01' }),
+      [
+        assignment('A', 'F-RESIDUAL', {
+          unitId: 'u-th',
+          basis: 'market',
+          activityCode: 'PLANT-01',
+        }),
+      ],
+      [...FACTORS, residual],
+      SETS,
+    );
+    expect(resolved).toMatchObject({ factor: { id: 'F-RESIDUAL' } });
+  });
+});
+
+describe('factorNeedsOfLine（算定・割当の一覧・入力ハッシュが同じ組を使う）', () => {
+  const line = {
+    activityCode: 'steam',
+    contractCode: null,
+    fuelCode: null,
+    tonKm: null,
+    cargoWeightT: null,
+    distanceKm: null,
+    loadFactorPct: null,
+  };
+  it('購入した熱は電力と同じく 2 基準（ロケーション・マーケット）の組が要る', () => {
+    expect(factorNeedsOfLine({ ...line, activityKind: 'heat' })).toEqual([
+      { kind: 'heat', code: 'steam', basis: 'location' },
+      { kind: 'heat', code: 'steam', basis: 'market' },
+    ]);
+    expect(
+      factorNeedsOfLine({
+        ...line,
+        activityKind: 'electricity',
+        activityCode: 'grid',
+        contractCode: 'C-1',
+      }),
+    ).toEqual([
+      { kind: 'electricity', code: 'grid', basis: 'location' },
+      { kind: 'electricity', code: 'C-1', basis: 'market' },
+    ]);
   });
 });

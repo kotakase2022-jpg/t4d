@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setAiProviderForTesting } from '@/lib/ai';
 import { MockAIProvider } from '@/lib/ai/mock-provider';
 import { FIXTURE_TODAY } from '@/lib/config';
+import { isFyReportingUnit } from '@/lib/domain/boundaries';
 import { ORG_IDS, PERIOD_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { SSBJ_FRAMEWORK_INFO } from '@/lib/frameworks/ssbj-2026';
@@ -350,8 +351,12 @@ describe('ホーム（従来・ESG経営タブ）', () => {
     render(await LegacyHomeBody({ shell, today: FIXTURE_TODAY }));
     expectOutsideDetails(screen.getByRole('heading', { name: '拠点別進捗' }));
 
-    const units = shell.units.filter((u) => u.unitType !== 'supplier');
+    // 年度のデータを集める拠点だけ（連結対象外の検証拠点の 0/0 の行は出さない。R2）
+    const units = shell.units.filter(isFyReportingUnit);
     expect(units.length).toBeGreaterThan(0);
+    for (const unit of shell.units.filter((u) => !isFyReportingUnit(u))) {
+      expect(screen.queryByRole('list', { name: `${unit.name} の状態の内訳` })).toBeNull();
+    }
     for (const unit of units) {
       const list = screen.getByRole('list', { name: `${unit.name} の状態の内訳` });
       // 検証エラーは状態と重なるので帯に入れず、拠点の行に件数を書く（0 件でも書く）

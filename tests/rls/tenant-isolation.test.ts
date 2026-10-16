@@ -5274,12 +5274,12 @@ describe('Scope1・2 の算定と照合（0060〜0065）の越権・追記専用
 
   describe('0064 算定の記録と算定行', () => {
     it('拠点がすべて担当拠点のときだけ記録できる（作成者は本人）。算定行は記録の作成者本人だけ。どちらも追記専用', async () => {
-      const run = (actor: string, units: string[]) =>
+      const run = (actor: string, units: string[], lineCount = 1) =>
         h.asUser<{ id: string; created_by: string }>(
           actor,
           `insert into ghg_calculation_runs (organization_id, reporting_period_id, unit_ids, policy_id, input_hash, engine_version, summary, line_count, created_by)
-           values ($1, $2, $3::uuid[], $4, $5, 'ghg-engine/1', '{}'::jsonb, 0, $6) returning id, created_by`,
-          [ORG_A, CY, `{${units.join(',')}}`, G.policy, SHA, AUTHOR],
+           values ($1, $2, $3::uuid[], $4, $5, 'ghg-engine/2', '{}'::jsonb, $7, $6) returning id, created_by`,
+          [ORG_A, CY, `{${units.join(',')}}`, G.policy, SHA, AUTHOR, lineCount],
         );
       await expect(run(ENT_A_SITE, [UNIT_IDS.east, G.units.th])).rejects.toThrow(RLS);
       const [own] = await run(ENT_A_SITE, [UNIT_IDS.east]);
@@ -5300,6 +5300,8 @@ describe('Scope1・2 の算定と照合（0060〜0065）の越権・追記専用
         );
       await expect(insertLine(AUTHOR)).rejects.toThrow(RLS);
       await insertLine(ENT_A_SITE);
+      // 記録の行数（1）がそろった後は、作成者本人でも行を足せない（0066 のトリガ）
+      await expect(insertLine(ENT_A_SITE)).rejects.toThrow(/T4D_IMMUTABLE/);
       expect(
         await h.asUser(
           AUTHOR,
@@ -5371,6 +5373,193 @@ describe('Scope1・2 の算定と照合（0060〜0065）の越権・追記専用
       await expect(
         h.asSuperuser(`update ghg_baseline_results set label = 'x' where id = $1`, [G.baseline]),
       ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0066 レビュー指摘: 取込の権限・担当拠点・割当の係数の一致・算定行の範囲', () => {
+    const SUPPLIER = fid('profile', 'rls-ghg-supplier');
+    const TONKM_RUN = (actor: string, units: string[], lineCount: number) =>
+      h.asUser<{ id: string }>(
+        actor,
+        `insert into ghg_calculation_runs (organization_id, reporting_period_id, unit_ids, policy_id, input_hash, engine_version, summary, line_count, created_by)
+         values ($1, $2, $3::uuid[], $4, $5, 'ghg-engine/2', '{}'::jsonb, $6, $7) returning id`,
+        [ORG_A, CY, `{${units.join(',')}}`, G.policy, SHA, lineCount, actor],
+      );
+
+    beforeAll(async () => {
+      // データ入力はできるが取込の権限の無い役割（サプライヤー担当）
+      await h.asSuperuser('insert into auth.users (id, email) values ($1, $2)', [
+        SUPPLIER,
+        'rls-ghg-supplier@demo.local',
+      ]);
+      await h.asSuperuser(
+        `insert into profiles (id, email, display_name) values ($1, $2, 'RLS サプライヤー担当')`,
+        [SUPPLIER, 'rls-ghg-supplier@demo.local'],
+      );
+      const [membership] = await h.asSuperuser<{ id: string }>(
+        `insert into organization_memberships (organization_id, user_id, status)
+         values ($1, $2, 'active') returning id`,
+        [ORG_A, SUPPLIER],
+      );
+      await h.asSuperuser(
+        `insert into membership_roles (membership_id, role_key) values ($1, 'supplier_contributor')`,
+        [membership!.id],
+      );
+    });
+
+    it('活動量のバッチ・行の作成は取込の権限（import.run）が要る（データ入力だけでは作れない）', async () => {
+      await expect(
+        h.asUser(
+          SUPPLIER,
+          `insert into ghg_activity_batches (organization_id, reporting_period_id, unit_id, kind) values ($1, $2, $3, 'energy')`,
+          [ORG_A, CY, UNIT_IDS.east],
+        ),
+      ).rejects.toThrow(RLS);
+      const [draft] = await h.asUser<{ id: string }>(
+        ENT_A_SITE,
+        `insert into ghg_activity_batches (organization_id, reporting_period_id, unit_id, kind)
+         values ($1, $2, $3, 'energy') returning id`,
+        [ORG_A, CY, UNIT_IDS.east],
+      );
+      await expect(
+        h.asUser(
+          SUPPLIER,
+          `insert into ghg_activity_lines (organization_id, batch_id, line_no, month, activity_kind, activity_code, amount, unit)
+           values ($1, $2, 1, '2025-01-01', 'fuel', 'diesel', 100, 'L')`,
+          [ORG_A, draft!.id],
+        ),
+      ).rejects.toThrow(RLS);
+    });
+
+    it('既存結果の作成は取込の権限と、対応付けた拠点・行の拠点がすべて担当拠点であること', async () => {
+      const baseline = (actor: string, mapping: Record<string, string>, rows: object[] = []) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into ghg_baseline_results (organization_id, reporting_period_id, label, file_sha256, granularity, rows, unit_mapping, row_count, created_by)
+           values ($1, $2, '（テスト）既存結果', $3, 'site_scope', $4::jsonb, $5::jsonb, $6, $7) returning id`,
+          [ORG_A, CY, SHA, JSON.stringify(rows), JSON.stringify(mapping), rows.length, actor],
+        );
+      await expect(baseline(SUPPLIER, { EAST: UNIT_IDS.east })).rejects.toThrow(RLS);
+      await expect(baseline(ENT_A_SITE, { EAST: UNIT_IDS.east, TH1: G.units.th })).rejects.toThrow(
+        RLS,
+      );
+      await expect(
+        baseline(ENT_A_SITE, { EAST: UNIT_IDS.east }, [
+          { rowNo: 1, siteCode: 'TH1', unitId: G.units.th, scope: 'scope1', emissions: 1 },
+        ]),
+      ).rejects.toThrow(RLS);
+      const [own] = await baseline(ENT_A_SITE, { EAST: UNIT_IDS.east }, [
+        { rowNo: 1, siteCode: 'EAST', unitId: UNIT_IDS.east, scope: 'scope1', emissions: 1 },
+      ]);
+      expect(own!.id).toBeTruthy();
+    });
+
+    it('照合は算定の記録の拠点がすべて担当拠点の人だけ（5 拠点の R-1 は拠点担当には照合できない）', async () => {
+      const reconcile = (actor: string, runId: string, baselineId: string) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into ghg_reconciliations (organization_id, run_id, baseline_id, tolerance, attribution_order, result, checker_version, created_by)
+           values ($1, $2, $3, '{}'::jsonb, '{factor}', '{}'::jsonb, 'ghg-reconcile/2', $4) returning id`,
+          [ORG_A, runId, baselineId, actor],
+        );
+      await expect(reconcile(ENT_A_SITE, G.run, G.baseline)).rejects.toThrow(RLS);
+      const [own] = await TONKM_RUN(ENT_A_SITE, [UNIT_IDS.east], 0);
+      const [ok] = await reconcile(ENT_A_SITE, own!.id, G.baseline);
+      expect(ok!.id).toBeTruthy();
+    });
+
+    it('算定行は記録の拠点だけ・担当拠点だけ。購入した熱の 2 基準の方法を書ける', async () => {
+      const [sample] = await h.asSuperuser<Record<string, unknown>>(
+        'select * from ghg_calculation_lines where run_id = $1 limit 1',
+        [G.run],
+      );
+      const [authorRun] = await TONKM_RUN(AUTHOR, [UNIT_IDS.east], 3);
+      const line = (actor: string, unitId: string, method: string, activityKind = 'fuel') =>
+        h.asUser(
+          actor,
+          `insert into ghg_calculation_lines (organization_id, run_id, unit_id, month, activity_line_id, activity_kind, activity_code, method,
+             activity_amount, activity_unit, converted_amount, converted_unit, factor_id, factor_value, factor_unit, factor_year,
+             factor_set_code, factor_set_version, resolution_path, emissions_unrounded, emissions_rounded, protocol_scope, reported_scope)
+           values ($1, $2, $3, '2025-01-01', $4, $6, 'steam', $5, 1, 'GJ', 1, 'GJ', $7, 0.06, 't-CO2/GJ', 2025,
+             'ORG-2025', '2025 年版', '（テスト）', 0.06, 0.06, 'scope2_location', 'scope2_location')`,
+          [
+            ORG_A,
+            authorRun!.id,
+            unitId,
+            sample!.activity_line_id,
+            method,
+            activityKind,
+            sample!.factor_id,
+          ],
+        );
+      // 記録の拠点（EAST）でない拠点の行は足せない
+      await expect(line(AUTHOR, G.units.th, 'heat_location', 'heat')).rejects.toThrow(
+        /T4D_CALCULATION_LINE|row-level security/,
+      );
+      await line(AUTHOR, UNIT_IDS.east, 'heat_location', 'heat');
+      await line(AUTHOR, UNIT_IDS.east, 'heat_market', 'heat');
+      await expect(line(AUTHOR, UNIT_IDS.east, 'steam_guess', 'heat')).rejects.toThrow(
+        /ghg_calculation_lines_method_check/,
+      );
+    });
+
+    it('割当の係数は活動・基準・国が割当と合うこと（DB のトリガ）', async () => {
+      const assign = (
+        unit: string | null,
+        country: string | null,
+        kind: string,
+        code: string,
+        basis: string | null,
+        factor: string,
+      ) =>
+        h.asUser<{ id: string }>(
+          AUTHOR,
+          `insert into emission_factor_assignments (organization_id, reporting_period_id, unit_id, country_code, activity_kind, activity_code, basis, factor_id)
+           values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+          [ORG_A, CY, unit, country, kind, code, basis, factor],
+        );
+      // 軽油の割当に揮発油の係数
+      await expect(
+        assign(G.units.th, null, 'fuel', 'diesel', null, ghgFactorId(2024, 'GASOLINE')),
+      ).rejects.toThrow(/T4D_FACTOR_ASSIGNMENT/);
+      // マーケット基準の割当にロケーション基準の係数
+      await expect(
+        assign(G.units.th, null, 'electricity', 'grid', 'market', ghgFactorId(2024, 'ELEC-LOC-TH')),
+      ).rejects.toThrow(/T4D_FACTOR_ASSIGNMENT/);
+      // タイ工場（TH）にベトナムの係数
+      await expect(
+        assign(
+          G.units.th,
+          null,
+          'electricity',
+          'grid',
+          'location',
+          ghgFactorId(2024, 'ELEC-LOC-VN'),
+        ),
+      ).rejects.toThrow(/T4D_FACTOR_ASSIGNMENT/);
+      await expect(
+        assign(null, 'TH', 'electricity', 'grid', 'location', ghgFactorId(2024, 'ELEC-LOC-VN')),
+      ).rejects.toThrow(/T4D_FACTOR_ASSIGNMENT/);
+      // 合う係数は割り当てられる（電力のマーケット基準の契約に組織の代替値 grid も当てられる）
+      const [ok] = await assign(
+        G.units.th,
+        null,
+        'electricity',
+        'grid',
+        'location',
+        ghgFactorId(2024, 'ELEC-LOC-TH'),
+      );
+      const [contract] = await assign(
+        G.units.th,
+        null,
+        'electricity',
+        'TH-PLANT-01',
+        'market',
+        ghgFactorId(2024, 'ELEC-MKT-RESIDUAL'),
+      );
+      for (const row of [ok, contract]) {
+        await h.asUser(AUTHOR, 'delete from emission_factor_assignments where id = $1', [row!.id]);
+      }
     });
   });
 

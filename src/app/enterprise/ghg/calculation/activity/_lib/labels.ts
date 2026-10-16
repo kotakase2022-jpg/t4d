@@ -1,3 +1,4 @@
+import type { StatusSemantic } from '@/lib/ui/status/types';
 import type { CarrierKind, FuelEconomyClass, GhgBatchKind, VehicleUse } from '@/types/domain';
 
 /**
@@ -52,4 +53,26 @@ export function carrierKindLabel(value: string | null): string {
 /** 月の表示（YYYY-MM） */
 export function monthLabel(month: string | null): string {
   return month ? month.slice(0, 7) : '—';
+}
+
+/**
+ * 「未受領」の数の示し方（P94 の数の帯）。未受領は検証拠点 × 活動で確定済みの行が無い月を数えるため、検証拠点が
+ * 無い組織（トライアルの設定が無い）では数えていない。0 を「すべて受領」と示すと、下の受領状況の表（検証対象外の
+ * 拠点の未受領の月）と食い違う（自己監査 UX-04）。検証拠点が無ければ「—」と「検証拠点が未設定」にする
+ */
+export function missingMonthsTile(
+  verificationUnits: number,
+  missingMonths: number,
+): { value: number | string; unit?: string; status: { semantic: StatusSemantic; label: string } } {
+  if (verificationUnits === 0) {
+    return { value: '—', status: { semantic: 'excluded', label: '検証拠点が未設定' } };
+  }
+  return {
+    value: missingMonths,
+    unit: 'か月',
+    status:
+      missingMonths > 0
+        ? { semantic: 'pending', label: '検証拠点 × 活動で確定済みの行が無い月' }
+        : { semantic: 'done', label: 'すべて受領' },
+  };
 }

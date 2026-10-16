@@ -61,6 +61,7 @@ import {
   reconciliationListHref,
   toleranceSummary,
 } from '../_components/reconcile-options';
+import { PreservingForm } from '@/components/shared/preserving-form';
 import { recordCauseAction } from '../actions';
 
 export const metadata = { title: '照合の詳細' };
@@ -389,7 +390,7 @@ export default async function GhgReconciliationPage({
                     </p>
                   )}
                 </div>
-                <form action={recordCauseAction} className="space-y-2">
+                <PreservingForm action={recordCauseAction} className="space-y-2">
                   <input type="hidden" name="reconciliationId" value={id} />
                   <input type="hidden" name="itemKey" value={recordTarget.key} />
                   <input type="hidden" name="periodId" value={period.id} />
@@ -436,7 +437,7 @@ export default async function GhgReconciliationPage({
                   >
                     原因を記録する
                   </SubmitButton>
-                </form>
+                </PreservingForm>
               </CreatePanel>
             )}
 

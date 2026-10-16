@@ -4,6 +4,7 @@ import { safeAppLinkOrNull } from '@/lib/security/safe-link';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { recordAiDecision } from '@/lib/ai';
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { assertCan, AuthorizationError, NotFoundError } from '@/lib/authorization/can';
 import {
@@ -1843,9 +1844,8 @@ export async function carryOverSsbjAction(formData: FormData): Promise<void> {
     });
     const current = periods.find((p) => p.id === periodId);
     if (!current) throw new NotFoundError('報告期間が見つかりません。');
-    const previous = periods
-      .filter((p) => p.startDate < current.startDate)
-      .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
+    // 引継ぎ元は決算日が同じ前年の期間（暦年の期間を年度の前年にしない。plan K10）
+    const previous = previousComparablePeriod(current, periods, 'start');
     if (!previous) {
       throw new ValidationError('前年度の報告期間がないため、引き継ぐ評価がありません。');
     }

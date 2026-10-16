@@ -325,17 +325,21 @@ export function ActivityImportForm({
     if (!fd) return;
     setPending('import');
     setMessage(null);
+    // 取り込めたら、移った先の画面が出るまで押せないままにする（読み込みの間にもう一度押すと、同じファイルの
+    // 確認中の取込が 2 つできる）
+    let navigating = false;
     try {
       const result = await importActivityFileAction(fd);
       if (!result.ok) {
         setMessage(result.message);
         return;
       }
+      navigating = true;
       router.push(result.href);
     } catch {
       setMessage(NETWORK_FAILURE);
     } finally {
-      setPending(null);
+      if (!navigating) setPending(null);
     }
   }
 
@@ -488,6 +492,11 @@ export function ActivityImportForm({
           }}
         />
       </FileDropZone>
+      {/* 選んだファイルと検証の結果を読み上げる（係数のセット・既存結果の取込の画面と同じ。読み上げの領域は
+          内容が変わる前から置いておく） */}
+      <p role="status" aria-live="polite" className="sr-only" data-activity-import-status>
+        {activityImportStatusText(file?.name ?? null, preview, fresh)}
+      </p>
       {sampleLinks.length > 0 && (
         <p className="text-caption text-ink-muted">
           架空のサンプル:{' '}
@@ -711,4 +720,22 @@ export function ActivityImportForm({
       </div>
     </div>
   );
+}
+
+/**
+ * 取込の画面の読み上げの文（選んだファイル・検証の結果）。検証が通って「取り込む」が押せるようになったことを
+ * スクリーンリーダーの利用者にも伝える（失敗は role="alert" の通知が伝える）。見えている見出しのバッジ・
+ * ファイルの欄と同じ文にしない（同じ文が 2 か所にあると、読み上げが重なり、文で探す検査も 1 つに決まらない）
+ */
+export function activityImportStatusText(
+  fileName: string | null,
+  preview: Pick<ActivityImportPreview, 'canImport' | 'rowCount'> | null,
+  fresh: boolean,
+): string {
+  if (preview && fresh) {
+    return preview.canImport
+      ? `検証の結果: 取込可（${preview.rowCount} 行）。「取り込む」で確認中の取込を作ります。`
+      : '検証の結果: 取込不可。理由の一覧を確かめてください。';
+  }
+  return fileName ? `ファイル「${fileName}」を選びました。` : '';
 }

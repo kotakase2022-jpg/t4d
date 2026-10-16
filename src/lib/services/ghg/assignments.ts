@@ -7,13 +7,17 @@ import { isIsoCountryCode, normalizeCountryCode } from '@/lib/domain/country-cod
 import { ACTIVITY_CODE_LABELS } from '@/lib/domain/ghg/calculate';
 import {
   RESOLUTION_ERROR_LABELS,
+  factorFits,
+  factorNeedsOfLine,
+  kindHasBasis,
   resolveFactor,
   type ResolutionError,
   type ResolutionPath,
 } from '@/lib/domain/ghg/factor-resolution';
 import { EMISSION_BASIS_LABELS, FACTOR_KIND_LABELS } from '@/lib/domain/ghg/factor-import';
 import { ValidationError } from '@/lib/errors/user-facing';
-import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
+import { isUuid } from '@/lib/validation/uuid';
+import { ghgFixtureAssignmentIds } from '@/lib/fixtures/ghg-verification';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { DEMO_GHG_LIMITS } from '@/lib/repositories/demo-ghg-checks';
 import type { DbClient } from '@/lib/repositories/types';
@@ -44,7 +48,7 @@ import { loadGhgSource } from './inputs';
  *  - 書けるのは enterprise.metric.manage。期間が締められていれば拒否
  *  - 外す: Supabase Mode は利用者の JWT で DELETE（RLS が metric.manage を確かめる）。Demo Mode は利用者が
  *    作った割当だけ（Fixture の割当を外しても、別のインスタンスでは Cookie から戻せず元に戻って見えるため、
- *    割り当て直す操作だけにする）
+ *    割り当て直す操作だけにする）。外した割当は Cookie に「外した」印を残し、既に行を戻した別のインスタンスでも除く
  * 監査ログは既存の種類（割当の保存・外す＝settings_changed）。
  */
 
@@ -127,39 +131,20 @@ export function needLabel(
     case 'transport_formula':
     case 'transport_default':
       return `${FACTOR_KIND_LABELS[kind]}（${fuelLabel(code)}）`;
-    case 'heat':
-      return code === 'heat' ? '熱' : `熱（${code}）`;
+    case 'heat': {
+      const name = code === 'heat' ? '熱' : `熱（${code}）`;
+      return basis ? `${name}（${EMISSION_BASIS_LABELS[basis]}）` : name;
+    }
     default:
       return fuelLabel(code);
   }
 }
 
-/** 活動量の 1 行に要る割当（算定のエンジンが係数を解決する組と同じ） */
+/** 活動量の 1 行に要る割当（算定のエンジンが係数を解決する組と同じ関数） */
 export function needsOfLine(
   line: GhgActivityLine,
 ): Array<{ kind: FactorActivityKind; code: string; basis: EmissionBasis | null }> {
-  switch (line.activityKind) {
-    case 'electricity':
-      return [
-        { kind: 'electricity', code: 'grid', basis: 'location' },
-        { kind: 'electricity', code: line.contractCode ?? 'grid', basis: 'market' },
-      ];
-    case 'transport': {
-      const fuel = line.fuelCode ?? line.activityCode;
-      const tonKm = line.tonKm !== null || (line.cargoWeightT !== null && line.distanceKm !== null);
-      if (!tonKm) return [{ kind: 'fuel', code: fuel, basis: null }];
-      return [
-        {
-          kind: line.loadFactorPct === null ? 'transport_default' : 'transport_formula',
-          code: fuel,
-          basis: null,
-        },
-        { kind: 'fuel', code: fuel, basis: null },
-      ];
-    }
-    default:
-      return [{ kind: line.activityKind, code: line.activityCode, basis: null }];
-  }
+  return factorNeedsOfLine(line);
 }
 
 export function needKey(
@@ -171,20 +156,8 @@ export function needKey(
   return [unitId, kind, code, basis ?? ''].join('|');
 }
 
-/** 係数がこの割当（種類・活動・基準）に使えるか。電力のマーケット基準は契約の係数か組織の代替値（grid） */
-export function factorFits(
-  factor: Pick<EmissionFactor, 'activityKind' | 'activityCode' | 'basis'>,
-  kind: FactorActivityKind,
-  code: string,
-  basis: EmissionBasis | null,
-): boolean {
-  if (factor.activityKind !== kind) return false;
-  if ((factor.basis ?? null) !== (basis ?? null)) return false;
-  if (kind === 'electricity' && basis === 'market') {
-    return factor.activityCode === code || factor.activityCode === 'grid';
-  }
-  return factor.activityCode === code;
-}
+/** 係数がこの割当（種類・活動・基準）に使えるか（解決・Demo の Cookie の戻し・DB のトリガと同じ規則） */
+export { factorFits };
 
 function levelOf(a: Pick<EmissionFactorAssignment, 'unitId' | 'countryCode'>): AssignmentLevel {
   if (a.unitId) return 'unit';
@@ -202,12 +175,12 @@ function assertManager(ctx: AuthorizationContext): void {
   assertCan(ctx, 'enterprise.metric.manage');
 }
 
-/** Fixture の初期値の割当の ID（Demo Mode で「利用者が作った割当か」を見分ける。書き換えない） */
+/**
+ * Fixture の初期値の割当の ID（Demo Mode で「利用者が作った割当か」を見分ける。書き換えない）。
+ * Cookie の「外した」印の検査（demo-ghg-checks.ts）と同じ集合
+ */
 function pristineAssignmentIds(): ReadonlySet<string> {
-  // リセットの反映と同じ「Fixture の初期値」を使う（repositories/index.ts の pristineFixture と同じ置き場所）
-  const g = globalThis as unknown as { __t4dPristineFixture?: FixtureDb };
-  g.__t4dPristineFixture ??= createFixtureDb();
-  return new Set(g.__t4dPristineFixture.emissionFactorAssignments.map((a) => a.id));
+  return ghgFixtureAssignmentIds();
 }
 
 const DEMO_FIXTURE_ASSIGNMENT_REASON =
@@ -364,7 +337,8 @@ async function loadOpenPeriod(
   ctx: AuthorizationContext,
   periodId: Uuid,
 ): Promise<ReportingPeriod> {
-  const period = await db.findById('periods', periodId);
+  // UUID でない ID は DB に問い合わせない（Supabase Mode では 22P02 の例外＝500 になるため。見つからない扱い）
+  const period = isUuid(periodId) ? await db.findById('periods', periodId) : null;
   if (!period || period.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('報告期間が見つかりません。');
   }
@@ -393,12 +367,16 @@ export async function saveAssignment(
     throw new ValidationError('活動のコードを読めません。');
   }
   const basis = input.basis;
-  if (input.activityKind === 'electricity') {
+  if (kindHasBasis(input.activityKind)) {
     if (!basis || !(EMISSION_BASES as readonly string[]).includes(basis)) {
-      throw new ValidationError('電力の割当には基準（ロケーション・マーケット）が要ります。');
+      throw new ValidationError(
+        input.activityKind === 'heat'
+          ? '熱の割当には基準（ロケーション・マーケット）が要ります。'
+          : '電力の割当には基準（ロケーション・マーケット）が要ります。',
+      );
     }
   } else if (basis !== null) {
-    throw new ValidationError('基準は電力の割当にだけ付けます。');
+    throw new ValidationError('基準は電力・熱の割当にだけ付けます。');
   }
   const reason = input.reason.trim();
   const reasonMax = db.mode === 'demo' ? 300 : 500;
@@ -409,7 +387,8 @@ export async function saveAssignment(
   let targetCountry: string | null = null;
   let targetLabel: string = ASSIGNMENT_LEVEL_LABELS.org_default;
   if (input.level === 'unit') {
-    const unit = input.unitId ? await db.findById('units', input.unitId) : null;
+    const unit =
+      input.unitId && isUuid(input.unitId) ? await db.findById('units', input.unitId) : null;
     if (!unit || unit.organizationId !== organizationId || unit.deletedAt) {
       throw new NotFoundError('拠点が見つかりません。');
     }
@@ -428,7 +407,9 @@ export async function saveAssignment(
     throw new ValidationError('割り当てる範囲（拠点・国・全社既定）を選んでください。');
   }
 
-  const factor = await db.findById('emissionFactors', input.factorId);
+  const factor = isUuid(input.factorId)
+    ? await db.findById('emissionFactors', input.factorId)
+    : null;
   if (!factor || factor.organizationId !== organizationId || !factor.factorSetId) {
     throw new ValidationError('割り当てられるのは係数のセットの係数だけです。');
   }
@@ -519,7 +500,10 @@ export async function clearAssignment(
 ): Promise<void> {
   assertManager(ctx);
   const organizationId = ctx.workspace.organizationId;
-  const assignment = await db.findById('emissionFactorAssignments', options.assignmentId);
+  // UUID でない ID は DB に問い合わせない（Supabase Mode では 22P02 の例外＝500 になるため。見つからない扱い）
+  const assignment = isUuid(options.assignmentId)
+    ? await db.findById('emissionFactorAssignments', options.assignmentId)
+    : null;
   if (!assignment || assignment.organizationId !== organizationId) {
     throw new NotFoundError('割当が見つかりません。');
   }
@@ -539,7 +523,12 @@ export async function clearAssignment(
       throw new ValidationError(DEMO_FIXTURE_ASSIGNMENT_REASON);
     }
     if (!(db instanceof DemoDbClient)) throw new Error('Demo Mode の DbClient ではありません。');
-    await db.hardDeleteDemoRows('emissionFactorAssignments', new Set([assignment.id]));
+    await db.removeRowWithMark(
+      'emissionFactorAssignments',
+      assignment.id,
+      ctx.userId,
+      new Date().toISOString(),
+    );
   }
   await recordAuditEvent(db, ctx, {
     eventType: 'settings_changed',

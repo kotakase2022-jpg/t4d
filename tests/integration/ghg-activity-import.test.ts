@@ -409,6 +409,42 @@ describe('confirmActivityImport・discardActivityBatch', () => {
     );
   });
 
+  it('差し替える元が既に差し替え済み・行が欠けた取込は、詳細で確定の押せない理由を示す（確定の検査と同じ文。UX-03）', async () => {
+    const original = ghgBatchId('EAST', 'transport');
+    const file = sampleTransport();
+    const p = await previewActivityImport(
+      db,
+      author(),
+      request(file, { replaceBatchId: original }),
+    );
+    const draftA = await createActivityBatch(db, author(), {
+      ...request(file, { replaceBatchId: original }),
+      expectedSha256: p.file.sha256,
+    });
+    const draftB = await createActivityBatch(db, author(), {
+      ...request(file, { replaceBatchId: original }),
+      expectedSha256: p.file.sha256,
+    });
+    expect((await loadActivityBatch(db, author(), draftA.id)).confirmBlockedReason).toBeNull();
+    // 先に B を確定すると、元のバッチは差し替え済みになり A は確定できない
+    await confirmActivityImport(db, author(), draftB.id);
+    const blocked = (await loadActivityBatch(db, author(), draftA.id)).confirmBlockedReason;
+    expect(blocked).toContain('既に差し替え済み');
+    await expect(confirmActivityImport(db, author(), draftA.id)).rejects.toThrow(blocked!);
+
+    // 行が欠けた（Demo のサーバーの切り替えで行が戻らなかった）取込（デモの取込の上限のため別の Fixture で）
+    fixture = createFixtureDb();
+    db = new DemoDbClient(fixture);
+    const draftC = await importTransport();
+    fixture.ghgActivityLines.splice(
+      fixture.ghgActivityLines.findIndex((l) => l.batchId === draftC.id),
+      1,
+    );
+    const missing = (await loadActivityBatch(db, author(), draftC.id)).confirmBlockedReason;
+    expect(missing).toContain('行の数が取込の記録と合いません');
+    await expect(confirmActivityImport(db, author(), draftC.id)).rejects.toThrow(missing!);
+  });
+
   it('担当外の拠点・データ入力の権限の無い役割は確定・破棄できない', async () => {
     const batch = await importTransport(author(), TH1);
     await expect(confirmActivityImport(db, site(), batch.id)).rejects.toBeInstanceOf(

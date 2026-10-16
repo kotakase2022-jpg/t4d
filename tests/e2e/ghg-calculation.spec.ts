@@ -84,10 +84,12 @@ test.describe('Scope1・2 の算定の実行・結果', () => {
     }
     await expect(sites.locator('tbody tr')).toHaveCount(5);
 
-    // 二重表示: 区分規則 LOGI-01 は承認待ち（N2）。組織の算定ルールのバッジ。計は移動だけ（±0）
+    // 二重表示: 区分規則 LOGI-01 は承認待ち（N2）。R-1 は再分類していないので、組織の算定ルールのバッジ
+    // （標準区分と異なる区分を含む）は出さない。計は移動だけ（±0）
     const dualSection = main.getByRole('region', { name: '報告区分と既定区分' });
     await expect(dualSection.locator('[data-ghg-notice="N2"]')).toBeVisible();
-    await expect(dualSection.locator('[data-honesty="company-rule"]')).toBeVisible();
+    await expect(dualSection.locator('[data-ghg-notice="N1"]')).toHaveCount(0);
+    await expect(dualSection.locator('[data-honesty="company-rule"]')).toHaveCount(0);
     await expect(dualSection.locator('[data-ghg-notice="N6"]')).toBeVisible();
     const dual = dualSection.getByRole('table', { name: '報告区分と既定区分' });
     await expect(dual.locator('[data-dual-row="scope1_scope3_total"]')).toContainText(

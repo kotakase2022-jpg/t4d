@@ -21,7 +21,7 @@ import {
 } from '@/lib/domain/report-snapshot-content';
 import { RECONCILIATION_CHECKER_VERSION } from '@/lib/domain/export-reconciliation';
 import { buildSharedReportCopy, sharedReportCopyHash } from '@/lib/domain/report-copy';
-import { rebuildReconciliation, rebuildRun } from './demo-ghg-checks';
+import { rebuildReconciliation, rebuildRun, rememberRebuiltLines } from './demo-ghg-checks';
 import type { FixtureDb } from '@/lib/fixtures/store';
 import {
   ANCHOR_ACQUIRED_BY,
@@ -1236,7 +1236,10 @@ function expandGhgRun(v: Rec, db: FixtureDb): Rec | null {
   if (!hasShape(row, GHG_RUN_SHAPE)) return null;
   const base = only(row, GHG_RUN_SHAPE);
   const rebuilt = rebuildRun(db, base as unknown as Parameters<typeof rebuildRun>[1]);
-  return { ...base, summary: rebuilt ? (rebuilt.summary as unknown as Rec) : null };
+  const out = { ...base, summary: rebuilt ? (rebuilt.summary as unknown as Rec) : null };
+  // 算定行は同じ作り直しの結果を使う（restoreRunLines がもう一度算定しない）
+  if (rebuilt) rememberRebuiltLines(out, rebuilt.lines);
+  return out;
 }
 
 const GHG_RECON_SHAPE: Shape = {

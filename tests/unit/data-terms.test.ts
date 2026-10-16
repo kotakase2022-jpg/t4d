@@ -146,6 +146,22 @@ describe('入力の読み取り', () => {
     ]);
   });
 
+  it('半角の「/」は区切らない（URL・「米国/EU」・「NDA/DPA」を所在地・根拠へずらさない。自己監査 UX-06）', () => {
+    const list = parseSubprocessors(
+      {
+        subprocessorsByCategory: {
+          cloud: 'Example Cloud／ホスティング／東京/大阪／DPA https://example.com/dpa',
+          contractor: 'A社／保管／米国/EU／NDA/DPA',
+        },
+      },
+      60,
+    );
+    expect(list.map((s) => [s.name, s.role, s.location, s.confidentialityBasis])).toEqual([
+      ['A社', '保管', '米国/EU', 'NDA/DPA'],
+      ['Example Cloud', 'ホスティング', '東京/大阪', 'DPA https://example.com/dpa'],
+    ]);
+  });
+
   it('区分の合計で 10 社まで。各項目の上限・名称の空は断る', () => {
     const many = Array.from({ length: 6 }, (_, i) => `社${i}／役割／所在`).join('\n');
     expect(() =>

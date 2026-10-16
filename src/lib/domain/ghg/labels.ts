@@ -1,5 +1,6 @@
 import type {
   CarrierKind,
+  FactorActivityKind,
   FuelEconomyClass,
   GhgActivityKind,
   GhgScope,
@@ -11,7 +12,33 @@ import type {
 /**
  * 取込の表の語を値へ読む（既存の算定結果・活動量の取込で共通。純関数）。
  * 読めない語は null（推測で決めない。取込の検証でエラーとして人に返す）。
+ * 活動のコードの名前（ACTIVITY_CODE_LABELS）もここに置く（画面のクライアントの部品からも読めるように。
+ * calculate.ts は node:crypto を使うため、クライアントから import できない）。
  */
+
+/** 活動の名前（経路の文・明細・係数の表に使う。知らないコードはコードのまま） */
+export const ACTIVITY_CODE_LABELS: Readonly<Record<string, string>> = {
+  diesel: '軽油',
+  gasoline: '揮発油',
+  kerosene: '灯油',
+  heavy_oil_a: 'A重油',
+  lpg: 'LPG',
+  city_gas: '都市ガス',
+  grid: '電力（系統）',
+  heat: '熱',
+  contracted: '委託物流',
+  own_fleet: '自社便',
+};
+
+/**
+ * 係数の活動の名前（係数のセットの表・取込の下見）。燃料・ガス・熱はコードの名前（軽油・都市ガスなど）、
+ * 電力は系統か契約（「契約 X」）。知らないコード（組織が決めたコード）はコードのまま
+ */
+export function factorActivityName(kind: FactorActivityKind | null, code: string | null): string {
+  if (!code) return '—';
+  if (kind === 'electricity' && code !== 'grid') return `契約 ${code}`;
+  return ACTIVITY_CODE_LABELS[code] ?? code;
+}
 
 function norm(raw: string | null | undefined): string {
   return (

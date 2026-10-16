@@ -5,7 +5,9 @@ import type {
   BaselineRow,
   GhgActivityKind,
   GhgAttributionCause,
+  GhgActivityLine,
   GhgCalculationLine,
+  GhgReconciliation,
   GhgReconciliationNote,
   GhgReconciliationResult,
   GhgReconVerdict,
@@ -30,7 +32,8 @@ import type {
  * 浮動小数の誤差で原因の無い差を作らない）。判定の語に「一致」を使わない（plan K8）。
  */
 
-export const RECONCILIATION_CHECKER_VERSION = 'ghg-reconcile/1';
+/** 照合の規則の版（2: 購入した熱の行を基準〔区分〕の同じ既存の行とだけ対応させる） */
+export const RECONCILIATION_CHECKER_VERSION = 'ghg-reconcile/2';
 
 /** 既定の順序（plan §2.2） */
 export const DEFAULT_ATTRIBUTION_ORDER: readonly GhgAttributionCause[] = [
@@ -249,8 +252,9 @@ function buildMatches(
       (r) =>
         r.unitId === line.unitId &&
         activityKeyOf(r.activityKind!, r.activityCode!) === activity &&
-        // 電力は区分が基準（ロケーション・マーケット）を表す。区分の付け替えは無く、基準の違う行と対応させない
-        (line.activityKind !== 'electricity' || r.scope === line.reportedScope) &&
+        // 購入した電力・熱は区分が基準（ロケーション・マーケット）を表す。区分の付け替えは無く、基準の違う行と対応させない
+        ((line.activityKind !== 'electricity' && line.activityKind !== 'heat') ||
+          r.scope === line.reportedScope) &&
         (r.month === null || r.month === line.month) &&
         (r.shipmentRef === null || r.shipmentRef === line.shipmentRef),
     );
@@ -681,4 +685,42 @@ export function attributionLinesFrom(
     methodDetail: l.methodDetail,
     shipmentRef: shipmentRefOf(l.activityLineId),
   }));
+}
+
+/**
+ * 記録した照合の結果を作り直す（記録の算定行・既存結果の行・記録の許容差と原因の順序から同じ純関数で）。
+ * 照合の規則の版が違えば null。Demo Mode の Cookie からの戻しと、Supabase Mode の記録の照合（利用者の JWT で
+ * 書かれた結果を信じない）が同じ関数を使う。形の壊れた許容差・順序（書き換えられた行）でも例外にせず null
+ */
+export function rebuildReconciliationResult(
+  recon: Pick<GhgReconciliation, 'tolerance' | 'attributionOrder' | 'checkerVersion'>,
+  lines: readonly GhgCalculationLine[],
+  activityLines: ReadonlyArray<Pick<GhgActivityLine, 'id' | 'shipmentRef'>>,
+  baselineRows: readonly BaselineRow[],
+  rounding: readonly RoundingRule[],
+): GhgReconciliationResult | null {
+  if (recon.checkerVersion !== RECONCILIATION_CHECKER_VERSION) return null;
+  const known = new Set<string>(DEFAULT_ATTRIBUTION_ORDER);
+  if (
+    !Array.isArray(recon.attributionOrder) ||
+    !recon.attributionOrder.every((c) => known.has(c)) ||
+    !recon.tolerance ||
+    typeof recon.tolerance !== 'object'
+  ) {
+    return null;
+  }
+  const shipmentOf = new Map(activityLines.map((l) => [l.id, l.shipmentRef]));
+  try {
+    return attribute(
+      attributionLinesFrom(lines, (id) => shipmentOf.get(id) ?? null),
+      baselineRows,
+      {
+        t4dRounding: rounding,
+        tolerance: recon.tolerance,
+        order: recon.attributionOrder,
+      },
+    );
+  } catch {
+    return null;
+  }
 }

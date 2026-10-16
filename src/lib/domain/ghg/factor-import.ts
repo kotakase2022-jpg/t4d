@@ -1,5 +1,6 @@
 import { isIsoCountryCode, normalizeCountryCode } from '@/lib/domain/country-code';
 import { CO2_PER_C } from './fuel-co2';
+import { kindHasBasis } from './factor-resolution';
 import { parseActivity, parseEconomyClass, parseVehicleUse } from './labels';
 import {
   parseNumberWithSeparator,
@@ -73,7 +74,7 @@ export const FACTOR_IMPORT_FIELD_LABELS: Record<FactorImportField, string> = {
   activity: '活動（燃料・ガスなど）',
   contract: '電力の契約',
   country: '国（ISO 2 文字）',
-  basis: '電力の基準',
+  basis: '基準（電力・熱）',
   activityUnit: '活動量の単位',
   calorificValue: '単位発熱量',
   calorificUnit: '単位発熱量の単位',
@@ -112,7 +113,7 @@ export const FACTOR_FIELD_GROUPS: ReadonlyArray<{
   fields: readonly FactorImportField[];
 }> = [
   { title: '共通', fields: ['code', 'name', 'kind', 'activity', 'activityUnit', 'year'] },
-  { title: '電力・国', fields: ['country', 'basis', 'contract', 'region'] },
+  { title: '電力・熱・国', fields: ['country', 'basis', 'contract', 'region'] },
   {
     title: '係数の値',
     fields: [
@@ -177,7 +178,7 @@ const HEADER_ALIASES: Record<FactorImportField, readonly string[]> = {
   activity: ['活動', '活動の種類', '燃料', '燃料種', 'activity', 'fuel'],
   contract: ['契約', '契約コード', '電力の契約', 'contract', 'contractcode'],
   country: ['国', '国コード', 'country', 'countrycode'],
-  basis: ['基準', '算定基準', '電力の基準', 'basis'],
+  basis: ['基準', '算定基準', '電力の基準', '熱の基準', 'basis'],
   activityUnit: ['活動量の単位', '活動量単位', 'activityunit'],
   calorificValue: ['単位発熱量', '発熱量', 'calorificvalue', 'heatingvalue'],
   calorificUnit: ['単位発熱量の単位', '発熱量の単位', 'calorificunit'],
@@ -483,11 +484,16 @@ function readRow(
 
   const basisText = get('basis');
   const basis = parseBasis(basisText);
-  if (kind === 'electricity' && !basis) {
-    fail('電力の係数には基準（ロケーション基準・マーケット基準）が要ります。');
+  // 購入した電力・熱は Scope2 の 2 基準で別々に算定する（どちらの基準の係数かを決めずに取り込まない）
+  if (kindHasBasis(kind) && !basis) {
+    fail(
+      kind === 'heat'
+        ? '熱の係数には基準（ロケーション基準・マーケット基準）が要ります。'
+        : '電力の係数には基準（ロケーション基準・マーケット基準）が要ります。',
+    );
   }
-  if (kind !== 'electricity' && basisText.trim() !== '') {
-    fail('基準（ロケーション・マーケット）は電力の係数にだけ書きます。');
+  if (!kindHasBasis(kind) && basisText.trim() !== '') {
+    fail('基準（ロケーション・マーケット）は電力・熱の係数にだけ書きます。');
   }
 
   const transport = kind === 'transport_formula' || kind === 'transport_default';
@@ -628,7 +634,7 @@ function readRow(
     year,
     country,
     region,
-    basis: kind === 'electricity' ? basis : null,
+    basis: kindHasBasis(kind) ? basis : null,
     activityUnit,
     validFrom,
     validTo,

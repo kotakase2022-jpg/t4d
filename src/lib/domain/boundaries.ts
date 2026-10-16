@@ -33,6 +33,17 @@ export function isConsolidatedUnit(unit: Pick<OrganizationUnit, 'consolidationMe
 }
 
 /**
+ * 年度（FY）のデータを集める拠点か（拠点別進捗・入力テンプレート・標準の取込の拠点の候補）。サプライヤーと
+ * 連結対象外（excluded）の拠点は集めない。収集キャンペーンの既定の対象（organizations/_lib/master-tables.ts）と
+ * 同じ規則。Scope1・2 の算定の検証拠点（連結対象外）を年度の収集の画面に出さない（plan §2.6）
+ */
+export function isFyReportingUnit(
+  unit: Pick<OrganizationUnit, 'unitType' | 'consolidationMethod'>,
+): boolean {
+  return unit.unitType !== 'supplier' && unit.consolidationMethod !== 'excluded';
+}
+
+/**
  * 「該当なし」を明示するための番兵 ID。
  * 絞り込みの交差が空になったとき、空配列を渡すと「未指定」と区別できず
  * 条件が外れてしまうため、実在しない ID を 1 件だけ渡して 0 件にする。

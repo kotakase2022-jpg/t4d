@@ -26,7 +26,7 @@ import { CALC_DETAIL_HREF, CalcNav, calcTabHref } from '../_components/calc-nav'
 import { ActivityImportForm } from './_components/activity-import-form';
 import { CoverageTable } from './_components/coverage-table';
 import { TonKmPresetSection } from './_components/tonkm-preset-section';
-import { BATCH_KIND_LABELS } from './_lib/labels';
+import { BATCH_KIND_LABELS, missingMonthsTile } from './_lib/labels';
 
 export const metadata = { title: '活動量（Scope1・2算定）' };
 
@@ -288,16 +288,7 @@ export default async function GhgActivityPage({ searchParams }: { searchParams: 
             }
             href={`${BASE}?period=${period.id}&status=draft#activity-batches`}
           />
-          <MetricTile
-            label="未受領"
-            value={counts.missingMonths}
-            unit="か月"
-            status={
-              counts.missingMonths > 0
-                ? { semantic: 'pending', label: '検証拠点 × 活動で確定済みの行が無い月' }
-                : { semantic: 'done', label: 'すべて受領' }
-            }
-          />
+          <MetricTile label="未受領" {...missingMonthsTile(unitIds.length, counts.missingMonths)} />
           <MetricTile
             label="見なし積載率の行"
             value={counts.defaultLoadLines}

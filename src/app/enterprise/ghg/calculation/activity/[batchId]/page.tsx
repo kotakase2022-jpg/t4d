@@ -392,14 +392,17 @@ export default async function GhgActivityBatchPage({
               action: confirmActivityBatchAction,
               fields: { batchId: batch.id },
               hidden: !canWrite,
-              disabledReason: closed ? `期間「${period.label}」は締めています。` : undefined,
+              // 状態で確定できないとき（締めた期間・差し替える元が既に差し替え済み・行が欠けた）は押せない理由を出す
+              disabledReason: closed
+                ? `期間「${period.label}」は締めています。`
+                : (detail.confirmBlockedReason ?? undefined),
               confirm: {
                 tier: 'bulk',
                 title: 'この活動量を確定しますか',
                 scope,
                 consequences: [
                   '確定すると、次の「算定を実行」から使います。確定した行は変更できません（直すときは差し替えのバッチを取り込みます）。',
-                  ...(detail.supersedes
+                  ...(detail.supersedes && detail.supersedes.status === 'confirmed'
                     ? [
                         `確定済みのバッチ「${detail.supersedes.fileName}」（${detail.supersedes.rowCount} 行）を差し替え済みにし、算定に使わなくします。`,
                       ]

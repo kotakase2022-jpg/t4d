@@ -13,6 +13,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { carryOverSsbjAction, runSsbjGapAnalysisBulkAction } from '@/app/enterprise/actions';
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
 import { FractionBar } from '@/components/charts/fraction-bar';
 import { FunnelSteps } from '@/components/charts/funnel-steps';
 import { DataCoverageBadge } from '@/components/shared/badges';
@@ -115,10 +116,10 @@ export default async function SsbjRequirementsPage({
   const canRunAi = can(shell.ctx, 'enterprise.ai.run');
   const canExport = can(shell.ctx, 'enterprise.export.run');
 
-  // 前年度の評価の引継ぎ（F048）の引継ぎ元＝当期より前の、いちばん新しい報告期間
-  const previousPeriod = shell.periods
-    .filter((p) => p.startDate < shell.currentPeriod.startDate)
-    .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
+  // 前年度の評価の引継ぎ（F048）の引継ぎ元＝当期より前の、決算日が同じいちばん新しい報告期間
+  // （引継ぎの Action と同じ選び方。暦年の期間を年度の前年にしない。plan K10）
+  const previousPeriod =
+    previousComparablePeriod(shell.currentPeriod, shell.periods, 'start') ?? undefined;
 
   // CSV は画面の絞り込みをそのまま引き継ぐ（見えている一覧と同じ行が出る）
   const exportParams = new URLSearchParams({ period: shell.currentPeriod.id });

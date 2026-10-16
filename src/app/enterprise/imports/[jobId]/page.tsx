@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAppMode } from '@/lib/config';
+import { isFyReportingUnit } from '@/lib/domain/boundaries';
 import { ArrowRight, FileText } from 'lucide-react';
 import { JobStatusBadge } from '@/components/shared/badges';
 import { DemoSimulationNotice } from '@/components/shared/demo-simulation-notice';
@@ -94,7 +95,7 @@ export default async function ImportJobPage({
             units={fallbackShell.units
               .filter(
                 (u) =>
-                  u.unitType !== 'supplier' &&
+                  isFyReportingUnit(u) &&
                   (fallbackShell.ctx.workspace.unitScopeIds.length === 0 ||
                     fallbackShell.ctx.workspace.unitScopeIds.includes(u.id)),
               )
@@ -120,7 +121,7 @@ export default async function ImportJobPage({
   // 投入画面（imports/page.tsx）と同じ条件で絞る。
   const editableUnits = shell.units.filter(
     (u) =>
-      u.unitType !== 'supplier' &&
+      isFyReportingUnit(u) &&
       (shell.ctx.workspace.unitScopeIds.length === 0 ||
         shell.ctx.workspace.unitScopeIds.includes(u.id)),
   );

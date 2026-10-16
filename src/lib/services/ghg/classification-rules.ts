@@ -17,6 +17,7 @@ import {
   type DoubleCountWarning,
 } from '@/lib/domain/ghg/classification';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { isUuid } from '@/lib/validation/uuid';
 import { DEMO_GHG_LIMITS } from '@/lib/repositories/demo-ghg-checks';
 import type { DbClient } from '@/lib/repositories/types';
 import { loadScope3SupplierBreakdown } from '@/lib/services/scope3-suppliers';
@@ -169,7 +170,9 @@ export function protocolScopesOfMatch(match: ClassificationMatch): GhgScope[] {
     const methods =
       kind === 'electricity'
         ? (['electricity_location', 'electricity_market'] as const)
-        : (['fuel_combustion'] as const);
+        : kind === 'heat'
+          ? (['heat_location', 'heat_market'] as const)
+          : (['fuel_combustion'] as const);
     for (const method of methods) {
       for (const carrierKind of kind === 'transport' ? carriers : [null]) {
         scopes.add(
@@ -358,6 +361,8 @@ async function loadOwnRule(
   ctx: AuthorizationContext,
   ruleId: Uuid,
 ): Promise<GhgClassificationRule> {
+  // UUID でない ID は DB に問い合わせない（Supabase Mode では 22P02 の例外＝500 になるため。見つからない扱い）
+  if (!isUuid(ruleId)) throw new NotFoundError('区分規則が見つかりません。');
   const rule = await db.findById('ghgClassificationRules', ruleId);
   if (!rule || rule.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('区分規則が見つかりません。');

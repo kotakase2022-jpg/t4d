@@ -249,9 +249,9 @@ export function trialCalculate(
     const result: TrialResult = {
       method: line.method,
       basis:
-        line.method === 'electricity_location'
+        line.method === 'electricity_location' || line.method === 'heat_location'
           ? 'location'
-          : line.method === 'electricity_market'
+          : line.method === 'electricity_market' || line.method === 'heat_market'
             ? 'market'
             : null,
       activityAmount: line.activityAmount,

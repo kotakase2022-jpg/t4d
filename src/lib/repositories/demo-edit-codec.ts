@@ -17,12 +17,16 @@ import {
   isCsrdCheckedTable,
 } from './demo-csrd-checks';
 import {
+  DEMO_GHG_LIMITS,
   GHG_APPEND_ONLY_TABLES,
   GHG_DEFERRED_ORDER,
   GHG_PERSISTED_TABLES,
   acceptGhgEdit,
+  acceptGhgRemoval,
+  isDemoRemoval,
   isGhgCheckedTable,
   restoreRunLines,
+  type GhgApplyContext,
 } from './demo-ghg-checks';
 import {
   TRIAL_APPEND_ONLY_TABLES,
@@ -477,6 +481,22 @@ const REPLAY_BUDGET_CHARS = 1_000_000;
 /** 1 件の適用の結果。'retry' は依存する行が後から戻れば受け付けうる、'settled' はこの適用では変わらない */
 type ApplyOutcome = 'applied' | 'retry' | 'settled';
 
+/**
+ * 1 回の適用で作り直してよい算定の記録・照合の数（作り直しは算定・照合の純関数を回すため重い。照合 1 件で
+ * 約 25ms）。正規の Cookie は利用者の上限（記録 5・照合 5）まで。以前は検査の前に作り直していたため、上限を
+ * 超えた偽の記録・照合を数百件並べた Cookie で 1 リクエストに約 12〜18 秒かかった（自己監査 GHG F2）
+ */
+const MAX_GHG_REBUILDS_PER_APPLY =
+  (DEMO_GHG_LIMITS.userRuns + DEMO_GHG_LIMITS.userReconciliations) * 2;
+
+/** 作り直しを伴う GHG の表（目録から要約・結果を作り直す） */
+const GHG_REBUILT_TABLES: ReadonlySet<string> = new Set([
+  'ghgCalculationRuns',
+  'ghgReconciliations',
+]);
+
+const GHG_TABLES: ReadonlySet<string> = new Set<string>(GHG_PERSISTED_TABLES);
+
 interface ApplyContext {
   /** まだ適用していない依頼の編集（記録の検査で、依頼時点の内容を見る） */
   pendingRequests: readonly DemoEdit[];
@@ -492,6 +512,13 @@ interface ApplyContext {
   failedAt: WeakMap<DemoEdit, number>;
   /** 節のレビュー状態が依頼と合わないとき、編集を捨てずに状態を下書きへ戻して受け付ける */
   lenientBlockStatus?: boolean;
+  /** GHG の表の行を受け付けた回数（作り直しの失敗を、依存する行が変わるまで繰り返さない） */
+  ghgGeneration: number;
+  ghgFailedAt: WeakMap<DemoEdit, number>;
+  /** この適用で残っている作り直しの回数 */
+  ghgRebuilds: number;
+  /** GHG の行の検査に渡す文脈（同じ Cookie にある行） */
+  ghg: GhgApplyContext;
 }
 
 /** 目録の組み立て直しに関わらない表（これらを受け付けても、失敗した目録を組み立て直さない） */
@@ -538,6 +565,11 @@ class RowIndex {
   pushed(table: string, id: unknown, index: number): void {
     this.byTable.get(table)?.set(id, index);
   }
+
+  /** 行を取り除いた表の位置を忘れる（後ろの行の位置がずれるため、次に引くときに作り直す） */
+  forget(table: string): void {
+    this.byTable.delete(table);
+  }
 }
 
 /** 同じ表の中の並べ方。原稿の版は節・版番号の順（土台の版が先に戻る）、ほかは追記した順のまま */
@@ -564,10 +596,19 @@ export function applyDemoEdits(db: FixtureDb, edits: DemoEdit[]): void {
     rowIndex: new RowIndex(),
     generation: 0,
     failedAt: new WeakMap(),
+    ghgGeneration: 0,
+    ghgFailedAt: new WeakMap(),
+    ghgRebuilds: MAX_GHG_REBUILDS_PER_APPLY,
+    ghg: { inCookie: () => false },
   };
+  const applied = edits.slice(-MAX_APPLIED_EDITS);
+  const cookieRows = new Set(
+    applied.filter((e) => e && typeof e.t === 'string').map((e) => `${e.t}:${e.id}`),
+  );
+  ctx.ghg = { inCookie: (table, id) => cookieRows.has(`${table}:${id}`) };
   const deferred: DemoEdit[] = [];
   // 新しい編集を残す（呼び出し側は追記の順に並べて渡す）。正規の Cookie はこの数に届かない
-  for (const edit of edits.slice(-MAX_APPLIED_EDITS)) {
+  for (const edit of applied) {
     // 書き込み側の許可リスト（isPersistedTable）と対にする。
     // 片側だけの防御は、Cookie を偽造されると意味を持たない。
     if (!edit || typeof edit.t !== 'string' || !isPersistedTable(edit.t as TableName)) continue;
@@ -625,8 +666,20 @@ function applyOne(db: FixtureDb, edit: DemoEdit, ctx: ApplyContext): ApplyOutcom
     rows.push(next);
     ctx.rowIndex.pushed(edit.t, next.id, rows.length - 1);
     if (!SNAPSHOT_INDEPENDENT_TABLES.has(edit.t)) ctx.generation += 1;
+    if (GHG_TABLES.has(edit.t)) ctx.ghgGeneration += 1;
     return 'applied';
   };
+  // 外した行の印（利用者が外した割当）。この Cookie の持ち主が外した行を、このインスタンスのメモリからも除く
+  if (isDemoRemoval(edit.t, edit.v)) {
+    if (!row) return 'settled';
+    const can: Parameters<typeof acceptGhgRemoval>[4] = (organizationId, userId, permission) =>
+      hasPermission(db, organizationId, userId, permission);
+    if (!acceptGhgRemoval(db, edit.t, row, edit.v, can)) return 'settled';
+    rows.splice(index, 1);
+    ctx.rowIndex.forget(edit.t);
+    if (GHG_TABLES.has(edit.t)) ctx.ghgGeneration += 1;
+    return 'applied';
+  }
   if (isCompactedTable(edit.t)) {
     // 小さくした形で載せた追記専用の行。既にある行（このインスタンスで作った・既に戻した）は書き換えない。
     // ただし標準 CSV の確定の控えは、このインスタンスで検証しただけのバッチに重ねる（検証と確定が
@@ -652,9 +705,20 @@ function applyOne(db: FixtureDb, edit: DemoEdit, ctx: ApplyContext): ApplyOutcom
         return 'retry';
       }
     }
+    // 算定の記録・照合も、作り直し（算定・照合の純関数）の前に目録のまま同じ検査を通す（要約・結果は検査に
+    // 使わない。安い検査なので、依存する行が後の周で戻るときのために毎回通す）。作り直した後に断ったものは
+    // GHG の行が変わるまで作り直さず、作り直しの回数にも上限を置く
+    const isGhgRebuild = GHG_REBUILT_TABLES.has(edit.t);
+    if (isGhgRebuild) {
+      if (ctx.ghgFailedAt.get(edit) === ctx.ghgGeneration) return 'retry';
+      if (!acceptEdit(db, edit.t, undefined, edit.v, ctx)) return 'retry';
+      if (ctx.ghgRebuilds <= 0) return 'retry';
+      ctx.ghgRebuilds -= 1;
+    }
     const expanded = expandRow(edit.t, edit.v, db, { budget: ctx.budget });
     if (!expanded || expanded.id !== edit.id || !acceptEdit(db, edit.t, undefined, expanded, ctx)) {
       if (isSnapshot) ctx.failedAt.set(edit, ctx.generation);
+      if (isGhgRebuild) ctx.ghgFailedAt.set(edit, ctx.ghgGeneration);
       return 'retry';
     }
     const outcome = push(expanded);
@@ -672,6 +736,7 @@ function applyOne(db: FixtureDb, edit: DemoEdit, ctx: ApplyContext): ApplyOutcom
   if (row) {
     rows[index] = next;
     if (!SNAPSHOT_INDEPENDENT_TABLES.has(edit.t)) ctx.generation += 1;
+    if (GHG_TABLES.has(edit.t)) ctx.ghgGeneration += 1;
     return 'applied';
   }
   // 新規作成された行（コメントなど）は、そのまま足す
@@ -1765,8 +1830,14 @@ function acceptEdit(
       }
       // Scope1・2 の算定と照合の表（0061〜0065）も DB の規則と同じ検査を通す
       if (isGhgCheckedTable(table)) {
-        return acceptGhgEdit(db, table, existing, next, (organizationId, userId, permission) =>
-          hasPermission(db, organizationId, userId, permission),
+        return acceptGhgEdit(
+          db,
+          table,
+          existing,
+          next,
+          (organizationId, userId, permission) =>
+            hasPermission(db, organizationId, userId, permission),
+          ctx.ghg,
         );
       }
       // トライアル対応の表（0049〜0057）も DB の規則と同じ検査を通す

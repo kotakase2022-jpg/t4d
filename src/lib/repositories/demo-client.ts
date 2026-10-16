@@ -1,5 +1,6 @@
 import { getDemoDb, type FixtureDb } from '@/lib/fixtures/store';
 import { compactRow, isCompactedTable } from './demo-compact';
+import { demoRemovalMark, isDemoRemoval } from './demo-ghg-checks';
 import { appendDemoEdit, isPersistedTable, removeDemoEditsFor } from './demo-persistence';
 import {
   applyQuery,
@@ -245,6 +246,28 @@ export class DemoDbClient implements DbClient {
     return (this.table(table) as unknown as Array<{ id?: string }>).flatMap((r) =>
       r.id ? [r.id] : [],
     );
+  }
+
+  /**
+   * 利用者の操作で行を外す（Demo Mode。いまは係数の割当だけ）。このインスタンスのメモリから除き、Cookie には
+   * 行の編集の代わりに「外した」印を残す。Cookie から行の編集を消すだけでは、以前のリクエストで既に行を戻した
+   * 別のインスタンスに行が残り、インスタンスによって割当が違って見える（自己監査 GHG F1）。印は各インスタンスが
+   * 次のリクエストで受け取り、同じ規則（demo-ghg-checks.ts の acceptGhgRemoval）で確かめてから行を除く
+   */
+  async removeRowWithMark<K extends TableName>(
+    table: K,
+    id: Uuid,
+    removedBy: Uuid,
+    removedAt: string,
+  ): Promise<void> {
+    const mark = { id, ...demoRemovalMark(removedBy, removedAt) };
+    if (!isDemoRemoval(table, mark)) {
+      throw new Error(`${table} は外した印を持ち回せる表ではありません。`);
+    }
+    const target = this.table(table) as unknown as Array<{ id?: string }>;
+    const index = target.findIndex((r) => r.id === id);
+    if (index >= 0) target.splice(index, 1);
+    await appendDemoEdit(table, id, mark, { replace: true });
   }
 
   /**

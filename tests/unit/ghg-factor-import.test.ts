@@ -274,8 +274,40 @@ describe('値の検査（黙って代えない）', () => {
     ]);
     const messages = r.errors.map((e) => e.message).join('\n');
     expect(messages).toContain('電力の係数には基準');
-    expect(messages).toContain('基準（ロケーション・マーケット）は電力の係数にだけ書きます');
+    expect(messages).toContain('基準（ロケーション・マーケット）は電力・熱の係数にだけ書きます');
     expect(messages).toContain('国「JPN」は ISO 3166-1 の 2 文字のコード');
+  });
+
+  it('購入した熱も Scope2 の 2 基準で別々に算定するため、基準が要る（基準の無い熱の係数は取り込まない）', () => {
+    const missing = base([
+      ['H1', '蒸気', '熱', '熱', 'JP', '', 'GJ', '', '', '', '', '0.06', 't-CO2/GJ', '2025'],
+    ]);
+    expect(missing.factors).toEqual([]);
+    expect(missing.errors.map((e) => `${e.line}:${e.message}`)).toContain(
+      '2:熱の係数には基準（ロケーション基準・マーケット基準）が要ります。',
+    );
+    const r = base([
+      [
+        'H2',
+        '蒸気',
+        '熱',
+        '熱',
+        'JP',
+        'ロケーション基準',
+        'GJ',
+        '',
+        '',
+        '',
+        '',
+        '0.06',
+        't-CO2/GJ',
+        '2025',
+      ],
+    ]);
+    expect(r.errors).toEqual([]);
+    expect(r.factors.map((f) => [f.code, f.activityKind, f.basis])).toEqual([
+      ['H2', 'heat', 'location'],
+    ]);
   });
 
   it('同じコード・年度の重複はエラー、同じコードで年度が違えば別の係数（年度を区別する）', () => {

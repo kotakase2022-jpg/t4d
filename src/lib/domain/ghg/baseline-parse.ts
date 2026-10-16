@@ -96,9 +96,20 @@ export function extractBaselineRows(
     const siteCode = cell(raw, mapping.siteCode);
     const scope = parseScope(cell(raw, mapping.scope));
     const emissions = numberOrNull(cell(raw, mapping.emissions), mapping.decimalSeparator);
-    const emissionsUnit =
-      cell(raw, mapping.emissionsUnit) || options.defaultEmissionsUnit || 't-CO2e';
     const problems: string[] = [];
+    // 排出量の単位は推測しない: 単位の列を選んだら、その行の欄の値だけを使う（空の欄を既定の単位で埋めると、
+    // kg の結果の 1 行が t として読まれ 1,000 倍になる）。列が無いときだけ、利用者が選んだファイル全体の単位を使う
+    const unitText = cell(raw, mapping.emissionsUnit);
+    const emissionsUnit = mapping.emissionsUnit
+      ? unitText
+      : (options.defaultEmissionsUnit ?? '').trim();
+    if (emissionsUnit === '') {
+      problems.push(
+        mapping.emissionsUnit
+          ? '排出量の単位が空です（推測しません。単位を入れてください）'
+          : '排出量の単位がありません（単位の列か、ファイル全体の単位を選んでください。推測しません）',
+      );
+    }
     if (siteCode === '') problems.push('拠点が空です');
     if (!scope) problems.push(`区分「${cell(raw, mapping.scope)}」を読めません`);
     if (emissions === null) {
@@ -106,7 +117,7 @@ export function extractBaselineRows(
         unreadableNumberMessage('排出量', cell(raw, mapping.emissions), mapping.decimalSeparator),
       );
     }
-    if (parseUnit(emissionsUnit)?.dimension !== 'emission') {
+    if (emissionsUnit !== '' && parseUnit(emissionsUnit)?.dimension !== 'emission') {
       problems.push(`排出量の単位「${emissionsUnit}」を読めません`);
     }
     const activityText = cell(raw, mapping.activity);

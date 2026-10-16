@@ -4,7 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireEnterpriseContext } from '@/lib/auth/session';
 import { NotFoundError } from '@/lib/authorization/can';
-import { isUserFacingError, ValidationError, withUserFacingError } from '@/lib/errors/user-facing';
+import { runPreservingAction } from '@/lib/errors/form-action';
+import type { FormActionState } from '@/lib/errors/form-action-state';
+import { isUserFacingError, ValidationError } from '@/lib/errors/user-facing';
 import { getDb } from '@/lib/repositories';
 import {
   baselineSettingsFromForm,
@@ -101,18 +103,19 @@ export async function confirmBaselineImportAction(
   redirect(reconciliationListHref(periodId, { flash: 'ghgBaselineImported', rows: String(rows) }));
 }
 
-/** 照合する（許容差は利用者が入れる。既定値を置かない） */
-export async function reconcileAction(formData: FormData): Promise<void> {
+/**
+ * 照合する（許容差は利用者が入れる。既定値を置かない）。断ったとき（許容差の無い区分・読めない値・上限）は
+ * リダイレクトせず理由を返し、入れた許容差と順序をフォームに残す（PreservingForm）
+ */
+export async function reconcileAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   const periodId = text(formData, 'periodId');
   const runId = text(formData, 'runId');
   const baselineId = text(formData, 'baselineId');
-  const backTo = reconciliationListHref(periodId, {
-    reconcile: '1',
-    ...(runId ? { run: runId } : {}),
-    ...(baselineId ? { baseline: baselineId } : {}),
-  });
   const done: { id: string; items: number; outside: number } = { id: '', items: 0, outside: 0 };
-  await withUserFacingError(backTo, async () => {
+  const failure = await runPreservingAction(formData, async () => {
     const ctx = await requireEnterpriseContext();
     const db = await getDb();
     if (!isUuid(runId)) throw new NotFoundError('算定の記録が見つかりません。');
@@ -139,6 +142,7 @@ export async function reconcileAction(formData: FormData): Promise<void> {
     done.items = items.length;
     done.outside = items.filter((i) => !i.withinTolerance).length;
   });
+  if (failure) return failure;
   revalidatePath(RECONCILIATION_BASE_PATH);
   redirect(
     reconciliationDetailHref(done.id, periodId || null, {
@@ -149,25 +153,29 @@ export async function reconcileAction(formData: FormData): Promise<void> {
   );
 }
 
-/** 項目の差異の原因を記録する（確認者の名義・追記） */
-export async function recordCauseAction(formData: FormData): Promise<void> {
+/**
+ * 項目の差異の原因を記録する（確認者の名義・追記）。断ったとき（原因を選んでいない・「その他」でコメントが無い）は
+ * リダイレクトせず理由を返し、選んだ原因と書いたコメントをフォームに残す（PreservingForm）
+ */
+export async function recordCauseAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   const reconciliationId = text(formData, 'reconciliationId');
   const itemKey = text(formData, 'itemKey');
   const periodId = text(formData, 'periodId') || null;
   const detail = isUuid(reconciliationId) ? reconciliationId : 'unknown';
-  await withUserFacingError(
-    reconciliationDetailHref(detail, periodId, { record: '1', item: itemKey }),
-    async () => {
-      const ctx = await requireEnterpriseContext();
-      const db = await getDb();
-      await recordCause(db, ctx, {
-        reconciliationId,
-        itemKey,
-        cause: text(formData, 'cause'),
-        comment: text(formData, 'comment'),
-      });
-    },
-  );
+  const failure = await runPreservingAction(formData, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
+    await recordCause(db, ctx, {
+      reconciliationId,
+      itemKey,
+      cause: text(formData, 'cause'),
+      comment: text(formData, 'comment'),
+    });
+  });
+  if (failure) return failure;
   revalidatePath(`${RECONCILIATION_BASE_PATH}/${detail}`);
   redirect(reconciliationDetailHref(detail, periodId, { flash: 'ghgCauseRecorded' }));
 }

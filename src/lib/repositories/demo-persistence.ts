@@ -171,11 +171,13 @@ function writeChunks(store: CookieStore, chunks: readonly string[]): void {
 /**
  * 変更を Cookie へ追記する。
  * 同じ (table, id) は最新で置き換え、サイズ超過分は古い順に捨てる。
+ * replace: 前の編集の列と重ねず、この内容だけにする（削除の印。行の中身を持ち回さない）
  */
 export async function appendDemoEdit(
   table: TableName,
   id: string,
   changed: Record<string, unknown>,
+  options: { replace?: boolean } = {},
 ): Promise<void> {
   if (!isPersistedTable(table)) return;
 
@@ -195,7 +197,7 @@ export async function appendDemoEdit(
   const nextEdit: DemoEdit = {
     t: table,
     id,
-    v: { ...(previous?.v ?? {}), ...changed },
+    v: options.replace ? { ...changed } : { ...(previous?.v ?? {}), ...changed },
     n: sequence,
   };
 

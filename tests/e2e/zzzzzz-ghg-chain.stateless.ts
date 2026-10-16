@@ -81,7 +81,8 @@ test('概要: 本社サステナ担当が区分規則の承認待ち（N2）と�
   await expect(main(page).locator('[data-ghg-notice="N9"]')).toBeVisible();
   const dual = main(page).getByRole('region', { name: '報告区分と既定区分' });
   await expect(dual.locator('[data-ghg-notice="N2"]')).toBeVisible();
-  await expect(dual.locator('[data-honesty="company-rule"]')).toBeVisible();
+  // 承認待ちだけ（R-1 は再分類していない）なら、組織の算定ルールのバッジは出さない
+  await expect(dual.locator('[data-honesty="company-rule"]')).toHaveCount(0);
   // Fixture の記録 R-1 で 5 拠点は算定済み
   const sites = main(page).getByRole('table', { name: '拠点別の結果' });
   await expect(sites.locator('tbody tr')).toHaveCount(5);
@@ -133,6 +134,11 @@ test('算定: 本社サステナ担当が算定を実行し、二重表示で委
   await expect(
     main(page).locator('[data-data-table="ghg-run-lines"] tr[data-t4d-record]').first(),
   ).toBeVisible();
+  // 概要: 規則で報告区分を変えた最新の記録には、N1 と組織の算定ルールのバッジを出す
+  await page.goto(OVERVIEW);
+  const overviewDual = main(page).getByRole('region', { name: '報告区分と既定区分' });
+  await expect(overviewDual.locator('[data-ghg-notice="N1"]').first()).toBeVisible();
+  await expect(overviewDual.locator('[data-honesty="company-rule"]')).toBeVisible();
 });
 
 test('照合: 算定明細の「この記録で照合する」から許容差を入れて既存結果 BL-1 と照合する', async ({

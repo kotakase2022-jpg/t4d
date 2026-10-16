@@ -458,11 +458,11 @@ function parseSubprocessorLines(
     .map((line) => line.trim())
     .filter((line) => line !== '')
     .map((line) => {
-      const [name = '', role = '', location = '', ...rest] = line
-        .split(/[／/]/)
-        .map((v) => v.trim());
-      // 根拠に「／」が入っていても、4 つ目以降はまとめて根拠として読む
-      const confidentialityBasis = rest.join('／').trim();
+      // 区切りは画面の案内どおり全角の「／」だけ（半角の「/」は区切らない。URL・「米国/EU」・「NDA/DPA」を
+      // 所在地・根拠へずらさない）。区切るのは 3 回まで、4 つ目以降はそのまま根拠として読む（書き換えない）
+      const parts = line.split('／');
+      const [name = '', role = '', location = ''] = parts.slice(0, 3).map((v) => v.trim());
+      const confidentialityBasis = parts.slice(3).join('／').trim();
       if (name === '') {
         throw new ValidationError(`処理を委ねる先（${label}）の名称を入力してください。`);
       }

@@ -2,8 +2,15 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '@/lib/domain/disclosure-block';
 import { fid } from '@/lib/fixtures/ids';
 import { classify, ruleEffectiveIn } from './classification';
-import { resolveFactor, RESOLUTION_ERROR_LABELS, type FactorNeed } from './factor-resolution';
+import {
+  assignmentsAtResolvedLevel,
+  factorNeedsOfLine,
+  resolveFactor,
+  RESOLUTION_ERROR_LABELS,
+  type FactorNeed,
+} from './factor-resolution';
 import { CO2_PER_C, fuelToCo2 } from './fuel-co2';
+import { ACTIVITY_CODE_LABELS } from './labels';
 import { applyRoundingStages, cleanFloat, roundEmission, ruleFor } from './rounding';
 import {
   fuelIntensity,
@@ -47,8 +54,11 @@ import type {
  * 区分規則が衝突する行は、エラーの一覧に入れて行を作らない（呼び出し側は 1 件でもあれば記録を作らない。plan K6）。
  */
 
-/** エンジンの版（式・規則を変えたら上げる。記録と一緒に残し、作り直しの照合に使う） */
-export const GHG_ENGINE_VERSION = 'ghg-engine/1';
+/**
+ * エンジンの版（式・規則を変えたら上げる。記録と一緒に残し、作り直しの照合に使う）。
+ * 2: 購入した熱を 2 基準で算定・入力ハッシュに係数のセットの状態・拠点の国・解決で選ばれる段の割当だけを含める
+ */
+export const GHG_ENGINE_VERSION = 'ghg-engine/2';
 
 export interface GhgCalculationInputs {
   organizationId: string;
@@ -107,18 +117,8 @@ export interface GhgSubstitutions {
 // 表示の語
 // ----------------------------------------------------------------------
 
-/** 活動の名前（経路の文・明細に使う。知らないコードはコードのまま） */
-export const ACTIVITY_CODE_LABELS: Readonly<Record<string, string>> = {
-  diesel: '軽油',
-  gasoline: '揮発油',
-  kerosene: '灯油',
-  heavy_oil_a: 'A重油',
-  lpg: 'LPG',
-  city_gas: '都市ガス',
-  grid: '電力（系統）',
-  contracted: '委託物流',
-  own_fleet: '自社便',
-};
+/** 活動の名前（経路の文・明細に使う。知らないコードはコードのまま。置き場所は labels.ts） */
+export { ACTIVITY_CODE_LABELS };
 
 export const ACTIVITY_KIND_LABELS: Readonly<Record<GhgActivityKind, string>> = {
   fuel: '燃料',
@@ -175,19 +175,54 @@ export function effectiveRules(
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
-/** 算定に関わる割当（期間の、対象拠点か国・全社の割当） */
-function relevantAssignments(inputs: GhgCalculationInputs): EmissionFactorAssignment[] {
+/** 算定する活動量のバッチ（対象拠点・期間）。算定と入力ハッシュが同じ規則で選ぶ */
+function targetBatches(inputs: GhgCalculationInputs): GhgActivityBatch[] {
   const units = new Set(inputs.unitIds);
-  return inputs.assignments
-    .filter(
-      (a) => a.reportingPeriodId === inputs.period.id && (a.unitId === null || units.has(a.unitId)),
-    )
-    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  return inputs.batches.filter(
+    (b) => units.has(b.unitId) && b.reportingPeriodId === inputs.period.id,
+  );
+}
+
+/**
+ * 算定に関わる割当: 算定する活動量の行が要る組（拠点 × 種類 × 活動 × 基準）ごとに、解決で選ばれる段
+ * （拠点 ＞ 国 ＞ 全社既定）の割当だけ。算定する拠点の国に関係しない国の割当・より低い段の割当は結果を変えないため
+ * 含めない（含めると、将来の拠点の準備で国の割当を足しただけで記録が「入力が変わった」になり、反映が止まる）
+ */
+function relevantAssignments(inputs: GhgCalculationInputs): EmissionFactorAssignment[] {
+  const unitById = new Map(inputs.units.map((u) => [u.id, u]));
+  const batchUnit = new Map(targetBatches(inputs).map((b) => [b.id, b.unitId]));
+  const picked = new Map<string, EmissionFactorAssignment>();
+  const seen = new Set<string>();
+  for (const line of inputs.lines) {
+    const unitId = batchUnit.get(line.batchId);
+    const unit = unitId ? unitById.get(unitId) : undefined;
+    if (!unit) continue;
+    for (const need of factorNeedsOfLine(line)) {
+      const key = [unit.id, need.kind, need.code, need.basis ?? ''].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const level = assignmentsAtResolvedLevel(
+        {
+          reportingPeriodId: inputs.period.id,
+          unitId: unit.id,
+          countryCode: unit.countryCode,
+          activityKind: need.kind,
+          activityCode: need.code,
+          basis: need.basis,
+        },
+        inputs.assignments,
+      );
+      for (const a of level?.list ?? []) picked.set(a.id, a);
+    }
+  }
+  return [...picked.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
 /**
  * 入力ハッシュ（並べ替えた正規 JSON の sha256）。結果を変えうる入力だけを含める:
- * 方針の中身・関係する割当と係数の中身・効く区分規則の中身・活動量のバッチと行・エンジンの版
+ * 方針の中身・解決で選ばれる割当と係数の中身・係数のセットの状態（取り下げると記録は「入力が変わった」になり、
+ * 取り下げたセットの値を Data Point へ反映しない。plan K6）・拠点の国（国の割当・国の不一致・海外拠点の輸送を決める）・
+ * 効く区分規則の中身・活動量のバッチと行・エンジンの版
  */
 export function computeInputHash(inputs: GhgCalculationInputs): string {
   const assignments = relevantAssignments(inputs);
@@ -214,10 +249,9 @@ export function computeInputHash(inputs: GhgCalculationInputs): string {
   const sets = inputs.factorSets
     .filter((s) => setIds.has(s.id))
     .sort((a, b) => (a.id < b.id ? -1 : 1))
-    .map((s) => ({ id: s.id, code: s.code, version: s.versionLabel }));
-  const batchIds = new Set(
-    inputs.batches.filter((b) => inputs.unitIds.includes(b.unitId)).map((b) => b.id),
-  );
+    .map((s) => ({ id: s.id, code: s.code, version: s.versionLabel, status: s.status }));
+  const batchIds = new Set(targetBatches(inputs).map((b) => b.id));
+  const unitCountry = new Map(inputs.units.map((u) => [u.id, u.countryCode]));
   const lines = inputs.lines
     .filter((l) => batchIds.has(l.batchId))
     .map((l) => l.id)
@@ -228,7 +262,7 @@ export function computeInputHash(inputs: GhgCalculationInputs): string {
       organizationId: inputs.organizationId,
       country: inputs.organizationCountryCode,
       period: inputs.period.id,
-      units: [...inputs.unitIds].sort(),
+      units: [...inputs.unitIds].sort().map((id) => ({ id, country: unitCountry.get(id) ?? null })),
       policy: {
         rounding: inputs.policy.rounding,
         conversions: inputs.policy.conversions,
@@ -465,19 +499,30 @@ function computeFuelLike(
   ];
 }
 
-function computeElectricity(
+/**
+ * 購入したエネルギー（電力・熱）。ロケーション基準とマーケット基準で 1 行ずつ（決して足さない。plan K7）。
+ * 係数の組は factorNeedsOfLine と同じ（電力のマーケット基準は契約のコード、熱は活動のコード）
+ */
+function computePurchasedEnergy(
   ctx: LineContext,
   line: GhgActivityLine,
 ): LineDraft[] | { error: string } {
-  if (line.amount === null || !line.unit) return { error: '電力量または単位がありません' };
+  const electricity = line.activityKind === 'electricity';
+  const noun = electricity ? '電力' : '購入した熱';
+  if (line.amount === null || !line.unit) {
+    return { error: electricity ? '電力量または単位がありません' : '熱量または単位がありません' };
+  }
   const out: LineDraft[] = [];
-  const bases: Array<['location' | 'market', GhgMethod, string]> = [
-    ['location', 'electricity_location', 'grid'],
-    ['market', 'electricity_market', line.contractCode ?? 'grid'],
-  ];
-  for (const [basis, method, code] of bases) {
-    const label = basis === 'location' ? '電力（ロケーション基準）' : '電力（マーケット基準）';
-    const resolved = resolveFor(ctx, line, 'electricity', code, basis, label);
+  const methods: Record<'location' | 'market', GhgMethod> = electricity
+    ? { location: 'electricity_location', market: 'electricity_market' }
+    : { location: 'heat_location', market: 'heat_market' };
+  const kind: FactorActivityKind = electricity ? 'electricity' : 'heat';
+  for (const need of factorNeedsOfLine(line)) {
+    const basis = need.basis === 'market' ? 'market' : 'location';
+    const method = methods[basis];
+    const code = need.code;
+    const label = `${noun}（${basis === 'location' ? 'ロケーション基準' : 'マーケット基準'}）`;
+    const resolved = resolveFor(ctx, line, kind, code, basis, label);
     if ('error' in resolved) return resolved;
     const converted = convertTo(ctx, line.amount, line.unit, resolved.factor.activityUnit);
     if ('error' in converted) return converted;
@@ -636,9 +681,8 @@ function computeLine(ctx: LineContext, line: GhgActivityLine): LineDraft[] | { e
     case 'gas':
       return computeFuelLike(ctx, line, 'fuel_combustion', 'gas', line.activityCode);
     case 'heat':
-      return computeFuelLike(ctx, line, 'fuel_combustion', 'heat', line.activityCode);
     case 'electricity':
-      return computeElectricity(ctx, line);
+      return computePurchasedEnergy(ctx, line);
     case 'transport':
       return computeTransport(ctx, line);
   }
@@ -736,17 +780,12 @@ export function calculateRun(
   const rules = substitutions.noClassificationRules
     ? []
     : effectiveRules(inputs.rules, inputs.period, inputs.periods);
-  const targetUnits = new Set(inputs.unitIds);
   const batchById = new Map(inputs.batches.map((b) => [b.id, b]));
+  const targetBatchIds = new Set(targetBatches(inputs).map((b) => b.id));
   const unitById = new Map(inputs.units.map((u) => [u.id, u]));
 
   const activityLines = inputs.lines
-    .filter((l) => {
-      const batch = batchById.get(l.batchId);
-      return (
-        !!batch && targetUnits.has(batch.unitId) && batch.reportingPeriodId === inputs.period.id
-      );
-    })
+    .filter((l) => targetBatchIds.has(l.batchId))
     .sort((a, b) => {
       const ua = batchById.get(a.batchId)!.unitId;
       const ub = batchById.get(b.batchId)!.unitId;
@@ -831,13 +870,7 @@ export function calculateRun(
     }
   }
 
-  const usedBatchIds = [
-    ...new Set(
-      inputs.batches
-        .filter((b) => targetUnits.has(b.unitId) && b.reportingPeriodId === inputs.period.id)
-        .map((b) => b.id),
-    ),
-  ].sort();
+  const usedBatchIds = [...targetBatchIds].sort();
   return {
     lines: out,
     summary: summarizeLines(out, rounding),
@@ -872,6 +905,8 @@ export const GHG_METHOD_LABELS: Readonly<Record<GhgMethod, string>> = {
   fuel_combustion: '燃料の燃焼',
   electricity_location: '電力（ロケーション基準）',
   electricity_market: '電力（マーケット基準）',
+  heat_location: '購入した熱（ロケーション基準）',
+  heat_market: '購入した熱（マーケット基準）',
   tonkm_improved: '改良トンキロ法',
   fuel_method: '燃料法',
 };

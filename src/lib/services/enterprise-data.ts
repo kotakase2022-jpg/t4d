@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { isFyReportingUnit } from '@/lib/domain/boundaries';
 import { isUnitInScope } from '@/lib/authorization/can';
 import { getReferenceDate } from '@/lib/clock';
 import { daysUntilJst, isOverdue } from '@/lib/format/datetime';
@@ -431,9 +432,10 @@ export async function loadEnterpriseDashboard(
     where: { organizationId, reportingPeriodId: period.id },
   });
 
-  // 拠点別進捗: 拠点数は数件なので拠点ごとの count で足りる
+  // 拠点別進捗: 拠点数は数件なので拠点ごとの count で足りる。連結対象外の拠点（Scope1・2 の算定の検証拠点など）は
+  // 年度のデータを集めない（plan §2.6）。ただし当期の Data Point があれば行を出す（集めた値の進捗を隠さない）
   const reportableUnits = units.filter((u) => u.unitType !== 'supplier');
-  const unitProgress = await Promise.all(
+  const allUnitProgress = await Promise.all(
     reportableUnits.map(async (unit) => {
       const unitWhere = { ...base, unitId: unit.id };
       const [unitTotal, approved, submitted, notStarted] = await Promise.all([
@@ -462,6 +464,9 @@ export async function loadEnterpriseDashboard(
         progressPercent: unitTotal === 0 ? 0 : Math.round((approved / unitTotal) * 100),
       };
     }),
+  );
+  const unitProgress = allUnitProgress.filter(
+    (row) => isFyReportingUnit(row.unit) || row.total > 0,
   );
 
   // 同じ検出時刻の行が多い（再計算で一斉に入る）ため、id を第 2 キーにして並びを安定させる

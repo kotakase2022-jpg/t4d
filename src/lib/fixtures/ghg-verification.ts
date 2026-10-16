@@ -445,6 +445,17 @@ function buildAssignments(): EmissionFactorAssignment[] {
   return out;
 }
 
+let fixtureAssignmentIds: ReadonlySet<string> | null = null;
+
+/**
+ * Fixture の係数の割当の ID（Demo Mode で「利用者が作った割当か」を見分ける。Fixture の割当は外さない）。
+ * Fixture DB 全体を組み立てずに、割当だけを同じ関数で作って ID を取る
+ */
+export function ghgFixtureAssignmentIds(): ReadonlySet<string> {
+  fixtureAssignmentIds ??= new Set(buildAssignments().map((a) => a.id));
+  return fixtureAssignmentIds;
+}
+
 export const GHG_FIXTURE_TONKM_POLICY: TonKmPolicy = {
   shape: 'kokuji',
   minLoadPct: 10,

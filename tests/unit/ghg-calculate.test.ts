@@ -6,7 +6,7 @@ import {
   recalculate,
 } from '@/lib/domain/ghg/calculate';
 import { CO2_PER_C } from '@/lib/domain/ghg/fuel-co2';
-import { assign, baseInputs, rule } from './ghg-test-builders';
+import { assign, baseInputs, batch, factor, line, rule, set } from './ghg-test-builders';
 
 /**
  * 算定の実行（plan §2.2 calculate.ts・CR-08）。決定論・各段の値・係数のスナップショット・二重表示・段の丸め・
@@ -285,5 +285,124 @@ describe('recalculate（仮説の再計算。保存しない）', () => {
       OPTS,
     );
     expect(noRules.lines.every((l) => l.reportedScope === l.protocolScope)).toBe(true);
+  });
+});
+
+describe('入力ハッシュ: 結果を変えうる入力だけ（自己監査 inv F1・F6・pers F3）', () => {
+  it('使った係数のセットを取り下げると変わる（取り下げたセットの値で反映しない）', () => {
+    const base = computeInputHash(baseInputs());
+    const retired = baseInputs();
+    retired.factorSets = retired.factorSets.map((s) =>
+      s.id === 'S25' ? { ...s, status: 'retired' as const } : s,
+    );
+    expect(computeInputHash(retired)).not.toBe(base);
+  });
+
+  it('使っていないセットの状態・算定する拠点の国に関係しない国の割当では変わらない', () => {
+    const base = computeInputHash(baseInputs());
+    const unused = baseInputs();
+    unused.factorSets = unused.factorSets.map((s) =>
+      s.id === 'S24' ? { ...s, status: 'retired' as const } : s,
+    );
+    expect(computeInputHash(unused)).toBe(base);
+    const otherCountry = baseInputs();
+    otherCountry.assignments = [
+      ...otherCountry.assignments,
+      assign('A-DE', 'F-DIESEL-24', { countryCode: 'DE' }),
+    ];
+    expect(computeInputHash(otherCountry)).toBe(base);
+  });
+
+  it('国の割当を足すと、その国の拠点が使う段が変わるので変わる', () => {
+    const base = computeInputHash(baseInputs());
+    const thDiesel = baseInputs();
+    thDiesel.assignments = [
+      ...thDiesel.assignments,
+      assign('A-TH-DIESEL', 'F-DIESEL-24', { countryCode: 'TH' }),
+    ];
+    expect(computeInputHash(thDiesel)).not.toBe(base);
+  });
+
+  it('拠点の国を変えると変わる（国の割当・国の不一致・海外拠点の輸送を決める）', () => {
+    const base = computeInputHash(baseInputs());
+    const moved = baseInputs();
+    moved.units = moved.units.map((u) => (u.id === 'u-th' ? { ...u, countryCode: 'JP' } : u));
+    expect(computeInputHash(moved)).not.toBe(base);
+  });
+});
+
+describe('購入した熱は 2 基準で算定する（自己監査 inv F7）', () => {
+  const heatInputs = () => {
+    const inputs = baseInputs();
+    inputs.factorSets = [...inputs.factorSets, set('SH', '熱 2025 年版')];
+    inputs.factors = [
+      ...inputs.factors,
+      factor('F-HEAT-LOC', 'SH', {
+        activityKind: 'heat',
+        activityCode: 'steam',
+        basis: 'location',
+        factorValue: 0.06,
+        factorUnit: 't-CO2/GJ',
+        activityUnit: 'GJ',
+      }),
+      factor('F-HEAT-MKT', 'SH', {
+        activityKind: 'heat',
+        activityCode: 'steam',
+        basis: 'market',
+        factorValue: 0.05,
+        factorUnit: 't-CO2/GJ',
+        activityUnit: 'GJ',
+      }),
+    ];
+    inputs.assignments = [
+      ...inputs.assignments,
+      assign('A-HEAT-LOC', 'F-HEAT-LOC', {
+        activityKind: 'heat',
+        activityCode: 'steam',
+        basis: 'location',
+      }),
+      assign('A-HEAT-MKT', 'F-HEAT-MKT', {
+        activityKind: 'heat',
+        activityCode: 'steam',
+        basis: 'market',
+      }),
+    ];
+    inputs.batches = [...inputs.batches, batch('B-JP-H', 'u-jp')];
+    inputs.lines = [
+      ...inputs.lines,
+      line('L-HEAT', 'B-JP-H', 1, {
+        activityKind: 'heat',
+        activityCode: 'steam',
+        amount: 100,
+        unit: 'GJ',
+      }),
+    ];
+    return inputs;
+  };
+
+  it('ロケーション基準（scope2_location）とマーケット基準（scope2）の 2 行。燃料の燃焼と書かない', () => {
+    const out = calculateRun(heatInputs(), OPTS);
+    expect(out.errors).toEqual([]);
+    const heat = out.lines.filter((l) => l.activityLineId === 'L-HEAT');
+    expect(heat.map((l) => [l.method, l.protocolScope, l.factorId])).toEqual([
+      ['heat_location', 'scope2_location', 'F-HEAT-LOC'],
+      ['heat_market', 'scope2', 'F-HEAT-MKT'],
+    ]);
+    close(heat[0]!.emissionsUnrounded, 6);
+    close(heat[1]!.emissionsUnrounded, 5);
+    const loc = out.summary.reported.siteActivities.find(
+      (s) => s.unitId === 'u-jp' && s.scope === 'scope2_location' && s.activityKind === 'heat',
+    );
+    expect(loc?.unrounded).toBeCloseTo(6, 12);
+  });
+
+  it('片方の基準の割当が無ければエラー（片方の基準にだけ入れない）', () => {
+    const inputs = heatInputs();
+    inputs.assignments = inputs.assignments.filter((a) => a.id !== 'A-HEAT-MKT');
+    const out = calculateRun(inputs, OPTS);
+    expect(out.errors.map((e) => e.message)).toEqual([
+      expect.stringContaining('購入した熱（マーケット基準）: 係数が割り当てられていません'),
+    ]);
+    expect(out.lines.some((l) => l.activityLineId === 'L-HEAT')).toBe(false);
   });
 });

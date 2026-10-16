@@ -1,7 +1,11 @@
 import 'server-only';
 
 import { computeInputHash } from '@/lib/domain/ghg/calculate';
-import { RESOLUTION_ERROR_LABELS, resolveFactor } from '@/lib/domain/ghg/factor-resolution';
+import {
+  RESOLUTION_ERROR_LABELS,
+  factorNeedsOfLine,
+  resolveFactor,
+} from '@/lib/domain/ghg/factor-resolution';
 import { selectCalculationInputs } from '@/lib/domain/ghg/select-inputs';
 import { monthsBetween, siteStatuses, type SiteStatus } from '@/lib/domain/ghg/verification-status';
 import type { DbClient } from '@/lib/repositories/types';
@@ -15,7 +19,10 @@ import type {
   ReportingPeriod,
   Uuid,
 } from '@/types/domain';
+import { needLabel } from './assignments';
+import { trustedRun } from './calculation';
 import { loadGhgSource } from './inputs';
+import { trustedReconciliation } from './reconciliation';
 
 /**
  * 拠点ごとの検証の進み具合（plan §2.3 status.ts・CR-20。読むだけ）。
@@ -44,42 +51,17 @@ export interface GhgVerificationStatus {
   };
 }
 
+/** 活動量の 1 行に要る係数の組と画面の名前（算定のエンジン・割当の一覧と同じ組） */
 function needsOf(line: GhgActivityLine): Array<{
   kind: FactorActivityKind;
   code: string;
   basis: 'location' | 'market' | null;
   label: string;
 }> {
-  switch (line.activityKind) {
-    case 'electricity':
-      return [
-        { kind: 'electricity', code: 'grid', basis: 'location', label: '電力（ロケーション基準）' },
-        {
-          kind: 'electricity',
-          code: line.contractCode ?? 'grid',
-          basis: 'market',
-          label: '電力（マーケット基準）',
-        },
-      ];
-    case 'transport': {
-      const fuel = line.fuelCode ?? line.activityCode;
-      const tonKm = line.tonKm !== null || (line.cargoWeightT !== null && line.distanceKm !== null);
-      if (!tonKm) return [{ kind: 'fuel', code: fuel, basis: null, label: '燃料（燃料法）' }];
-      return [
-        {
-          kind: line.loadFactorPct === null ? 'transport_default' : 'transport_formula',
-          code: fuel,
-          basis: null,
-          label: '改良トンキロ法',
-        },
-        { kind: 'fuel', code: fuel, basis: null, label: '燃料' },
-      ];
-    }
-    default:
-      return [
-        { kind: line.activityKind, code: line.activityCode, basis: null, label: line.activityKind },
-      ];
-  }
+  return factorNeedsOfLine(line).map((need) => ({
+    ...need,
+    label: needLabel(need.kind, need.code, need.basis),
+  }));
 }
 
 export async function loadGhgVerificationStatus(
@@ -113,11 +95,30 @@ export async function loadGhgVerificationStatus(
       ],
     }),
   ]);
-  const latestRun =
+  const storedRun =
     runs.find((r) => unitIds.length > 0 && unitIds.some((u) => r.unitIds.includes(u))) ?? null;
-  const latestReconciliation = latestRun
+  // Supabase Mode の記録・照合は作り直した値を使う（利用者の JWT で書かれた要約・結果を信じない）
+  const trusted = storedRun ? trustedRun(db, source, storedRun) : null;
+  const latestRun = trusted?.run ?? null;
+  const storedReconciliation = latestRun
     ? (reconciliations.find((r) => r.runId === latestRun.id) ?? null)
     : null;
+  const reconciledBaseline =
+    storedReconciliation && db.mode !== 'demo'
+      ? await db.findById('ghgBaselineResults', storedReconciliation.baselineId)
+      : null;
+  const latestReconciliation =
+    !storedReconciliation || !latestRun || db.mode === 'demo'
+      ? storedReconciliation
+      : reconciledBaseline
+        ? await trustedReconciliation(
+            db,
+            storedReconciliation,
+            latestRun,
+            reconciledBaseline,
+            trusted?.lines ?? null,
+          )
+        : { ...storedReconciliation, result: null };
   const notes = latestReconciliation
     ? await db.select('ghgReconciliationNotes', {
         where: { organizationId, reconciliationId: latestReconciliation.id },
@@ -173,9 +174,11 @@ export async function loadGhgVerificationStatus(
     };
   });
   const statuses = siteStatuses(sites, latestRun, currentHash, latestReconciliation, notes);
-  const latestLines = latestRun
-    ? await db.select('ghgCalculationLines', { where: { organizationId, runId: latestRun.id } })
-    : [];
+  const latestLines = !latestRun
+    ? []
+    : trusted?.lines
+      ? trusted.lines
+      : await db.select('ghgCalculationLines', { where: { organizationId, runId: latestRun.id } });
   return {
     period: source.period,
     units: statuses.map((status) => ({

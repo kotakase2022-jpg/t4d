@@ -48,6 +48,7 @@ import {
   loadApprovalProgress,
   loadApprovalTimeline,
 } from '@/lib/services/approval-route';
+import { loadPreviousYearDataPoint } from '@/lib/services/data-entry';
 import { loadActiveValidations } from '@/lib/services/validation-store';
 import { BLOCK_USAGE_LABELS, listDataPointUsage, type DataPointUsage } from '@/lib/services/impact';
 import { hasOption } from '@/lib/services/organization-options';
@@ -303,21 +304,14 @@ export default async function DataPointDetailPage({
     return key ? `/enterprise/disclosures/${key}` : '/enterprise/disclosures/cdp';
   }
 
-  const previousPeriod = shell.periods
-    .filter((p) => p.startDate < period.startDate)
-    .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
-  const previousDataPoints = previousPeriod
-    ? await db.select('dataPoints', {
-        where: {
-          organizationId: ctx.workspace.organizationId,
-          reportingPeriodId: previousPeriod.id,
-          metricId: metric.id,
-          unitId: unit.id,
-        },
-        limit: 1,
-      })
-    : [];
-  const previous = previousDataPoints[0];
+  // 前年は決算日が同じ期間（暦年の期間を年度の前年にしない。plan K10）
+  const previousYear = await loadPreviousYearDataPoint(db, ctx, {
+    period,
+    periods: shell.periods,
+    metricId: metric.id,
+    unitId: unit.id,
+  });
+  const previous = previousYear?.dataPoint ?? undefined;
 
   const canWrite = can(ctx, 'enterprise.data.write');
   const canReview = can(ctx, 'enterprise.data.review');

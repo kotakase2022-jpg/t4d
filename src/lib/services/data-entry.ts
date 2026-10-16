@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { isFyReportingUnit } from '@/lib/domain/boundaries';
 import { previousComparablePeriod } from '@/lib/domain/period-comparability';
 
 import { recordAuditEvent } from '@/lib/audit/logger';
@@ -13,6 +14,7 @@ import type {
   MetricDefinition,
   OrganizationUnit,
   ReportingPeriod,
+  Uuid,
 } from '@/types/domain';
 
 /**
@@ -23,6 +25,42 @@ import type {
  * - テンプレート: 標準形（拠点/項目/値/単位/期間）の Excel を配る。
  *   再取込は既存の取込パイプラインがそのまま受ける。
  */
+
+/**
+ * 前年の期間の Data Point（詳細画面の「前年実績」と入力の目安）。前年は決算日が同じ期間（検証の前年比と同じ
+ * 'start' の比べ方。plan K10）。開始日の順だけで選ぶと、暦年の期間（例 CY2025）が年度（FY2025）の前年になり、
+ * 前年実績が「前年データなし」になったり暦年の値になったりする（自己監査 F4）。前年の期間が無ければ null
+ */
+export async function loadPreviousYearDataPoint(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  options: {
+    period: ReportingPeriod;
+    periods: readonly ReportingPeriod[];
+    metricId: Uuid;
+    unitId: Uuid;
+  },
+): Promise<{ period: ReportingPeriod; dataPoint: DataPoint | null } | null> {
+  assertCan(ctx, 'enterprise.data.read');
+  const organizationId = ctx.workspace.organizationId;
+  const previous = previousComparablePeriod(
+    options.period,
+    options.periods.filter((p) => p.organizationId === organizationId),
+    'start',
+  );
+  if (!previous) return null;
+  const [dataPoint] = await db.select('dataPoints', {
+    where: {
+      organizationId,
+      reportingPeriodId: previous.id,
+      metricId: options.metricId,
+      unitId: options.unitId,
+      deletedAt: { isNull: true },
+    },
+    limit: 1,
+  });
+  return { period: previous, dataPoint: dataPoint ?? null };
+}
 
 export interface CarryForwardResult {
   created: number;
@@ -170,8 +208,9 @@ export async function buildTemplateWorkbook(
   const ws = wb.addWorksheet('データ入力');
   ws.addRow(['拠点', '項目', '値', '単位', '期間']);
 
+  // 年度のデータを集める拠点だけ（連結対象外の拠点は収集キャンペーンの既定と同じく出さない。plan §2.6）
   const targetUnits = units.filter(
-    (u) => u.unitType !== 'supplier' && (unitScopeIds.length === 0 || unitScopeIds.includes(u.id)),
+    (u) => isFyReportingUnit(u) && (unitScopeIds.length === 0 || unitScopeIds.includes(u.id)),
   );
   for (const unit of targetUnits) {
     for (const metric of metrics) {

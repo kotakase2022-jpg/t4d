@@ -130,12 +130,18 @@ export async function setMembershipStatusAction(formData: FormData): Promise<voi
   );
 }
 
-/** データ取扱条件の版の記録（トライアル対応 NF-28。追記。enterprise.org.manage） */
-export async function recordDataTermsAction(formData: FormData): Promise<void> {
-  const ctx = await requireEnterpriseContext();
-  const db = await getDb();
+/**
+ * データ取扱条件の版の記録（トライアル対応 NF-28。追記。enterprise.org.manage）。断ったとき（文字数の上限・
+ * 残存期間の範囲など）はリダイレクトせず理由を返し、入れた全部の欄をフォームに残す（PreservingForm）
+ */
+export async function recordDataTermsAction(
+  _previous: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
   let versionNo = 0;
-  await withUserFacingError(`${SETTINGS}?tab=data-handling&new=1`, async () => {
+  const failure = await runPreservingAction(formData, async () => {
+    const ctx = await requireEnterpriseContext();
+    const db = await getDb();
     const terms = await recordDataTermsVersion(db, ctx, {
       ndaStatus: text(formData, 'ndaStatus'),
       processingTermsRef: text(formData, 'processingTermsRef'),
@@ -162,6 +168,7 @@ export async function recordDataTermsAction(formData: FormData): Promise<void> {
     });
     versionNo = terms.versionNo;
   });
+  if (failure) return failure;
   revalidatePath(SETTINGS);
   redirect(`${SETTINGS}?tab=data-handling&flash=dataTermsRecorded&version=${versionNo}`);
 }

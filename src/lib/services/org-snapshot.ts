@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
 import type { DbClient } from '@/lib/repositories/types';
 import { isCountedInTotals } from '@/lib/services/aggregation';
 import { loadDisclosureWorkspace } from '@/lib/services/disclosure';
@@ -57,10 +58,12 @@ export async function collectOrgSnapshot(
   periods: ReportingPeriod[],
 ): Promise<OrgSnapshot> {
   const organizationId = ctx.workspace.organizationId;
-  const previous =
-    periods
-      .filter((p) => p.organizationId === organizationId && p.endDate < current.startDate)
-      .sort((a, b) => (a.endDate < b.endDate ? 1 : -1))[0] ?? null;
+  // 前年は決算日が同じ期間（暦年の期間を年度の前年にしない。plan K10）
+  const previous = previousComparablePeriod(
+    current,
+    periods.filter((p) => p.organizationId === organizationId),
+    'end',
+  );
 
   const [metrics, units, dataPoints, prevDataPoints] = await Promise.all([
     db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),

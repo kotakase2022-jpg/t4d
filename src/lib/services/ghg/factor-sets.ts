@@ -13,6 +13,7 @@ import {
 } from '@/lib/domain/ghg/factor-import';
 import { DECIMAL_SEPARATORS, type DecimalSeparator } from '@/lib/domain/ghg/number-format';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { isUuid } from '@/lib/validation/uuid';
 import { parseCsv, parseExcel } from '@/lib/imports/parsers';
 import { DEMO_GHG_LIMITS, GHG_FIXTURE_ROW_IDS } from '@/lib/repositories/demo-ghg-checks';
 import type { DbClient } from '@/lib/repositories/types';
@@ -147,6 +148,8 @@ export async function loadFactorSet(
 ): Promise<FactorSetDetail> {
   assertReader(ctx);
   const organizationId = ctx.workspace.organizationId;
+  // UUID でない ID は DB に問い合わせない（Supabase Mode では 22P02 の例外＝500 になるため。見つからない扱い）
+  if (!isUuid(setId)) throw new NotFoundError('係数のセットが見つかりません。');
   const set = await db.findById('emissionFactorSets', setId);
   if (!set || set.organizationId !== organizationId) {
     throw new NotFoundError('係数のセットが見つかりません。');
@@ -496,6 +499,8 @@ async function loadOwnSet(
   ctx: AuthorizationContext,
   setId: Uuid,
 ): Promise<EmissionFactorSet> {
+  // UUID でない ID は DB に問い合わせない（Supabase Mode では 22P02 の例外＝500 になるため。見つからない扱い）
+  if (!isUuid(setId)) throw new NotFoundError('係数のセットが見つかりません。');
   const set = await db.findById('emissionFactorSets', setId);
   if (!set || set.organizationId !== ctx.workspace.organizationId) {
     throw new NotFoundError('係数のセットが見つかりません。');

@@ -18,10 +18,12 @@ import {
   FUEL_ECONOMY_CLASS_LABELS,
   VEHICLE_USE_LABELS,
 } from '@/lib/domain/ghg/factor-import';
+import { factorActivityName } from '@/lib/domain/ghg/labels';
 import type { TransportDefaultParams, TransportFormulaParams } from '@/lib/domain/ghg/tonkm';
 import { formatJst, formatJstDate, formatNumber } from '@/lib/format/datetime';
 import { needLabel } from '@/lib/services/ghg/assignments';
 import { loadFactorSet, type FactorSetDetail } from '@/lib/services/ghg/factor-sets';
+import { isUuid } from '@/lib/validation/uuid';
 import {
   FUEL_ECONOMY_CLASSES,
   type EmissionFactor,
@@ -67,11 +69,13 @@ export default async function GhgFactorSetPage({
   searchParams: Promise<SearchParams>;
 }) {
   const [{ setId = '' }, query] = await Promise.all([params, searchParams]);
+  // UUID でない ID は 404（他の詳細画面と同じ。Supabase Mode で 22P02 を 500 にしない）
+  if (!isUuid(setId)) notFound();
   const { shell, period, status } = await loadCalcContext(query);
   const { ctx, db } = shell;
   let detail: FactorSetDetail;
   try {
-    detail = await loadFactorSet(db, ctx, decodeURIComponent(setId));
+    detail = await loadFactorSet(db, ctx, setId);
   } catch (error) {
     if (error instanceof NotFoundError) notFound();
     throw error;
@@ -80,8 +84,9 @@ export default async function GhgFactorSetPage({
   const canManage = can(ctx, 'enterprise.metric.manage');
   const byKind = (kinds: readonly FactorActivityKind[]) =>
     factors.filter((f) => f.activityKind !== null && kinds.includes(f.activityKind));
-  const fuels = byKind(['fuel', 'gas', 'heat']);
-  const electricity = byKind(['electricity']);
+  const fuels = byKind(['fuel', 'gas']);
+  // 購入した熱も電力と同じく 2 基準（ロケーション・マーケット）の係数なので、基準の列のある表に並べる
+  const electricity = byKind(['electricity', 'heat']);
   const formulas = byKind(['transport_formula']);
   const defaults = byKind(['transport_default']);
   const name = (id: string | null) => (id ? (detail.names.get(id) ?? '—') : '—');
@@ -171,7 +176,8 @@ export default async function GhgFactorSetPage({
 
       <div className="space-y-3 px-4 pb-4 pt-3">
         <FlashMessage searchParams={query} />
-        {ctx.demo && <GhgNotice id="N9" />}
+        {/* 架空の注記はデモの架空のセットだけ（公的参照・組織指定として取り込んだセットを架空と言わない） */}
+        {ctx.demo && set.origin === 'fixture' && <GhgNotice id="N9" />}
         {set.status === 'draft' && (
           <Notice tone="info" title="下書きのセットです">
             算定には使いません。係数を確かめてから「有効にする」を押してください（有効にした後は変更できません）。
@@ -241,10 +247,10 @@ export default async function GhgFactorSetPage({
         )}
 
         {fuels.length > 0 && (
-          <Section title={`燃料・ガス・熱（${fuels.length}）`}>
+          <Section title={`燃料・ガス（${fuels.length}）`}>
             <div className="t4d-scroll-x">
               <Table>
-                <caption className="sr-only">燃料・ガス・熱の係数</caption>
+                <caption className="sr-only">燃料・ガスの係数</caption>
                 <THead>
                   <TR>
                     <TH>コード</TH>
@@ -266,7 +272,12 @@ export default async function GhgFactorSetPage({
                       <TD>{f.name}</TD>
                       <TD className="text-small">
                         {f.activityKind ? FACTOR_KIND_LABELS[f.activityKind] : '—'}・
-                        <span className="font-mono text-caption">{f.activityCode}</span>
+                        {factorActivityName(f.activityKind, f.activityCode)}
+                        {factorActivityName(f.activityKind, f.activityCode) !== f.activityCode && (
+                          <span className="ml-1 font-mono text-caption text-ink-muted">
+                            {f.activityCode}
+                          </span>
+                        )}
                       </TD>
                       <TD>{f.countryCode ?? '—'}</TD>
                       <TD align="right" className="tnum">
@@ -301,14 +312,15 @@ export default async function GhgFactorSetPage({
         )}
 
         {electricity.length > 0 && (
-          <Section title={`電力（${electricity.length}）`}>
+          <Section title={`電力・熱（${electricity.length}）`}>
             <div className="t4d-scroll-x">
               <Table>
-                <caption className="sr-only">電力の係数</caption>
+                <caption className="sr-only">電力・熱の係数</caption>
                 <THead>
                   <TR>
                     <TH>コード</TH>
                     <TH>名称</TH>
+                    <TH>種類・活動</TH>
                     <TH>基準</TH>
                     <TH>国・契約</TH>
                     <TH align="right">年度</TH>
@@ -322,15 +334,12 @@ export default async function GhgFactorSetPage({
                     <TR key={f.id}>
                       <TD className="font-mono text-caption">{f.code}</TD>
                       <TD>{f.name}</TD>
-                      <TD>{f.basis ? EMISSION_BASIS_LABELS[f.basis] : '—'}</TD>
                       <TD className="text-small">
-                        {f.countryCode ?? '国の指定なし'}
-                        {f.activityCode !== 'grid' && (
-                          <span className="ml-1 font-mono text-caption text-ink-muted">
-                            契約 {f.activityCode}
-                          </span>
-                        )}
+                        {f.activityKind ? FACTOR_KIND_LABELS[f.activityKind] : '—'}・
+                        {factorActivityName(f.activityKind, f.activityCode)}
                       </TD>
+                      <TD>{f.basis ? EMISSION_BASIS_LABELS[f.basis] : '—'}</TD>
+                      <TD className="text-small">{f.countryCode ?? '国の指定なし'}</TD>
                       <TD align="right" className="tnum">
                         {f.factorYear}
                       </TD>
@@ -354,7 +363,8 @@ export default async function GhgFactorSetPage({
             <Section key={f.id} title={`改良トンキロ法の式: ${f.name}（${f.factorYear} 年度）`}>
               <p className="pb-1 text-small text-ink-muted">
                 x ＝ A ÷ (積載率/100)^S ÷ 最大積載量(kg)^B（L/t·km）。S ＝ {n(params.S)}。燃料{' '}
-                <span className="font-mono">{f.activityCode}</span>・コード{' '}
+                {factorActivityName('fuel', f.activityCode)}（
+                <span className="font-mono">{f.activityCode}</span>）・コード{' '}
                 <span className="font-mono">{f.code}</span>
               </p>
               <div className="t4d-scroll-x">
@@ -406,8 +416,9 @@ export default async function GhgFactorSetPage({
             <Section key={f.id} title={`見なし積載率の原単位表: ${f.name}（${f.factorYear} 年度）`}>
               <p className="pb-1 text-small text-ink-muted">
                 積載率が分からない行に使う原単位（L/t·km）。燃料{' '}
-                <span className="font-mono">{f.activityCode}</span>
-                ・コード <span className="font-mono">{f.code}</span>
+                {factorActivityName('fuel', f.activityCode)}（
+                <span className="font-mono">{f.activityCode}</span>） ・コード{' '}
+                <span className="font-mono">{f.code}</span>
                 。表に無い区分（—）は算定でエラーになります。
               </p>
               <div className="t4d-scroll-x">

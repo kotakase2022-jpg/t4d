@@ -250,8 +250,9 @@ test.describe('活動量の取込と改良トンキロ法', () => {
       /公的参照/,
     );
     await expect(main.locator('[data-status-domain="ghgFactorSet"]').first()).toHaveText(/下書き/);
-    // 公的資料の値を「架空値」と書かない（出所で出し分ける）
+    // 公的資料の値を「架空値」と書かない（出所で出し分ける）。架空の注記（N9）もデモの架空のセットだけに出す
     await expect(main.getByText('架空値（実係数ではありません）')).toHaveCount(0);
+    await expect(main.locator('[data-ghg-notice="N9"]')).toHaveCount(0);
     // 式は燃料ごとに 1 つ（軽油・揮発油）。告示の値のまま
     await expect(main.getByRole('heading', { name: /^改良トンキロ法の式: / })).toHaveCount(2);
     await expect(main.getByRole('heading', { name: /^見なし積載率の原単位表: / })).toHaveCount(2);

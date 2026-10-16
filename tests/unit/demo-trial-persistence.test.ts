@@ -36,6 +36,8 @@ import {
 } from '@/lib/repositories/demo-trial-checks';
 import type { TableName } from '@/lib/repositories/types';
 import { createReportNote, respondToNote } from '@/lib/services/assurance-notes';
+import { recordDataTermsVersion } from '@/lib/services/data-terms';
+import { saveTrialProgram } from '@/lib/services/trial-program';
 import { shareReportSnapshot, withdrawSharedReport } from '@/lib/services/report-share';
 import { parseSharedReportCopy } from '@/lib/domain/report-copy';
 import type {
@@ -692,6 +694,90 @@ describe('CDP の対応付け・回答（T7 の依頼。DB の規則と同じ検
         response.status,
       );
     }
+  });
+});
+
+describe('トライアルの範囲・データ取扱（2026-10-16 の要望 ①④⑥⑦）', () => {
+  it('合意 4 つ（範囲・判断者・スケジュール・無償の範囲）と検証範囲・展開対象・目安・予定日が Cookie から戻る', async () => {
+    const { program } = await saveTrialProgram(new DemoDbClient(source), admin(), {
+      agreements: {
+        freeScope: { agreedOn: '2026-10-16', note: '（架空）標準機能の範囲は無償で合意' },
+        decider: { agreedOn: '2026-10-10', note: '（架空）推進部長' },
+      },
+      rollout: { totalSites: 44, note: '（架空）検証の結果を見て順に広げる' },
+      freeScope: { pdfFiles: 30 },
+      disposal: { plannedOn: '2027-03-31' },
+    });
+    expect(Object.keys(program.agreements).sort()).toEqual(
+      ['decider', 'freeScope', 'schedule', 'scope'].sort(),
+    );
+    const restored = replay([editOf('trialPrograms', program)]).trialPrograms.find(
+      (p) => p.id === program.id,
+    )!;
+    expect(restored.agreements).toEqual(program.agreements);
+    expect(restored.options).toEqual(program.options);
+    expect(restored.options).toMatchObject({
+      ghgVerification: { unitIds: expect.arrayContaining([UNIT_IDS.east]) },
+      rollout: { totalSites: 44 },
+      freeScope: { pdfFiles: 30 },
+      disposal: { plannedOn: '2027-03-31' },
+    });
+  });
+
+  it('処理を委ねる先 10 社分（区分・秘密保持の根拠つき）と残存期間が Cookie から戻る', async () => {
+    const line = (i: number) =>
+      `（架空）委託先 ${i}／運用の一部／（架空）国内／（架空）個別の秘密保持契約 ${i}`;
+    const terms = await recordDataTermsVersion(new DemoDbClient(source), admin(), {
+      ndaStatus: 'signed',
+      processingTermsRef: '',
+      storageLocation: '',
+      retentionPolicy: '',
+      aiTrainingUse: 'not_allowed',
+      aiProviderStorage: 'none',
+      subprocessorsByCategory: {
+        contractor: [1, 2, 3].map(line).join('\n'),
+        cloud: [4, 5, 6].map(line).join('\n'),
+        ai: [7, 8].map(line).join('\n'),
+        other: [9, 10].map(line).join('\n'),
+      },
+      returnMethod: '',
+      deletionMethod: '',
+      backupResidualDays: '35',
+      agreedOn: '',
+      agreedByLabel: '',
+      note: '',
+    });
+    expect(terms.subprocessors).toHaveLength(10);
+    const restored = replay([editOf('organizationDataTerms', terms)]).organizationDataTerms.find(
+      (t) => t.id === terms.id,
+    )!;
+    expect(restored.subprocessors).toEqual(terms.subprocessors);
+    expect(restored.subprocessors.map((s) => s.category)).toEqual([
+      ...Array(3).fill('contractor'),
+      ...Array(3).fill('cloud'),
+      ...Array(2).fill('ai'),
+      ...Array(2).fill('other'),
+    ]);
+    expect(restored.backupResidualDays).toBe(35);
+  });
+
+  it('偽の行は戻さない: 範囲外の残存期間・別途協議以外の費用区分に付けた区分', () => {
+    const terms = source.organizationDataTerms.find((t) => t.organizationId === ORG_IDS.aomi)!;
+    const forgedTerms = { ...terms, id: 'forged-terms', versionNo: 9, backupResidualDays: 401 };
+    expect(
+      replay([editOf('organizationDataTerms', forgedTerms)]).organizationDataTerms.some(
+        (t) => t.id === 'forged-terms',
+      ),
+    ).toBe(false);
+    const item = source.trialFeedbackItems.find(
+      (f) => f.organizationId === ORG_IDS.aomi && f.costClass === 'maintenance',
+    )!;
+    const forgedItem = { ...item, scopeKind: 'custom_development' as const };
+    expect(
+      replay([editOf('trialFeedbackItems', forgedItem)]).trialFeedbackItems.find(
+        (f) => f.id === item.id,
+      )?.scopeKind ?? null,
+    ).toBeNull();
   });
 });
 

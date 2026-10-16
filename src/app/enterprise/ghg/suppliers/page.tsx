@@ -19,6 +19,7 @@ import { getAppMode } from '@/lib/config';
 import { formatNumber } from '@/lib/format/datetime';
 import { buildSupplierDemoFiles } from '@/lib/fixtures/supplier-demo-files';
 import {
+  cat1FactorIndex,
   loadScope3SupplierBreakdown,
   type SupplierBreakdownEntry,
 } from '@/lib/services/scope3-suppliers';
@@ -150,6 +151,12 @@ export default async function GhgSuppliersPage({
   const openLinks = query.flash === 'factorRelinked' || typeof query.error === 'string';
 
   const factorById = new Map(breakdown.factors.map((f) => [f.id, f]));
+  // 係数の鍵はコード × 年度（同じコードに年度が 2 つ以上あれば「コード@年度」で選ぶ。plan GE-02）
+  const factorIndex = cat1FactorIndex(breakdown.factors);
+  // 架空値の注記は架空の係数（Fixture）があるときに出す（組織が登録した係数を架空と書かない。plan CR-16）。
+  // Demo Mode は係数がすべて架空なので常に出る
+  const showFictionalFactors =
+    demo || breakdown.factors.some((f) => f.factorSource.startsWith('FIXTURE'));
   // 紐づけ状況: 活動量を持つ内訳行（金額・物理量の素データ由来）だけが再紐づけの対象
   const linkedRows = breakdown.suppliers
     .flatMap((supplier) =>
@@ -484,6 +491,9 @@ export default async function GhgSuppliersPage({
                             <>
                               {factor.name}
                               <span className="ml-1 font-mono text-ink-muted">{factor.code}</span>
+                              <span className="ml-1 text-ink-muted">
+                                （{factor.factorYear} 年度）
+                              </span>
                             </>
                           ) : (
                             <span className="text-ink-muted">不明（旧形式）</span>
@@ -501,12 +511,14 @@ export default async function GhgSuppliersPage({
                                 activityAmount={input.activityAmount ?? 0}
                                 activityUnit={input.activityUnit ?? ''}
                                 currentValue={input.value}
-                                currentCode={factor?.code ?? ''}
+                                currentRef={factor ? factorIndex.refOf(factor) : ''}
                                 candidates={candidates.map((candidate) => ({
+                                  ref: factorIndex.refOf(candidate),
                                   code: candidate.code,
                                   name: candidate.name,
                                   factorValue: candidate.factorValue,
                                   factorUnit: candidate.factorUnit,
+                                  factorYear: candidate.factorYear,
                                 }))}
                               />
                             ) : (
@@ -532,7 +544,11 @@ export default async function GhgSuppliersPage({
           collapsible
           title={`排出量原単位（排出係数）マスター（${breakdown.factors.length}）`}
           summary={`原単位 ${breakdown.factors.length} 件（CSV の「排出係数コード」列に記入するコード）`}
-          actions={<Badge tone="warning">架空値（実係数ではありません）</Badge>}
+          actions={
+            showFictionalFactors ? (
+              <Badge tone="warning">架空値（実係数ではありません）</Badge>
+            ) : undefined
+          }
         >
           <div className="t4d-scroll-x">
             <Table>

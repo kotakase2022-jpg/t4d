@@ -70,9 +70,34 @@ export function toJstDate(value: IsoDateTime): IsoDate {
 
 const numberFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, { maximumFractionDigits: 3 });
 
-export function formatNumber(value: number | null | undefined): string {
+const fractionFormatters = new Map<string, Intl.NumberFormat>();
+
+/**
+ * 数値の表示。桁数を指定すると、その桁まで表示する（算定の丸め後の値を表示で丸め直さない・未丸めの値を
+ * 桁を落とさずに並べるため。Scope1・2 の算定と照合の画面。既定は小数 3 桁まで）
+ */
+export function formatNumber(
+  value: number | null | undefined,
+  digits?: { fraction: number; minimumFraction?: number },
+): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
-  return numberFormatter.format(value);
+  // 呼び出し側が関数のまま渡すと（valueFormat={formatNumber}・Array#map）2 番目に添字の数が来る。
+  // 桁の指定はオブジェクトのときだけ受け付け、それ以外は既定の表示にする
+  if (!digits || typeof digits !== 'object' || !Number.isFinite(digits.fraction)) {
+    return numberFormatter.format(value);
+  }
+  const max = Math.min(Math.max(digits.fraction, 0), 20);
+  const min = Math.min(Math.max(digits.minimumFraction ?? 0, 0), max);
+  const key = `${min}/${max}`;
+  let formatter = fractionFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
+      maximumFractionDigits: max,
+      minimumFractionDigits: min,
+    });
+    fractionFormatters.set(key, formatter);
+  }
+  return formatter.format(value);
 }
 
 export function formatPercent(value: number | null | undefined, digits = 1): string {

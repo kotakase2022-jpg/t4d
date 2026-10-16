@@ -28,6 +28,7 @@ import {
   TRIAL_END_DISPOSITIONS,
   TRIAL_JUDGEMENTS,
   TRIAL_PHASES,
+  TRIAL_SCOPE_KINDS,
   TRIAL_TASK_KEYS,
   TRIAL_TIMING_METHODS,
   TRIAL_TIMING_MODES,
@@ -168,7 +169,10 @@ const nonNegative = (value: unknown): boolean =>
 const optionalNonNegativeInt = (value: unknown): boolean =>
   value === null || (Number.isInteger(value) && (value as number) >= 0);
 /** JSON の列の大きさの上限（偽の Cookie で巨大な before / after を持たせない） */
-const smallJson = (value: unknown, max = 2000): boolean =>
+/** Cookie から戻す JSON の列（options・処理を委ねる先など）の文字数の既定の上限。サービスの入力検査も同じ値を使う */
+export const DEMO_TRIAL_JSON_MAX_CHARS = 2000;
+
+const smallJson = (value: unknown, max = DEMO_TRIAL_JSON_MAX_CHARS): boolean =>
   JSON.stringify(value ?? null).length <= max;
 
 /** 既にある行の主キー・組織・親が変わっていないか */
@@ -734,6 +738,8 @@ const FEEDBACK_TRIAGE_COLUMNS = [
   'verifiedBy',
   'verifiedAt',
   'agreed',
+  // 別途協議の区分（0060）
+  'scopeKind',
   'updatedAt',
   'updatedBy',
 ] as const;
@@ -752,6 +758,9 @@ function acceptFeedback(
   if (!optionalOneOf(FEEDBACK_SEVERITIES, next.severity)) return false;
   if (next.severity !== null && next.kind !== 'defect') return false;
   if (!oneOf(FEEDBACK_STATUSES, next.status) || !oneOf(COST_CLASSES, next.costClass)) return false;
+  // 別途協議の区分は費用区分が別途協議のときだけ（0060 の CHECK と同じ）
+  if (!optionalOneOf(TRIAL_SCOPE_KINDS, next.scopeKind ?? null)) return false;
+  if ((next.scopeKind ?? null) !== null && next.costClass !== 'separate_estimate') return false;
   for (const key of ['responsePolicy', 'ownerLabel', 'resolvedInVersion', 'verificationResult']) {
     if (!within(next[key], DEMO_TEXT_LIMITS.trialText)) return false;
   }
@@ -898,6 +907,14 @@ function acceptDataTerms(
     'note',
   ]) {
     if (!within(next[key], DEMO_TEXT_LIMITS.trialText)) return false;
+  }
+  // バックアップの残存期間（0060。0〜400 日・null は未合意）
+  const residual = next.backupResidualDays ?? null;
+  if (
+    residual !== null &&
+    (!Number.isInteger(residual) || (residual as number) < 0 || (residual as number) > 400)
+  ) {
+    return false;
   }
   if (!Array.isArray(next.subprocessors) || next.subprocessors.length > 10) return false;
   if (!smallJson(next.subprocessors)) return false;

@@ -21,6 +21,7 @@ import {
 } from '@/lib/domain/report-snapshot-content';
 import { RECONCILIATION_CHECKER_VERSION } from '@/lib/domain/export-reconciliation';
 import { buildSharedReportCopy, sharedReportCopyHash } from '@/lib/domain/report-copy';
+import { rebuildReconciliation, rebuildRun } from './demo-ghg-checks';
 import type { FixtureDb } from '@/lib/fixtures/store';
 import {
   ANCHOR_ACQUIRED_BY,
@@ -123,6 +124,12 @@ export const COMPACTED_TABLES: ReadonlySet<string> = new Set([
   'approvals',
   // 保証側へ共有した写し（トライアル対応 NF-20）。目録だけを載せ、写しはスナップショットから作り直す
   'sharedReportCopies',
+  // Scope1・2 の算定（2026-10-16 の要望。plan K11）: 算定の記録・照合は目録（要約・結果を落とし、戻すときに
+  // 同じ純関数で作り直す）。既存結果と活動量の行は既定値（null・空）の列を落として載せる
+  'ghgCalculationRuns',
+  'ghgReconciliations',
+  'ghgBaselineResults',
+  'ghgActivityLines',
 ]);
 
 export function isCompactedTable(table: string): boolean {
@@ -1142,6 +1149,121 @@ function expandSharedCopy(v: Rec, db: FixtureDb, budget: ReplayBudget): Rec | nu
 }
 
 // ----------------------------------------------------------------------
+// Scope1・2 の算定・照合（0063〜0065）
+// ----------------------------------------------------------------------
+
+const ACTIVITY_LINE_DEFAULTS: Rec = {
+  amount: null,
+  unit: null,
+  contractCode: null,
+  shipmentRef: null,
+  cargoWeightT: null,
+  distanceKm: null,
+  tonKm: null,
+  fuelCode: null,
+  maxPayloadKg: null,
+  loadFactorPct: null,
+  vehicleUse: null,
+  fuelEconomyClass: null,
+  carrierKind: null,
+  cargoKind: null,
+  attributes: {},
+  note: '',
+};
+
+const BASELINE_ROW_DEFAULTS: Rec = {
+  unitId: null,
+  activityKind: null,
+  activityCode: null,
+  month: null,
+  shipmentRef: null,
+  activityAmount: null,
+  activityUnit: null,
+  convertedAmount: null,
+  convertedUnit: null,
+  factorValue: null,
+  factorUnit: null,
+  factorYear: null,
+  method: null,
+  rounding: null,
+  roundingNote: '',
+};
+
+function compactBaseline(row: Rec): Rec {
+  const rows = Array.isArray(row.rows) ? (row.rows as Rec[]) : [];
+  return {
+    [COMPACT_MARK]: COMPACT_VERSION,
+    ...row,
+    rows: rows.map((r) => withoutDefaults(r, BASELINE_ROW_DEFAULTS)),
+  };
+}
+
+function expandBaseline(v: Rec): Rec | null {
+  if (!Array.isArray(v.rows)) return null;
+  const row = withDefaults(v, {});
+  return {
+    ...row,
+    rows: (v.rows as unknown[]).map((r) =>
+      r && typeof r === 'object' && !Array.isArray(r)
+        ? withDefaults(r as Rec, BASELINE_ROW_DEFAULTS)
+        : r,
+    ),
+  };
+}
+
+const GHG_RUN_SHAPE: Shape = {
+  id: isStr,
+  organizationId: isStr,
+  reportingPeriodId: isStr,
+  unitIds: isStrArray,
+  policyId: isStr,
+  factorSetIds: isStrArray,
+  ruleIds: isStrArray,
+  activityBatchIds: isStrArray,
+  inputHash: isStr,
+  engineVersion: isStr,
+  lineCount: isInt,
+  createdAt: isStr,
+  createdBy: isStr,
+};
+
+/**
+ * 算定の記録の目録から要約を作り直す（記録した入力から同じ純関数で。入力ハッシュ・エンジンの版が違えば
+ * 要約を null にして戻す＝「入力が変わった」と表示し、数値を出さない）
+ */
+function expandGhgRun(v: Rec, db: FixtureDb): Rec | null {
+  const row = withDefaults(v, {});
+  if (!hasShape(row, GHG_RUN_SHAPE)) return null;
+  const base = only(row, GHG_RUN_SHAPE);
+  const rebuilt = rebuildRun(db, base as unknown as Parameters<typeof rebuildRun>[1]);
+  return { ...base, summary: rebuilt ? (rebuilt.summary as unknown as Rec) : null };
+}
+
+const GHG_RECON_SHAPE: Shape = {
+  id: isStr,
+  organizationId: isStr,
+  runId: isStr,
+  baselineId: isStr,
+  tolerance: (x) => !!x && typeof x === 'object' && !Array.isArray(x),
+  attributionOrder: isStrArray,
+  checkerVersion: isStr,
+  createdAt: isStr,
+  createdBy: isStr,
+};
+
+/** 照合の目録から結果を作り直す（照合の規則の版が違う・算定の記録を作り直せないなら結果は null） */
+function expandGhgReconciliation(v: Rec, db: FixtureDb): Rec | null {
+  const row = withDefaults(v, {});
+  if (!hasShape(row, GHG_RECON_SHAPE)) return null;
+  const base = only(row, GHG_RECON_SHAPE);
+  const result = rebuildReconciliation(
+    db,
+    base as unknown as Parameters<typeof rebuildReconciliation>[1],
+  );
+  return { ...base, result: result as unknown as Rec | null };
+}
+
+// ----------------------------------------------------------------------
 // 入口
 // ----------------------------------------------------------------------
 
@@ -1175,6 +1297,18 @@ export function compactRow(table: string, row: Rec, db: FixtureDb): Rec | null {
         : null;
     case 'sharedReportCopies':
       return compactSharedCopy(row);
+    case 'ghgCalculationRuns': {
+      const { summary: _summary, ...rest } = row;
+      return { [COMPACT_MARK]: COMPACT_VERSION, ...rest };
+    }
+    case 'ghgReconciliations': {
+      const { result: _result, ...rest } = row;
+      return { [COMPACT_MARK]: COMPACT_VERSION, ...rest };
+    }
+    case 'ghgBaselineResults':
+      return compactBaseline(row);
+    case 'ghgActivityLines':
+      return withoutDefaults({ [COMPACT_MARK]: COMPACT_VERSION, ...row }, ACTIVITY_LINE_DEFAULTS);
     default:
       return row;
   }
@@ -1209,6 +1343,14 @@ export function expandRow(
       return expandApproval(v);
     case 'sharedReportCopies':
       return expandSharedCopy(v, db, budget);
+    case 'ghgCalculationRuns':
+      return expandGhgRun(v, db);
+    case 'ghgReconciliations':
+      return expandGhgReconciliation(v, db);
+    case 'ghgBaselineResults':
+      return expandBaseline(v);
+    case 'ghgActivityLines':
+      return withDefaults(v, ACTIVITY_LINE_DEFAULTS);
     default:
       return null;
   }

@@ -11,13 +11,15 @@
  * `server-only` を付けない純粋モジュール（サービス・画面・テストで共用）。
  */
 
+import { isIsoCountryCode, normalizeCountryCode } from './country-code';
+
 export interface FactorHint {
   /** 品目テキストとの照合キーワード（小文字比較・日英） */
   keywords: string[];
   /** 対象地域の表示名（世界平均／日本／中国…／サプライヤー固有） */
   region: string;
-  /** 生産国コードと一致すれば「生産国一致」で推薦する。null は地域非依存 */
-  countryCode: 'JP' | 'CN' | 'TW' | 'KR' | 'MY' | null;
+  /** 生産国コード（ISO 3166-1 alpha-2）と一致すれば「生産国一致」で推薦する。null は地域非依存 */
+  countryCode: string | null;
   /** 算定境界（表示用） */
   boundary: string;
   /** 算定方式（表示用） */
@@ -190,26 +192,70 @@ export const SCOPE3_FACTOR_HINTS: Record<string, FactorHint> = {
   },
 };
 
-/** 生産国セルの表記ゆらぎ → 国コード。判定できない値は null（勝手に決めない） */
-export function normalizeCountry(raw: string): FactorHint['countryCode'] {
-  const v = raw.normalize('NFKC').trim().toLowerCase();
+/**
+ * 生産国の名前の表記ゆらぎ → 国コード（ISO 3166-1 alpha-2。plan CR-18）。
+ * 日本語・英語の国名と alpha-3 を主な国だけ持ち、それ以外は 2 文字のコード（ISO の割り当て済みのもの）で受ける。
+ * 表に無い名前・ISO に無いコードは null（勝手に決めない。候補の推薦は「世界平均」か人の選択になる）
+ */
+const COUNTRY_NAMES: ReadonlyArray<[code: string, label: string, aliases: readonly string[]]> = [
+  ['JP', '日本', ['日本', 'japan', 'jpn']],
+  ['CN', '中国', ['中国', '中華人民共和国', 'china', 'chn', 'prc']],
+  ['TW', '台湾', ['台湾', 'taiwan', 'twn']],
+  ['KR', '韓国', ['韓国', '大韓民国', 'korea', 'south korea', 'republic of korea', 'kor']],
+  ['MY', 'マレーシア', ['マレーシア', 'malaysia', 'mys']],
+  ['ID', 'インドネシア', ['インドネシア', 'indonesia', 'idn']],
+  ['TH', 'タイ', ['タイ', 'thailand', 'tha']],
+  ['VN', 'ベトナム', ['ベトナム', 'vietnam', 'viet nam', 'vnm']],
+  ['PH', 'フィリピン', ['フィリピン', 'philippines', 'phl']],
+  ['SG', 'シンガポール', ['シンガポール', 'singapore', 'sgp']],
+  ['IN', 'インド', ['インド', 'india', 'ind']],
+  ['HK', '香港', ['香港', 'hong kong', 'hkg']],
+  ['KH', 'カンボジア', ['カンボジア', 'cambodia', 'khm']],
+  ['MM', 'ミャンマー', ['ミャンマー', 'myanmar', 'mmr']],
+  ['BD', 'バングラデシュ', ['バングラデシュ', 'bangladesh', 'bgd']],
+  ['AU', 'オーストラリア', ['オーストラリア', 'australia', 'aus']],
+  ['NZ', 'ニュージーランド', ['ニュージーランド', 'new zealand', 'nzl']],
+  [
+    'US',
+    '米国',
+    ['米国', 'アメリカ', 'アメリカ合衆国', 'united states', 'united states of america', 'usa'],
+  ],
+  ['CA', 'カナダ', ['カナダ', 'canada', 'can']],
+  ['MX', 'メキシコ', ['メキシコ', 'mexico', 'mex']],
+  ['BR', 'ブラジル', ['ブラジル', 'brazil', 'bra']],
+  ['AR', 'アルゼンチン', ['アルゼンチン', 'argentina', 'arg']],
+  ['CL', 'チリ', ['チリ', 'chile', 'chl']],
+  ['DE', 'ドイツ', ['ドイツ', 'germany', 'deu']],
+  ['FR', 'フランス', ['フランス', 'france', 'fra']],
+  ['GB', '英国', ['英国', 'イギリス', 'united kingdom', 'uk', 'gbr']],
+  ['IT', 'イタリア', ['イタリア', 'italy', 'ita']],
+  ['ES', 'スペイン', ['スペイン', 'spain', 'esp']],
+  ['NL', 'オランダ', ['オランダ', 'netherlands', 'nld']],
+  ['CH', 'スイス', ['スイス', 'switzerland', 'che']],
+  ['SE', 'スウェーデン', ['スウェーデン', 'sweden', 'swe']],
+  ['PL', 'ポーランド', ['ポーランド', 'poland', 'pol']],
+  ['CZ', 'チェコ', ['チェコ', 'czechia', 'czech republic', 'cze']],
+  ['TR', 'トルコ', ['トルコ', 'turkey', 'türkiye', 'tur']],
+  ['AE', 'アラブ首長国連邦', ['アラブ首長国連邦', 'united arab emirates', 'uae', 'are']],
+  ['SA', 'サウジアラビア', ['サウジアラビア', 'saudi arabia', 'sau']],
+  ['ZA', '南アフリカ', ['南アフリカ', 'south africa', 'zaf']],
+];
+
+const NAME_TO_CODE = new Map<string, string>(
+  COUNTRY_NAMES.flatMap(([code, , aliases]) => aliases.map((a) => [a, code] as const)),
+);
+const COUNTRY_LABELS = new Map<string, string>(COUNTRY_NAMES.map(([code, label]) => [code, label]));
+
+/** 生産国セルの表記ゆらぎ → 国コード（ISO 3166-1 alpha-2）。判定できない値は null（勝手に決めない） */
+export function normalizeCountry(raw: string): string | null {
+  const v = raw.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
   if (v === '') return null;
-  if (/^(日本|japan|jp|jpn)$/.test(v)) return 'JP';
-  if (/^(中国|china|cn|chn|prc)$/.test(v)) return 'CN';
-  if (/^(台湾|taiwan|tw|twn)$/.test(v)) return 'TW';
-  if (/^(韓国|korea|south korea|kr|kor)$/.test(v)) return 'KR';
-  if (/^(マレーシア|malaysia|my|mys)$/.test(v)) return 'MY';
-  return null;
+  const named = NAME_TO_CODE.get(v);
+  if (named) return named;
+  return /^[a-z]{2}$/.test(v) && isIsoCountryCode(v) ? normalizeCountryCode(v) : null;
 }
 
-const COUNTRY_LABELS: Record<NonNullable<FactorHint['countryCode']>, string> = {
-  JP: '日本',
-  CN: '中国',
-  TW: '台湾',
-  KR: '韓国',
-  MY: 'マレーシア',
-};
-
-export function countryLabel(code: FactorHint['countryCode']): string | null {
-  return code ? COUNTRY_LABELS[code] : null;
+/** 国コードの表示名（表に無い国はコードのまま） */
+export function countryLabel(code: string | null): string | null {
+  return code ? (COUNTRY_LABELS.get(code) ?? code) : null;
 }

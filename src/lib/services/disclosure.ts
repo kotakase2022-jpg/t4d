@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
+
 import { permissionsFor } from '@/lib/authorization/can';
 import type { DocxSection } from '@/lib/exports';
 import { diffFrameworkItems, type FrameworkDiff } from '@/lib/domain/framework-diff';
@@ -318,10 +320,8 @@ export async function loadDisclosureWorkspace(
   });
   const responseByItem = new Map(responses.map((r) => [r.itemId, r]));
 
-  const previousPeriod =
-    periods
-      .filter((p) => p.startDate < period.startDate)
-      .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0] ?? null;
+  // 前年は決算月が同じ期間に限る（plan K10）
+  const previousPeriod = previousComparablePeriod(period, periods, 'start');
 
   const previousResponses = previousPeriod
     ? await db.select('disclosureResponses', {

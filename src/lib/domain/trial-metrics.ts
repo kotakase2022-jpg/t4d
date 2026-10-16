@@ -14,6 +14,7 @@ import type {
   TrialTaskKey,
   TrialTaskTiming,
   TrialTheme,
+  TrialScopeKind,
   TrialTimingMethod,
   TrialTimingMode,
 } from '@/types/domain';
@@ -45,6 +46,7 @@ export const TRIAL_THEME_LABELS: Readonly<Record<TrialTheme, string>> = {
   usability: '使いやすさ',
   work_time: '作業時間',
   operations: '運用',
+  calculation_reconciliation: '算定の再現と整合性の確認',
 };
 
 export const TRIAL_PHASE_LABELS: Readonly<Record<TrialPhase, string>> = {
@@ -74,6 +76,7 @@ export const TRIAL_AGREEMENT_LABELS: Readonly<Record<TrialAgreementKey, string>>
   scope: '対象範囲',
   decider: '判断者',
   schedule: 'スケジュール',
+  freeScope: '無償の範囲',
 };
 
 export const TRIAL_TASK_LABELS: Readonly<Record<TrialTaskKey, string>> = {
@@ -381,6 +384,11 @@ export interface OpenIssueSummary {
   byKind: Record<FeedbackKind, number>;
   byStatus: Record<FeedbackStatus, number>;
   byCostClass: Record<CostClass, number>;
+  /**
+   * 費用区分が別途協議の件数を区分（scope_kind）ごとに。区分の無い別途協議は unclassified
+   * （どの区分にも数えない。推測で振り分けない）
+   */
+  separateByScopeKind: Record<TrialScopeKind | 'unclassified', number>;
 }
 
 export function openIssueSummary(
@@ -388,7 +396,7 @@ export function openIssueSummary(
     Pick<
       TrialFeedbackItem,
       'kind' | 'status' | 'agreed' | 'severity' | 'mandatoryRequirement' | 'costClass' | 'deletedAt'
-    >
+    > & { scopeKind?: TrialScopeKind | null }
   >,
 ): OpenIssueSummary {
   const live = items.filter((i) => !i.deletedAt);
@@ -412,10 +420,20 @@ export function openIssueSummary(
     separate_estimate: 0,
     undecided: 0,
   };
+  const separateByScopeKind: Record<TrialScopeKind | 'unclassified', number> = {
+    site_expansion: 0,
+    bulk_primary_data: 0,
+    system_integration: 0,
+    custom_development: 0,
+    unclassified: 0,
+  };
   for (const item of live) {
     byKind[item.kind] += 1;
     byStatus[item.status] += 1;
     byCostClass[item.costClass] += 1;
+    if (item.costClass === 'separate_estimate') {
+      separateByScopeKind[item.scopeKind ?? 'unclassified'] += 1;
+    }
   }
   const isCritical = (severity: FeedbackSeverity | null) => severity === 'critical';
   return {
@@ -428,5 +446,6 @@ export function openIssueSummary(
     byKind,
     byStatus,
     byCostClass,
+    separateByScopeKind,
   };
 }

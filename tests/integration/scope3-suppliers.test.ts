@@ -8,6 +8,7 @@ import {
   loadScope3SupplierBreakdown,
   previewSupplierImport,
   relinkSupplierFactor,
+  type Cat1CalculationInput,
 } from '@/lib/services/scope3-suppliers';
 import type { AuthorizationContext, RoleKey } from '@/types/domain';
 
@@ -617,5 +618,114 @@ describe('算定データの区分と一次データ比率の定義（W0 O6 / �
     const breakdown = await loadScope3SupplierBreakdown(db, ctx, PERIOD_IDS.fy2026);
     // 金額ベースの合計は変わらない（区分が入れ替わらない）
     expect(breakdown.totalsByClass.spend_based).toBe(53.3);
+  });
+});
+
+describe('係数の鍵はコード × 年度（plan GE-02・3-3・3-7。同じコードの複数年度を黙って選ばない）', () => {
+  /** EF-STEEL-KG の 2024 年度版を足す（架空。2025 年度版と値を変える） */
+  function addSteel2024(): void {
+    const steel = fixture.emissionFactors.find(
+      (f) => f.code === 'EF-STEEL-KG' && f.factorSetId === null,
+    )!;
+    fixture.emissionFactors.push({
+      ...steel,
+      id: '00000000-0000-4000-8000-0000000c2024',
+      factorYear: 2024,
+      factorValue: 0.0023,
+    });
+  }
+
+  const steelCsv = () =>
+    new TextEncoder().encode(
+      [
+        'サプライヤーコード,品目,データ種別,数値,単位,排出係数コード',
+        'SUP-24,梱包材,物理量,1000,kg,EF-STEEL-KG',
+      ].join('\n'),
+    );
+
+  it('年度が 1 つのコードは従来どおりコードで選べ、算定版の行に係数の年度・値を写す', async () => {
+    await confirmSupplierImport(db, manager(), PERIOD_IDS.fy2026, [
+      {
+        supplierCode: 'SUP-24',
+        item: '梱包材',
+        dataType: 'physical',
+        amount: 1000,
+        unit: 'kg',
+        factorCode: 'EF-STEEL-KG',
+      },
+    ]);
+    const input = fixture.calculations
+      .at(-1)!
+      .inputs.find((i) => i.label.startsWith('SUP-24'))! as Cat1CalculationInput;
+    const steel = fixture.emissionFactors.find((f) => f.code === 'EF-STEEL-KG')!;
+    expect(input).toMatchObject({
+      sourceId: steel.id,
+      factorYear: steel.factorYear,
+      factorValue: steel.factorValue,
+    });
+  });
+
+  it('プレビュー: 帳票のコードに年度が 2 つあれば人が年度を選ぶ（推薦しない・紐づけ待ちに数える）', async () => {
+    addSteel2024();
+    const preview = await previewSupplierImport(
+      db,
+      manager(),
+      PERIOD_IDS.fy2026,
+      'steel.csv',
+      steelCsv(),
+    );
+    const row = preview.rows[0]!;
+    expect(row.factor).toBeNull();
+    expect(row.needsFactorChoice).toBe(true);
+    expect(row.recommendedFactorCode).toBeNull();
+    expect(row.factorCandidates.map((c) => c.ref)).toEqual([
+      'EF-STEEL-KG@2024',
+      'EF-STEEL-KG@2025',
+    ]);
+    expect(preview.needsMappingCount).toBe(1);
+  });
+
+  it('確定・再紐づけ: 年度の無いコードは断り、「コード@年度」で選んだ年度の係数で算定する', async () => {
+    addSteel2024();
+    const decision = {
+      supplierCode: 'SUP-24',
+      item: '梱包材',
+      dataType: 'physical' as const,
+      amount: 1000,
+      unit: 'kg',
+    };
+    await expect(
+      confirmSupplierImport(db, manager(), PERIOD_IDS.fy2026, [
+        { ...decision, factorCode: 'EF-STEEL-KG' },
+      ]),
+    ).rejects.toThrow(/年度が 2 つ以上あります（2024・2025 年度）/);
+    await confirmSupplierImport(db, manager(), PERIOD_IDS.fy2026, [
+      { ...decision, factorCode: 'EF-STEEL-KG@2024' },
+    ]);
+    const input = fixture.calculations
+      .at(-1)!
+      .inputs.find((i) => i.label.startsWith('SUP-24'))! as Cat1CalculationInput;
+    // 1,000 kg × 0.0023 = 2.3 t-CO2e（2024 年度版）
+    expect(input).toMatchObject({ value: 2.3, factorYear: 2024, factorValue: 0.0023 });
+
+    await expect(
+      relinkSupplierFactor(db, manager(), PERIOD_IDS.fy2026, {
+        supplierCode: 'SUP-24',
+        item: '梱包材',
+        factorCode: 'EF-STEEL-KG',
+      }),
+    ).rejects.toThrow(/年度を選んでください/);
+    const steel2025 = fixture.emissionFactors.find(
+      (f) => f.code === 'EF-STEEL-KG' && f.factorYear === 2025,
+    )!;
+    await relinkSupplierFactor(db, manager(), PERIOD_IDS.fy2026, {
+      supplierCode: 'SUP-24',
+      item: '梱包材',
+      factorCode: 'EF-STEEL-KG@2025',
+    });
+    const relinked = fixture.calculations
+      .at(-1)!
+      .inputs.find((i) => i.label.startsWith('SUP-24'))! as Cat1CalculationInput;
+    expect(relinked).toMatchObject({ sourceId: steel2025.id, factorYear: 2025 });
   });
 });

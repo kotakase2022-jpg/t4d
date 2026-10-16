@@ -3376,3 +3376,167 @@ P-F1〜P-F6〔レビューでは F1〜F6 と重複した番号〕）をすべて
 - a9827d9 を `vercel deploy --prod` → `vercel alias set … terrast-t4d.vercel.app`。本番スモーク 36/36。
 - `playwright.production-chain.config.ts` に試行の流れ（`zzzzz-trial-chain.stateless.ts`）を追加し、本番で主デモ 8・CSRD 9・試行 13 の計 30/30
   （Cookie ヘッダー最大: 主 8,929B・CSRD 3,494B・試行 4,298B、押し出し 0）。その後、同じコードを再デプロイして共有メモリを初期化。
+
+## 2026-10-16 Scope1・2 の算定と照合・トライアルの範囲（Stage A の土台。単独・未コミット）
+
+2026-10-16 に受けた要望（Scope1・2 の算定の再現と既存結果との整合性の確認、委託物流の区分、トライアルの無償の範囲・別途協議、
+秘密保持とデータの削除）に沿った計画（ローカルの機密の資料。Git の対象外）の Stage A。データモデル・純関数・中核サービス・
+架空の Fixture・Demo の持ち回し・登録簿・画面の足場（仮ページ）を置いた。画面の本実装は Stage B の 5 スライス。
+commit・push・deploy はしていない。権限キー・役割は増やしていない。設定の画面は企業管理者だけのまま。AI は算定・照合に使わない。
+
+### 変更
+
+- **スキーマ（0060〜0065）**: 0060 トライアルの範囲と削除（`organization_data_terms.backup_residual_days`・
+  `trial_feedback_items.scope_kind`・主題 `calculation_reconciliation`・`t4d.is_offboarding_delete`・`forbid_mutation` の置き換え・
+  終了処理の 5 引数版と組織の行の匿名化）、0061 係数のセット・係数の列・割当（有効にしたセットの係数は不変・割当は有効なセットだけ・
+  算定記録の不変性）、0062 算定方針（追記専用）・区分規則（提案者は承認できない）、0063 活動量のバッチ・行（拠点スコープ・確定後は不変・
+  差し替え）、0064 算定の記録・行（追記専用・全拠点が担当）、0065 既存の算定結果・照合・原因の確認の記録（追記専用・同じ期間・
+  「その他」はコメント必須）。新しい表 11・RLS 有効・越権テストは `tests/rls/tenant-isolation.test.ts` の末尾。ロールバックは
+  known-limitations §6、マトリクスは rls-matrix §6.3。
+- **純関数（`src/lib/domain/ghg/*`）**: 丸め（5 方式・段階）、単位換算、改良トンキロ法（告示の形・log 形・下限・見なし表）、燃料の CO2、
+  係数の解決（拠点→国→組織既定）、区分（既定区分と報告区分の二重表示）、算定（`ghg-engine/1`・入力ハッシュ）、差異の帰属
+  （順に揃えた差・単独差・残差。`ghg-reconcile/1`）、既存結果・活動量の取込の行の取り出し（小数点の記号の指定 `decimalSeparator`）、
+  拠点の状態。`trial-options.ts`・`period-comparability.ts`（決算期末の同じ期間だけを比べる）・`country-code.ts`（ISO 3166）。
+- **サービス（`src/lib/services/ghg/*`）**: `inputs`・`calculation`（算定の実行・記録・仮説の再計算〔保存しない〕）・`reconciliation`・
+  `status`。既存: `aggregation`・`kpi`・`analysis/*`・`disclosure*`・`data-entry`・`validation-store` は前期・推移を決算期末の同じ期間に
+  限る、`master-data` は国コードの検査、`scope3-suppliers` は係数セットに属さない係数だけ、`data-terms`・`trial-feedback` は新しい列。
+- **Fixture（架空）**: `ghg-verification.ts`（検証拠点 4〔タイ・ベトナム・メキシコ・米国の架空の工場。連結集計の対象外〕・CY2025・係数
+  セット 2 版・活動量・算定 R-1・既存結果 BL-1〔6 種の原因を仕込む〕・照合 R-1）、`ghg-demo-files.ts`（E20 のサンプル 4 種）、
+  `trial-case.ts`（計画の options・合意・シナリオ S-CALC-01・データ取扱条件の版 2）。`supabase/seed.sql` を再生成。
+- **Demo の持ち回し**: `demo-ghg-checks.ts`（検査・上限 `DEMO_GHG_LIMITS`・算定の記録と照合の作り直し）、`demo-ghg-reset.ts`、
+  `demo-compact.ts`（目録化）、`demo-edit-codec.ts`。
+- **登録簿・部品**: 状態の登録簿 10 領域、`costClass` のラベル（標準の範囲内／別途協議／未判断）、`HonestyKind` 2 種
+  （`company-rule`・`consistency-check`）、固定文 N1〜N10（`ghg-notices.tsx`）、`formatNumber` の桁の指定。
+- **画面の足場**: メニューの葉「Scope1・2算定」（従来の GHG 配下・開示優先の 情報・根拠）、P90〜P98 の仮ページ（`GHG-STUB`）、
+  `calc-nav.tsx`（タブ 5 つ・要対応の件数）、`route-catalog-ext/s1〜s5.ts`、`dangerous-ops/S1〜S5.ts`（空）、E20 の API
+  （`/api/exports/ghg-demo-files`。Demo だけ・閲覧権限・監査 `export_created`）。
+- **既存の期待値の更新（緩めていない）**: Fixture の追加で値が変わったものだけを正確な値へ（分析の対象外の拠点名・データ取扱条件の
+  現在の版〔第 2 版〕と新しい版の番号〔第 3 版。`trial-admin.spec.ts` の通知の文〕・トライアルのシナリオ 8 件・XLSX の行数・
+  主題の CHECK の一覧）。メニューの葉の追加で `nav-config`・`nav-structure` に葉と行き先の検査を足した。`formatNumber` を関数のまま
+  渡す既存の呼び出し（`valueFormat={formatNumber}`）が 2 番目の引数に添字を受けるため、桁の指定はオブジェクトのときだけ受け付ける。
+- データ取扱条件の第 2 版は合意の手続き（合意日・合意者）を確認中のままにした（既存の「未合意を表示する」流れを保つ。推測で埋めない）。
+
+### テスト結果（2026-10-16 ローカル。E2E は単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` / `pnpm check:colors` 合格。`pnpm check:rls`: 141 表・RLS 有効 141・ポリシー 325 で合格。
+- `pnpm test`: 281 ファイル・**3,514 件**合格。`pnpm test:rls`: 2 ファイル・**364 件**合格（0060〜0065 の越権・追記専用・職務分離・終了処理）。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: **40 件すべて合格**（Cookie ヘッダーの最大: 実演 8,957B・CSRD 3,493B・試行 4,304B。
+  2026-10-13 の本番の測定〔8,929B・3,494B・4,298B〕から増えていない〔差は時刻・ID の揺れの範囲〕）。unit の chain: 実演＋CSRD 最大 11,143B（上限 11,200B）。
+- `E2E_PORT=3217 pnpm test:e2e`（全件・単独）: 1 回目は `trial-admin.spec.ts` のデータの取扱い 1 件が失敗（Fixture の第 2 版が全項目合意で
+  「未合意」が出ない）。第 2 版の合意の手続きを確認中にし、通知の版番号を第 3 版へ直して再実行し **447 件すべて合格・18.7 分**。
+- 機密語の検査（`forbidden-words.txt`。`git grep --untracked -f`、対象外は検討資料のフォルダ）: **0 件**。
+
+### 未解決・次作業
+
+- 画面 P90〜P98 は仮ページ（`GHG-STUB`）。Stage B の 5 スライスが置き換える（API と注意は検討資料のフォルダの handoff/A.md。
+  サービス・純関数・Fixture・RLS は Stage A で凍結）。
+- 取込の数の表記（「3.741」）は小数点の記号を選ばないと読まない。S2・S4 の列の対応付けの段で `decimalSeparator` を選ばせる。
+- 検証拠点は連結集計の対象外（理由付き）。年度の連結へ入れる判断は先方への確認（範囲外）。
+- E20 のサンプル（係数セット CSV の列）は S1 の取込で対応付けられることを S1 で確かめる。
+- 本番は未反映（デプロイは統括の判断）。
+
+## 2026-10-16 Scope1・2 の算定と照合・トライアルの範囲（Stage C 統合。単独・未コミット）
+
+正は 2026-10-16 の要望に沿った計画（検討資料のフォルダの plan.md。Git の対象外で、この記録には写さない。編集していない）。
+Stage B の 5 スライス（S1 係数セット・割当・算定ルール／S2 活動量・改良トンキロ法／S3 算定の実行・結果・GHG サマリー／S4 既存結果との照合・差異原因／
+S5 トライアルの範囲・条件・データ取扱・削除）の依頼（同じフォルダの handoff/S1〜S5.md）をすべて適用し、入口・到達性・1 画面 1 primary・
+状態の持ち回しの流れ（service 層と画面）・本番スモーク・文書を足して全ゲートを通した。回帰の判定は `docs/ui-redesign/regression.md` §7
+（画面 98・機能 F001〜F221・出力 API E01〜E21。Missing・Broken 0）。要件ごとの結果は検討資料のフォルダの `traceability-result.md`
+（Git 管理外。記述 42 件: 実装済み 29・一部 1・対象外 12。機能 30 件: 実装済み 29・先送り 1〔P2〕）。commit・push・deploy はしていない。
+権限キー・役割（roles.ts・0002_identity.sql）は変えていない。設定画面は企業管理者だけのまま（R1 は不採用のまま）。算定・照合に AI は使わない。
+
+### Stage B（S1〜S5）で置いたもの（要旨。各スライスの引き継ぎは検討資料のフォルダの handoff/S1〜S5.md）
+
+- **S1 係数セット・割当・算定ルール**: P91 排出係数（セット／割当の切り替え `?view=`・取込の欄 `?new=1`・割当の欄 `?assign=1&target=`）、P92 係数セットの詳細
+  （有効化＝区分 1・取り下げ＝その他）、P93 算定ルール（算定方針の版・区分規則の提案・承認・取り下げ・二重計上の確認・N6）。サービス
+  `services/ghg/{factor-sets,assignments,policy,classification-rules}.ts`、純関数 `domain/ghg/factor-import.ts`。Cat.1 の係数の鍵をコード × 年度に、生産国を ISO 3166-1 alpha-2 に。
+  int: ghg-factor-sets 13・ghg-assignments 9・ghg-policy 8・ghg-classification-rules 11、unit: ghg-factor-import 17。
+- **S2 活動量・改良トンキロ法**: P94 活動量（充足・N7・N5・公的参照プリセット〔N10 は折りたたみの外〕）、P95 取込の詳細（確定＝区分 2・破棄＝その他・行の展開で
+  t·km → 原単位 → 燃料 → CO2 の試算）。決めたこと: 取込は 2 段（検証〔書き込み 0〕→ 確認中のバッチ → 確定）、検証したファイルと同じかを sha256 で確かめる
+  （検証の結果は Cookie にもサーバーにも残さない）、読めない行が 1 行でもあれば取り込まない、差し替えはバッチ全体、締めた期間には取り込まない、
+  権限は import.run＋data.write＋担当拠点（確定・破棄は data.write＋担当拠点）、Demo は取込 2 回 × 60 行（6 行で約 1.3KB）、試算は `calculateRun` に
+  確認中の行を入れて作る（Fixture の R-1 と同じ値）、別表第3 の 74 セルを告示式で検算（不一致は出典の注記どおりの 2 セル）。
+  unit: ghg-tonkm-preset 19・ghg-activity-mapping 12、int: ghg-activity-import 24・ghg-transport-preview 12。
+- **S3 算定の実行・結果・GHG サマリー**: P90 概要（算定を実行・段階・Attention・拠点別の結果・二重表示＋N1/N2/N6・算定の記録）、P96 算定明細（Data Point に下書き反映
+  ＝区分 2・CSV〔E18〕・展開行）、GHG 算定サマリーの誠実さの是正（架空値のバッジを出所で・内部取引控除の文を推移から・連結の指標を指標マスターから）と節「Scope1・2 の算定と照合」。
+  反映は報告区分の拠点 × Scope1・Scope2 の 2 基準だけ（Cat.4・審査中・締めた期間には反映しない・承認しない・同じ値は版を作らない）。
+  int: ghg-post-drafts 11、unit: ghg-dual-view-table 9・ghg-calculation-export 8・ghg-page-parts +3、int: ghg-trend +1。
+- **S4 既存結果との照合・差異原因**: P97 照合（既存結果の取込〔拠点の対応付けは人が選ぶ・小数点の記号〕・照合〔区分ごとの許容差・既定値なし・原因の順序は代表の 3 通り〕）、
+  P98 照合の詳細（6 区分の件数・項目の表・原因別の寄与〔帯と数値の表〕・単独差・残差・N4・原因の記録〔data.review・本人名義・残差はコメント必須〕・
+  仮説の再計算〔照合で違いが出うる候補だけ・保存しない・N8〕・XLSX〔E19〕）。int: ghg-baseline-import・ghg-reconciliation-notes・ghg-what-if、unit: ghg-reconciliation-export・ghg-reconciliation-wording。
+- **S5 トライアルの範囲・条件・データ取扱・削除**: トライアル概要（検証拠点・展開対象・算定の検証範囲・無償の範囲と別途協議・返却と削除の日付）、改善管理表の別途協議、
+  データの取扱いの処理を委ねる先・残存期間、検証結果の XLSX の行、返却の README の節、終了処理のスクリプトの削除完了の報告（案）、手順書（tenant-offboarding・backup-restore）。
+  新しいルート・Action・権限キーは無い（既存の Action に欄を足した）。unit: trial-scope・data-disposal・offboard-report・data-terms。
+
+### 変更（Stage C）
+
+- **スライス間の依頼（crossSliceNeeds）**:
+  - S1: `CalculationInput` に任意の `factorYear`・`factorValue`（Cat.1 の算定版の行。`Cat1CalculationInput` は別名に）。結果の通知の文言を
+    `flash-messages/ghg-factors-rules.ts` へ移し、P91〜P93 は共通の `FlashMessage` に（`S1Flash` と `factors/_lib/flash.ts` を消した）。
+    係数セットの取込の検証のエラーの一覧の a11y の欠陥を直した（`ul` の role="alert" をリストの外側へ。E2E で検出）。
+  - S2→S1: 公的参照プリセットを係数セットへ取り込む経路。プリセットから係数セットの取込用 CSV を作る出力 API **E21**
+    （`/api/exports/ghg-preset-factor-set?fuelCo2=shk_r5|shk_h21`。`src/lib/exports/ghg-preset-factor-set.ts`）を足し、P94 の公的参照の節と
+    P91 の「その他」にリンク。既存の「係数セットを取り込む」で出所「公的参照」の下書きのセットになる（有効にするまで算定に使わない）。
+    「既定では適用しない（算定・サービス・Fixture・Demo の持ち回しはプリセットを読まない）」の静的検査は変えていない。Demo の係数の params の
+    上限を `DEMO_GHG_LIMITS.factorParamsChars` = 3,000 字に（別表第3 の軽油の表 約 2,300 字。サービスと Cookie の戻しで同じ値）。
+  - S3: P90 と P91〜P98 の画面の一覧に `permission: 'enterprise.data.read'`（画面の読み込みが求める権限と揃えた）。P96 の副操作に
+    「この記録で照合する」（`?reconcile=1&run=`。S4 の照合の欄が受ける）。
+  - S4: `reconciliation.ts` の「許容差が入っていない区分があります」の区分を表示の語（`GHG_SCOPE_LABELS`）に、`reconcile`・
+    `loadReconciliation` の ID を `isUuid` で確かめてから読む（Supabase Mode で 22P02 → 500 にしない。int に 1 件）。固定文 N3 の見出しを
+    「整合性の確認です（結果の一致を保証するものではありません）」に揃え、`unit:ghg-reconciliation-wording`・`e2e:ghg-reconciliation` の許す
+    否定の言い回しを 1 つに減らした（厳しくした）。
+  - S5: `demo-trial-checks.ts` の JSON の上限を `DEMO_TRIAL_JSON_MAX_CHARS` として export し、`data-terms.ts` の値の写しを置き換えた。
+  - 仮ページの部品 `calc-stub.tsx` を消した（`GHG-STUB` は 0 件）。
+- **入口**: Command Palette の操作 7（係数セットを取り込む・係数の未割当を直す・区分規則を承認する・活動量を取り込む・算定を実行する・
+  既存の算定結果を取り込む・既存結果と照合する。`task-verbs.ts`。移るだけで実行しない）、ヘルプの用語 12（改良トンキロ法・見なし積載率・
+  積載率の下限・公的参照プリセット・報告区分と既定区分・整合性の確認・原因別の寄与・単独差・残差・仮説の再計算・無償の範囲と別途協議・処理を委ねる先・
+  バックアップの残存期間）、ホームの Attention 3（`my-work.ts`: 最終承認者に「承認待ちの区分規則」〔自分の提案は数えない〕、data.review に
+  「照合で要確認の拠点」→ 最新の照合の `?verdict=needs_review`、metric.manage に「係数が決まらない活動」→ 割当の未割当）。メニューの葉は Stage A のまま。
+- **到達性・1 画面 1 primary**: `tests/support/route-samples.ts` に P90〜P98 の 18 変種とトライアルの別途協議の絞り込み（所有の型に S1〜S5）。
+  `reachability.spec.ts` に詳細画面の入口（`GHG_DETAIL_ENTRIES`・5 役割）。`primary-action-audit` は許容リスト無しのまま全画面で違反 0。
+- **状態の持ち回し**: `tests/integration/stateless-ghg-chain.test.ts`★（リセット → 承認待ち → 承認 → 算定 R-2 → 二重表示 → 照合 → 原因の記録 →
+  仮説の再計算〔書き込み 0〕→ 原因の記録 → トライアル概要の状態。単独・実演 → リセット → 試行 → GHG・リハーサル ×2）と
+  `tests/e2e/zzzzzz-ghg-chain.stateless.ts`★（同じ流れを画面で。最後に開示デモを戻す。`playwright.stateless.config.ts` と
+  `playwright.production-chain.config.ts` の testMatch に追加）。試行の流れの手順を `tests/support/trial-flow.ts` へ移した（GHG の流れと共有。中身は変えていない）。
+- **本番スモーク（+3。閲覧のみ）**: ① P90 の N9・5 拠点（国コード）・二重表示と company-rule・N2 ② 照合 R-1 の 6 種の原因（絞り込み）・N3・「一致」の無いこと
+  ③ トライアル概要の検証範囲・全 30 拠点・無償の範囲と別途協議・削除の日付。
+- **E2E の追加**: `ghg-calculation`（役割ごとの「算定を実行」「Data Point に下書き反映」の押せない理由）、`ghg-activity-tonkm`（取込の破棄・
+  公的参照プリセットの取込）、`palette`（区分規則の承認・係数セットの取込の操作、書きの権限の無い役割に出さない、用語）。
+- **採番**: 新しい Server Action 20 件を F202〜F221 に（スライスの仮番号 F211〜F241 を振り直し、`dangerous-ops/S1〜S4.ts` も合わせた）。
+  `feature-coverage.ts`（221 件。NO_E2E_YET は 26 のまま）・`inventory-features.md`（§2.4 P90〜P98・§3.15・§4 の E18〜E21）。
+- **文書**: `docs/ui-redesign/regression.md` §7、`known-limitations.md` §13.7（最終の形に書き直し）、`assumptions.md` B-3a〜B-3c、`domain-model.md`、
+  `REQUIREMENTS_TRACEABILITY.csv`（GHG-001〜014）、README（手順 8・ライブラリ追加なし・コマンド）。どれにも先方を想起させる語を書いていない。
+
+### 見送ったスライスの任意の依頼（理由）
+
+- DbClient の共通の物理削除（S1）: 割当を外す処理は利用者の JWT のクライアントで DELETE（RLS が権限を確かめる。identity.ts と同じ前例）で足りる。
+  共通の delete を足すと全テーブルに物理削除の経路が増えるため足していない。
+- 月だけの差し替え（S2）: `select-inputs.ts` の差し替えの意味・入力ハッシュ・記録の作り直しを同時に変える必要があり、画面は「バッチ全体の差し替え」と明示している。
+- 反映で作った算定内訳のリセット（S3）: Scope3 の算定内訳と同じ扱い（数値データのリセットの対象外）。新しい Data Point の ID に記録の ID を含めたので孤立して画面に出ない。
+- トライアル概要での `SiteResultsTable` の再利用（S3→S5）: トライアル概要は状況の 6 列（活動量・係数・算定・既存結果・照合・状況）で、状態は同じ登録簿（`ghgSiteStatus`）・
+  同じ関数（`status.ts`）から出している。
+
+### テスト結果（2026-10-16 ローカル。E2E は単独実行）
+
+- `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` / `pnpm check:colors` 合格。`pnpm check:rls`: 141 表・RLS 有効 141・ポリシー 325 で合格。
+- `pnpm test`: 304 ファイル・**3,818 件**合格（Stage A 後 3,514 件・Stage B 後 3,805 件）。`pnpm test:rls`: 2 ファイル・**364 件**合格。
+- Demo の Cookie（integration。実行ごとに ID・時刻で数十 B 揺れる）: GHG の流れ単独の最大 1,611〜1,623B（上限 3,000B）、実演 → リセット → 試行 → GHG の最大 6,920〜6,940B（上限 9,000B）、
+  実演＋CSRD の最大 11,159〜11,161B（上限 11,200B）、試行の流れ 3,957〜3,972B、実演 → リセット → 試行 5,697〜5,715B。押し出しはどれも 0。
+- `E2E_PORT=3219 pnpm test:e2e:stateless`: **49 件すべて合格**（2.5 分。40 件から増。GHG の流れ 9 件）。Cookie ヘッダーの最大: 実演 8,925B・CSRD 3,478B・試行 4,308B・GHG 1,990B（操作の記録 1,776B）。押し出し 0。
+- `E2E_PORT=3217 pnpm test:e2e`（全件・単独・retries 0）: 1 回目は 469 合格・1 失敗・5 未実行。失敗は `trial-requirements.spec.ts` のログインの
+  `page.goto('/login')` が `net::ERR_NO_BUFFER_SPACE`（Windows のソケットの枯渇。直前まで 469 件が合格・画面の不具合ではない。メモリ「E2E と資源枯渇」と同じ症状）。
+  ソケットが空くのを待って単独で流し直し、**475 件すべて合格・19.8 分**（skip 0。Stage A 後 447 件）。
+- `PROD_BASE_URL=http://127.0.0.1:3217 pnpm test:e2e:prod`（ローカルの `next start`・Demo Mode・単独）: **39 件すべて合格**（既存 36＋算定と照合 3。再試行なし）。
+  あわせて `playwright.production-chain.config.ts` をローカルの同じサーバーへ流し **39 件すべて合格**（実演・CSRD・試行・GHG の流れ。GHG の流れの最大 Cookie ヘッダー 1,998B）。本番（Vercel）には流していない（デプロイしていない）。
+- 途中で直したもの: Stage B の E2E を初めて流した時点で `ghg-factors-rules` の 1 件が失敗（検証のエラーの一覧が listitem の親を持たない＝実装の a11y の欠陥）。実装を直して合格。
+  追加した `ghg-activity-tonkm` の公的参照の取込の見出しの検査は、燃料ごとに 2 つあるため件数（2）で確かめる形にした（自分で足した検査の誤り）。
+- 機密語の検査（`rg -n -f docs/client-requests-2026-10-16/forbidden-words.txt --glob '!docs/client-requests-2026-10-16/**' .`）: **0 件**。
+
+### 未解決・次作業
+
+- 本番は未反映（デプロイは統括の判断。手順はメモリ「本番デプロイのエイリアス手順」。反映後は本番スモークと本番チェーン〔GHG の流れを含む〕を流し、
+  最後に同じコミットを再デプロイして共有メモリを入れ替える）。commit もしていない。
+- Supabase Mode の読み取りはページ送りをしないため、PostgREST の行の上限（1,000 行）を超える期間（出荷単位の輸送実績が多いなど）は活動量・算定行が欠けうる。
+  実データの環境（判断事項 D4）を用意する前に、読み取りのページ送りを入れて確かめる（known-limitations §13.7）。
+- 判断事項 D1〜D11 は既定で進めた（葉を足す・海外の国を変える・プリセットを入れる・標準機能として扱う・監査ログを残す など）。先方への確認事項 C1〜C12 は未確認。
+- Demo の Cookie を多く使う操作（Data Point への反映 約 4.4KB・公的参照のセットの取込 約 2.4KB）は、長い実演の後に行うと古い操作が押し出されうる（D-3。同じインスタンスでは残る）。

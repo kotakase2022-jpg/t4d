@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { DISCLOSURE_FIRST_IDS as IDS } from '@/lib/fixtures/disclosure-first';
+import { GHG_FIXTURE_IDS } from '@/lib/fixtures/ghg-verification';
 import { FY2025_APPROVED_SNAPSHOT_ID } from '@/lib/fixtures/trial-case';
 import { buildHeterogeneousDataset } from '../../scripts/hetero-dataset';
 import { openCollapsible, openMoreMenu } from '../e2e/helpers';
@@ -1231,4 +1232,90 @@ test('本番: 社内承認済みレポートを共有すると保証側の「開
   }
   await prodLogin(page, '青葉 健', { keepDemoState: true });
   await expect(await sharedReportLinks()).toHaveCount(0);
+});
+
+// ---- Scope1・2 の算定と照合（2026-10-16 の要望。plan §3.3-6）。どれも閲覧のみ ----------------------------
+
+test('本番: Scope1・2算定の概要に架空の注記・5 拠点（国コード）・二重表示と組織の算定ルールのバッジ・承認待ちの注記が出る（閲覧のみ）', async ({
+  page,
+}) => {
+  await prodLogin(page, '海野 みどり');
+  const res = await page.goto(`${BASE}/enterprise/ghg/calculation`);
+  expect(res?.status()).toBeLessThan(400);
+  const main = page.locator('#t4d-main');
+  await expect(main.getByRole('heading', { level: 1, name: 'Scope1・2算定' })).toBeVisible();
+  // 架空のデータ（N9）。折りたたまない
+  await expect(main.locator('[data-ghg-notice="N9"]')).toBeVisible();
+  const sites = main.getByRole('table', { name: '拠点別の結果' });
+  for (const [code, country] of [
+    ['EAST', '（JP・国内）'],
+    ['TH1', '（TH・海外）'],
+    ['VN1', '（VN・海外）'],
+    ['MX1', '（MX・海外）'],
+    ['US1', '（US・海外）'],
+  ] as const) {
+    await expect(sites.locator(`[data-site-row="${code}"]`)).toContainText(country);
+  }
+  await expect(sites.locator('tbody tr')).toHaveCount(5);
+  // 報告区分と既定区分の二重表示・組織の算定ルールのバッジ・区分規則の承認待ち（N2）
+  const dual = main.getByRole('region', { name: '報告区分と既定区分' });
+  await expect(dual.locator('[data-honesty="company-rule"]')).toBeVisible();
+  await expect(dual.locator('[data-ghg-notice="N2"]')).toBeVisible();
+  const table = dual.getByRole('table', { name: '報告区分と既定区分' });
+  for (const row of ['scope1', 'scope3_cat4', 'scope1_scope3_total', 'scope2_location', 'scope2']) {
+    await expect(table.locator(`[data-dual-row="${row}"]`)).toBeVisible();
+  }
+});
+
+test('本番: 照合 R-1 の詳細に 6 種の原因のラベルと整合性の確認の固定文が出て、判定・見出しに「一致」が無い（閲覧のみ）', async ({
+  page,
+}) => {
+  await prodLogin(page, '海野 みどり');
+  const detail = `${BASE}/enterprise/ghg/calculation/reconciliation/${GHG_FIXTURE_IDS.reconciliation}`;
+  const rows = () =>
+    page.locator('[data-data-table="ghg-reconciliation-items"] tr[data-t4d-record]');
+  const cause = (value: string) =>
+    rows().locator(`[data-status-domain="ghgCause"][data-status-value="${value}"]`).first();
+  /** 「一致」が出てよいのは、一致を保証しないことを述べる固定の否定文だけ（plan K8） */
+  const strayMatches = (text: string) =>
+    text.split('一致を保証するものではありません').join('').split('一致').length - 1;
+
+  await page.goto(detail);
+  const main = page.locator('#t4d-main');
+  await expect(main.getByRole('heading', { level: 1, name: '照合の詳細' })).toBeVisible();
+  await expect(main.locator('[data-ghg-notice="N3"]')).toBeVisible();
+  await expect(main.locator('[data-honesty="consistency-check"]').first()).toBeVisible();
+  expect(strayMatches(await main.innerText())).toBe(0);
+  // 1 ページ目には 6 種が揃わないため、絞り込みで確かめる（係数・単位換算・区分 → 残差 → 片側のみ → 丸め）
+  await page.goto(`${detail}?verdict=needs_review&size=100`);
+  for (const value of ['factor', 'conversion', 'classification']) {
+    await expect(cause(value)).toBeVisible();
+  }
+  await page.goto(`${detail}?verdict=unexplained`);
+  await expect(cause('residual')).toBeVisible();
+  expect(strayMatches(await main.innerText())).toBe(0);
+  await page.goto(`${detail}?verdict=one_sided`);
+  await expect(cause('coverage')).toBeVisible();
+  await page.goto(`${detail}?unit=${GHG_FIXTURE_IDS.units.th}`);
+  await expect(cause('rounding')).toBeVisible();
+});
+
+test('本番: トライアル概要に算定の検証範囲・将来の展開対象（全 30 拠点）・無償の範囲と別途協議が出る（閲覧のみ）', async ({
+  page,
+}) => {
+  await prodLogin(page, '青海 太郎');
+  await page.goto(`${BASE}/enterprise/trial?tab=overview`);
+  const main = page.locator('#t4d-main');
+  await expect(main.locator('[data-trial-rollout]')).toContainText(
+    '全 30 拠点（うち検証対象 5・残り 25）',
+  );
+  await expect(main.locator('[data-trial-verification-sites]')).toContainText(
+    '5 拠点（国内 1・海外 4）',
+  );
+  const verification = main.getByRole('region', { name: '算定の検証範囲' });
+  await expect(verification.getByRole('table', { name: '拠点別の検証の状況' })).toBeVisible();
+  const freeScope = main.getByRole('region', { name: '無償の範囲と別途協議' });
+  await expect(freeScope.getByRole('table', { name: '別途協議の区分' })).toBeVisible();
+  await expect(main.locator('[data-trial-disposal]')).toBeVisible();
+  await expect(main.locator('[data-trial-purge]')).toBeVisible();
 });

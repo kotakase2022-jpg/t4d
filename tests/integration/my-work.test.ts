@@ -3,6 +3,8 @@ import { FIXTURE_TODAY } from '@/lib/config';
 import { AuthorizationError } from '@/lib/authorization/can';
 import { ENGAGEMENT_IDS, ORG_IDS, PERIOD_IDS, UNIT_IDS, userId } from '@/lib/fixtures/dataset';
 import { FY2025_APPROVED_SNAPSHOT_ID } from '@/lib/fixtures/trial-case';
+import { GHG_FIXTURE_IDS, GHG_VERIFICATION_UNIT_IDS } from '@/lib/fixtures/ghg-verification';
+import { loadGhgVerificationStatus } from '@/lib/services/ghg/status';
 import { parseSharedReportCopy } from '@/lib/domain/report-copy';
 import { openIssueSummary } from '@/lib/domain/trial-metrics';
 import { createReportNote } from '@/lib/services/assurance-notes';
@@ -62,6 +64,66 @@ function expectOrdered(profile: keyof typeof MY_WORK_ORDER, kinds: string[]) {
   const ranks = kinds.map((k) => (order.includes(k) ? order.indexOf(k) : order.length + 1));
   expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
 }
+
+describe('Scope1・2 の算定と照合の Attention（2026-10-16。保存せず、拠点の状態から導く）', () => {
+  const keysOf = (work: Awaited<ReturnType<typeof loadMyWork>>) =>
+    new Map(work.attention.map((a) => [a.key, a]));
+  const G = GHG_FIXTURE_IDS;
+  const approver = () => ctxFor('approver@demo.local', ['approver', 'reviewer']);
+  const reviewer = () => ctxFor('reviewer@demo.local', ['reviewer']);
+  const author = () => ctxFor('sustainability@demo.local', ['sustainability_manager']);
+  const site = () => ctxFor('site-user@demo.local', ['site_contributor'], [UNIT_IDS.east]);
+
+  it('最終承認者: 承認待ちの区分規則（提案者本人の規則は数えない）を算定ルールの承認待ちへ出す', async () => {
+    const item = keysOf(await loadMyWork(db, approver(), input())).get('ghg-rule-pending');
+    expect(item).toMatchObject({
+      count: 1,
+      href: '/enterprise/ghg/calculation/rules?status=proposed',
+    });
+    // 承認の権限の無い役割（提案した本社サステナ担当・レビュー担当）には出さない
+    expect(keysOf(await loadMyWork(db, author(), input())).has('ghg-rule-pending')).toBe(false);
+    expect(keysOf(await loadMyWork(db, reviewer(), input())).has('ghg-rule-pending')).toBe(false);
+    // 最終承認者が自分で提案した規則は自分では承認できない（職務分離）ので数えない
+    const rule = fixture.ghgClassificationRules.find((r) => r.id === G.rule)!;
+    rule.proposedBy = approver().userId;
+    expect(keysOf(await loadMyWork(db, approver(), input())).has('ghg-rule-pending')).toBe(false);
+  });
+
+  it('レビュー担当: 照合で要確認の拠点を、最新の照合の要確認の絞り込みへ出す', async () => {
+    const status = await loadGhgVerificationStatus(db, reviewer(), {
+      periodId: G.period,
+      unitIds: [...GHG_VERIFICATION_UNIT_IDS],
+    });
+    expect(status.attention.reconciliationNeedsReview).toBeGreaterThan(0);
+    const item = keysOf(await loadMyWork(db, reviewer(), input())).get('ghg-reconciliation-review');
+    expect(item).toMatchObject({
+      count: status.attention.reconciliationNeedsReview,
+      href: `/enterprise/ghg/calculation/reconciliation/${G.reconciliation}?verdict=needs_review`,
+    });
+    // 原因を記録する権限（data.review）の無い拠点担当には出さない
+    expect(keysOf(await loadMyWork(db, site(), input())).has('ghg-reconciliation-review')).toBe(
+      false,
+    );
+  });
+
+  it('本社サステナ担当: 係数が決まらない活動があるときだけ、割当の未割当の絞り込みへ出す', async () => {
+    // Fixture は全部割り当て済み（出さない）
+    expect(keysOf(await loadMyWork(db, author(), input())).has('ghg-factor-unassigned')).toBe(
+      false,
+    );
+    const kept = fixture.emissionFactorAssignments.filter((a) => a.reportingPeriodId !== G.period);
+    fixture.emissionFactorAssignments.splice(0, fixture.emissionFactorAssignments.length, ...kept);
+    const item = keysOf(await loadMyWork(db, author(), input())).get('ghg-factor-unassigned');
+    expect(item?.count).toBeGreaterThan(0);
+    expect(item?.href).toBe(
+      `/enterprise/ghg/calculation/factors?view=assignments&state=unresolved&period=${G.period}`,
+    );
+    // 係数の設定の権限（metric.manage）の無い役割には出さない
+    expect(keysOf(await loadMyWork(db, reviewer(), input())).has('ghg-factor-unassigned')).toBe(
+      false,
+    );
+  });
+});
 
 describe('トライアル対応の Attention（plan §4.3-3。保存せず導出）', () => {
   const keysOf = (work: Awaited<ReturnType<typeof loadMyWork>>) =>

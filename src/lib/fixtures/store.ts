@@ -46,9 +46,21 @@ import {
 } from './disclosure-first';
 import { seedCsrd } from './csrd';
 import { seedTrialCase } from './trial-case';
+import { seedGhgVerification } from './ghg-verification';
 import { contentHash, fid } from './ids';
 import type {
   AiFeedback,
+  EmissionFactorAssignment,
+  EmissionFactorSet,
+  GhgActivityBatch,
+  GhgActivityLine,
+  GhgBaselineResult,
+  GhgCalculationLine,
+  GhgCalculationPolicy,
+  GhgCalculationRun,
+  GhgClassificationRule,
+  GhgReconciliation,
+  GhgReconciliationNote,
   ExportReconciliation,
   NarrativeRequirementLink,
   OrganizationDataTerms,
@@ -285,6 +297,18 @@ export interface FixtureDb {
   organizationDataTerms: OrganizationDataTerms[];
   organizationOptions: OrganizationOption[];
   responseContentLinks: ResponseContentLink[];
+  // Scope1・2 の算定と既存結果との照合（0061〜0065）
+  emissionFactorSets: EmissionFactorSet[];
+  emissionFactorAssignments: EmissionFactorAssignment[];
+  ghgCalculationPolicies: GhgCalculationPolicy[];
+  ghgClassificationRules: GhgClassificationRule[];
+  ghgActivityBatches: GhgActivityBatch[];
+  ghgActivityLines: GhgActivityLine[];
+  ghgCalculationRuns: GhgCalculationRun[];
+  ghgCalculationLines: GhgCalculationLine[];
+  ghgBaselineResults: GhgBaselineResult[];
+  ghgReconciliations: GhgReconciliation[];
+  ghgReconciliationNotes: GhgReconciliationNote[];
 
   engagements: Engagement[];
   engagementMembers: EngagementMember[];
@@ -444,6 +468,17 @@ export function createFixtureDb(): FixtureDb {
     organizationDataTerms: [],
     organizationOptions: [],
     responseContentLinks: [],
+    emissionFactorSets: [],
+    emissionFactorAssignments: [],
+    ghgCalculationPolicies: [],
+    ghgClassificationRules: [],
+    ghgActivityBatches: [],
+    ghgActivityLines: [],
+    ghgCalculationRuns: [],
+    ghgCalculationLines: [],
+    ghgBaselineResults: [],
+    ghgReconciliations: [],
+    ghgReconciliationNotes: [],
     engagements: [],
     engagementMembers: [],
     engagementScopes: [],
@@ -712,6 +747,21 @@ export function createFixtureDb(): FixtureDb {
       factorYear: spec.factorYear,
       factorSource: 'FIXTURE（架空値・実係数ではありません）',
       createdAt: at(200),
+      // Scope3 Cat.1 の係数はセットに属さない（0061。Scope1・2 の算定の係数は ghg-verification.ts）
+      factorSetId: null,
+      countryCode: null,
+      regionLabel: null,
+      basis: null,
+      activityKind: null,
+      activityCode: null,
+      gas: 'co2e',
+      calorificValue: null,
+      calorificUnit: null,
+      carbonFactor: null,
+      carbonFactorUnit: null,
+      validFrom: null,
+      validTo: null,
+      params: {},
     });
   }
 
@@ -3086,6 +3136,13 @@ export function createFixtureDb(): FixtureDb {
   // 既存の数値・資料・許諾には触れない（Data Room・SNAP-1・検証の件数を変えない）
   // ------------------------------------------------------------------
   seedTrialCase(db);
+
+  // ------------------------------------------------------------------
+  // Scope1・2 の算定と既存結果との照合（2026-10-16 の要望。すべて架空）: 海外の検証拠点 4・暦年の期間 CY2025・
+  // 係数セット 2 版・割当・算定方針・区分規則（承認待ち）・活動量・算定の記録 R-1・既存結果 BL-1・照合 R-1。
+  // 拠点は reports: false（FY の Data Point を作らない）。検証結果の materialize の後に足す（既存の件数を変えない）
+  // ------------------------------------------------------------------
+  seedGhgVerification(db);
 
   return db;
 }

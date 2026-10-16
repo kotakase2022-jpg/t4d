@@ -3,30 +3,43 @@ import 'server-only';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, assertEnterpriseWorkspace } from '@/lib/authorization/can';
 import { getAppMode, getOpenAiConfig } from '@/lib/config';
+import {
+  backupResidualLabel,
+  backupResidualText,
+  BACKUP_RESIDUAL_DAYS_MAX,
+  isBackupResidualDays,
+} from '@/lib/domain/data-disposal';
 import { ValidationError } from '@/lib/errors/user-facing';
 import { fid } from '@/lib/fixtures/ids';
-import { DEMO_TEXT_LIMITS } from '@/lib/repositories/demo-trial-checks';
+import { DEMO_TEXT_LIMITS, DEMO_TRIAL_JSON_MAX_CHARS } from '@/lib/repositories/demo-trial-checks';
 import type { DataTermsState } from '@/lib/ui/status/dataTerms';
+import { statusLabel } from '@/lib/ui/status/registry';
 import type { DbClient } from '@/lib/repositories/types';
 import {
   AI_PROVIDER_STORAGES,
   AI_TRAINING_USES,
   NDA_STATUSES,
+  SUBPROCESSOR_CATEGORIES,
   type AiProviderStorage,
   type AiTrainingUse,
   type AuthorizationContext,
   type DataTermsSubprocessor,
   type NdaStatus,
   type OrganizationDataTerms,
+  type SubprocessorCategory,
 } from '@/types/domain';
 
 /**
- * データ取扱条件（トライアル対応 NF-28）。合意した条件の版（追記専用 organization_data_terms）と、
- * システムの実態（設定から自動で読む）を並べる。
+ * データ取扱条件（トライアル対応 NF-28・2026-10-16 の要望 ⑥⑦）。合意した条件の版（追記専用
+ * organization_data_terms）と、システムの実態（設定から自動で読む）を並べる。
  *
  *  - 未合意の項目は「未合意」と出す。推測で埋めない（空・undecided・NDA の未締結は未合意）
  *  - 版は追記だけ（DB は forbid_mutation）。記録は組織の管理者（enterprise.org.manage）
  *  - システムの実態は Secret を出さない（API キーの有無だけ。値は読まない）
+ *  - 処理を委ねる先は区分（業務委託先・クラウドサービス提供者・AI サービス提供者・その他）と秘密保持の根拠を持つ。
+ *    以前の版（区分なしの 3 項目）は読むときに「その他」・根拠なしに読み替える（版は追記専用なので書き換えない）
+ *  - この環境が使う外部の処理先（ホスティング・データベース・AI の API）と、合意した処理先の区分を突き合わせる
+ *  - バックアップの残存期間（0060）は合意値の日数。未合意なら消去の見込み日を出さない
  */
 
 export const NDA_STATUS_LABELS: Record<NdaStatus, string> = {
@@ -58,6 +71,7 @@ export const DATA_TERMS_ITEMS = [
   'subprocessors',
   'returnMethod',
   'deletionMethod',
+  'backupResidualDays',
   'agreement',
 ] as const;
 export type DataTermsItem = (typeof DATA_TERMS_ITEMS)[number];
@@ -69,11 +83,131 @@ export const DATA_TERMS_ITEM_LABELS: Record<DataTermsItem, string> = {
   retentionPolicy: '保存期間',
   aiTrainingUse: 'AI の再学習への利用',
   aiProviderStorage: 'AI の提供元での保存',
-  subprocessors: '再委託先',
+  subprocessors: '処理を委ねる先（業務委託先・クラウド・AI）',
   returnMethod: '終了時の返却方法',
   deletionMethod: '終了時の削除方法',
+  backupResidualDays: 'バックアップの残存期間',
   agreement: '合意日・合意者',
 };
+
+/** 区分の並び（入力欄・表の順） */
+export const SUBPROCESSOR_CATEGORY_ORDER: readonly SubprocessorCategory[] = [
+  'contractor',
+  'cloud',
+  'ai',
+  'other',
+];
+
+/** 処理を委ねる先の 1 行（表示用。以前の版の行は「その他」・根拠なしに読み替えたもの） */
+export interface SubprocessorRow {
+  category: SubprocessorCategory;
+  name: string;
+  role: string;
+  location: string;
+  confidentialityBasis: string;
+  /** 秘密保持の根拠が空なら未合意（推測で埋めない） */
+  basisState: DataTermsState;
+  /** AI の再学習（AI サービス提供者の行だけ。合意項目 aiTrainingUse の語。それ以外は null） */
+  aiTraining: string | null;
+}
+
+/** 以前の版（3 項目）を読み替える。区分の値が知らないものなら「その他」 */
+export function normalizeSubprocessor(s: DataTermsSubprocessor): Required<DataTermsSubprocessor> {
+  const category =
+    s.category && (SUBPROCESSOR_CATEGORIES as readonly string[]).includes(s.category)
+      ? s.category
+      : 'other';
+  return {
+    name: s.name ?? '',
+    role: s.role ?? '',
+    location: s.location ?? '',
+    category,
+    confidentialityBasis: s.confidentialityBasis ?? '',
+  };
+}
+
+/** 処理を委ねる先の表の行（区分の順。区分の中は記録の順） */
+export function subprocessorRows(terms: OrganizationDataTerms | null): SubprocessorRow[] {
+  if (!terms) return [];
+  const rows = terms.subprocessors.map(normalizeSubprocessor);
+  return SUBPROCESSOR_CATEGORY_ORDER.flatMap((category) =>
+    rows
+      .filter((row) => row.category === category)
+      .map((row) => ({
+        ...row,
+        basisState: (row.confidentialityBasis.trim() === ''
+          ? 'not_agreed'
+          : 'agreed') as DataTermsState,
+        aiTraining: category === 'ai' ? AI_TRAINING_USE_LABELS[terms.aiTrainingUse] : null,
+      })),
+  );
+}
+
+/** この環境が使う外部の処理先（環境変数から読む。値は読まない） */
+export interface EnvironmentProcessor {
+  category: SubprocessorCategory;
+  /** 環境から分かる提供元の名前（実在のサービス名はここにだけ出す） */
+  name: string;
+  role: string;
+}
+
+type EnvLike = Readonly<Record<string, string | undefined>>;
+
+/**
+ * この環境の外部の処理先。Vercel 上で動いているか（VERCEL）、Supabase Mode か、AI の API キーがあるか
+ * （値は読まない）から決める。分からないものは出さない（推測しない）
+ */
+export function environmentProcessors(
+  env: EnvLike = process.env,
+  facts: { mode: 'demo' | 'supabase'; aiConnected: boolean } = {
+    mode: getAppMode(),
+    aiConnected: getOpenAiConfig().apiKey !== null,
+  },
+): EnvironmentProcessor[] {
+  const out: EnvironmentProcessor[] = [];
+  if ((env.VERCEL ?? '').trim() !== '') {
+    out.push({ category: 'cloud', name: 'Vercel', role: 'アプリケーションの実行（ホスティング）' });
+  }
+  if (facts.mode === 'supabase') {
+    out.push({
+      category: 'cloud',
+      name: 'Supabase',
+      role: 'データベース・認証・ファイルの保管',
+    });
+  }
+  if (facts.aiConnected) {
+    out.push({
+      category: 'ai',
+      name: 'OpenAI',
+      role: '文章の候補の生成（採用は利用者が確定）',
+    });
+  }
+  return out;
+}
+
+/**
+ * 環境が使う区分のうち、合意した処理先に無いもの（区分ごとに 1 つの文）。
+ * 合意の版が無ければ、環境が使う区分はすべて「合意に無い」
+ */
+export function processorMismatches(
+  environment: readonly EnvironmentProcessor[],
+  terms: OrganizationDataTerms | null,
+): string[] {
+  const agreed = new Set(
+    (terms?.subprocessors ?? []).map((s) => normalizeSubprocessor(s).category),
+  );
+  const used = SUBPROCESSOR_CATEGORY_ORDER.filter((c) => environment.some((p) => p.category === c));
+  return used
+    .filter((category) => !agreed.has(category))
+    .map((category) => {
+      const label = statusLabel('subprocessorCategory', category);
+      const names = environment
+        .filter((p) => p.category === category)
+        .map((p) => p.name)
+        .join('・');
+      return `この環境は「${label}」（${names}）を使っていますが、合意した処理先に「${label}」がありません。`;
+    });
+}
 
 export interface DataTermsItemView {
   item: DataTermsItem;
@@ -111,17 +245,35 @@ export function dataTermsItems(terms: OrganizationDataTerms | null): DataTermsIt
           value: AI_PROVIDER_STORAGE_LABELS[terms.aiProviderStorage],
           state: terms.aiProviderStorage === 'undecided' ? 'not_agreed' : 'agreed',
         };
-      case 'subprocessors':
-        return terms.subprocessors.length === 0
-          ? { item, label, value: '—', state: 'not_agreed' }
-          : {
-              item,
-              label,
-              value: terms.subprocessors
-                .map((s) => [s.name, s.role, s.location].filter((v) => v.trim() !== '').join('／'))
-                .join('、'),
-              state: 'agreed',
-            };
+      case 'subprocessors': {
+        if (terms.subprocessors.length === 0) {
+          return { item, label, value: '—', state: 'not_agreed' };
+        }
+        // 区分ごとの社数（各社の名称・根拠は下の「処理を委ねる先」の表）
+        const rows = subprocessorRows(terms);
+        const counts = SUBPROCESSOR_CATEGORY_ORDER.flatMap((category) => {
+          const n = rows.filter((r) => r.category === category).length;
+          return n > 0 ? [`${statusLabel('subprocessorCategory', category)} ${n}`] : [];
+        });
+        const missingBasis = rows.filter((r) => r.basisState === 'not_agreed').length;
+        return {
+          item,
+          label,
+          value: `${counts.join('・')}（${rows.length} 社${
+            missingBasis > 0 ? `。秘密保持の根拠が未合意 ${missingBasis} 社` : ''
+          }）`,
+          state: 'agreed',
+        };
+      }
+      case 'backupResidualDays':
+        return {
+          item,
+          label,
+          value: isBackupResidualDays(terms.backupResidualDays)
+            ? backupResidualLabel(terms.backupResidualDays)
+            : '—',
+          state: isBackupResidualDays(terms.backupResidualDays) ? 'agreed' : 'not_agreed',
+        };
       case 'agreement':
         return terms.agreedOn && text(terms.agreedByLabel) !== ''
           ? { item, label, value: `${terms.agreedOn}（${terms.agreedByLabel}）`, state: 'agreed' }
@@ -150,11 +302,23 @@ export interface SystemFact {
  * システムの実態（自動）。設定・環境から読むだけ（推測の値を出さない。保管場所は環境から分からないので
  * 合意した条件を見るよう案内する）。API キーの値は読まない
  */
-export function systemFacts(): SystemFact[] {
+export function systemFacts(env: EnvLike = process.env): SystemFact[] {
   const mode = getAppMode();
   const ai = getOpenAiConfig();
   const connected = ai.apiKey !== null;
+  const processors = environmentProcessors(env, { mode, aiConnected: connected });
   return [
+    {
+      label: 'この環境が使う外部の処理先',
+      value:
+        processors.length === 0
+          ? '検出していません（ホスティング・データベース・AI の API のいずれの提供元にも接続していません）'
+          : processors
+              .map(
+                (p) => `${p.name}（${statusLabel('subprocessorCategory', p.category)}・${p.role}）`,
+              )
+              .join('、'),
+    },
     {
       label: '動作モード',
       value:
@@ -198,12 +362,20 @@ export interface DataTermsView {
   current: OrganizationDataTerms | null;
   items: DataTermsItemView[];
   notAgreedCount: number;
+  /** 処理を委ねる先の表（現在の版） */
+  processors: SubprocessorRow[];
+  /** この環境が使う外部の処理先と、合意に無い区分の文（Notice warning） */
+  environment: EnvironmentProcessor[];
+  mismatches: string[];
+  /** 削除の後のバックアップの扱い（固定の文。合意した日数入り） */
+  residualText: string;
 }
 
 /** 合意した条件の版（組織の管理者だけ。設定画面と同じ権限） */
 export async function loadDataTerms(
   db: DbClient,
   ctx: AuthorizationContext,
+  env: EnvLike = process.env,
 ): Promise<DataTermsView> {
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.org.manage');
@@ -213,11 +385,16 @@ export async function loadDataTerms(
   });
   const current = versions[0] ?? null;
   const items = dataTermsItems(current);
+  const environment = environmentProcessors(env);
   return {
     versions,
     current,
     items,
     notAgreedCount: items.filter((i) => i.state === 'not_agreed').length,
+    processors: subprocessorRows(current),
+    environment,
+    mismatches: processorMismatches(environment, current),
+    residualText: backupResidualText(current?.backupResidualDays ?? null),
   };
 }
 
@@ -228,41 +405,114 @@ export interface RecordDataTermsInput {
   retentionPolicy: string;
   aiTrainingUse: string;
   aiProviderStorage: string;
-  /** 1 行に 1 社（「名称／役割／所在地」） */
-  subprocessorsText: string;
+  /**
+   * 以前の入力（区分なし。1 行に 1 社「名称／役割／所在地／秘密保持の根拠」）。区分は「その他」として記録する
+   */
+  subprocessorsText?: string;
+  /** 区分ごとの入力（1 行に 1 社「名称／役割／所在地（処理地域）／秘密保持の根拠」） */
+  subprocessorsByCategory?: Partial<Record<SubprocessorCategory, string>>;
   returnMethod: string;
   deletionMethod: string;
+  /**
+   * バックアップの残存期間（日。0〜400。空は未合意）。渡さない（undefined）ときは前の版の合意値を引き継ぐ
+   * （黙って未合意に戻さない）
+   */
+  backupResidualDays?: string | number | null;
   agreedOn: string;
   agreedByLabel: string;
   note: string;
 }
 
-/** 再委託先の上限（Demo の Cookie から戻すときの検査と同じ） */
+/** 処理を委ねる先の上限（Demo の Cookie から戻すときの検査と同じ） */
 export const MAX_SUBPROCESSORS = 10;
+
+/**
+ * Demo Mode の処理を委ねる先の JSON の上限（Cookie から戻すときの検査 demo-trial-checks.ts と同じ値。
+ * 超えると Cookie から戻らないため、記録の前に断る）
+ */
+export const DEMO_SUBPROCESSORS_JSON_MAX = DEMO_TRIAL_JSON_MAX_CHARS;
 
 /** 本文の上限。Demo Mode は Cookie の容量に合わせる（demo-trial-checks.ts と同じ値） */
 export function dataTermsTextLimit(db: DbClient): number {
   return db.mode === 'demo' ? DEMO_TEXT_LIMITS.trialText : 2000;
 }
 
-function parseSubprocessors(text: string, limit: number): DataTermsSubprocessor[] {
-  const lines = text
+/**
+ * 処理を委ねる先の各項目の上限。Demo Mode は 1 項目 60 字（10 社分を Cookie の JSON 2,000 文字に収めるため。
+ * 合計もあわせて検査する）
+ */
+export const SUBPROCESSOR_FIELD_LIMITS = { demo: 60, supabase: 200 } as const;
+
+export function subprocessorFieldLimit(db: Pick<DbClient, 'mode'>): number {
+  return db.mode === 'demo' ? SUBPROCESSOR_FIELD_LIMITS.demo : SUBPROCESSOR_FIELD_LIMITS.supabase;
+}
+
+function parseSubprocessorLines(
+  text: string,
+  category: SubprocessorCategory,
+  limit: number,
+): DataTermsSubprocessor[] {
+  const label = statusLabel('subprocessorCategory', category);
+  return text
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line !== '');
-  if (lines.length > MAX_SUBPROCESSORS) {
-    throw new ValidationError(`再委託先は ${MAX_SUBPROCESSORS} 社までです。`);
-  }
-  return lines.map((line) => {
-    const [name = '', role = '', location = ''] = line.split(/[／/]/).map((v) => v.trim());
-    if (name === '') throw new ValidationError('再委託先の名称を入力してください。');
-    for (const value of [name, role, location]) {
-      if (value.length > limit) {
-        throw new ValidationError(`再委託先の各項目は ${limit} 文字以内で入力してください。`);
+    .filter((line) => line !== '')
+    .map((line) => {
+      const [name = '', role = '', location = '', ...rest] = line
+        .split(/[／/]/)
+        .map((v) => v.trim());
+      // 根拠に「／」が入っていても、4 つ目以降はまとめて根拠として読む
+      const confidentialityBasis = rest.join('／').trim();
+      if (name === '') {
+        throw new ValidationError(`処理を委ねる先（${label}）の名称を入力してください。`);
       }
-    }
-    return { name, role, location };
-  });
+      for (const value of [name, role, location, confidentialityBasis]) {
+        if (value.length > limit) {
+          throw new ValidationError(
+            `処理を委ねる先の各項目（名称・役割・所在地・秘密保持の根拠）は ${limit} 文字以内で入力してください。`,
+          );
+        }
+      }
+      return { category, name, role, location, confidentialityBasis };
+    });
+}
+
+/** 区分ごとの入力（と以前の区分なしの入力）を、区分の順に 1 つの一覧にする */
+export function parseSubprocessors(
+  input: Pick<RecordDataTermsInput, 'subprocessorsText' | 'subprocessorsByCategory'>,
+  limit: number,
+  options: { demo: boolean } = { demo: false },
+): DataTermsSubprocessor[] {
+  const byCategory = input.subprocessorsByCategory ?? {};
+  const list = [
+    ...SUBPROCESSOR_CATEGORY_ORDER.flatMap((category) =>
+      parseSubprocessorLines(byCategory[category] ?? '', category, limit),
+    ),
+    ...parseSubprocessorLines(input.subprocessorsText ?? '', 'other', limit),
+  ];
+  if (list.length > MAX_SUBPROCESSORS) {
+    throw new ValidationError(`処理を委ねる先は ${MAX_SUBPROCESSORS} 社までです（区分の合計）。`);
+  }
+  if (options.demo && JSON.stringify(list).length > DEMO_SUBPROCESSORS_JSON_MAX) {
+    throw new ValidationError(
+      `処理を委ねる先の記載が長すぎます（デモでは全社の合計で約 ${DEMO_SUBPROCESSORS_JSON_MAX.toLocaleString('ja-JP')} 文字まで）。各項目を短くしてください。`,
+    );
+  }
+  return list;
+}
+
+/** バックアップの残存期間の入力（空は未合意。0〜400 の整数） */
+function checkedResidualDays(raw: string | number | null): number | null {
+  if (raw === null) return null;
+  const text = String(raw).trim().replace(/,/g, '');
+  if (text === '') return null;
+  const value = Number(text);
+  if (!isBackupResidualDays(value)) {
+    throw new ValidationError(
+      `バックアップの残存期間は 0〜${BACKUP_RESIDUAL_DAYS_MAX} の整数（日）で入力してください。`,
+    );
+  }
+  return value;
 }
 
 /**
@@ -312,7 +562,13 @@ export async function recordDataTermsVersion(
   if (agreedOn !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(agreedOn)) {
     throw new ValidationError('合意日は YYYY-MM-DD の形で入力してください。');
   }
-  const subprocessors = parseSubprocessors(input.subprocessorsText, limit);
+  const subprocessors = parseSubprocessors(input, subprocessorFieldLimit(db), {
+    demo: db.mode === 'demo',
+  });
+  const residualInput =
+    input.backupResidualDays === undefined
+      ? undefined
+      : checkedResidualDays(input.backupResidualDays);
 
   const latest = await db.select('organizationDataTerms', {
     where: { organizationId },
@@ -337,6 +593,9 @@ export async function recordDataTermsVersion(
     agreedOn: agreedOn === '' ? null : agreedOn,
     agreedByLabel: texts.agreedByLabel,
     note: texts.note,
+    // バックアップの残存期間（0060）。入力が無い呼び出しは前の版の合意値を引き継ぐ（黙って未合意に戻さない）
+    backupResidualDays:
+      residualInput === undefined ? (latest[0]?.backupResidualDays ?? null) : residualInput,
     createdBy: ctx.userId,
     createdAt: now,
   };

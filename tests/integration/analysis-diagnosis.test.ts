@@ -221,7 +221,14 @@ describe('GHG 算定の網羅性', () => {
       expectedUnits: 4,
     });
     expect(scope('scope2_location').missingUnits).toHaveLength(4);
-    expect(ghg.excludedUnitNames).toEqual(['青海マテリアル合弁会社']);
+    // 算定の検証用の海外 4 拠点（2026-10-16 の要望の架空 Fixture）は年度の連結集計の対象外として並ぶ
+    expect(ghg.excludedUnitNames).toEqual([
+      '青海マテリアル合弁会社',
+      'タイ工場',
+      'ベトナム工場',
+      'メキシコ工場',
+      '米国工場',
+    ]);
   });
 
   it('Scope3 はカテゴリ n / 15、合計は未算定（Cat.1 を全量にしない・0 と出さない）', async () => {

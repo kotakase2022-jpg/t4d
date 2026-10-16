@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { ORG_IDS } from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS } from '@/lib/fixtures/disclosure-first';
+import { GHG_FIXTURE_IDS, ghgBatchId } from '@/lib/fixtures/ghg-verification';
 import { fid } from '@/lib/fixtures/ids';
 import {
   FY2025_APPROVED_SNAPSHOT_ID,
@@ -18,9 +19,30 @@ import {
  *   作成パネルを開いている間は、見出しの「〜を作成」を隠し、パネルの送信が primary になる）
  */
 
-/** UI 再設計のスライス（B1〜B6）と、トライアル対応（2026-10）のスライス（T1〜T8） */
+/**
+ * UI 再設計のスライス（B1〜B6）・トライアル対応（2026-10）のスライス（T1〜T8）・
+ * Scope1・2 の算定と照合（2026-10-16）のスライス（S1〜S5）
+ */
 export type SliceOwner =
-  'B1' | 'B2' | 'B3' | 'B4' | 'B5' | 'B6' | 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6' | 'T7' | 'T8';
+  | 'B1'
+  | 'B2'
+  | 'B3'
+  | 'B4'
+  | 'B5'
+  | 'B6'
+  | 'T1'
+  | 'T2'
+  | 'T3'
+  | 'T4'
+  | 'T5'
+  | 'T6'
+  | 'T7'
+  | 'T8'
+  | 'S1'
+  | 'S2'
+  | 'S3'
+  | 'S4'
+  | 'S5';
 
 export interface RouteSample {
   key: string;
@@ -196,6 +218,117 @@ const TRIAL_ENTERPRISE_SAMPLES: RouteSample[] = [
     owner: 'T8',
     workspace: 'enterprise',
     url: `${E}/disclosures/impacts?type=impact`,
+  },
+];
+
+/**
+ * Scope1・2 の算定と照合（2026-10-16 の要望。P90〜P98）の画面・状態。どの役割でも primary は 1 つ以下:
+ * 見出しの主操作（算定を実行・係数セットを取り込む・規則を保存・活動量を取り込む・照合する・有効にする・確定する・
+ * Data Point に下書き反映）は書きの権限が無ければ出さないか押せない理由付き。欄（?new=1・?import=1・?reconcile=1・
+ * ?record=1）を開いた状態は欄の送信が唯一の primary（見出しの主操作を隠す）。詳細の ID は Fixture の定数
+ */
+const CALC = `${E}/ghg/calculation`;
+/** Fixture の照合 R-1 の米国工場 Scope1（合計だけの既存結果・原因不明〔残差〕）の項目 */
+const RESIDUAL_ITEM = encodeURIComponent(`${GHG_FIXTURE_IDS.units.us}|scope1|`);
+const GHG_CALC_SAMPLES: RouteSample[] = [
+  // ---- S3 概要（メニューの葉。開示優先モードのメニューにもある）・算定明細
+  { key: CALC, owner: 'S3', workspace: 'enterprise', url: CALC, disclosureFirst: true },
+  {
+    key: `${CALC}/runs/[runId]`,
+    owner: 'S3',
+    workspace: 'enterprise',
+    url: `${CALC}/runs/${GHG_FIXTURE_IDS.run}`,
+  },
+  // ---- S1 排出係数（セット・割当・取込の欄）・係数セットの詳細・算定ルール（提案の欄）
+  { key: `${CALC}/factors`, owner: 'S1', workspace: 'enterprise', url: `${CALC}/factors` },
+  {
+    key: `${CALC}/factors?view=assignments`,
+    owner: 'S1',
+    workspace: 'enterprise',
+    url: `${CALC}/factors?view=assignments`,
+  },
+  {
+    key: `${CALC}/factors?new=1`,
+    owner: 'S1',
+    workspace: 'enterprise',
+    url: `${CALC}/factors?new=1`,
+  },
+  {
+    key: `${CALC}/factors/[setId]`,
+    owner: 'S1',
+    workspace: 'enterprise',
+    url: `${CALC}/factors/${GHG_FIXTURE_IDS.sets.org2025}`,
+  },
+  { key: `${CALC}/rules`, owner: 'S1', workspace: 'enterprise', url: `${CALC}/rules` },
+  {
+    key: `${CALC}/rules?new=1`,
+    owner: 'S1',
+    workspace: 'enterprise',
+    url: `${CALC}/rules?new=1`,
+  },
+  // ---- S2 活動量（取込の欄）・取込の詳細（Fixture の確定済みのバッチ）
+  { key: `${CALC}/activity`, owner: 'S2', workspace: 'enterprise', url: `${CALC}/activity` },
+  {
+    key: `${CALC}/activity?new=1`,
+    owner: 'S2',
+    workspace: 'enterprise',
+    url: `${CALC}/activity?new=1`,
+  },
+  {
+    key: `${CALC}/activity/[batchId]`,
+    owner: 'S2',
+    workspace: 'enterprise',
+    url: `${CALC}/activity/${ghgBatchId('EAST', 'transport')}`,
+  },
+  // ---- S4 照合（取込の欄・照合の欄）・照合の詳細（絞り込み・仮説の再計算・原因の記録の欄）
+  {
+    key: `${CALC}/reconciliation`,
+    owner: 'S4',
+    workspace: 'enterprise',
+    url: `${CALC}/reconciliation`,
+  },
+  {
+    key: `${CALC}/reconciliation?import=1`,
+    owner: 'S4',
+    workspace: 'enterprise',
+    url: `${CALC}/reconciliation?import=1`,
+  },
+  {
+    key: `${CALC}/reconciliation?reconcile=1`,
+    owner: 'S4',
+    workspace: 'enterprise',
+    url: `${CALC}/reconciliation?reconcile=1`,
+  },
+  {
+    key: `${CALC}/reconciliation/[id]`,
+    owner: 'S4',
+    workspace: 'enterprise',
+    url: `${CALC}/reconciliation/${GHG_FIXTURE_IDS.reconciliation}`,
+  },
+  {
+    key: `${CALC}/reconciliation/[id]?verdict=needs_review`,
+    owner: 'S4',
+    workspace: 'enterprise',
+    url: `${CALC}/reconciliation/${GHG_FIXTURE_IDS.reconciliation}?verdict=needs_review`,
+  },
+  {
+    key: `${CALC}/reconciliation/[id]?whatif=set:[setId]`,
+    owner: 'S4',
+    workspace: 'enterprise',
+    url: `${CALC}/reconciliation/${GHG_FIXTURE_IDS.reconciliation}?whatif=set:${GHG_FIXTURE_IDS.sets.org2024}`,
+  },
+  {
+    key: `${CALC}/reconciliation/[id]?record=1&item=[itemKey]`,
+    owner: 'S4',
+    workspace: 'enterprise',
+    url: `${CALC}/reconciliation/${GHG_FIXTURE_IDS.reconciliation}?record=1&item=${RESIDUAL_ITEM}`,
+  },
+  // ---- S5 トライアル概要（算定の検証範囲・無償の範囲）・改善管理表の別途協議の絞り込み
+  {
+    key: `${E}/trial?tab=feedback&cost=separate_estimate`,
+    owner: 'S5',
+    workspace: 'enterprise',
+    url: `${E}/trial?tab=feedback&cost=separate_estimate`,
   },
 ];
 
@@ -514,6 +647,7 @@ export const ENTERPRISE_SAMPLES: RouteSample[] = [
   { key: '/notifications', owner: 'B6', workspace: 'enterprise', url: '/notifications' },
   { key: '/profile', owner: 'B6', workspace: 'enterprise', url: '/profile' },
   ...TRIAL_ENTERPRISE_SAMPLES,
+  ...GHG_CALC_SAMPLES,
 ];
 
 const ENG = '/assurance/engagements/[engagementId]';

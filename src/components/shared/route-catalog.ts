@@ -459,6 +459,28 @@ const BASE_ROUTES: readonly RouteCatalogEntry[] = [
     menu: 'both',
   },
   {
+    // P90（2026-10-16 の要望。plan K2）。下位の P91〜P98 は route-catalog-ext/s1〜s4.ts（menu: 'none'）
+    pattern: `${E}/ghg/calculation`,
+    label: 'Scope1・2算定',
+    path: ['GHG', 'Scope1・2算定'],
+    href: `${E}/ghg/calculation`,
+    // 画面の読み込み（loadCalcContext → トライアル計画・拠点の状態）が enterprise.data.read を求める
+    permission: 'enterprise.data.read',
+    workspace: 'enterprise',
+    keywords: [
+      'GHG',
+      'scope1',
+      'scope2',
+      '排出係数',
+      '活動量',
+      '改良トンキロ法',
+      '算定ルール',
+      '照合',
+      '既存の算定結果',
+    ],
+    menu: 'both',
+  },
+  {
     pattern: `${E}/ghg/suppliers`,
     label: 'Scope3データ取込（Cat.1）',
     path: ['GHG', 'Scope3データ取込', 'Cat.1'],

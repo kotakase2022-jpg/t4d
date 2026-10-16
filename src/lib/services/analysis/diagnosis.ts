@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { assertCan, assertEnterpriseWorkspace, can, NotFoundError } from '@/lib/authorization/can';
+import { sameFiscalYearEnd } from '@/lib/domain/period-comparability';
 import { getReferenceDate } from '@/lib/clock';
 import {
   computeConsolidatedAggregation,
@@ -665,7 +666,10 @@ export async function loadDiagnosis(
   }
   const units = input.units.filter((u) => u.organizationId === organizationId);
   const metrics = input.metrics.filter((m) => m.organizationId === organizationId);
-  const periods = input.periods.filter((p) => p.organizationId === organizationId);
+  // 決算月が同じ期間だけ（暦年と年度を同じ推移・前年に並べない。plan K10）
+  const periods = input.periods.filter(
+    (p) => p.organizationId === organizationId && sameFiscalYearEnd(p, input.period),
+  );
   const referenceDate = input.referenceDate ?? getReferenceDate();
   const scoped: DiagnosisInput = { ...input, units, metrics, periods };
 

@@ -10,7 +10,7 @@ import { toJstDate } from '@/lib/format/datetime';
 import { getDb } from '@/lib/repositories';
 import { summarizeScenarios } from '@/lib/services/trial-evaluation';
 import { summarizeOpenIssues } from '@/lib/services/trial-feedback';
-import { loadTrialProgram } from '@/lib/services/trial-program';
+import { loadTrialProgram, loadTrialScopeSignals } from '@/lib/services/trial-program';
 import { summarizeTimings } from '@/lib/services/trial-timing';
 import { reductionTargetOf } from '@/lib/domain/trial-metrics';
 
@@ -36,6 +36,8 @@ export async function GET(request: Request) {
     summarizeTimings(db, ctx),
     loadTrialProgram(db, ctx),
   ]);
+  // 無償の範囲の合意と別途協議の 4 区分（トライアル概要と同じ関数。金額は出さない）
+  const signals = await loadTrialScopeSignals(db, ctx, program);
   const generatedAt = new Date().toISOString();
   const build = getBuildInfo().commit;
   const sheets = buildTrialReportSheets({
@@ -43,6 +45,11 @@ export async function GET(request: Request) {
     feedback,
     timings,
     target: program ? reductionTargetOf(program.options) : null,
+    scope: {
+      agreement: program?.agreements.freeScope ?? null,
+      signals: signals.signals,
+      unclassifiedSeparate: signals.unclassifiedSeparate,
+    },
     demo: ctx.demo || db.mode === 'demo',
     build,
     generatedAt,

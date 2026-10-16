@@ -130,9 +130,10 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
         ? `単位「${unitNorm.unit}」に合う係数が候補にありません（確定時にエラーになります）`
         : null;
 
+  // 選択の値は係数の参照（同じコードに年度が 2 つ以上あれば「コード@年度」。年度を明示して選ぶ）
   const activeFactor =
-    (selectedCode !== '' ? row.factorCandidates.find((c) => c.code === selectedCode) : null) ??
-    (row.factor?.code === selectedCode ? row.factor : null);
+    (selectedCode !== '' ? row.factorCandidates.find((c) => c.ref === selectedCode) : null) ??
+    (row.factor?.ref === selectedCode ? row.factor : null);
   const effectiveAmount =
     hasAmount && unitNorm !== null && unitCompatible ? amountNumber * unitNorm.multiplier : null;
   const emissions = !importable
@@ -238,7 +239,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
                   <option value="">原単位を選択…</option>
                 )}
                 {row.factorCandidates.map((candidate) => (
-                  <option key={candidate.id} value={candidate.code}>
+                  <option key={candidate.id} value={candidate.ref}>
                     {candidateOptionLabel(candidate)}
                   </option>
                 ))}
@@ -253,7 +254,7 @@ const SupplierPreviewRowView = React.memo(function SupplierPreviewRowView({
           </span>
         ) : row.factor ? (
           <>
-            <input type="hidden" name={`factorCode:${rowKey}`} value={row.factor.code} />
+            <input type="hidden" name={`factorCode:${rowKey}`} value={row.factor.ref} />
             {row.factor.name}
             <span className="ml-1 font-mono text-ink-muted">{row.factor.code}</span>
             {row.factorReason && (
@@ -603,7 +604,7 @@ export function SupplierUploadForm({ reportingPeriodId }: { reportingPeriodId: s
                               selectedCode={
                                 chosenFactors[rowKey] ??
                                 row.recommendedFactorCode ??
-                                row.factor?.code ??
+                                row.factor?.ref ??
                                 ''
                               }
                               onAmountChange={onAmountChange}

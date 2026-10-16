@@ -255,6 +255,82 @@ describe('トリアージと再検証（enterprise.org.manage）', () => {
   });
 });
 
+describe('別途協議の区分（2026-10-16 の要望 ④。0060 の scope_kind）', () => {
+  function triageInput(itemId: string, costClass: string, scopeKind?: string | null) {
+    return {
+      itemId,
+      status: 'triaged',
+      costClass,
+      responsePolicy: '',
+      ownerLabel: '',
+      dueOn: null,
+      mandatoryRequirement: false,
+      resolvedInVersion: '',
+      agreed: false,
+      scopeKind,
+    };
+  }
+
+  it('費用区分が別途協議なら区分を記録する。監査ログに区分を書く。Cookie から戻せる', async () => {
+    const item = fixture.trialFeedbackItems.find(
+      (f) => f.organizationId === ORG_IDS.aomi && f.costClass !== 'separate_estimate',
+    )!;
+    const updated = await triageFeedback(
+      db,
+      admin(),
+      triageInput(item.id, 'separate_estimate', 'system_integration'),
+    );
+    expect(updated).toMatchObject({
+      costClass: 'separate_estimate',
+      scopeKind: 'system_integration',
+    });
+    const event = fixture.auditEvents.filter((e) => e.resourceId === item.id).at(-1)!;
+    expect(event.afterSummary).toContain('別途協議（外部システムとの個別連携）');
+    const restored = replayRow('trialFeedbackItems', updated).trialFeedbackItems.find(
+      (row) => row.id === item.id,
+    )!;
+    expect(restored.scopeKind).toBe('system_integration');
+    const summary = (await summarizeOpenIssues(db, admin())).summary;
+    expect(summary.separateByScopeKind.system_integration).toBe(1);
+  });
+
+  it('費用区分が別途協議なのに区分が空なら断る。知らない区分も断る', async () => {
+    const item = fixture.trialFeedbackItems.find((f) => f.organizationId === ORG_IDS.aomi)!;
+    await expect(
+      triageFeedback(db, admin(), triageInput(item.id, 'separate_estimate', '')),
+    ).rejects.toThrow('別途協議の区分（拠点の追加');
+    await expect(
+      triageFeedback(db, admin(), triageInput(item.id, 'separate_estimate', 'other_kind')),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('別途協議以外で区分を入れると断る（0060 の CHECK と同じ）。費用区分を変えると区分を外す', async () => {
+    const separate = fixture.trialFeedbackItems.find(
+      (f) => f.organizationId === ORG_IDS.aomi && f.scopeKind === 'custom_development',
+    )!;
+    await expect(
+      triageFeedback(db, admin(), triageInput(separate.id, 'maintenance', 'custom_development')),
+    ).rejects.toThrow('費用区分が「別途協議」のときだけ選べます');
+    const cleared = await triageFeedback(db, admin(), triageInput(separate.id, 'maintenance', ''));
+    expect(cleared).toMatchObject({ costClass: 'maintenance', scopeKind: null });
+  });
+
+  it('区分を渡さない（以前の呼び方）なら、別途協議のままの項目の区分を保つ', async () => {
+    const separate = fixture.trialFeedbackItems.find(
+      (f) => f.organizationId === ORG_IDS.aomi && f.scopeKind === 'custom_development',
+    )!;
+    const kept = await triageFeedback(db, admin(), triageInput(separate.id, 'separate_estimate'));
+    expect(kept.scopeKind).toBe('custom_development');
+  });
+
+  it('組織の管理の権限が無い人は区分を変えられない', async () => {
+    const item = fixture.trialFeedbackItems.find((f) => f.organizationId === ORG_IDS.aomi)!;
+    await expect(
+      triageFeedback(db, author(), triageInput(item.id, 'separate_estimate', 'site_expansion')),
+    ).rejects.toBeInstanceOf(AuthorizationError);
+  });
+});
+
 describe('summarizeOpenIssues', () => {
   it('Fixture: 必須要件 × 重大 × 未解決 1 件。解消を確認すると 0 件になる', async () => {
     const before = await summarizeOpenIssues(db, author());

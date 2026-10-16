@@ -17,6 +17,14 @@ import {
   isCsrdCheckedTable,
 } from './demo-csrd-checks';
 import {
+  GHG_APPEND_ONLY_TABLES,
+  GHG_DEFERRED_ORDER,
+  GHG_PERSISTED_TABLES,
+  acceptGhgEdit,
+  isGhgCheckedTable,
+  restoreRunLines,
+} from './demo-ghg-checks';
+import {
   TRIAL_APPEND_ONLY_TABLES,
   TRIAL_DEFERRED_ORDER,
   TRIAL_PERSISTED_TABLES,
@@ -341,6 +349,9 @@ const PERSISTED_TABLES = new Set<TableName>([
   // 戻すときは demo-trial-checks.ts が DB と同じ検査（組織・権限・職務分離・本人名義・大きさ）を通す。
   // メンバーシップは架空メンバーの担当拠点・状態の変更だけ（実在のデモ利用者の行・新しい行は戻さない）
   ...TRIAL_PERSISTED_TABLES,
+  // Scope1・2 の算定と照合（2026-10-16 の要望。plan §2.7）。算定行は持ち回さない（記録を戻したときに作り直す）。
+  // 戻すときは demo-ghg-checks.ts が DB と同じ検査（組織・権限・拠点スコープ・職務分離・状態の遷移・大きさ）を通す
+  ...GHG_PERSISTED_TABLES,
 ]);
 
 /**
@@ -366,6 +377,8 @@ const APPEND_ONLY_TABLES: ReadonlySet<string> = new Set([
   'approvals',
   // トライアル対応の追記専用の表（0049〜0057 の forbid_mutation）
   ...TRIAL_APPEND_ONLY_TABLES,
+  // Scope1・2 の算定と照合の追記専用の表（0062〜0065 の forbid_mutation）
+  ...GHG_APPEND_ONLY_TABLES,
 ]);
 
 /**
@@ -431,6 +444,8 @@ const DEFERRED_ORDER: Readonly<Record<string, number>> = {
   ...CSRD_DEFERRED_ORDER,
   // トライアル対応: 判断 → 履歴・申請、スナップショット → 共有した写し → コメント → 回答、道筋 → 段階
   ...TRIAL_DEFERRED_ORDER,
+  // Scope1・2 の算定と照合: セット → 係数 → 割当、方針・規則・バッチ → 行 → 算定の記録 → 既存結果 → 照合 → 確認
+  ...GHG_DEFERRED_ORDER,
 };
 
 /**
@@ -496,6 +511,8 @@ const SNAPSHOT_INDEPENDENT_TABLES: ReadonlySet<string> = new Set([
       t !== 'projectRequirementAssessmentEvents' &&
       t !== 'requirementExclusionEvents',
   ),
+  // Scope1・2 の算定と照合の表は開示プロジェクトのスナップショットに含まれない
+  ...GHG_PERSISTED_TABLES,
 ]);
 
 /**
@@ -640,7 +657,12 @@ function applyOne(db: FixtureDb, edit: DemoEdit, ctx: ApplyContext): ApplyOutcom
       if (isSnapshot) ctx.failedAt.set(edit, ctx.generation);
       return 'retry';
     }
-    return push(expanded);
+    const outcome = push(expanded);
+    // 算定行は持ち回さない。記録を戻したら、同じ純関数で作り直した算定行をメモリへ足す（ID は決定論）
+    if (edit.t === 'ghgCalculationRuns') {
+      restoreRunLines(db, expanded as unknown as Parameters<typeof restoreRunLines>[1]);
+    }
+    return outcome;
   }
   if (!row && !('id' in edit.v)) return 'settled';
   // 追記専用の表の既にある行は書き換えない（何度繰り返しても変わらない）
@@ -733,6 +755,9 @@ const TRIAL_ADDED_COLUMN_DEFAULTS: Readonly<Record<string, Record<string, unknow
   ssbjAnalysisSettings: { frameworkVersionId: null },
   projectFrameworks: { taxonomyPackageId: null },
   approvalRoutes: { purpose: 'default' },
+  // 2026-10-16 の要望の対応（0060）で足した列
+  trialFeedbackItems: { scopeKind: null },
+  organizationDataTerms: { backupResidualDays: null },
 };
 
 /**
@@ -1735,6 +1760,12 @@ function acceptEdit(
       // CSRD の表と割当（0044〜0046・収集項目）は DB の規則と同じ検査を通す
       if (isCsrdCheckedTable(table)) {
         return acceptCsrdEdit(db, table, existing, next, (organizationId, userId, permission) =>
+          hasPermission(db, organizationId, userId, permission),
+        );
+      }
+      // Scope1・2 の算定と照合の表（0061〜0065）も DB の規則と同じ検査を通す
+      if (isGhgCheckedTable(table)) {
+        return acceptGhgEdit(db, table, existing, next, (organizationId, userId, permission) =>
           hasPermission(db, organizationId, userId, permission),
         );
       }

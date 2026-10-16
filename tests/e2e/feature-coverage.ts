@@ -2,7 +2,7 @@
  * 機能（Server Action）→ その機能を通す E2E の対応表（docs/ui-redesign/plan.md §5.1-1・IF §7.4）。
  *
  * 初期値は docs/ui-redesign/inventory-features.md §3 の E2E 列（棚卸し 2026-10-07）。F145〜F201 はトライアル対応
- * （2026-10。§3.14）で足した機能。
+ * （2026-10。§3.14）、F202〜F221 は Scope1・2 の算定と照合（2026-10-16。§3.15）で足した機能。
  * tests/unit/feature-coverage.test.ts が (a) §3 の全機能が表にあること、(b) 参照先の spec が実在すること、
  * (c) Action の名前が実在することを検査する。操作を L2 へ移して spec を直したら、ここも合わせて直す。
  * NO_E2E_YET は棚卸しの時点で E2E が無かった機能（再設計で壊しても E2E では気づけない。Stage C が足す）。
@@ -1051,5 +1051,106 @@ export const FEATURE_COVERAGE: Record<string, FeatureCoverage> = {
     name: '定性情報の要求事項の AI 候補を採用しない（理由）',
     action: 'rejectNarrativeLinksAction',
     specs: ['tests/e2e/trial-content-impact.spec.ts'],
+  },
+  // ---- Scope1・2 の算定と照合（2026-10-16 の要望。inventory-features.md §3.15）
+  F202: {
+    name: '係数セットの取込を検証する（保存しない。列の対応・小数点の記号）',
+    action: 'previewFactorSetImportAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts', 'tests/e2e/ghg-activity-tonkm.spec.ts'],
+  },
+  F203: {
+    name: '係数セットの取込を確定する（下書きのセット）',
+    action: 'confirmFactorSetImportAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts', 'tests/e2e/ghg-activity-tonkm.spec.ts'],
+  },
+  F204: {
+    name: '係数セットを有効にする（以後、係数を変更できない）',
+    action: 'activateFactorSetAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts'],
+  },
+  F205: {
+    name: '係数セットを取り下げる',
+    action: 'retireFactorSetAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts'],
+  },
+  F206: {
+    name: '係数を割り当てる（期間 × 拠点／国／全社 × 活動）',
+    action: 'saveAssignmentAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts'],
+  },
+  F207: {
+    name: '係数の割当を外す',
+    action: 'clearAssignmentAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts'],
+  },
+  F208: {
+    name: '算定方針（丸め・換算・改良トンキロ法の組織の設定）の新しい版を保存',
+    action: 'savePolicyAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts'],
+  },
+  F209: {
+    name: '区分規則を提案する（根拠必須・適用期間）',
+    action: 'proposeRuleAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts'],
+  },
+  F210: {
+    name: '区分規則を承認する（提案者と別人）',
+    action: 'approveRuleAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts', 'tests/e2e/zzzzzz-ghg-chain.stateless.ts'],
+  },
+  F211: {
+    name: '区分規則を取り下げる',
+    action: 'withdrawRuleAction',
+    specs: ['tests/e2e/ghg-factors-rules.spec.ts'],
+  },
+  F212: {
+    name: '活動量の取込を検証する（保存しない）',
+    action: 'previewActivityImportAction',
+    specs: ['tests/e2e/ghg-activity-tonkm.spec.ts'],
+  },
+  F213: {
+    name: '活動量を確認中として取り込む',
+    action: 'importActivityFileAction',
+    specs: ['tests/e2e/ghg-activity-tonkm.spec.ts'],
+  },
+  F214: {
+    name: '活動量を確定する（差し替えを含む）',
+    action: 'confirmActivityBatchAction',
+    specs: ['tests/e2e/ghg-activity-tonkm.spec.ts'],
+  },
+  F215: {
+    name: '活動量の取込を破棄する',
+    action: 'discardActivityBatchAction',
+    specs: ['tests/e2e/ghg-activity-tonkm.spec.ts'],
+  },
+  F216: {
+    name: '算定を実行する（算定の記録・算定行）',
+    action: 'runGhgCalculationAction',
+    specs: ['tests/e2e/ghg-calculation.spec.ts', 'tests/e2e/zzzzzz-ghg-chain.stateless.ts'],
+  },
+  F217: {
+    name: '算定の記録の報告区分の値を Data Point に下書きとして反映する',
+    action: 'postGhgRunToDataPointsAction',
+    specs: ['tests/e2e/ghg-calculation.spec.ts'],
+  },
+  F218: {
+    name: '既存の算定結果の取込を検証する（保存しない。拠点の対応付けは人が選ぶ）',
+    action: 'previewBaselineImportAction',
+    specs: ['tests/e2e/ghg-reconciliation.spec.ts'],
+  },
+  F219: {
+    name: '既存の算定結果の取込を確定する（追記）',
+    action: 'confirmBaselineImportAction',
+    specs: ['tests/e2e/ghg-reconciliation.spec.ts'],
+  },
+  F220: {
+    name: '既存の算定結果と照合する（許容差は人が入れる）',
+    action: 'reconcileAction',
+    specs: ['tests/e2e/ghg-reconciliation.spec.ts', 'tests/e2e/zzzzzz-ghg-chain.stateless.ts'],
+  },
+  F221: {
+    name: '差異の原因を記録する（本人名義・追記）',
+    action: 'recordCauseAction',
+    specs: ['tests/e2e/ghg-reconciliation.spec.ts', 'tests/e2e/zzzzzz-ghg-chain.stateless.ts'],
   },
 };

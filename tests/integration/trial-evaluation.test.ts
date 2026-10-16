@@ -97,7 +97,7 @@ function replay(table: string, row: object): FixtureDb {
 }
 
 describe('summarizeScenarios', () => {
-  it('Fixture の 7 シナリオと実施 6 件を集計し、n < 3 の率は出さない', async () => {
+  it('Fixture の 8 シナリオと実施 6 件を集計し、n < 3 の率は出さない', async () => {
     const summary = await summarizeScenarios(db, author());
     expect(summary.rows.map((r) => r.scenario.code)).toEqual([
       'TS-01',
@@ -107,6 +107,7 @@ describe('summarizeScenarios', () => {
       'TS-05',
       'TS-06',
       'TS-07',
+      'S-CALC-01',
     ]);
     expect(summary.runCount).toBe(6);
     // 自力で完了 4（TS-01・TS-04・TS-05 のレビュー担当・TS-03）/ 6
@@ -114,8 +115,8 @@ describe('summarizeScenarios', () => {
     const ts05 = summary.rows.find((r) => r.scenario.code === 'TS-05')!;
     expect(ts05.effectiveRunCount).toBe(2);
     expect(ts05.completion.label).toBe('件数不足（n=2）');
-    // 判定は TS-01 合格・TS-04 保留の 2 件 → 合格率は件数不足、未判定 5 件は分母に入れない
-    expect(summary.pass).toMatchObject({ rate: null, n: 2, notJudged: 5 });
+    // 判定は TS-01 合格・TS-04 保留の 2 件 → 合格率は件数不足、未判定 6 件（S-CALC-01 を含む）は分母に入れない
+    expect(summary.pass).toMatchObject({ rate: null, n: 2, notJudged: 6 });
     expect(summary.rows.find((r) => r.scenario.code === 'TS-01')!.state).toBe('pass');
     expect(summary.rows.find((r) => r.scenario.code === 'TS-02')!.state).toBe('not_judged');
   });
@@ -356,7 +357,8 @@ describe('GET /api/exports/trial-report（検証結果・改善管理表の XLSX
     notes.eachRow((row) => noteTexts.push(String(row.getCell(1).value ?? '')));
     expect(noteTexts.some((t) => t.includes('架空のトライアル記録です'))).toBe(true);
     const scenarios = workbook.getWorksheet('シナリオ結果')!;
-    expect(scenarios.rowCount).toBe(8);
+    // 見出し 1 行 ＋ シナリオ 8 件（算定の再現と整合性の確認 S-CALC-01 を含む）
+    expect(scenarios.rowCount).toBe(9);
     // 実施者の氏名は出さない（役割名だけ）
     const runs = workbook.getWorksheet('操作と工数')!;
     const header = (runs.getRow(1).values as unknown[]).map(String);

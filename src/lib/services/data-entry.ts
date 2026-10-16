@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
+
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan } from '@/lib/authorization/can';
 import { contentHash, fid } from '@/lib/fixtures/ids';
@@ -40,10 +42,12 @@ export async function carryForwardFromPreviousPeriod(
     throw new Error('報告期間が見つかりません。');
   }
 
-  const previous =
-    periods
-      .filter((p) => p.organizationId === organizationId && p.endDate < period.startDate)
-      .sort((a, b) => (a.endDate < b.endDate ? 1 : -1))[0] ?? null;
+  // 前年は決算月（終了日の月日）が同じ期間に限る（暦年と年度を取り違えない。plan K10）
+  const previous = previousComparablePeriod(
+    period,
+    periods.filter((p) => p.organizationId === organizationId),
+    'end',
+  );
   if (!previous) throw new Error('複製元となる前年度がありません。');
 
   const [prevRows, currentRows] = await Promise.all([

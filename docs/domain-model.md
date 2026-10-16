@@ -37,36 +37,55 @@ engagements（監査法人所有）
  └ signoffs
 ```
 
+Scope1・2 の算定と照合（2026-10-16。マイグレーション 0060〜0065。企業テナントだけ・監査法人のポリシーは無い）:
+
+```
+organizations（企業）
+ ├ emission_factor_sets（出所 customer_specified / public_reference / fixture。draft → active → retired）
+ │   └ emission_factors（セット付きの行は draft のときだけ追加・変更。Cat.1 のセット無しの行は従来どおり）
+ ├ emission_factor_assignments（期間 × 拠点／国／全社 × 活動 × 基準 → 係数。active のセットの係数だけ）
+ ├ ghg_calculation_policies（期間ごとの版。丸め・換算・改良トンキロ法の組織の設定。追記専用）
+ ├ ghg_classification_rules（既定区分 → 報告区分。proposed → approved（提案者以外）／withdrawn）
+ ├ ghg_activity_batches ─ ghg_activity_lines（draft → confirmed → superseded／discarded。行は追記専用）
+ ├ ghg_calculation_runs ─ ghg_calculation_lines（算定の記録と各段の値。追記専用。入力ハッシュ・エンジンの版）
+ └ ghg_baseline_results ─ ghg_reconciliations ─ ghg_reconciliation_notes（既存の算定結果・照合・原因の確認の記録。追記専用）
+```
+
 ---
 
 ## 2. 業務キーと一意制約
 
-| テーブル                   | 一意制約                                                               | 意図                     |
-| -------------------------- | ---------------------------------------------------------------------- | ------------------------ |
-| `organization_memberships` | `(organization_id, user_id)`                                           | 同一組織に重複所属しない |
-| `data_points`              | `(organization_id, metric_id, unit_id, reporting_period_id, boundary)` | Data Point の業務キー    |
-| `data_point_versions`      | `(data_point_id, version_no)`                                          | 版番号の重複防止         |
-| `evidence_links`           | `(target_type, target_id, file_version_id, page, cell_ref)`            | 同一箇所の重複 Link 防止 |
-| `engagement_members`       | `(engagement_id, user_id)`                                             | 重複アサイン防止         |
-| `client_access_grants`     | `(engagement_id, subject_type, subject_id)`                            | 許諾の重複防止           |
-| `assurance_snapshot_items` | `(snapshot_id, source_type, source_id, source_version_id)`             | Snapshot 項目の重複防止  |
-| `sample_items`             | `(sample_id, population_item_id)`                                      | 同一項目の二重抽出防止   |
-| `signoffs`                 | `(engagement_id, signoff_stage, user_id, version)`                     | Sign-off の重複防止      |
-| `ingestion_jobs`           | `(organization_id, idempotency_key)`                                   | ジョブの重複実行防止     |
-| `disclosure_responses`     | `(organization_id, item_id, reporting_period_id)`                      | 回答の重複防止           |
+| テーブル                   | 一意制約                                                                                                                                   | 意図                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `organization_memberships` | `(organization_id, user_id)`                                                                                                               | 同一組織に重複所属しない                             |
+| `data_points`              | `(organization_id, metric_id, unit_id, reporting_period_id, boundary)`                                                                     | Data Point の業務キー                                |
+| `data_point_versions`      | `(data_point_id, version_no)`                                                                                                              | 版番号の重複防止                                     |
+| `evidence_links`           | `(target_type, target_id, file_version_id, page, cell_ref)`                                                                                | 同一箇所の重複 Link 防止                             |
+| `engagement_members`       | `(engagement_id, user_id)`                                                                                                                 | 重複アサイン防止                                     |
+| `client_access_grants`     | `(engagement_id, subject_type, subject_id)`                                                                                                | 許諾の重複防止                                       |
+| `assurance_snapshot_items` | `(snapshot_id, source_type, source_id, source_version_id)`                                                                                 | Snapshot 項目の重複防止                              |
+| `sample_items`             | `(sample_id, population_item_id)`                                                                                                          | 同一項目の二重抽出防止                               |
+| `signoffs`                 | `(engagement_id, signoff_stage, user_id, version)`                                                                                         | Sign-off の重複防止                                  |
+| `ingestion_jobs`           | `(organization_id, idempotency_key)`                                                                                                       | ジョブの重複実行防止                                 |
+| `disclosure_responses`     | `(organization_id, item_id, reporting_period_id)`                                                                                          | 回答の重複防止                                       |
+| `emission_factors`         | セット無し: `(organization_id, code, factor_year)`／セット有り: `(organization_id, factor_set_id, code, factor_year)`（部分一意索引 2 本） | 年度・版の取り違え防止（同じコードの複数年度を区別） |
 
 ## 3. CHECK 制約（業務ルールの DB 化）
 
-| テーブル            | 制約                                                                            | 意味                       |
-| ------------------- | ------------------------------------------------------------------------------- | -------------------------- |
-| `data_points`       | `status <> 'approved' or (approved_by is not null and approved_at is not null)` | 承認には実行者と時刻が必須 |
-| `assurance_tests`   | `reviewed_by is null or prepared_by is not null`                                | レビューには作成が先行する |
-| `assurance_tests`   | `reviewed_by is null or reviewed_by <> prepared_by`                             | **自己レビュー禁止**       |
-| `assurance_issues`  | `status <> 'resolved' or resolution is not null`                                | 解消には解消内容が必須     |
-| `engagements`       | `assurance_firm_id <> client_organization_id`                                   | 自社監査の禁止             |
-| `file_versions`     | `storage_key !~ '\.\.'` ほか                                                    | Path Traversal 防止        |
-| `audit_events`      | `length(before_summary) <= 500` ほか                                            | ログ肥大と PII 混入の抑止  |
-| `reporting_periods` | `end_date > start_date`                                                         | 期間の整合                 |
+| テーブル                   | 制約                                                                            | 意味                               |
+| -------------------------- | ------------------------------------------------------------------------------- | ---------------------------------- |
+| `data_points`              | `status <> 'approved' or (approved_by is not null and approved_at is not null)` | 承認には実行者と時刻が必須         |
+| `assurance_tests`          | `reviewed_by is null or prepared_by is not null`                                | レビューには作成が先行する         |
+| `assurance_tests`          | `reviewed_by is null or reviewed_by <> prepared_by`                             | **自己レビュー禁止**               |
+| `assurance_issues`         | `status <> 'resolved' or resolution is not null`                                | 解消には解消内容が必須             |
+| `engagements`              | `assurance_firm_id <> client_organization_id`                                   | 自社監査の禁止                     |
+| `file_versions`            | `storage_key !~ '\.\.'` ほか                                                    | Path Traversal 防止                |
+| `audit_events`             | `length(before_summary) <= 500` ほか                                            | ログ肥大と PII 混入の抑止          |
+| `reporting_periods`        | `end_date > start_date`                                                         | 期間の整合                         |
+| `ghg_classification_rules` | `approved_by is distinct from proposed_by`（ほかにトリガ・RLS・サービス）       | **提案者は承認できない**           |
+| `ghg_reconciliation_notes` | 原因が「その他」・残差の項目はコメント必須（1,000 字以内）                      | 原因の確認の根拠を残す             |
+| `trial_feedback_items`     | `scope_kind is null or cost_class = 'separate_estimate'`                        | 別途協議の区分は別途協議のときだけ |
+| `organization_data_terms`  | `backup_residual_days` は 0〜400                                                | バックアップの残存期間             |
 
 ## 4. Version 管理
 
@@ -132,19 +151,30 @@ prepared → reviewed → partner_approved
 
 各段階に抑止条件があり、前段が無いと次に進めません。
 
+### 係数のセット・区分規則・活動量（Scope1・2 の算定）
+
+```
+係数のセット: draft → active（以後、係数は変更できない） → retired
+区分規則:     proposed → approved（提案者以外の enterprise.data.approve） / proposed・approved → withdrawn
+活動量:       draft → confirmed（差し替える元は superseded） / draft → discarded
+```
+
+算定の記録・照合・原因の確認の記録は追記専用で、状態を持たない（入力が変わると「入力が変わった」と導く）。
+
 ## 7. Fixture（架空データ）
 
-| 項目       | 内容                                                                                                                          |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 企業 A     | 青海テクノロジー株式会社（本社 / 東日本工場 / 西日本工場 / 欧州販売子会社 / サプライヤー 5 社）                               |
-| 企業 B     | 蒼天マテリアル株式会社（越権テスト用）                                                                                        |
-| 監査法人 A | あおば保証監査法人                                                                                                            |
-| 監査法人 B | くろべ監査法人（越権テスト用）                                                                                                |
-| 報告期間   | FY2025（closed） / FY2026（collecting）                                                                                       |
-| 指標       | 14 種（Scope1/2/3Cat1、エネルギー、水、廃棄物、従業員数、管理職数、女性管理職数・比率、役員総数、女性役員数・比率、取締役数） |
-| Data Point | 64 件（FY2025 32 / FY2026 32）                                                                                                |
-| 保証案件   | ENG-2026-001（FY2026 限定的保証）                                                                                             |
-| Sample     | 10 件 / PBC 5 件 / Issue 3 件 / Review Note 2 件 / Snapshot 後変更 2 件                                                       |
+| 項目       | 内容                                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 企業 A     | 青海テクノロジー株式会社（本社 / 東日本工場 / 西日本工場 / 欧州販売子会社 / サプライヤー 5 社）                                                                                                          |
+| 企業 B     | 蒼天マテリアル株式会社（越権テスト用）                                                                                                                                                                   |
+| 監査法人 A | あおば保証監査法人                                                                                                                                                                                       |
+| 監査法人 B | くろべ監査法人（越権テスト用）                                                                                                                                                                           |
+| 報告期間   | FY2025（closed） / FY2026（collecting）                                                                                                                                                                  |
+| 指標       | 14 種（Scope1/2/3Cat1、エネルギー、水、廃棄物、従業員数、管理職数、女性管理職数・比率、役員総数、女性役員数・比率、取締役数）                                                                            |
+| Data Point | 64 件（FY2025 32 / FY2026 32）                                                                                                                                                                           |
+| 保証案件   | ENG-2026-001（FY2026 限定的保証）                                                                                                                                                                        |
+| GHG の検証 | 検証拠点 5（東日本工場＋架空の海外 4 拠点〔TH・VN・MX・US〕）・期間 CY2025・係数セット 2 版（架空）・活動量・算定の記録 R-1・既存結果 BL-1（6 種の原因を仕込む）・照合 R-1・区分規則 LOGI-01（承認待ち） |
+| Sample     | 10 件 / PBC 5 件 / Issue 3 件 / Review Note 2 件 / Snapshot 後変更 2 件                                                                                                                                  |
 
 ### 意図的な異常データ
 

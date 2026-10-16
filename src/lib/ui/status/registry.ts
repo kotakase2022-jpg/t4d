@@ -16,11 +16,24 @@
  *  requirementCoverage・exclusionApproval・crosswalkRelation・sharedReport・clientNote・reconciliation・
  *  xbrlMapping・xbrlValidation・trialJudgement・trialCompletion・feedbackKind・feedbackStatus・severity・
  *  costClass・dataTerms・cdpOption
+ * Scope1・2 の算定と照合（2026-10-16 の要望）の領域も Stage A が置く（plan §2.5）:
+ *  ghgFactorSet・factorOrigin・ghgRule・ghgActivityBatch・ghgLoadFactorSource・ghgReconItem・ghgCause・
+ *  ghgSiteStatus・trialScopeSignal・subprocessorCategory
  */
 import { aiRun } from './aiRun';
 import { cdpOption } from './cdpOption';
 import { clientNote } from './clientNote';
 import { costClass } from './costClass';
+import { factorOrigin } from './factorOrigin';
+import { ghgActivityBatch } from './ghgActivityBatch';
+import { ghgCause } from './ghgCause';
+import { ghgFactorSet } from './ghgFactorSet';
+import { ghgLoadFactorSource } from './ghgLoadFactorSource';
+import { ghgReconItem } from './ghgReconItem';
+import { ghgRule } from './ghgRule';
+import { ghgSiteStatus } from './ghgSiteStatus';
+import { subprocessorCategory } from './subprocessorCategory';
+import { trialScopeSignal } from './trialScopeSignal';
 import { crosswalkRelation } from './crosswalkRelation';
 import { dataTerms } from './dataTerms';
 import { exclusionApproval } from './exclusionApproval';
@@ -72,6 +85,9 @@ export { SHARED_REPORT_STATES, type SharedReportState } from './sharedReport';
 export { TRIAL_JUDGEMENT_STATES, type TrialJudgementState } from './trialJudgement';
 export { XBRL_MAPPING_STATES, type XbrlMappingState } from './xbrlMapping';
 export { XBRL_VALIDATION_STATES, type XbrlValidationState } from './xbrlValidation';
+export { GHG_CAUSE_STATES, type GhgCauseState } from './ghgCause';
+export { GHG_LOAD_FACTOR_SOURCES, type GhgLoadFactorSource } from './ghgLoadFactorSource';
+export { TRIAL_SCOPE_SIGNAL_STATES, type TrialScopeSignalState } from './trialScopeSignal';
 
 export const STATUS = {
   dataPoint,
@@ -118,6 +134,17 @@ export const STATUS = {
   costClass,
   dataTerms,
   cdpOption,
+  // Scope1・2 の算定と照合（2026-10-16 の要望）
+  ghgFactorSet,
+  factorOrigin,
+  ghgRule,
+  ghgActivityBatch,
+  ghgLoadFactorSource,
+  ghgReconItem,
+  ghgCause,
+  ghgSiteStatus,
+  trialScopeSignal,
+  subprocessorCategory,
 } as const;
 
 export type StatusDomain = keyof typeof STATUS;

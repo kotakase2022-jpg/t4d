@@ -69,6 +69,10 @@ test('シナリオ: 作成担当が実施を記録し、率は件数（n）と�
   );
   // 判定は管理者だけ（作成担当の行の操作に「判定を記録…」は無い）
   await expect(main(page).getByRole('button', { name: /^TS-02 .+ の操作$/ })).toHaveCount(0);
+  // 算定の再現と整合性の確認（主題と判定の目安。「一致」を判定の語に使わない）
+  const calc = table.getByRole('row').filter({ hasText: 'S-CALC-01' });
+  await expect(calc).toContainText('算定の再現と整合性の確認');
+  await expect(calc).not.toContainText('一致');
 
   await table
     .getByRole('row')

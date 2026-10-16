@@ -36,6 +36,11 @@ import { exclusionReasonExcerpt } from '@/lib/domain/requirement-coverage';
 import { CSRD_IDS } from './csrd';
 import { ORG_IDS, PERIOD_IDS, UNIT_IDS, at, dataPointId, day, metricId, userId } from './dataset';
 import { DISCLOSURE_FIRST_IDS } from './disclosure-first';
+import {
+  GHG_FIXTURE_IDS,
+  GHG_ROLLOUT_TOTAL_SITES,
+  GHG_VERIFICATION_UNIT_IDS,
+} from './ghg-verification';
 import { fid } from './ids';
 import type { FixtureDb } from './store';
 import {
@@ -1333,7 +1338,8 @@ const SCENARIOS: ReadonlyArray<{
     | 'output_reuse'
     | 'usability'
     | 'work_time'
-    | 'operations';
+    | 'operations'
+    | 'calculation_reconciliation';
   title: string;
   steps: string;
   targetRole: string;
@@ -1394,6 +1400,17 @@ const SCENARIOS: ReadonlyArray<{
     steps: '手順書に沿って別の環境へ復旧し、件数を照合する',
     targetRole: '管理者',
     criterion: '手順書どおりに復旧でき、件数が一致する',
+  },
+  {
+    // 算定の再現と整合性の確認（2026-10-16 の要望 ③の表現。「一致」を判定に使わない）
+    code: 'S-CALC-01',
+    theme: 'calculation_reconciliation',
+    title: '算定の再現と整合性の確認',
+    steps:
+      '排出係数・算定ルールを設定 → 活動量を取り込む → Scope1・2 を算定 → 既存の算定結果と照合 → 差異の原因を確認',
+    targetRole: '本社サステナビリティ担当・レビュー担当',
+    criterion:
+      '組織指定の排出係数・算定ルールを設定した場合に、既存算定結果との整合性を確認できる。差異が発生した場合にその原因を確認できる。',
   },
 ];
 
@@ -1515,11 +1532,29 @@ function seedTrial(db: FixtureDb): void {
     plannedFiscalYears: 1,
     plannedFiles: 30,
     plannedApprovalLevels: 3,
-    options: {},
+    // 算定の検証範囲・将来の展開対象・無償の範囲の目安・返却／削除の予定日（plan K9。includedUnitIds は変えない）
+    options: {
+      ghgVerification: {
+        periodId: GHG_FIXTURE_IDS.period,
+        unitIds: [...GHG_VERIFICATION_UNIT_IDS],
+        scopes: ['scope1', 'scope2', 'scope2_location'],
+        activityKinds: ['fuel', 'electricity', 'gas', 'transport'],
+      },
+      rollout: {
+        totalSites: GHG_ROLLOUT_TOTAL_SITES,
+        note: '（架空）検証の結果を見て海外の生産拠点へ順に広げる',
+      },
+      freeScope: { pdfFiles: 20 },
+      disposal: { plannedOn: day(170) },
+    },
     agreements: {
       scope: { agreedOn: day(-35), note: '（架空）対象範囲は本社と国内 2 拠点で合意。' },
       decider: { agreedOn: null, note: '（架空）対象外の最終判断者は調整中。' },
       schedule: { agreedOn: day(-35), note: '（架空）定例会は隔週で開催。' },
+      freeScope: {
+        agreedOn: day(-35),
+        note: '（架空）標準機能の範囲は無償、追加開発等は別途協議で合意',
+      },
     },
     endDisposition: 'undecided',
     endAgreedOn: null,
@@ -1608,6 +1643,8 @@ function seedTrial(db: FixtureDb): void {
     status: 'open' | 'triaged' | 'in_progress' | 'resolved' | 'wont_fix' | 'verified';
     policy: string;
     cost: 'maintenance' | 'separate_estimate' | 'undecided';
+    /** 別途協議の区分（費用区分が別途協議のときだけ） */
+    scopeKind?: 'custom_development';
     owner: string;
     due: number | null;
     resolvedIn: string;
@@ -1660,8 +1697,9 @@ function seedTrial(db: FixtureDb): void {
       severity: null,
       mandatory: false,
       status: 'triaged',
-      policy: '（架空）引継ぎ一覧で対応し、一括の付け替えは別途見積とする。',
+      policy: '（架空）引継ぎ一覧で対応し、一括の付け替えは別途協議とする。',
       cost: 'separate_estimate',
+      scopeKind: 'custom_development',
       owner: '開発担当（架空）',
       due: null,
       resolvedIn: '',
@@ -1729,6 +1767,7 @@ function seedTrial(db: FixtureDb): void {
       verifiedAt: null,
       agreed: false,
       environmentVersion: 'fixture',
+      scopeKind: spec.scopeKind ?? null,
       deletedAt: null,
       createdAt,
       updatedAt: createdAt,
@@ -1794,6 +1833,52 @@ function seedDataTermsAndOptions(db: FixtureDb): void {
     note: '（架空）トライアル開始前の確認中の版。',
     createdBy: ADMIN,
     createdAt: at(20),
+    backupResidualDays: null,
+  });
+  // 第 2 版（架空）: 処理を委ねる先を区分ごとに 1 行・秘密保持の根拠・バックアップの残存期間。
+  // 第 1 版は区分なし（古い形の読み替えの確認用に残す）。名称は一般名（実在の事業者名は環境の実態にだけ出す）。
+  // 合意の手続き（合意日・合意者）は確認中のまま（推測で埋めない。画面は「未合意」の項目を数えて示す）
+  db.organizationDataTerms.push({
+    id: fid('organization_data_terms', `${ORG}/2`),
+    organizationId: ORG,
+    versionNo: 2,
+    ndaStatus: 'signed',
+    processingTermsRef: '（架空）データ処理条件 v1.0',
+    storageLocation: '（架空）国内のリージョン',
+    retentionPolicy: '（架空）トライアル終了後 30 日以内に削除',
+    aiTrainingUse: 'not_allowed',
+    aiProviderStorage: 'none',
+    subprocessors: [
+      {
+        category: 'cloud',
+        name: '（架空）クラウド事業者',
+        role: 'データベース・ファイルの保管',
+        location: '（架空）国内のリージョン',
+        confidentialityBasis: '（架空）提供元のデータ処理条件',
+      },
+      {
+        category: 'ai',
+        name: '（架空）AI サービス提供者',
+        role: '文章の候補の生成（採用は利用者が確定）',
+        location: '（架空）提供元の地域',
+        confidentialityBasis: '（架空）学習に使わない設定と提供元の約款',
+      },
+      {
+        category: 'contractor',
+        name: '（架空）運用の委託先',
+        role: '運用の一部',
+        location: '（架空）国内',
+        confidentialityBasis: '（架空）個別の秘密保持契約',
+      },
+    ],
+    returnMethod: '（架空）全データの書き出し（CSV・XLSX）',
+    deletionMethod: '（架空）運営が手順書に従って削除',
+    agreedOn: null,
+    agreedByLabel: '',
+    note: '（架空）処理を委ねる先を区分ごとに記載した版。合意の手続きは確認中。',
+    createdBy: ADMIN,
+    createdAt: at(15),
+    backupResidualDays: 35,
   });
   db.organizationOptions.push(
     {

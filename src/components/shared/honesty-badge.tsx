@@ -5,8 +5,10 @@ import {
   CalendarClock,
   FileWarning,
   FlaskConical,
+  GitCompare,
   Hourglass,
   Lock,
+  Scale,
   Sparkles,
   Stamp,
 } from 'lucide-react';
@@ -37,6 +39,9 @@ export const HONESTY_KINDS = [
   // トライアル対応（2026-10。付録 C）
   'not-filing-ready',
   'internal-approval',
+  // Scope1・2 の算定と照合（2026-10-16 の要望。plan K13）
+  'company-rule',
+  'consistency-check',
 ] as const;
 export type HonestyKind = (typeof HONESTY_KINDS)[number];
 
@@ -100,6 +105,16 @@ export const HONESTY_TEXT: Record<
     detail: '社内の承認を経た版です。第三者保証ではありません。',
     tone: 'neutral',
   },
+  'company-rule': {
+    label: '組織の算定ルール',
+    detail: 'GHG プロトコルの標準区分と異なる区分を含みます。標準区分の値を並べて表示します。',
+    tone: 'brand',
+  },
+  'consistency-check': {
+    label: '整合性の確認',
+    detail: '一致を保証するものではありません。差と原因を示します。',
+    tone: 'neutral',
+  },
 };
 
 const ICONS: Record<HonestyKind, typeof Bot> = {
@@ -114,6 +129,8 @@ const ICONS: Record<HonestyKind, typeof Bot> = {
   'not-effective': CalendarClock,
   'not-filing-ready': FileWarning,
   'internal-approval': Stamp,
+  'company-rule': Scale,
+  'consistency-check': GitCompare,
 };
 
 export function HonestyBadge({ kind, className }: { kind: HonestyKind; className?: string }) {

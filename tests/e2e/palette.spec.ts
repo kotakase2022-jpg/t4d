@@ -81,10 +81,57 @@ test('? でヘルプ（用語集つき）、g → d で非財務データへ', a
   await expect(help).toBeVisible();
   await help.getByRole('tab', { name: '用語集' }).click();
   await expect(help.getByText('Data Room', { exact: true })).toBeVisible();
+  // Scope1・2 の算定と照合（2026-10-16）の用語
+  for (const term of [
+    '改良トンキロ法',
+    '見なし積載率',
+    '報告区分と既定区分',
+    '整合性の確認',
+    '原因別の寄与',
+  ]) {
+    await expect(help.getByText(term, { exact: true })).toBeVisible();
+  }
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
   await page.keyboard.press('g');
   await page.keyboard.press('d');
   await page.waitForURL('**/enterprise/data');
+});
+
+test('Scope1・2 の算定の操作: 最終承認者は「区分規則を承認する」で承認待ちの規則へ移るだけ（承認はしない）', async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.approver);
+  await page.keyboard.press('Control+k');
+  await input(page).fill('区分規則');
+  await page
+    .getByRole('group', { name: '操作' })
+    .getByRole('option', { name: /区分規則を承認する/ })
+    .click();
+  await page.waitForURL(/\/enterprise\/ghg\/calculation\/rules\?status=proposed/);
+  // 移っただけで、Fixture の区分規則は承認待ちのまま（承認は行の操作で人が押す）
+  await expect(
+    page.locator('#t4d-main [data-status-domain="ghgRule"][data-status-value="proposed"]').first(),
+  ).toBeVisible();
+});
+
+test('Scope1・2 の算定の操作: 本社サステナ担当は「係数セットを取り込む」で取込の欄を開いた排出係数へ移る', async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.sustainability);
+  await page.keyboard.press('Control+k');
+  await input(page).fill('係数セット');
+  await page
+    .getByRole('group', { name: '操作' })
+    .getByRole('option', { name: /係数セットを取り込む/ })
+    .click();
+  await page.waitForURL(/\/enterprise\/ghg\/calculation\/factors\?new=1/);
+  await expect(page.getByRole('region', { name: '係数セットを取り込む' })).toBeVisible();
+  // レビュー担当（書きの権限なし）には取込・算定・照合の操作を出さない
+  await loginAs(page, DEMO_USERS.reviewer);
+  await page.keyboard.press('Control+k');
+  await input(page).fill('照合');
+  await expect(page.getByRole('option', { name: /既存結果と照合する/ })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: /算定を実行する/ })).toHaveCount(0);
 });

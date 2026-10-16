@@ -4,6 +4,10 @@ import { ASSURANCE_SETTINGS_FLASH } from './assurance-settings';
 import { CONTENT_IMPACT_FLASH } from './content-impact';
 import { CSRD_FLASH } from './csrd';
 import { DATA_FLASH } from './data';
+import { GHG_ACTIVITY_FLASH } from './ghg-activity';
+import { GHG_CALCULATION_FLASH } from './ghg-calculation';
+import { GHG_FACTORS_RULES_FLASH } from './ghg-factors-rules';
+import { GHG_RECONCILIATION_FLASH } from './ghg-reconciliation';
 import { PROJECTS_FLASH } from './projects';
 import { REQUIREMENTS_FLASH } from './requirements';
 import { SSBJ_CDP_FLASH } from './ssbj-cdp';
@@ -23,6 +27,10 @@ const PARTS: readonly FlashRegistry[] = [
   ADMIN_FLASH,
   TRIAL_FLASH,
   CONTENT_IMPACT_FLASH,
+  GHG_RECONCILIATION_FLASH,
+  GHG_ACTIVITY_FLASH,
+  GHG_CALCULATION_FLASH,
+  GHG_FACTORS_RULES_FLASH,
 ];
 
 /** 同じキーを 2 つのファイルに書くと、後のものが黙って勝つ。読み込み時に止める */

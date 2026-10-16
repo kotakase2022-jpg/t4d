@@ -15,15 +15,22 @@ import {
   type ReductionTarget,
   type TaskReduction,
 } from '@/lib/domain/trial-metrics';
+import {
+  SEPARATE_CONSULTATION_LABELS,
+  signalCountLabel,
+  type ScopeSignal,
+} from '@/lib/domain/trial-scope';
 import type { ScenarioSummary } from '@/lib/services/trial-evaluation';
 import type { FeedbackOverview } from '@/lib/services/trial-feedback';
 import type { TimingSummary } from '@/lib/services/trial-timing';
 import { statusLabel } from '@/lib/ui/status/registry';
+import type { TrialAgreement } from '@/types/domain';
 
 /**
  * 検証結果・改善管理表の XLSX（トライアル対応 NF-33・NF-34・NF-35。スライド 11 の成果物 #02）。
  *
  * シート: シナリオ結果・操作と工数・改善管理表・作業時間・集計・注記。
+ *  - 集計に、無償の範囲の合意と別途協議の 4 区分の信号（トライアル概要と同じ関数の結果。金額は出さない）
  *  - 率は件数（n）と測り方を併記し、件数不足は率を出さない（画面と同じ関数の結果をそのまま書く）
  *  - 実施者の氏名は出さない（役割名だけ。共有先で個人を評価しないため）
  *  - 利用者が入力した文字列は数式として解釈されないよう無害化する（neutralizeFormula）
@@ -39,6 +46,12 @@ export interface TrialReportInput {
   /** 出力した環境の版 */
   build: string;
   generatedAt: string;
+  /** 無償の範囲の合意と別途協議の 4 区分の信号（trial-program.ts の loadTrialScopeSignals） */
+  scope?: {
+    agreement: TrialAgreement | null;
+    signals: ScopeSignal[];
+    unclassifiedSeparate: number;
+  };
 }
 
 const text = (value: string | null | undefined): string => neutralizeFormula(value ?? '');
@@ -62,6 +75,7 @@ export function trialReportNotes(input: { demo: boolean; build: string; generate
     '目標は結果とは別に示しています（目標を達成したかの判定はしていません）。',
     '判定は評価者が記録したものです。測定値の候補はアプリが出しますが、判定は人が行います。',
     '利用者の操作は自動で追跡していません。実施・作業時間は人が記録したものです。',
+    '別途協議の区分の「別途協議の目安を超過」は別途協議の候補であって確定ではありません（操作は止めていません）。金額は扱っていません。',
   ];
   if (input.demo) {
     notes.unshift('架空のトライアル記録です。実測値・実際の効果ではありません（デモデータ）。');
@@ -89,6 +103,35 @@ function reductionColumns(prefix: '現行' | 'T4D', side: 'baseline' | 't4d') {
       value: (r: TaskReduction) =>
         r[side].methods.map((m) => TRIAL_TIMING_METHOD_LABELS[m]).join('・') || '—',
     },
+  ];
+}
+
+/** 集計の行: 無償の範囲の合意と別途協議の 4 区分（区分ごとに状態・件数／目安・数えたもの） */
+function scopeRows(
+  scope: TrialReportInput['scope'],
+): Array<{ item: string; value: string; note: string }> {
+  if (!scope) return [];
+  const agreement = scope.agreement;
+  return [
+    {
+      item: '無償の範囲の合意',
+      value: agreement?.agreedOn ? `合意済み（${formatJstDate(agreement.agreedOn)}）` : '未合意',
+      note: text(agreement?.note),
+    },
+    ...scope.signals.map((signal) => ({
+      item: `別途協議の区分: ${signal.label}`,
+      value: `${statusLabel('trialScopeSignal', signal.state)}（${signalCountLabel(signal)}）`,
+      note: [signal.measured, signal.detail].filter((v) => v !== '').join('。'),
+    })),
+    ...(scope.unclassifiedSeparate > 0
+      ? [
+          {
+            item: '別途協議（区分なし）',
+            value: `${scope.unclassifiedSeparate} 件`,
+            note: 'どの区分にも数えていません（改善管理表で区分を選んでください）',
+          },
+        ]
+      : []),
   ];
 }
 
@@ -135,6 +178,7 @@ export function buildTrialReportSheets(input: TrialReportInput): ExportSheet<any
       value: reductionTargetLabel(input.target),
       note: '結果とは別に示す',
     },
+    ...scopeRows(input.scope),
     ...timings.tasks.map((task) => ({
       item: `作業時間: ${TRIAL_TASK_LABELS[task.taskKey]}`,
       value: task.label,
@@ -242,6 +286,16 @@ export function buildTrialReportSheets(input: TrialReportInput): ExportSheet<any
         { key: 'owner', header: '担当', value: (r) => text(r.ownerLabel) },
         { key: 'due', header: '期限', value: (r) => (r.dueOn ? formatJstDate(r.dueOn) : '') },
         { key: 'cost', header: '費用区分', value: (r) => statusLabel('costClass', r.costClass) },
+        {
+          key: 'scopeKind',
+          header: '別途協議の区分',
+          value: (r) =>
+            r.scopeKind
+              ? SEPARATE_CONSULTATION_LABELS[
+                  r.scopeKind as keyof typeof SEPARATE_CONSULTATION_LABELS
+                ]
+              : '',
+        },
         { key: 'version', header: '反映した版', value: (r) => text(r.resolvedInVersion) },
         {
           key: 'verification',

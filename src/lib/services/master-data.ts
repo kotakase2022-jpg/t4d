@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { isIsoCountryCode, normalizeCountryCode } from '@/lib/domain/country-code';
+
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, can, NotFoundError } from '@/lib/authorization/can';
 import { fid } from '@/lib/fixtures/ids';
@@ -44,6 +46,20 @@ function requireText(raw: string, label: string, max = 200): string {
   const value = raw.trim();
   if (!value) throw new ValidationError(`${label}を入力してください。`);
   if (value.length > max) throw new ValidationError(`${label}は${max}文字以内で入力してください。`);
+  return value;
+}
+
+/**
+ * 国コードは ISO 3166-1 alpha-2（2 文字）に限る（plan CR-18）。国別の係数の割当は国コードの一致で引くため、
+ * 「JPN」「Japan」が入ると国の割当が黙って外れる
+ */
+function requireCountryCode(raw: string): string {
+  const value = normalizeCountryCode(raw);
+  if (!isIsoCountryCode(value)) {
+    throw new ValidationError(
+      '国コードは ISO 3166-1 の 2 文字（例: JP・TH・US）で入力してください。',
+    );
+  }
   return value;
 }
 
@@ -282,7 +298,7 @@ export function parseOrganizationUnitInput(get: (key: string) => string): Organi
     name: requireText(get('name'), '組織名'),
     unitType: oneOf(UNIT_TYPES, get('unitType'), '種別'),
     parentId: get('parentId').trim() || null,
-    countryCode: requireText(get('countryCode') || 'JP', '国コード', 3),
+    countryCode: requireCountryCode(get('countryCode') || 'JP'),
     currencyCode: requireText(get('currencyCode') || 'JPY', '通貨コード', 3),
     timezone: get('timezone').trim() || 'Asia/Tokyo',
     consolidationMethod,

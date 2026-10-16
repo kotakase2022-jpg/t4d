@@ -17,10 +17,13 @@ import { relinkSupplierFactorAction } from '../../actions';
  */
 
 export interface RelinkCandidate {
+  /** 選択の値（係数コード。同じコードに年度が 2 つ以上あれば「コード@年度」。年度を明示して選ぶ） */
+  ref: string;
   code: string;
   name: string;
   factorValue: number;
   factorUnit: string;
+  factorYear: number;
 }
 
 function roundEmissions(value: number): number {
@@ -35,7 +38,7 @@ export function FactorRelinkDialog({
   activityAmount,
   activityUnit,
   currentValue,
-  currentCode,
+  currentRef,
   candidates,
 }: {
   reportingPeriodId: string;
@@ -45,12 +48,13 @@ export function FactorRelinkDialog({
   activityAmount: number;
   activityUnit: string;
   currentValue: number;
-  currentCode: string;
+  /** いまの係数の参照（不明なら空） */
+  currentRef: string;
   candidates: readonly RelinkCandidate[];
 }) {
-  const [selected, setSelected] = React.useState(currentCode || (candidates[0]?.code ?? ''));
-  const current = candidates.find((c) => c.code === currentCode);
-  const next = candidates.find((c) => c.code === selected);
+  const [selected, setSelected] = React.useState(currentRef || (candidates[0]?.ref ?? ''));
+  const current = candidates.find((c) => c.ref === currentRef);
+  const next = candidates.find((c) => c.ref === selected);
   const nextValue = next ? roundEmissions(activityAmount * next.factorValue) : null;
   const selectId = React.useId();
 
@@ -76,8 +80,9 @@ export function FactorRelinkDialog({
             aria-label={`${supplierName} ${item} の排出量原単位`}
           >
             {candidates.map((candidate) => (
-              <option key={candidate.code} value={candidate.code}>
-                {candidate.name}（{candidate.factorValue} {candidate.factorUnit}）
+              <option key={candidate.ref} value={candidate.ref}>
+                {candidate.name}（{candidate.factorValue} {candidate.factorUnit}・
+                {candidate.factorYear}年度）
               </option>
             ))}
           </NativeSelect>
@@ -108,9 +113,13 @@ export function FactorRelinkDialog({
                 原単位
               </th>
               <td className="px-2 py-1">
-                {current ? `${current.name}（${current.code}）` : '不明（旧形式）'}
+                {current
+                  ? `${current.name}（${current.code}）・${current.factorYear}年度`
+                  : '不明（旧形式）'}
               </td>
-              <td className="px-2 py-1">{next ? `${next.name}（${next.code}）` : '—'}</td>
+              <td className="px-2 py-1">
+                {next ? `${next.name}（${next.code}）・${next.factorYear}年度` : '—'}
+              </td>
             </tr>
             <tr className="border-t border-line">
               <th

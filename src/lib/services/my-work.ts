@@ -17,9 +17,13 @@ import {
   type DisclosureHome,
   type MyTaskKind,
 } from '@/lib/services/disclosure-home';
+import { ghgVerificationUnitIds } from '@/lib/services/ghg/inputs';
+import { loadGhgVerificationStatus } from '@/lib/services/ghg/status';
 import { listDerivedAttention } from '@/lib/services/impact';
 import { listPendingExclusions } from '@/lib/services/requirement-exclusion';
 import { summarizeOpenIssues } from '@/lib/services/trial-feedback';
+import { loadTrialProgram } from '@/lib/services/trial-program';
+import { parseTrialOptions } from '@/lib/domain/trial-options';
 import type {
   AuthorizationContext,
   DataPoint,
@@ -362,6 +366,9 @@ export async function loadMyWork(
     }
   }
 
+  // ---- Scope1・2 の算定と照合（2026-10-16 の要望）。トライアルの検証期間・検証拠点の状態から導く（書かない）
+  attention.push(...(await ghgAttention(db, ctx, input.period)));
+
   // ---- 管理者の準備（招待の期限） ---------------------------------------------
   if (can(ctx, 'enterprise.member.manage')) {
     const invitations = await db.select('invitations', {
@@ -386,4 +393,67 @@ export async function loadMyWork(
   }
 
   return { profile, attention, items: orderMyWork(profile, items) };
+}
+
+/**
+ * Scope1・2 の算定と照合の Attention（算定の概要・トライアル概要と同じ status.ts の導出）。
+ *  - 最終承認者（data.approve）: 承認待ちの区分規則。自分の提案は自分で承認できない（職務分離）ので数えない
+ *  - 原因を記録する人（data.review）: 最新の照合で要確認の拠点 → その照合の要確認の絞り込み
+ *  - 係数を設定する人（metric.manage）: 係数が決まらない活動量の行 → 割当の未割当の絞り込み
+ * 期間はトライアルの算定の検証期間（無ければホームの期間）、拠点はトライアルの検証拠点。
+ */
+async function ghgAttention(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  homePeriod: ReportingPeriod,
+): Promise<MyWorkAttention[]> {
+  const canApprove = can(ctx, 'enterprise.data.approve');
+  const canReview = can(ctx, 'enterprise.data.review');
+  const canManage = can(ctx, 'enterprise.metric.manage');
+  if (!can(ctx, 'enterprise.data.read') || !(canApprove || canReview || canManage)) return [];
+  const out: MyWorkAttention[] = [];
+  const organizationId = ctx.workspace.organizationId;
+  if (canApprove) {
+    const pending = (
+      await db.select('ghgClassificationRules', { where: { organizationId, status: 'proposed' } })
+    ).filter((rule) => rule.proposedBy !== ctx.userId);
+    if (pending.length > 0) {
+      out.push({
+        key: 'ghg-rule-pending',
+        label: 'Scope1・2算定: 承認待ちの区分規則',
+        count: pending.length,
+        // 承認は算定ルールの画面の行の操作で人が押す（提案者本人には押せない理由を出す）
+        href: '/enterprise/ghg/calculation/rules?status=proposed',
+        semantic: 'pending',
+      });
+    }
+  }
+  if (!canReview && !canManage) return out;
+  const trial = await loadTrialProgram(db, ctx);
+  const unitIds = ghgVerificationUnitIds(trial);
+  if (unitIds.length === 0) return out;
+  const trialPeriodId = trial ? parseTrialOptions(trial.options).ghgVerification?.periodId : null;
+  const status = await loadGhgVerificationStatus(db, ctx, {
+    periodId: trialPeriodId ?? homePeriod.id,
+    unitIds,
+  });
+  if (canReview && status.latestReconciliation && status.attention.reconciliationNeedsReview > 0) {
+    out.push({
+      key: 'ghg-reconciliation-review',
+      label: 'Scope1・2算定: 照合で要確認の拠点',
+      count: status.attention.reconciliationNeedsReview,
+      href: `/enterprise/ghg/calculation/reconciliation/${encodeURIComponent(status.latestReconciliation.id)}?verdict=needs_review`,
+      semantic: 'pending',
+    });
+  }
+  if (canManage && status.attention.unresolvedLines > 0) {
+    out.push({
+      key: 'ghg-factor-unassigned',
+      label: 'Scope1・2算定: 係数が決まらない活動（未割当など）',
+      count: status.attention.unresolvedLines,
+      href: `/enterprise/ghg/calculation/factors?view=assignments&state=unresolved&period=${encodeURIComponent(status.period.id)}`,
+      semantic: 'blocked',
+    });
+  }
+  return out;
 }

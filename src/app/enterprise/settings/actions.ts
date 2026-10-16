@@ -14,6 +14,7 @@ import { updateMembership } from '@/lib/services/identity';
 import {
   APPROVAL_ROUTE_PURPOSES,
   MAX_APPROVAL_STAGES,
+  SUBPROCESSOR_CATEGORIES,
   type ApprovalRoutePurpose,
   type RoleKey,
 } from '@/types/domain';
@@ -142,9 +143,19 @@ export async function recordDataTermsAction(formData: FormData): Promise<void> {
       retentionPolicy: text(formData, 'retentionPolicy'),
       aiTrainingUse: text(formData, 'aiTrainingUse'),
       aiProviderStorage: text(formData, 'aiProviderStorage'),
+      // 処理を委ねる先は区分ごとの欄（業務委託先・クラウド・AI・その他）。以前の 1 欄の入力も受ける
       subprocessorsText: text(formData, 'subprocessors'),
+      subprocessorsByCategory: Object.fromEntries(
+        SUBPROCESSOR_CATEGORIES.map((category) => [
+          category,
+          text(formData, `subprocessors.${category}`),
+        ]),
+      ),
       returnMethod: text(formData, 'returnMethod'),
       deletionMethod: text(formData, 'deletionMethod'),
+      backupResidualDays: formData.has('backupResidualDays')
+        ? text(formData, 'backupResidualDays')
+        : undefined,
       agreedOn: text(formData, 'agreedOn'),
       agreedByLabel: text(formData, 'agreedByLabel'),
       note: text(formData, 'note'),

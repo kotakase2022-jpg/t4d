@@ -9,14 +9,29 @@ import {
   can,
   NotFoundError,
 } from '@/lib/authorization/can';
+import { backupPurgeDueOn } from '@/lib/domain/data-disposal';
 import {
   reductionTargetOf,
   TRIAL_DECISION_LABELS,
   type ReductionTarget,
 } from '@/lib/domain/trial-metrics';
+import {
+  parseTrialOptions,
+  ROLLOUT_NOTE_MAX,
+  validateTrialOptionsPatch,
+  verificationUnitIds,
+  type DisposalOptions,
+  type FreeScopeOptions,
+  type GhgVerificationOptions,
+  type RolloutOptions,
+  type TrialOptions,
+} from '@/lib/domain/trial-options';
+import { isPdf, scopeSignals, type ScopeSignal } from '@/lib/domain/trial-scope';
 import { ValidationError } from '@/lib/errors/user-facing';
+import { toJstDate } from '@/lib/format/datetime';
 import { DEMO_TEXT_LIMITS } from '@/lib/repositories/demo-trial-checks';
 import type { DbClient } from '@/lib/repositories/types';
+import { loadGhgVerificationStatus, type GhgVerificationStatus } from '@/lib/services/ghg/status';
 import { cdpOptionState } from '@/lib/services/organization-options';
 import type { CdpOptionState } from '@/lib/ui/status/cdpOption';
 import { isUuid } from '@/lib/validation/uuid';
@@ -25,16 +40,21 @@ import {
   TRIAL_DECISIONS,
   TRIAL_END_DISPOSITIONS,
   TRIAL_PHASES,
+  TRIAL_SCOPE_KINDS,
   type AuthorizationContext,
   type DisclosureProject,
+  type GhgActivityKind,
+  type GhgScope,
   type IsoDate,
   type OrganizationUnit,
+  type ReportingPeriod,
   type TrialAgreement,
   type TrialAgreementKey,
   type TrialDecision,
   type TrialEndDisposition,
   type TrialPhase,
   type TrialProgram,
+  type TrialScopeKind,
   type Uuid,
 } from '@/types/domain';
 
@@ -92,6 +112,8 @@ export interface TrialTextLimits {
   text: number;
   /** 合意のメモ（3 つまとめて Cookie に載るため、さらに短い） */
   agreementNote: number;
+  /** 将来の展開対象のメモ（options に載る。trial-options.ts の検査と同じ値） */
+  rolloutNote: number;
 }
 
 /** 入力の上限（Demo Mode は Cookie の容量。Supabase Mode は DB の上限） */
@@ -102,8 +124,9 @@ export function trialTextLimits(db: DbClient, ctx: AuthorizationContext): TrialT
         title: DEMO_TEXT_LIMITS.trialTitle,
         text: DEMO_TEXT_LIMITS.trialText,
         agreementNote: 100,
+        rolloutNote: ROLLOUT_NOTE_MAX,
       }
-    : { title: 200, text: 2000, agreementNote: 500 };
+    : { title: 200, text: 2000, agreementNote: 500, rolloutNote: 1000 };
 }
 
 /** 文字列の欄を検査する（前後の空白を除く。必須で空・上限超えは利用者向けのエラー） */
@@ -223,6 +246,242 @@ export interface TrialOverview {
   selectedRequirements: SelectedRequirementView[];
   selectedMetrics: Array<{ id: Uuid; name: string; hasData: boolean }>;
   reductionTarget: ReductionTarget | null;
+  /** 算定の検証範囲・将来の展開対象・無償の範囲と別途協議・返却／削除の日付（計画が無ければ null） */
+  scope: TrialScopeOverview | null;
+}
+
+/** 拠点の名前と国（国内／海外は組織の国コードと比べる） */
+export interface TrialSiteView {
+  id: Uuid;
+  name: string;
+  countryCode: string;
+  domestic: boolean;
+}
+
+export interface TrialScopeOverview {
+  options: TrialOptions;
+  verification: {
+    /** 算定の検証範囲（options.ghgVerification）を設定しているか */
+    configured: boolean;
+    /** 算定の検証期間（未設定・組織に無い期間は null） */
+    period: ReportingPeriod | null;
+    sites: TrialSiteView[];
+    /** 算定の検証拠点が空で、計画の対象拠点を使っている（plan K9） */
+    fromIncludedUnits: boolean;
+    domestic: number;
+    overseas: number;
+    scopes: GhgScope[];
+    activityKinds: GhgActivityKind[];
+    /** 拠点ごとの検証の状況（期間と拠点が揃っているときだけ。算定の概要と同じ関数） */
+    status: GhgVerificationStatus | null;
+  };
+  rollout: {
+    totalSites: number | null;
+    note: string;
+    /** 検証対象の拠点数（算定の検証拠点） */
+    verifying: number;
+    /** 残り（総拠点数 − 検証対象。総拠点数が未設定なら null） */
+    remaining: number | null;
+  };
+  freeScope: TrialScopeSignals & { agreement: TrialAgreement | null };
+  disposal: {
+    /** 返却・削除の予定日 */
+    plannedOn: IsoDate | null;
+    /** データ取扱条件の最新の版のバックアップの残存期間（未合意は null） */
+    backupResidualDays: number | null;
+    /** バックアップから消える見込み日（予定日 + 残存期間。どちらかが無ければ null） */
+    purgeDueOn: IsoDate | null;
+  };
+}
+
+export interface TrialScopeSignals {
+  signals: ScopeSignal[];
+  /** 目安を超えた（別途協議の候補の）区分 */
+  over: ScopeSignal[];
+  /** 区分の無い別途協議の件数（どの区分にも数えない） */
+  unclassifiedSeparate: number;
+}
+
+/**
+ * 無償の範囲と別途協議の 4 区分の信号（読むだけ・保存しない。自組織の行だけを数える）。
+ * トライアル概要と検証結果の XLSX が同じ関数を使う。
+ *
+ *  - 拠点: トライアルの拠点（計画の対象拠点と算定の検証拠点の和）と計画の対象拠点数、対象プロジェクトの期間に
+ *    データがあるトライアルの拠点の外の拠点（サプライヤーを除く）
+ *  - PDF: トライアルの期間（開始日〜終了日。未設定の端は区切らない）に取込に使った PDF・資料として登録した PDF。
+ *    文字を取れない PDF（needs_ocr）は 1 件でも標準機能の外
+ *  - 改善管理表: 費用区分が別途協議の件数（区分ごと）
+ */
+export async function loadTrialScopeSignals(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  program: TrialProgram | null,
+): Promise<TrialScopeSignals> {
+  assertTrialReader(ctx);
+  const organizationId = ctx.workspace.organizationId;
+  const options = parseTrialOptions(program?.options);
+  const project =
+    program?.projectId && isUuid(program.projectId)
+      ? ((
+          await db.select('disclosureProjects', {
+            where: { id: program.projectId, organizationId, deletedAt: { isNull: true } },
+            limit: 1,
+          })
+        )[0] ?? null)
+      : null;
+  const [units, ingestionFiles, files, feedback] = await Promise.all([
+    db.select('units', { where: { organizationId, deletedAt: { isNull: true } } }),
+    db.select('ingestionJobFiles', { where: { organizationId } }),
+    db.select('files', { where: { organizationId, deletedAt: { isNull: true } } }),
+    db.select('trialFeedbackItems', {
+      where: { organizationId, deletedAt: { isNull: true }, costClass: 'separate_estimate' },
+    }),
+  ]);
+
+  // トライアルの拠点（全社なら null。全社のときは外の拠点が無い）
+  const included = program?.includedUnitIds ?? [];
+  const trialSiteIds =
+    included.length === 0
+      ? null
+      : new Set([...included, ...verificationUnitIds(options, included)]);
+  const supplier = new Set(units.filter((u) => u.unitType === 'supplier').map((u) => u.id));
+  const live = new Set(units.map((u) => u.id));
+  let outsideRows = 0;
+  const outsideUnits = new Set<Uuid>();
+  if (trialSiteIds && project) {
+    const points = await db.select('dataPoints', {
+      where: {
+        organizationId,
+        reportingPeriodId: project.reportingPeriodId,
+        deletedAt: { isNull: true },
+      },
+    });
+    for (const point of points) {
+      if (!hasValue(point) || trialSiteIds.has(point.unitId)) continue;
+      if (supplier.has(point.unitId) || !live.has(point.unitId)) continue;
+      outsideRows += 1;
+      outsideUnits.add(point.unitId);
+    }
+  }
+
+  const startsOn = program?.startsOn ?? null;
+  const endsOn = program?.endsOn ?? null;
+  const inPeriod = (createdAt: string) => {
+    const date = toJstDate(createdAt);
+    return (startsOn === null || date >= startsOn) && (endsOn === null || date <= endsOn);
+  };
+  const pdfIngestion = ingestionFiles.filter((f) => isPdf(f) && inPeriod(f.createdAt));
+  const pdfRegistered = files.filter((f) => isPdf(f) && inPeriod(f.createdAt));
+  const periodLabel =
+    startsOn === null && endsOn === null
+      ? '全期間（トライアルの期間が未設定）'
+      : `トライアルの期間 ${startsOn ?? '未設定'}〜${endsOn ?? '未設定'}`;
+
+  const byKind = Object.fromEntries(TRIAL_SCOPE_KINDS.map((k) => [k, 0])) as Record<
+    TrialScopeKind,
+    number
+  >;
+  let unclassified = 0;
+  for (const item of feedback) {
+    if (item.scopeKind) byKind[item.scopeKind] += 1;
+    else unclassified += 1;
+  }
+
+  const signals = scopeSignals({
+    sites: {
+      trialSites: trialSiteIds ? trialSiteIds.size : null,
+      plannedSites: program?.plannedSites ?? null,
+      outsideUnits: outsideUnits.size,
+      outsideRows,
+    },
+    pdf: {
+      ingestionPdf: pdfIngestion.length,
+      needsOcr: pdfIngestion.filter((f) => f.parseStatus === 'needs_ocr').length,
+      registeredPdf: pdfRegistered.length,
+      threshold: options.freeScope?.pdfFiles ?? null,
+      periodLabel,
+    },
+    feedback: { byKind, unclassified },
+  });
+  return {
+    signals,
+    over: signals.filter((s) => s.state === 'over'),
+    unclassifiedSeparate: unclassified,
+  };
+}
+
+/** 算定の検証範囲・将来の展開対象・無償の範囲・返却／削除の日付（トライアル概要。読むだけ） */
+async function loadTrialScopeOverview(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  program: TrialProgram,
+  units: readonly OrganizationUnit[],
+): Promise<TrialScopeOverview> {
+  const organizationId = ctx.workspace.organizationId;
+  const options = parseTrialOptions(program.options);
+  const [organization, periods, terms, signals] = await Promise.all([
+    db.findById('organizations', organizationId),
+    db.select('periods', { where: { organizationId } }),
+    db.select('organizationDataTerms', {
+      where: { organizationId },
+      orderBy: { column: 'versionNo', dir: 'desc' },
+      limit: 1,
+    }),
+    loadTrialScopeSignals(db, ctx, program),
+  ]);
+  const homeCountry = (organization?.countryCode ?? '').toUpperCase();
+  const siteIds = verificationUnitIds(options, program.includedUnitIds);
+  const sites: TrialSiteView[] = siteIds.flatMap((id) => {
+    const unit = units.find((u) => u.id === id);
+    return unit
+      ? [
+          {
+            id,
+            name: unit.name,
+            countryCode: unit.countryCode,
+            domestic: homeCountry !== '' && unit.countryCode.toUpperCase() === homeCountry,
+          },
+        ]
+      : [];
+  });
+  const ghg = options.ghgVerification;
+  const period = ghg?.periodId ? (periods.find((p) => p.id === ghg.periodId) ?? null) : null;
+  const status =
+    period && sites.length > 0
+      ? await loadGhgVerificationStatus(db, ctx, {
+          periodId: period.id,
+          unitIds: sites.map((s) => s.id),
+        })
+      : null;
+  const totalSites = options.rollout?.totalSites ?? null;
+  const backupResidualDays = terms[0]?.backupResidualDays ?? null;
+  const plannedOn = options.disposal?.plannedOn ?? null;
+  return {
+    options,
+    verification: {
+      configured: ghg !== null,
+      period,
+      sites,
+      fromIncludedUnits: (ghg?.unitIds.length ?? 0) === 0,
+      domestic: sites.filter((s) => s.domestic).length,
+      overseas: sites.filter((s) => !s.domestic).length,
+      scopes: ghg?.scopes ?? [],
+      activityKinds: ghg?.activityKinds ?? [],
+      status,
+    },
+    rollout: {
+      totalSites,
+      note: options.rollout?.note ?? '',
+      verifying: sites.length,
+      remaining: totalSites === null ? null : Math.max(0, totalSites - sites.length),
+    },
+    freeScope: { ...signals, agreement: program.agreements.freeScope ?? null },
+    disposal: {
+      plannedOn,
+      backupResidualDays,
+      purgeDueOn: backupPurgeDueOn(plannedOn, backupResidualDays),
+    },
+  };
 }
 
 function hasValue(point: { value: number | null; textValue: string | null }): boolean {
@@ -349,6 +608,11 @@ export async function loadTrialOverview(
   const planned = (key: PlannedKey): number | null => (program ? program[key] : null);
   const noProject = '対象プロジェクトを設定すると数えます';
   const selectedMetricIds = program?.selectedMetricIds ?? [];
+  // 将来の展開対象の総拠点数（検証対象を含む全体の数。plan CR-21）は対象拠点のタイルの補足に添える
+  const rolloutTotal = program
+    ? (parseTrialOptions(program.options).rollout?.totalSites ?? null)
+    : null;
+  const rolloutHint = rolloutTotal === null ? '' : `・展開対象 全 ${rolloutTotal}`;
   const base: PlanActualRow[] = [
     {
       key: 'members',
@@ -368,9 +632,9 @@ export async function loadTrialOverview(
       planned: planned('plannedSites'),
       over: false,
       hint:
-        includedUnits.length > 0
+        (includedUnits.length > 0
           ? namesOf(includedUnits.map((u) => u.name))
-          : '拠点を指定していません（全社）',
+          : '拠点を指定していません（全社）') + rolloutHint,
     },
     {
       key: 'quantitativeMetrics',
@@ -503,6 +767,7 @@ export async function loadTrialOverview(
     selectedRequirements,
     selectedMetrics,
     reductionTarget: program ? reductionTargetOf(program.options) : null,
+    scope: program ? await loadTrialScopeOverview(db, ctx, program, allUnits) : null,
   };
 }
 
@@ -512,8 +777,10 @@ export async function loadTrialOverview(
 
 export interface TrialFormChoices {
   projects: Array<{ id: Uuid; name: string }>;
-  /** 拠点（サプライヤーを除く。既に選んだものは残す） */
-  units: Array<{ id: Uuid; name: string }>;
+  /** 拠点（サプライヤーを除く。既に選んだものは残す）。国コードは算定の検証拠点の選択に添える */
+  units: Array<{ id: Uuid; name: string; countryCode: string }>;
+  /** 算定の検証期間の候補（組織の報告期間。コードの降順） */
+  periods: Array<{ id: Uuid; code: string; label: string }>;
   /** 対象プロジェクトの基準の要求事項（選定ケースの候補） */
   frameworks: Array<{
     versionId: Uuid;
@@ -531,7 +798,7 @@ export async function loadTrialFormChoices(
 ): Promise<TrialFormChoices> {
   assertTrialReader(ctx);
   const organizationId = ctx.workspace.organizationId;
-  const [projects, units, metrics] = await Promise.all([
+  const [projects, units, metrics, periods] = await Promise.all([
     db.select('disclosureProjects', {
       where: { organizationId, deletedAt: { isNull: true } },
       orderBy: { column: 'createdAt', dir: 'desc' },
@@ -544,8 +811,15 @@ export async function loadTrialFormChoices(
       where: { organizationId, deletedAt: { isNull: true } },
       orderBy: { column: 'code' },
     }),
+    db.select('periods', {
+      where: { organizationId },
+      orderBy: { column: 'code', dir: 'desc' },
+    }),
   ]);
-  const selectedUnits = new Set(program?.includedUnitIds ?? []);
+  const selectedUnits = new Set([
+    ...(program?.includedUnitIds ?? []),
+    ...(program ? (parseTrialOptions(program.options).ghgVerification?.unitIds ?? []) : []),
+  ]);
   const projectId = program?.projectId ?? null;
   const projectFrameworks = projectId
     ? await db.select('projectFrameworks', { where: { organizationId, projectId } })
@@ -565,7 +839,8 @@ export async function loadTrialFormChoices(
     projects: projects.map((p) => ({ id: p.id, name: p.name })),
     units: units
       .filter((u) => u.unitType !== 'supplier' || selectedUnits.has(u.id))
-      .map((u) => ({ id: u.id, name: u.name })),
+      .map((u) => ({ id: u.id, name: u.name, countryCode: u.countryCode })),
+    periods: periods.map((p) => ({ id: p.id, code: p.code, label: p.label })),
     frameworks: versionIds.flatMap((versionId) => {
       const version = versions.find((v) => v.id === versionId);
       if (!version) return [];
@@ -601,6 +876,17 @@ export interface TrialProgramPatch {
   cdpPlanned?: boolean | null;
   /** 作業時間の短縮の目標（options.reductionTarget。合意した値を人が入れる） */
   reductionTarget?: ReductionTarget | null;
+  /**
+   * 算定の検証範囲（options.ghgVerification。期間・算定の検証拠点・Scope・活動）。null は外す。
+   * 拠点が空なら計画の対象拠点を使う（plan K9）
+   */
+  ghgVerification?: GhgVerificationOptions | null;
+  /** 将来の展開対象（options.rollout。総拠点数は検証対象を含む全体の数）。null は外す */
+  rollout?: RolloutOptions | null;
+  /** 無償の範囲の目安（options.freeScope。PDF 等の一次データの件数）。null は外す */
+  freeScope?: FreeScopeOptions | null;
+  /** 返却・削除の予定日（options.disposal）。null は外す */
+  disposal?: DisposalOptions | null;
   selectedRequirementItemIds?: string[];
   selectedMetricIds?: string[];
   agreements?: Partial<Record<TrialAgreementKey, { agreedOn: string | null; note: string }>>;
@@ -626,6 +912,111 @@ function uniqueIds(ids: readonly string[], label: string): Uuid[] {
 export interface SaveTrialProgramResult {
   program: TrialProgram;
   created: boolean;
+}
+
+/** options の中で、このサービスが形を検査して書くキー（plan K9。既存のキー cdp・reductionTarget は別に扱う） */
+const TRIAL_OPTION_KEYS = ['ghgVerification', 'rollout', 'freeScope', 'disposal'] as const;
+type TrialOptionKey = (typeof TRIAL_OPTION_KEYS)[number];
+
+/** 入力を正規化する（前後の空白・空の項目。全部空なら null＝キーを外す） */
+function normalizedOption(
+  key: TrialOptionKey,
+  value: TrialProgramPatch[TrialOptionKey],
+): TrialOptions[TrialOptionKey] {
+  if (value === null || value === undefined) return null;
+  switch (key) {
+    case 'ghgVerification': {
+      const v = value as GhgVerificationOptions;
+      const periodId = (v.periodId ?? '').trim() || null;
+      const unitIds = v.unitIds.map((id) => id.trim()).filter((id) => id !== '');
+      const empty =
+        periodId === null &&
+        unitIds.length === 0 &&
+        v.scopes.length === 0 &&
+        v.activityKinds.length === 0;
+      return empty
+        ? null
+        : { periodId, unitIds, scopes: [...v.scopes], activityKinds: [...v.activityKinds] };
+    }
+    case 'rollout': {
+      const v = value as RolloutOptions;
+      const note = (v.note ?? '').trim();
+      return v.totalSites === null && note === '' ? null : { totalSites: v.totalSites, note };
+    }
+    case 'freeScope': {
+      const v = value as FreeScopeOptions;
+      return v.pdfFiles === null ? null : { pdfFiles: v.pdfFiles };
+    }
+    case 'disposal': {
+      const v = value as DisposalOptions;
+      const plannedOn = checkedDate(v.plannedOn, '返却・削除の予定日');
+      return plannedOn === null ? null : { plannedOn };
+    }
+  }
+}
+
+/**
+ * options の検証範囲・展開対象・目安・予定日を検査して書き戻す（既存のキーは残す）。
+ * 期間・拠点は組織のもの（サプライヤーを除く）、展開対象の総拠点数は検証対象の拠点数以上
+ * （展開対象は検証対象を含む全体の数）、メモは Demo で 100 字、PDF の目安は 0〜100,000
+ */
+async function applyTrialOptions(
+  db: DbClient,
+  ctx: AuthorizationContext,
+  options: Record<string, unknown>,
+  patch: TrialProgramPatch,
+  keys: readonly TrialOptionKey[],
+  context: { includedUnitIds: readonly Uuid[]; textLimitDemo: boolean },
+): Promise<void> {
+  const organizationId = ctx.workspace.organizationId;
+  const before = parseTrialOptions(options);
+  const touched: Partial<Record<TrialOptionKey, TrialOptions[TrialOptionKey]>> = {};
+  for (const key of keys) touched[key] = normalizedOption(key, patch[key]);
+  // 検査は入力そのもの（読み直すと知らない値が落ちて素通りするため）。触っていないキーは保存済みの形
+  const ghg = (
+    keys.includes('ghgVerification') ? touched.ghgVerification : before.ghgVerification
+  ) as GhgVerificationOptions | null;
+  const rollout = (
+    keys.includes('rollout') ? touched.rollout : before.rollout
+  ) as RolloutOptions | null;
+  const check: Partial<TrialOptions> = {};
+  if (keys.includes('ghgVerification') && ghg) check.ghgVerification = ghg;
+  // 検証拠点の数が変わりうるときは、触っていない展開対象も検査する
+  if (
+    rollout &&
+    (keys.includes('rollout') ||
+      keys.includes('ghgVerification') ||
+      patch.includedUnitIds !== undefined)
+  ) {
+    check.rollout = rollout;
+  }
+  if (keys.includes('freeScope') && touched.freeScope) {
+    check.freeScope = touched.freeScope as FreeScopeOptions;
+  }
+  if (keys.includes('disposal') && touched.disposal) {
+    check.disposal = touched.disposal as DisposalOptions;
+  }
+  if (Object.keys(check).length > 0) {
+    const [periods, units] = await Promise.all([
+      db.select('periods', { where: { organizationId } }),
+      db.select('units', { where: { organizationId, deletedAt: { isNull: true } } }),
+    ]);
+    const errors = validateTrialOptionsPatch(check, {
+      organizationPeriodIds: new Set(periods.map((p) => p.id)),
+      organizationUnitIds: new Set(units.filter((u) => u.unitType !== 'supplier').map((u) => u.id)),
+      includedUnitIds: verificationUnitIds(
+        { ...before, ghgVerification: ghg },
+        context.includedUnitIds,
+      ),
+      demo: context.textLimitDemo,
+    });
+    if (errors.length > 0) throw new ValidationError(errors.join(' '));
+  }
+  for (const key of keys) {
+    const value = touched[key];
+    if (value === null || value === undefined) delete options[key];
+    else options[key] = value;
+  }
 }
 
 /**
@@ -695,8 +1086,19 @@ export async function saveTrialProgram(
       next[key] = value;
     }
   }
-  if (patch.cdpPlanned !== undefined || patch.reductionTarget !== undefined) {
+  const optionKeys = TRIAL_OPTION_KEYS.filter((key) => patch[key] !== undefined);
+  if (
+    patch.cdpPlanned !== undefined ||
+    patch.reductionTarget !== undefined ||
+    optionKeys.length > 0
+  ) {
     const options: Record<string, unknown> = { ...(existing?.options ?? {}) };
+    if (optionKeys.length > 0) {
+      await applyTrialOptions(db, ctx, options, patch, optionKeys, {
+        includedUnitIds: next.includedUnitIds ?? existing?.includedUnitIds ?? [],
+        textLimitDemo: db.mode === 'demo' || ctx.demo,
+      });
+    }
     if (patch.cdpPlanned !== undefined) {
       if (patch.cdpPlanned === null) delete options.cdp;
       else options.cdp = patch.cdpPlanned;

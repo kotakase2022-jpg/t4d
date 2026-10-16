@@ -60,6 +60,15 @@ const JSONB_COLUMNS_BY_TABLE: Partial<Record<TableName, ReadonlySet<string>>> = 
   trialPrograms: new Set(['options', 'agreements']),
   trialScenarioRuns: new Set(['evidence']),
   organizationDataTerms: new Set(['subprocessors']),
+  // Scope1・2 の算定と既存結果との照合（0061〜0065）
+  emissionFactors: new Set(['params']),
+  ghgCalculationPolicies: new Set(['rounding', 'conversions', 'tonkm']),
+  ghgClassificationRules: new Set(['match']),
+  ghgActivityLines: new Set(['attributes']),
+  ghgCalculationRuns: new Set(['summary']),
+  ghgCalculationLines: new Set(['conversion_steps', 'method_detail', 'rounding_applied']),
+  ghgBaselineResults: new Set(['rows', 'unit_mapping']),
+  ghgReconciliations: new Set(['tolerance', 'result']),
 };
 
 /** Seed 生成で jsonb として書く列か（tests/unit/seed-sql.test.ts から migration と突合する）。 */
@@ -90,7 +99,10 @@ export const SEED_ORDER: TableName[] = [
   'metrics',
   'aggregationRules',
   'metricAssignments',
+  // 係数のセット → 係数 → 割当（係数は (セット, 組織) を、割当は (係数, 組織) を参照する）
+  'emissionFactorSets',
   'emissionFactors',
+  'emissionFactorAssignments',
   'dataPoints',
   'dataPointVersions',
   'calculations',
@@ -170,6 +182,16 @@ export const SEED_ORDER: TableName[] = [
   'trialTaskTimings',
   // CDP 等の回答と T4D の情報の対応付け（0057）。定性情報・節の後
   'responseContentLinks',
+  // Scope1・2 の算定と照合（0062〜0065）。方針・規則 → 活動量 → 算定の記録 → 算定行 → 既存結果 → 照合 → 確認
+  'ghgCalculationPolicies',
+  'ghgClassificationRules',
+  'ghgActivityBatches',
+  'ghgActivityLines',
+  'ghgCalculationRuns',
+  'ghgCalculationLines',
+  'ghgBaselineResults',
+  'ghgReconciliations',
+  'ghgReconciliationNotes',
   'engagements',
   'engagementMembers',
   'grants',

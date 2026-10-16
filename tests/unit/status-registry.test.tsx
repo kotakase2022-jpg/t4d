@@ -12,6 +12,9 @@ import {
   TRIAL_JUDGEMENT_STATES,
   XBRL_MAPPING_STATES,
   XBRL_VALIDATION_STATES,
+  GHG_CAUSE_STATES,
+  GHG_LOAD_FACTOR_SOURCES,
+  TRIAL_SCOPE_SIGNAL_STATES,
   SEMANTIC_STYLE,
   STATUS,
   STATUS_SEMANTICS,
@@ -27,6 +30,7 @@ import {
 } from '@/components/shared/status-badge';
 import { DataPointStatusBadge, TaskStatusBadge } from '@/components/shared/badges';
 import { SCAN_STATUS_LABELS } from '@/lib/domain/evidence-limits';
+import { GHG_SITE_STATUSES } from '@/lib/domain/ghg/verification-status';
 import {
   EXCLUSION_STATES,
   REQUIREMENT_COVERAGE_CATEGORIES,
@@ -42,6 +46,12 @@ import {
   DATA_POINT_STATUSES,
   DMA_OUTCOMES,
   ENGAGEMENT_STATUSES,
+  FACTOR_SET_ORIGINS,
+  FACTOR_SET_STATUSES,
+  GHG_BATCH_STATUSES,
+  GHG_RECON_VERDICTS,
+  GHG_RULE_STATUSES,
+  SUBPROCESSOR_CATEGORIES,
   FEEDBACK_KINDS,
   FEEDBACK_SEVERITIES,
   FEEDBACK_STATUSES,
@@ -116,6 +126,17 @@ const ENUMS: Record<StatusDomain, readonly string[]> = {
   costClass: COST_CLASSES,
   dataTerms: DATA_TERMS_STATES,
   cdpOption: CDP_OPTION_STATES,
+  // Scope1・2 の算定と照合（2026-10-16 の要望。plan §2.5）
+  ghgFactorSet: FACTOR_SET_STATUSES,
+  factorOrigin: FACTOR_SET_ORIGINS,
+  ghgRule: GHG_RULE_STATUSES,
+  ghgActivityBatch: GHG_BATCH_STATUSES,
+  ghgLoadFactorSource: GHG_LOAD_FACTOR_SOURCES,
+  ghgReconItem: GHG_RECON_VERDICTS,
+  ghgCause: GHG_CAUSE_STATES,
+  ghgSiteStatus: GHG_SITE_STATUSES,
+  trialScopeSignal: TRIAL_SCOPE_SIGNAL_STATES,
+  subprocessorCategory: SUBPROCESSOR_CATEGORIES,
 };
 
 const domains = Object.keys(STATUS) as StatusDomain[];

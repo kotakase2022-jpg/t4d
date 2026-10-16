@@ -3,6 +3,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import { assertCan, assertEnterpriseWorkspace } from '@/lib/authorization/can';
+import { sameFiscalYearEnd } from '@/lib/domain/period-comparability';
 import { ValidationError } from '@/lib/errors/user-facing';
 import {
   computeConsolidatedAggregation,
@@ -411,6 +412,14 @@ interface KpiData {
  * KPI・経年比較の計算に要る行をまとめて読む（書かない）。指標は metricCodes に絞る
  * （既定は ESG経営の KPI の指標。自社経年比較は数値指標すべてを渡す。docs/disclosure-first.md §10.2）
  */
+/**
+ * 決算月（終了日の月日）が選んだ期間と同じ期間だけにした KpiData（集計の作り置きは共有する）。
+ * 暦年と年度の期間が同じ組織に並んでも、年度の推移・実績・前年に暦年を入れない（plan K10）
+ */
+function comparableData(data: KpiData, anchor: ReportingPeriod): KpiData {
+  return { ...data, periods: data.periods.filter((p) => sameFiscalYearEnd(p, anchor)) };
+}
+
 async function loadKpiData(
   db: DbClient,
   ctx: AuthorizationContext,
@@ -1110,14 +1119,15 @@ export async function loadEsgDashboard(
 ): Promise<EsgDashboard> {
   assertEnterpriseWorkspace(ctx);
   assertCan(ctx, 'enterprise.data.read');
-  const data = await loadKpiData(db, ctx);
-  const selectedPeriod = pickPeriod(data.periods, options.periodId);
+  const all = await loadKpiData(db, ctx);
+  const selectedPeriod = pickPeriod(all.periods, options.periodId);
+  const data = comparableData(all, selectedPeriod);
   const { targets, ownerNames } = await loadTargetsAndOwners(db, ctx);
   const cards: KpiCardView[] = [];
   for (const key of KPI_KEYS) {
     cards.push(await buildCard(db, ctx, data, KPI_SPECS[key], selectedPeriod, targets, ownerNames));
   }
-  return { periods: data.periods, selectedPeriod, cards };
+  return { periods: all.periods, selectedPeriod, cards };
 }
 
 // ======================================================================
@@ -1260,8 +1270,10 @@ export async function loadKpiDetail(
   assertCan(ctx, 'enterprise.data.read');
   const organizationId = ctx.workspace.organizationId;
   const spec = KPI_SPECS[key];
-  const data = await loadKpiData(db, ctx);
-  const selectedPeriod = pickPeriod(data.periods, options.periodId);
+  const all = await loadKpiData(db, ctx);
+  const selectedPeriod = pickPeriod(all.periods, options.periodId);
+  // 推移・実績・前年は選んだ期間と決算月が同じ期間だけ（plan K10）
+  const data = comparableData(all, selectedPeriod);
   const { targets, ownerNames } = await loadTargetsAndOwners(db, ctx);
   const card = await buildCard(db, ctx, data, spec, selectedPeriod, targets, ownerNames);
 

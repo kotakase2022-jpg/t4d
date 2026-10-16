@@ -127,8 +127,8 @@ export interface SupplierCsvRow {
   factorCode: string;
   /** 生産国（原文）。空欄可 */
   countryRaw: string;
-  /** 正規化した生産国コード。判定できなければ null（勝手に決めない） */
-  country: 'JP' | 'CN' | 'TW' | 'KR' | 'MY' | null;
+  /** 正規化した生産国コード（ISO 3166-1 alpha-2）。判定できなければ null（勝手に決めない） */
+  country: string | null;
   /** 合計行・注記行として除外した理由。null なら取込候補 */
   skippedReason: string | null;
   errors: string[];
@@ -401,6 +401,11 @@ export function extractSupplierRowsFromTable(table: string[][]): SupplierCsvExtr
 
 export interface FactorCandidate {
   id: Uuid;
+  /**
+   * 選択の値（係数の参照）。同じコードに年度が 1 つなら係数コード、2 つ以上あれば「コード@年度」
+   * （年度を明示して選ぶ。同じコードの別の年度を黙って使わない。plan GE-02）
+   */
+  ref: string;
   code: string;
   name: string;
   factorValue: number;
@@ -466,14 +471,88 @@ function roundEmissions(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+// ----------------------------------------------------------------------
+// 係数の鍵（セット × コード × 年度。plan GE-02・3-3）
+// ----------------------------------------------------------------------
+
+/**
+ * Cat.1 の係数の参照。係数の鍵はセット × コード × 年度（Cat.1 の係数はセットに属さない）。
+ * 以前はコードで Map 化していたため、同じコードの複数年度は並び順で後勝ちになっていた。
+ * 同じコードに年度が 2 つ以上あるときは「コード@年度」で選ばせ、年度の無い参照は断る（黙って選ばない）
+ */
+export interface Cat1FactorIndex {
+  refOf: (factor: EmissionFactor) => string;
+  resolve: (
+    ref: string,
+  ) => { factor: EmissionFactor } | { error: string; ambiguous?: EmissionFactor[] };
+}
+
+const REF_WITH_YEAR = /^(.+)@(\d{4})$/;
+
+export function cat1FactorIndex(factors: readonly EmissionFactor[]): Cat1FactorIndex {
+  const byCode = new Map<string, EmissionFactor[]>();
+  for (const f of factors) {
+    const key = `${f.factorSetId ?? ''}|${f.code.normalize('NFKC').toUpperCase()}`;
+    byCode.set(key, [...(byCode.get(key) ?? []), f]);
+  }
+  const sameCode = (code: string) =>
+    [...byCode.entries()]
+      .filter(([key]) => key.endsWith(`|${code}`))
+      .flatMap(([, list]) => list)
+      .sort((a, b) => a.factorYear - b.factorYear);
+  return {
+    refOf: (factor) => {
+      const code = factor.code.normalize('NFKC').toUpperCase();
+      return sameCode(code).length > 1 ? `${factor.code}@${factor.factorYear}` : factor.code;
+    },
+    resolve: (ref) => {
+      const text = ref.normalize('NFKC').trim().toUpperCase();
+      const withYear = REF_WITH_YEAR.exec(text);
+      const code = withYear ? withYear[1]!.trim() : text;
+      const candidates = sameCode(code);
+      if (withYear) {
+        const year = Number(withYear[2]);
+        const hit = candidates.filter((f) => f.factorYear === year);
+        if (hit.length === 1) return { factor: hit[0]! };
+        return { error: `排出係数コード「${code}」（${year} 年度）が見つかりません。` };
+      }
+      if (candidates.length === 0) return { error: `排出係数コード「${code}」が見つかりません。` };
+      if (candidates.length > 1) {
+        return {
+          error: `排出係数コード「${code}」は年度が 2 つ以上あります（${candidates.map((f) => f.factorYear).join('・')} 年度）。年度を選んでください。`,
+          ambiguous: candidates,
+        };
+      }
+      return { factor: candidates[0]! };
+    },
+  };
+}
+
+/**
+ * 算定版の行に写す係数（値・年度）。係数マスターの行を後から直しても、算定に使った値と年度が分かる
+ * （plan GE-02・3-7。Cat.1 の係数はセットに属さず変更可能のため。コードは sourceId から引ける）。
+ * Demo Mode では算定版が Cookie に載るため、写すのは値と年度だけにする（村田デモの 1 版は約 8.5KB）。
+ * 列は domain.ts の CalculationInput の任意の列（JSONB の行なので列の追加は要らない）
+ */
+export type Cat1FactorSnapshot = Pick<CalculationInput, 'factorYear' | 'factorValue'>;
+
+/** Cat.1 の算定版の行（係数の年度・値は CalculationInput の任意の列） */
+export type Cat1CalculationInput = CalculationInput;
+
+function factorSnapshot(factor: EmissionFactor): Cat1FactorSnapshot {
+  return { factorYear: factor.factorYear, factorValue: factor.factorValue };
+}
+
 function toCandidate(
   factor: EmissionFactor,
   reason: string,
   recommended: boolean,
+  index: Cat1FactorIndex,
 ): FactorCandidate {
   const hint = SCOPE3_FACTOR_HINTS[factor.code];
   return {
     id: factor.id,
+    ref: index.refOf(factor),
     code: factor.code,
     name: factor.name,
     factorValue: factor.factorValue,
@@ -512,6 +591,26 @@ function eligibleFactorsFor(
 
 /** 候補の推薦順位: 生産国一致 → 世界平均 → なし（人が選ぶ） */
 function pickRecommended(
+  candidates: EmissionFactor[],
+  country: SupplierCsvRow['country'],
+): { factor: EmissionFactor; reason: string } | null {
+  const picked = pickRecommendedByHint(candidates, country);
+  // 推薦の係数と同じコードの別の年度が候補にあれば推薦しない（年度は人が選ぶ。黙って選ばない）
+  if (
+    picked &&
+    candidates.some(
+      (f) =>
+        f.id !== picked.factor.id &&
+        f.code.toUpperCase() === picked.factor.code.toUpperCase() &&
+        f.factorYear !== picked.factor.factorYear,
+    )
+  ) {
+    return null;
+  }
+  return picked;
+}
+
+function pickRecommendedByHint(
   candidates: EmissionFactor[],
   country: SupplierCsvRow['country'],
 ): { factor: EmissionFactor; reason: string } | null {
@@ -586,7 +685,11 @@ async function loadSupplierMaster(db: DbClient, ctx: AuthorizationContext) {
   const organizationId = ctx.workspace.organizationId;
   const [units, factors] = await Promise.all([
     db.select('units', { where: { organizationId, deletedAt: { isNull: true } } }),
-    db.select('emissionFactors', { where: { organizationId }, orderBy: { column: 'code' } }),
+    // Scope1・2 の算定の係数のセット（0061）の行は Cat.1 の解決に使わない（セットに属さない Cat.1 の係数だけ）
+    db.select('emissionFactors', {
+      where: { organizationId, factorSetId: { isNull: true } },
+      orderBy: { column: 'code' },
+    }),
   ]);
   const suppliers = units
     .filter((unit) => unit.unitType === 'supplier')
@@ -705,7 +808,7 @@ export async function previewSupplierImport(
     loadSupplierMaster(db, ctx),
     loadScope3Context(db, ctx, reportingPeriodId),
   ]);
-  const factorByCode = new Map(factors.map((f) => [f.code.toUpperCase(), f]));
+  const index = cat1FactorIndex(factors);
   const factorById = new Map(factors.map((f) => [f.id, f]));
   const submittedCodes = submittedSupplierCodes(suppliers, scope3.latest?.inputs ?? []);
   const learned = buildLearnedFactorIndex(scope3.calculations, suppliers);
@@ -733,9 +836,30 @@ export async function previewSupplierImport(
     ) {
       const rowUnit = row.unit;
       if (row.factorCode !== '') {
-        const byCode = factorByCode.get(row.factorCode) ?? null;
-        if (!byCode) {
-          errors.push(`排出係数コード「${row.factorCode}」が排出係数マスターに見つかりません。`);
+        const resolved = index.resolve(row.factorCode);
+        const byCode = 'factor' in resolved ? resolved.factor : null;
+        const yearChoices =
+          'ambiguous' in resolved
+            ? (resolved.ambiguous ?? []).filter((f) => f.activityUnit === rowUnit)
+            : [];
+        if (yearChoices.length > 0) {
+          // 同じコードに年度が 2 つ以上ある: 年度を人が選ぶ（推薦しない。黙って後勝ちにしない）
+          needsFactorChoice = true;
+          factorCandidates = yearChoices.map((candidate) =>
+            toCandidate(
+              candidate,
+              `帳票記載の係数コード（${candidate.factorYear} 年度）・単位一致（${rowUnit}）`,
+              false,
+              index,
+            ),
+          );
+        } else if (!byCode) {
+          // 年度を付けた参照・年度が合う係数の無い複数年度は、その理由の文。コードが無いときは従来の文
+          errors.push(
+            'error' in resolved && (resolved.ambiguous || REF_WITH_YEAR.test(row.factorCode))
+              ? resolved.error
+              : `排出係数コード「${row.factorCode}」が排出係数マスターに見つかりません。`,
+          );
         } else if (byCode.activityUnit !== rowUnit) {
           errors.push(
             `排出係数コード「${row.factorCode}」の活動量単位（${byCode.activityUnit}）が行の単位（${rowUnit}）と一致しません。`,
@@ -769,14 +893,14 @@ export async function previewSupplierImport(
           } else {
             needsFactorChoice = true;
             const recommended = pickRecommended(candidates, row.country);
-            recommendedFactorCode = recommended?.factor.code ?? null;
+            recommendedFactorCode = recommended ? index.refOf(recommended.factor) : null;
             const itemLower = row.item.normalize('NFKC').toLowerCase();
             factorCandidates = candidates.map((candidate) => {
               const hint = SCOPE3_FACTOR_HINTS[candidate.code];
               const itemMatched = Boolean(
                 hint?.keywords.some((k) => itemLower.includes(k.toLowerCase())),
               );
-              const isRecommended = candidate.code === recommendedFactorCode;
+              const isRecommended = recommended?.factor.id === candidate.id;
               return toCandidate(
                 candidate,
                 candidateReason(
@@ -786,6 +910,7 @@ export async function previewSupplierImport(
                   isRecommended ? (recommended?.reason ?? null) : null,
                 ),
                 isRecommended,
+                index,
               );
             });
           }
@@ -804,13 +929,13 @@ export async function previewSupplierImport(
       row.unit !== null
     ) {
       const rowUnit = row.unit;
-      const resolvedCode = factor.code;
+      const resolvedId = factor.id;
       const itemLower = row.item.normalize('NFKC').toLowerCase();
       factorCandidates = factors
         .filter((f) => f.activityUnit === rowUnit)
         .map((candidate) => {
-          if (candidate.code === resolvedCode) {
-            return toCandidate(candidate, factorReason ?? '', true);
+          if (candidate.id === resolvedId) {
+            return toCandidate(candidate, factorReason ?? '', true, index);
           }
           const hint = SCOPE3_FACTOR_HINTS[candidate.code];
           const itemMatched = Boolean(
@@ -820,6 +945,7 @@ export async function previewSupplierImport(
             candidate,
             candidateReason(candidate, rowUnit, itemMatched, null),
             false,
+            index,
           );
         });
     }
@@ -840,7 +966,7 @@ export async function previewSupplierImport(
       supplierUnitId: supplier?.id ?? null,
       supplierName: supplier?.name ?? null,
       // 解決済みの係数は候補セレクトでも初期選択＝推薦として表す（表現を一本化）
-      factor: factor ? toCandidate(factor, factorReason ?? '', true) : null,
+      factor: factor ? toCandidate(factor, factorReason ?? '', true, index) : null,
       factorResolution,
       factorReason,
       factorCandidates,
@@ -913,7 +1039,7 @@ interface ValidatedDecision {
   decision: SupplierRowDecision;
 }
 
-function buildInput({ supplier, factor, decision }: ValidatedDecision): CalculationInput {
+function buildInput({ supplier, factor, decision }: ValidatedDecision): Cat1CalculationInput {
   const label = supplierInputLabel(supplier, decision.item.trim());
   if (decision.dataType === 'emissions') {
     return {
@@ -935,6 +1061,7 @@ function buildInput({ supplier, factor, decision }: ValidatedDecision): Calculat
     unit: 't-CO2e',
     sourceType: 'emission_factor',
     sourceId: f.id,
+    ...factorSnapshot(f),
     note:
       decision.dataType === 'monetary'
         ? `購買金額 ${decision.amount.toLocaleString('ja-JP')} 千円 × 係数 ${f.factorValue} (${f.factorYear}年度)`
@@ -1011,7 +1138,7 @@ export async function confirmSupplierImport(
   // （data-point-workflow と同じ守り。RLS は組織単位までしか見ない）
   assertUnitInScope(ctx, scope3.dataPoint.unitId);
 
-  const factorByCode = new Map(factors.map((f) => [f.code.toUpperCase(), f]));
+  const index = cat1FactorIndex(factors);
 
   // 全行を書き込み前にまとめて検証する（途中まで書いて止まる中途半端な版を作らない）
   const validated: ValidatedDecision[] = decisions.map((decision) => {
@@ -1060,12 +1187,10 @@ export async function confirmSupplierImport(
         `${at}: 排出量原単位（排出係数）が未選択です。プレビューで原単位を紐づけてください。`,
       );
     }
-    const factor = factorByCode.get(code);
-    if (!factor) {
-      throw new ValidationError(
-        `${at}: 排出係数コード「${decision.factorCode}」が見つかりません。`,
-      );
-    }
+    // 係数の鍵はコード × 年度（同じコードに年度が 2 つ以上あれば「コード@年度」で選ぶ。黙って選ばない）
+    const resolved = index.resolve(code);
+    if ('error' in resolved) throw new ValidationError(`${at}: ${resolved.error}`);
+    const factor = resolved.factor;
     if (factor.activityUnit !== unit) {
       throw new ValidationError(
         `${at}: 排出係数コード「${factor.code}」の活動量単位（${factor.activityUnit}）が行の単位（${unit}）と一致しません。`,
@@ -1177,12 +1302,10 @@ export async function relinkSupplierFactor(
   }
   assertUnitInScope(ctx, scope3.dataPoint.unitId);
 
-  const factor = factors.find(
-    (f) => f.code.toUpperCase() === params.factorCode.normalize('NFKC').toUpperCase(),
-  );
-  if (!factor) {
-    throw new ValidationError(`排出係数コード「${params.factorCode}」が見つかりません。`);
-  }
+  // 係数の鍵はコード × 年度（同じコードに年度が 2 つ以上あれば「コード@年度」で選ぶ。黙って先勝ちにしない）
+  const resolved = cat1FactorIndex(factors).resolve(params.factorCode);
+  if ('error' in resolved) throw new ValidationError(resolved.error);
+  const factor = resolved.factor;
 
   // 同じサプライヤー×品目でも単位の違う行が混ざりうる（旧データ）。
   // 単位の合わない行はスキップして「合う行だけ」を紐づけ直し、
@@ -1207,10 +1330,11 @@ export async function relinkSupplierFactor(
       return input;
     }
     const isMonetary = input.activityUnit === '千円';
-    const next: CalculationInput = {
+    const next: Cat1CalculationInput = {
       ...input,
       value: roundEmissions(input.activityAmount * factor.factorValue),
       sourceId: factor.id,
+      ...factorSnapshot(factor),
       note: `${isMonetary ? '購買金額' : '活動量'} ${input.activityAmount.toLocaleString('ja-JP')} ${isMonetary ? '千円' : input.activityUnit} × 係数 ${factor.factorValue} (${factor.factorYear}年度)`,
       // 係数を付け替えても区分は変わらない（単位が係数と一致することは上で確かめた）
       dataClass: isMonetary ? 'spend_based' : 'activity_based',

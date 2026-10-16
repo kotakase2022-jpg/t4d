@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
+
 import { fid } from '@/lib/fixtures/ids';
 import { validateDataPoints } from '@/lib/validation/data-point-rules';
 import type { DbClient } from '@/lib/repositories/types';
@@ -54,9 +56,8 @@ export async function recomputePeriodValidations(
     where: { organizationId, reportingPeriodId: period.id, deletedAt: { isNull: true } },
   });
 
-  const previous = periods
-    .filter((p) => p.startDate < period.startDate)
-    .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
+  // 前年は決算月が同じ期間に限る（暦年の期間を年度の前年比に使わない。plan K10）
+  const previous = previousComparablePeriod(period, periods, 'start');
   const previousPeriodDataPoints = previous
     ? await db.select('dataPoints', {
         where: { organizationId, reportingPeriodId: previous.id, deletedAt: { isNull: true } },

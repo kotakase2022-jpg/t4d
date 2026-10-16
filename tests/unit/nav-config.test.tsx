@@ -184,6 +184,8 @@ describe('従来メニュー（機能設定が無効の組織: A39 と §9.1 の
         href: '/enterprise/ghg',
         children: [
           { label: '算定サマリー', href: '/enterprise/ghg' },
+          // 2026-10-16 の要望（plan K2）: Scope1・2 の算定の作業領域。Scope3データ取込と対称の兄弟
+          { label: 'Scope1・2算定', href: '/enterprise/ghg/calculation' },
           {
             label: 'Scope3データ取込',
             href: '/enterprise/ghg/suppliers',
@@ -276,6 +278,13 @@ describe('開示優先モードのメニュー（A01）', () => {
     expect(byLabel.get('定量データ')).toBe('/enterprise/data');
     expect(byLabel.get('資料・証跡')).toBe('/enterprise/evidence');
     expect(byLabel.get('GHG算定')).toBe('/enterprise/ghg');
+    expect(byLabel.get('Scope1・2算定')).toBe('/enterprise/ghg/calculation');
+    // 葉は 1 つだけ（plan K2）。情報・根拠の「GHG算定」の次、Scope3データ取込の前
+    const infoLabels = (tree.find((item) => item.label === '情報・根拠')?.children ?? []).map(
+      (child) => child.label,
+    );
+    const at = infoLabels.indexOf('GHG算定');
+    expect(infoLabels.slice(at, at + 3)).toEqual(['GHG算定', 'Scope1・2算定', 'Scope3データ取込']);
     expect(byLabel.get('Cat.1')).toBe('/enterprise/ghg/suppliers');
   });
 

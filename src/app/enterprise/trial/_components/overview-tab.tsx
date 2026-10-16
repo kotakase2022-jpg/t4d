@@ -15,6 +15,9 @@ import { NativeCheckbox } from '@/components/ui/native-checkbox';
 import { NativeSelect } from '@/components/ui/native-select';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { TBody, TD, TH, THead, TR, Table } from '@/components/ui/table';
+import { backupResidualLabel } from '@/lib/domain/data-disposal';
+import { ACTIVITY_KIND_LABELS, GHG_SCOPE_LABELS } from '@/lib/domain/ghg/calculate';
+import type { SiteStatus } from '@/lib/domain/ghg/verification-status';
 import {
   reductionTargetLabel,
   TRIAL_AGREEMENT_LABELS,
@@ -22,15 +25,25 @@ import {
   TRIAL_END_DISPOSITION_LABELS,
   TRIAL_PHASE_LABELS,
 } from '@/lib/domain/trial-metrics';
+import { parseTrialOptions } from '@/lib/domain/trial-options';
+import {
+  SCOPE_OVER_NOTICE,
+  signalCountLabel,
+  STANDARD_SCOPE_ITEMS,
+  STANDARD_SCOPE_NOTE,
+} from '@/lib/domain/trial-scope';
 import { formatJstDate } from '@/lib/format/datetime';
 import {
   PLANNED_KEYS,
   PLANNED_LABELS,
   type TrialFormChoices,
   type TrialOverview,
+  type TrialScopeOverview,
   type TrialTextLimits,
 } from '@/lib/services/trial-program';
 import {
+  GHG_ACTIVITY_KINDS,
+  GHG_SCOPES,
   TRIAL_AGREEMENT_KEYS,
   TRIAL_DECISIONS,
   TRIAL_END_DISPOSITIONS,
@@ -182,6 +195,7 @@ export function OverviewTab({
           <dd className="whitespace-pre-wrap">{program.targetDataNote || '—'}</dd>
           <dt className="text-ink-muted">作業時間の目標</dt>
           <dd>{reductionTargetLabel(overview.reductionTarget)}</dd>
+          {overview.scope && <PlanScopeRows scope={overview.scope} />}
         </dl>
       </Section>
 
@@ -212,6 +226,13 @@ export function OverviewTab({
           {cdpTile}
         </MetricStrip>
       </Section>
+
+      {overview.scope && (
+        <>
+          <VerificationSection scope={overview.scope} canManage={canManage} />
+          <FreeScopeSection scope={overview.scope} canManage={canManage} />
+        </>
+      )}
 
       <Section
         title={`選定ケース（要求事項 ${overview.selectedRequirements.length} 件）`}
@@ -328,6 +349,9 @@ export function OverviewTab({
               {TRIAL_END_DISPOSITION_LABELS[program.endDisposition]}
               {program.endAgreedOn && `（合意 ${formatJstDate(program.endAgreedOn)}）`}
             </dd>
+            {overview.scope && (
+              <DisposalRows scope={overview.scope} disposition={program.endDisposition} />
+            )}
             <dt className="text-ink-muted">導入判断</dt>
             <dd>
               <SemanticBadge
@@ -346,6 +370,291 @@ export function OverviewTab({
   );
 }
 
+/** 「計画」の欄: 算定の検証拠点（国コード・国内／海外の数）と将来の展開対象（全 N・うち検証 n） */
+function PlanScopeRows({ scope }: { scope: TrialScopeOverview }) {
+  const { verification, rollout } = scope;
+  return (
+    <>
+      <dt className="text-ink-muted">算定の検証拠点</dt>
+      <dd data-trial-verification-sites="">
+        {verification.sites.length === 0 ? (
+          '未設定'
+        ) : (
+          <>
+            <span className="font-medium">
+              {verification.sites.length} 拠点（国内 {verification.domestic}・海外{' '}
+              {verification.overseas}）
+            </span>
+            {verification.fromIncludedUnits && (
+              <span className="text-ink-muted">（計画の対象拠点を使っています）</span>
+            )}
+            <span className="block text-ink">
+              {verification.sites.map((s) => `${s.name}（${s.countryCode}）`).join('・')}
+            </span>
+          </>
+        )}
+      </dd>
+      <dt className="text-ink-muted">将来の展開対象</dt>
+      <dd data-trial-rollout="">
+        {rollout.totalSites === null ? (
+          '未設定'
+        ) : (
+          <span className="font-medium">
+            全 {rollout.totalSites} 拠点（うち検証対象 {rollout.verifying}・残り {rollout.remaining}
+            ）
+          </span>
+        )}
+        {rollout.note && <span className="block whitespace-pre-wrap">{rollout.note}</span>}
+      </dd>
+    </>
+  );
+}
+
+const ACTIVITY_STATE_LABEL = (s: SiteStatus['activity']) =>
+  s.state === 'none' ? '未受領' : `${s.months} / ${s.of} か月`;
+const FACTOR_STATE_LABEL = (s: SiteStatus['factors']) =>
+  s.state === 'ok' ? '揃っている' : `未割当 ${s.unresolved} 行`;
+const CALCULATION_LABEL: Record<SiteStatus['calculation'], string> = {
+  none: '未算定',
+  current: '最新',
+  stale: '再算定が必要',
+};
+const BASELINE_LABEL: Record<SiteStatus['baseline'], string> = { none: 'なし', present: 'あり' };
+const RECONCILIATION_LABEL: Record<SiteStatus['reconciliation'], string> = {
+  none: '未照合',
+  needs_review: '要確認',
+  done: '照合済み',
+};
+
+/** 算定の検証範囲（期間・Scope・活動）と拠点別の検証の状況（算定の概要と同じ数え方） */
+function VerificationSection({
+  scope,
+  canManage,
+}: {
+  scope: TrialScopeOverview;
+  canManage: boolean;
+}) {
+  const { verification } = scope;
+  const period = verification.period;
+  const calcHref = period
+    ? `/enterprise/ghg/calculation?period=${encodeURIComponent(period.id)}`
+    : '/enterprise/ghg/calculation';
+  const summary =
+    period && verification.sites.length > 0
+      ? `${period.code}・${verification.sites.length} 拠点（国内 ${verification.domestic}・海外 ${verification.overseas}）`
+      : '未設定';
+  const status = verification.status;
+  return (
+    <Section
+      title="算定の検証範囲"
+      summary={summary}
+      actions={
+        <Link href={calcHref} className={linkClass}>
+          Scope1・2算定の概要を開く
+        </Link>
+      }
+    >
+      {!verification.configured && verification.sites.length === 0 ? (
+        <EmptyState
+          kind={canManage ? 'no-data' : 'not-applicable'}
+          size="compact"
+          title="算定の検証範囲はまだ設定されていません"
+          description="期間・算定の検証拠点・Scope・活動を計画に入れると、拠点ごとの検証の進み具合を並べます。"
+          action={
+            canManage ? (
+              <Link href={trialHref('overview', { edit: '1' })} className={linkClass}>
+                計画を編集
+              </Link>
+            ) : undefined
+          }
+        />
+      ) : (
+        <div className="space-y-2">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-small">
+            <dt className="text-ink-muted">期間</dt>
+            <dd>{period ? period.label : '未設定（計画を編集して選びます）'}</dd>
+            <dt className="text-ink-muted">Scope</dt>
+            <dd>
+              {verification.scopes.length > 0
+                ? verification.scopes.map((s) => GHG_SCOPE_LABELS[s]).join('・')
+                : '未設定'}
+            </dd>
+            <dt className="text-ink-muted">活動</dt>
+            <dd>
+              {verification.activityKinds.length > 0
+                ? verification.activityKinds.map((k) => ACTIVITY_KIND_LABELS[k]).join('・')
+                : '未設定'}
+            </dd>
+          </dl>
+          {status ? (
+            <div className="t4d-scroll-x rounded-t4d border border-line">
+              <Table>
+                <caption className="sr-only">拠点別の検証の状況</caption>
+                <THead>
+                  <TR>
+                    <TH>拠点（国）</TH>
+                    <TH>国内・海外</TH>
+                    <TH>活動量</TH>
+                    <TH>係数</TH>
+                    <TH>算定</TH>
+                    <TH>既存結果</TH>
+                    <TH>照合</TH>
+                    <TH>状況</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {status.units.map(({ unit, status: site }) => {
+                    const view = verification.sites.find((s) => s.id === unit.id);
+                    return (
+                      <TR key={unit.id} data-t4d-record="">
+                        <TD className="whitespace-nowrap font-medium">
+                          {unit.name}（{unit.countryCode}）
+                        </TD>
+                        <TD className="text-small">{view?.domestic ? '国内' : '海外'}</TD>
+                        <TD className="tnum text-small">{ACTIVITY_STATE_LABEL(site.activity)}</TD>
+                        <TD className="text-small">{FACTOR_STATE_LABEL(site.factors)}</TD>
+                        <TD className="text-small">{CALCULATION_LABEL[site.calculation]}</TD>
+                        <TD className="text-small">{BASELINE_LABEL[site.baseline]}</TD>
+                        <TD className="text-small">{RECONCILIATION_LABEL[site.reconciliation]}</TD>
+                        <TD>
+                          <StatusBadge domain="ghgSiteStatus" value={site.overall} />
+                        </TD>
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="text-small text-ink-muted">
+              算定の検証期間と拠点を設定すると、拠点ごとの状況（活動量・係数・算定・既存結果・照合）を並べます。
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * 無償の範囲と別途協議（合意・標準機能の一覧・4 区分の信号）。目安を超えても止めない。金額は出さない。
+ * 合意が無ければ推測で「無償」と書かない
+ */
+function FreeScopeSection({ scope, canManage }: { scope: TrialScopeOverview; canManage: boolean }) {
+  const { agreement, signals, over, unclassifiedSeparate } = scope.freeScope;
+  return (
+    <Section
+      title="無償の範囲と別途協議"
+      summary={
+        over.length > 0
+          ? `別途協議の目安を超過 ${over.length} 区分（操作は止めません）`
+          : '目安を超えた区分はありません'
+      }
+      actions={
+        canManage ? (
+          <Link href={trialHref('overview', { decision: '1' })} className={linkClass}>
+            合意を記録
+          </Link>
+        ) : undefined
+      }
+    >
+      <div className="space-y-2">
+        <p className="flex flex-wrap items-center gap-1.5 text-small">
+          <span className="text-ink-muted">無償の範囲の合意</span>
+          {agreement?.agreedOn ? (
+            <SemanticBadge
+              semantic="done"
+              label={`合意済み（${formatJstDate(agreement.agreedOn)}）`}
+            />
+          ) : (
+            <SemanticBadge semantic="todo" label="未合意" />
+          )}
+          {agreement?.note && <span className="text-ink">{agreement.note}</span>}
+        </p>
+        {over.length > 0 && (
+          <Notice tone="warning" title={SCOPE_OVER_NOTICE}>
+            {over.map((s) => s.label).join('・')}
+            。「目安を超過」は別途協議の候補であって確定ではありません。合意した範囲を確かめてください。
+          </Notice>
+        )}
+        <div className="grid gap-3 lg:grid-cols-[minmax(14rem,1fr)_2fr]">
+          <div className="space-y-1">
+            <p className="text-small font-medium text-ink">標準機能の一覧</p>
+            <ul className="list-disc space-y-0.5 pl-4 text-small">
+              {STANDARD_SCOPE_ITEMS.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            <p className="text-caption text-ink-muted">{STANDARD_SCOPE_NOTE}</p>
+          </div>
+          <div className="t4d-scroll-x rounded-t4d border border-line">
+            <Table>
+              <caption className="sr-only">別途協議の区分</caption>
+              <THead>
+                <TR>
+                  <TH>区分</TH>
+                  <TH>数えたもの</TH>
+                  <TH>件数／目安</TH>
+                  <TH>状態</TH>
+                  <TH>補足</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {signals.map((signal) => (
+                  <TR key={signal.kind} data-t4d-record="">
+                    <TD className="whitespace-nowrap font-medium">{signal.label}</TD>
+                    <TD className="text-small">{signal.measured}</TD>
+                    <TD className="tnum whitespace-nowrap text-small">
+                      {signalCountLabel(signal)}
+                    </TD>
+                    <TD>
+                      <StatusBadge domain="trialScopeSignal" value={signal.state} />
+                    </TD>
+                    <TD className="text-small">{signal.detail || '—'}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+        </div>
+        <p className="text-caption text-ink-muted">
+          金額は表示しません。目安は合意した値を人が入れます（PDF
+          の目安は「計画を編集」、改善管理表の別途協議は区分を選んで記録）。
+          {unclassifiedSeparate > 0 &&
+            ` 区分の無い別途協議 ${unclassifiedSeparate} 件は、どの区分にも数えていません。`}
+        </p>
+      </div>
+    </Section>
+  );
+}
+
+/** 返却・削除の予定日と、バックアップから消える見込み日（予定日 + 合意した残存期間） */
+function DisposalRows({
+  scope,
+  disposition,
+}: {
+  scope: TrialScopeOverview;
+  disposition: TrialProgram['endDisposition'];
+}) {
+  const { plannedOn, backupResidualDays, purgeDueOn } = scope.disposal;
+  return (
+    <>
+      <dt className="text-ink-muted">返却・削除の予定日</dt>
+      <dd data-trial-disposal="">{plannedOn ? formatJstDate(plannedOn) : '未設定'}</dd>
+      <dt className="text-ink-muted">バックアップから消える見込み日</dt>
+      <dd data-trial-purge="">
+        {disposition === 'continue'
+          ? '—（本導入へ移行するため削除しません）'
+          : purgeDueOn
+            ? `${formatJstDate(purgeDueOn)}（予定日 + 残存期間 ${backupResidualLabel(backupResidualDays)}）`
+            : plannedOn
+              ? '出しません（バックアップの残存期間が未合意です）'
+              : '出しません（返却・削除の予定日が未設定です）'}
+      </dd>
+    </>
+  );
+}
+
 function PlanForm({
   program,
   choices,
@@ -358,6 +667,11 @@ function PlanForm({
   const target = program?.options.reductionTarget as
     { minPercent?: number; maxPercent?: number } | undefined;
   const cdp = program?.options.cdp;
+  const options = parseTrialOptions(program?.options);
+  const ghg = options.ghgVerification;
+  const ghgUnits = new Set(ghg?.unitIds ?? []);
+  const ghgScopes = new Set<string>(ghg?.scopes ?? []);
+  const ghgKinds = new Set<string>(ghg?.activityKinds ?? []);
   return (
     <PreservingForm action={saveTrialPlanAction} className="space-y-3 p-3">
       <FormSection title="基本" kind="required">
@@ -435,6 +749,106 @@ function PlanForm({
         </Field>
       </FormSection>
       <FormSection
+        title="算定の検証範囲と将来の展開対象"
+        kind="optional"
+        open={ghg !== null || options.rollout !== null}
+        description="算定の検証拠点を選ばなければ、上の対象拠点を使います。展開対象の総拠点数は検証対象を含む全体の数です（検証対象の拠点数以上）。"
+      >
+        <div className="grid grid-cols-12 gap-2">
+          <Field label="算定の検証期間" id="trial-plan-ghg-period" className="col-span-5">
+            {(p) => (
+              <NativeSelect {...p} name="ghgPeriodId" defaultValue={ghg?.periodId ?? ''}>
+                <option value="">未設定</option>
+                {choices.periods.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    {period.code}（{period.label}）
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
+          <Field
+            label="将来の展開対象の総拠点数"
+            id="trial-plan-rollout-total"
+            hint="検証対象を含む全体の数"
+            className="col-span-3"
+          >
+            {(p) => (
+              <Input
+                {...p}
+                name="rolloutTotalSites"
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                defaultValue={options.rollout?.totalSites ?? ''}
+              />
+            )}
+          </Field>
+          <Field
+            label="展開対象のメモ"
+            id="trial-plan-rollout-note"
+            hint={`${limits.rolloutNote} 字以内`}
+            className="col-span-4"
+          >
+            {(p) => (
+              <Input
+                {...p}
+                name="rolloutNote"
+                maxLength={limits.rolloutNote}
+                defaultValue={options.rollout?.note ?? ''}
+              />
+            )}
+          </Field>
+        </div>
+        <fieldset className="space-y-1">
+          <legend className="text-small font-medium text-ink">
+            算定の検証拠点（国コード。選ばなければ上の対象拠点）
+          </legend>
+          <div className="flex max-h-32 flex-wrap gap-x-3 gap-y-1 overflow-y-auto rounded-t4d border border-line p-2">
+            {choices.units.map((unit) => (
+              <NativeCheckbox
+                key={unit.id}
+                name="ghgUnitIds"
+                value={unit.id}
+                label={`${unit.name}（${unit.countryCode}）`}
+                defaultChecked={ghgUnits.has(unit.id)}
+              />
+            ))}
+          </div>
+        </fieldset>
+        <div className="grid gap-2 md:grid-cols-2">
+          <fieldset className="space-y-1">
+            <legend className="text-small font-medium text-ink">検証の Scope</legend>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {GHG_SCOPES.map((value) => (
+                <NativeCheckbox
+                  key={value}
+                  name="ghgScopes"
+                  value={value}
+                  label={GHG_SCOPE_LABELS[value]}
+                  defaultChecked={ghgScopes.has(value)}
+                />
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="space-y-1">
+            <legend className="text-small font-medium text-ink">検証の活動</legend>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {GHG_ACTIVITY_KINDS.map((value) => (
+                <NativeCheckbox
+                  key={value}
+                  name="ghgActivityKinds"
+                  value={value}
+                  label={ACTIVITY_KIND_LABELS[value]}
+                  defaultChecked={ghgKinds.has(value)}
+                />
+              ))}
+            </div>
+          </fieldset>
+        </div>
+      </FormSection>
+      <FormSection
         title="利用枠（計画値）と目標"
         kind="optional"
         open
@@ -494,6 +908,23 @@ function PlanForm({
                 min={0}
                 max={100}
                 defaultValue={target?.maxPercent ?? ''}
+              />
+            )}
+          </Field>
+          <Field
+            label="PDF 等の一次データの目安（件）"
+            id="trial-plan-free-pdf"
+            hint="無償の範囲として合意した目安。超えても止めません"
+          >
+            {(p) => (
+              <Input
+                {...p}
+                name="freeScopePdfFiles"
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                defaultValue={options.freeScope?.pdfFiles ?? ''}
               />
             )}
           </Field>
@@ -582,13 +1013,14 @@ function CasesForm({ program, choices }: { program: TrialProgram; choices: Trial
 }
 
 function DecisionForm({ program, limits }: { program: TrialProgram; limits: TrialTextLimits }) {
+  const disposal = parseTrialOptions(program.options).disposal;
   return (
     <PreservingForm action={saveTrialDecisionAction} className="space-y-3 p-3">
       <FormSection
-        title="開始前の合意（範囲・判断者・スケジュール）"
+        title="開始前の合意（範囲・判断者・スケジュール・無償の範囲）"
         kind="optional"
         open
-        description="合意日が空の項目は「未合意」と表示します（推測で埋めません）。"
+        description="合意日が空の項目は「未合意」と表示します（推測で埋めません）。無償の範囲は「標準機能の範囲は無償、追加開発等は別途協議」などの合意を書きます（金額は書きません）。"
       >
         <div className="grid grid-cols-12 gap-2">
           {TRIAL_AGREEMENT_KEYS.map((key) => (
@@ -646,6 +1078,21 @@ function DecisionForm({ program, limits }: { program: TrialProgram; limits: Tria
                 name="endAgreedOn"
                 type="date"
                 defaultValue={program.endAgreedOn ?? ''}
+              />
+            )}
+          </Field>
+          <Field
+            label="返却・削除の予定日"
+            id="trial-disposal-planned"
+            hint="バックアップから消える見込み日は、データ取扱条件の残存期間を足して出します"
+            className="col-span-5"
+          >
+            {(p) => (
+              <Input
+                {...p}
+                name="disposalPlannedOn"
+                type="date"
+                defaultValue={disposal?.plannedOn ?? ''}
               />
             )}
           </Field>

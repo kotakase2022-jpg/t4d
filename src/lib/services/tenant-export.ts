@@ -6,6 +6,7 @@ import { assertCan, assertEnterpriseWorkspace } from '@/lib/authorization/can';
 import { getBuildInfo } from '@/lib/build-info';
 import { toCsv, type ExportColumn } from '@/lib/exports';
 import { buildZip, type ZipEntry } from '@/lib/exports/zip';
+import { backupResidualText } from '@/lib/domain/data-disposal';
 import { SQL_TABLE_NAMES, toSnake } from '@/lib/repositories/table-names';
 import { getStorageAdapter } from '@/lib/storage';
 import type { DbClient, TableName } from '@/lib/repositories/types';
@@ -106,6 +107,18 @@ export const TENANT_EXPORT_TABLES = [
   'organizationDataTerms',
   'organizationOptions',
   'responseContentLinks',
+  // Scope1・2 の算定と既存結果との照合（0061〜0065。返却・削除の対象。plan CR-29）
+  'emissionFactorSets',
+  'emissionFactorAssignments',
+  'ghgCalculationPolicies',
+  'ghgClassificationRules',
+  'ghgActivityBatches',
+  'ghgActivityLines',
+  'ghgCalculationRuns',
+  'ghgCalculationLines',
+  'ghgBaselineResults',
+  'ghgReconciliations',
+  'ghgReconciliationNotes',
 ] as const satisfies readonly TableName[];
 
 /** organization_id 以外の列で自社の行を読む表（企業が書いた保証連携の行・自社のメンバーの操作の記録） */
@@ -341,7 +354,14 @@ export async function planTenantExport(
   return { tables, rows, files };
 }
 
-function readme(manifest: TenantExportManifest): string {
+/**
+ * README の本文。削除の後のバックアップの扱いは、データの取扱いの画面・削除完了の報告と同じ固定の文
+ * （合意した残存期間の日数入り。未合意ならそう書く。2026-10-16 の要望 ⑦）
+ */
+export function tenantExportReadme(
+  manifest: TenantExportManifest,
+  backupResidualDays: number | null = null,
+): string {
   const lines = [
     '# T4D 全データの書き出し（返却用）',
     '',
@@ -366,6 +386,11 @@ function readme(manifest: TenantExportManifest): string {
     ...manifest.excluded.map((e) => `- ${e.table}: ${e.reason}`),
     '',
     'データの削除（テナントの終了）は、返却を受け取ったことの確認のあと、運営が手順書に従って行います。',
+    '',
+    '## 削除の後のバックアップ',
+    '',
+    backupResidualText(backupResidualDays),
+    '削除を実施したら、運営が削除完了の報告（削除日・削除した件数・この manifest の sha256・消去の見込み日）を渡します。',
     '',
   ];
   return lines.join('\n');
@@ -460,7 +485,16 @@ export async function buildTenantExport(
     excluded: excludedList(),
   };
   entries.push({ name: 'manifest.json', bytes: encoder.encode(JSON.stringify(manifest, null, 2)) });
-  entries.push({ name: 'README.md', bytes: encoder.encode(readme(manifest)) });
+  // 削除の後のバックアップの残存期間は、データ取扱条件の最新の版の合意値（未合意は null）
+  const [terms] = await db.select('organizationDataTerms', {
+    where: { organizationId },
+    orderBy: { column: 'versionNo', dir: 'desc' },
+    limit: 1,
+  });
+  entries.push({
+    name: 'README.md',
+    bytes: encoder.encode(tenantExportReadme(manifest, terms?.backupResidualDays ?? null)),
+  });
   const zip = buildZip(entries, new Date(generatedAt));
 
   await recordAuditEvent(db, ctx, {

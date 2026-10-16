@@ -118,6 +118,18 @@ export const SQL_TABLE_NAMES: Record<TableName, string> = {
   organizationDataTerms: 'organization_data_terms',
   organizationOptions: 'organization_options',
   responseContentLinks: 'response_content_links',
+  // Scope1・2 の算定と既存結果との照合（0061〜0065。2026-10-16 の要望）
+  emissionFactorSets: 'emission_factor_sets',
+  emissionFactorAssignments: 'emission_factor_assignments',
+  ghgCalculationPolicies: 'ghg_calculation_policies',
+  ghgClassificationRules: 'ghg_classification_rules',
+  ghgActivityBatches: 'ghg_activity_batches',
+  ghgActivityLines: 'ghg_activity_lines',
+  ghgCalculationRuns: 'ghg_calculation_runs',
+  ghgCalculationLines: 'ghg_calculation_lines',
+  ghgBaselineResults: 'ghg_baseline_results',
+  ghgReconciliations: 'ghg_reconciliations',
+  ghgReconciliationNotes: 'ghg_reconciliation_notes',
 
   engagements: 'engagements',
   engagementMembers: 'engagement_members',

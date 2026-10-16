@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  consolidationMetricCodes,
+  intercompanyTrendNote,
+} from '@/app/enterprise/ghg/_components/summary-parts';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import { ORG_IDS, userId } from '@/lib/fixtures/dataset';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
@@ -141,6 +145,31 @@ describe('直近3年の連結推移', () => {
 
     // 承認済み実績の無い年度は載らず、開始日順の実績 3 年のまま
     expect(trend.map((t) => t.period.code)).toEqual(['FY2024', 'FY2025', 'FY2026']);
+  });
+
+  it('GHG 画面の指標は指標マスターと集計ルールから決まり、内部取引控除の文は推移の控除の有無から導く（CR-16）', async () => {
+    const periods = fixture.periods.filter((p) => p.organizationId === ORG_IDS.aomi);
+    const codes = consolidationMetricCodes(
+      fixture.metrics.filter((m) => m.organizationId === ORG_IDS.aomi && !m.deletedAt),
+      fixture.aggregationRules.filter((r) => r.organizationId === ORG_IDS.aomi),
+    );
+    expect(codes).toEqual(['scope1', 'scope2', 'scope2_location', 'scope3_cat1']);
+    const trend = await loadConsolidatedTrend(db, manager(), periods, codes);
+    // 暦年の CY2025（Scope1・2 の算定の検証期間）は年度の推移に入らない（決算月が違う。plan K10）
+    expect(trend.map((t) => t.period.code)).toEqual(['FY2024', 'FY2025', 'FY2026']);
+    // 控除は FY2026 の内部取引の明細だけ（Fixture）→ 従来の固定文と同じ文になる
+    expect(intercompanyTrendNote(trend)).toBe(
+      '内部取引控除は FY2026 から適用（過年度は控除前の値）。',
+    );
+    // FY2026 の内部取引の明細を消すと、控除の文は出ない（固定の文を残さない）
+    fixture.dataPoints = fixture.dataPoints.filter((dp) => dp.boundary !== '内部取引');
+    const without = await loadConsolidatedTrend(
+      new DemoDbClient(fixture),
+      manager(),
+      periods,
+      codes,
+    );
+    expect(intercompanyTrendNote(without)).toBeNull();
   });
 
   it('FY2024 の Data Point は FY2025 と同じ収集 21 指標・同じ拠点で、すべて承認済み', async () => {

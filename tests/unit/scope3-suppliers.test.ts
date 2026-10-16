@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { countryLabel, normalizeCountry } from '@/lib/domain/scope3-factor-hints';
 import { extractSupplierCsvRows } from '@/lib/services/scope3-suppliers';
 import { buildSupplierDemoFiles } from '@/lib/fixtures/supplier-demo-files';
 
@@ -196,5 +197,36 @@ describe('デモ用サンプルファイル', () => {
       ['SUP-29', 'monetary', 5200, '千円'],
     ]);
     expect(activity.rows.every((r) => r.errors.length === 0)).toBe(true);
+  });
+});
+
+describe('生産国（ISO 3166-1 alpha-2。plan CR-18）', () => {
+  it('国名・alpha-3・2 文字のコードを ISO の 2 文字に揃える（ID・BR などを含む）', () => {
+    expect(normalizeCountry('インドネシア')).toBe('ID');
+    expect(normalizeCountry('Brazil')).toBe('BR');
+    expect(normalizeCountry('IDN')).toBe('ID');
+    expect(normalizeCountry('br')).toBe('BR');
+    expect(normalizeCountry('ＴＨ')).toBe('TH');
+    expect(normalizeCountry('United  States')).toBe('US');
+    expect(normalizeCountry('日本')).toBe('JP');
+    // ISO に無いコード・表に無い名前は決めない（null）
+    expect(normalizeCountry('XX')).toBeNull();
+    expect(normalizeCountry('Atlantis')).toBeNull();
+    expect(normalizeCountry('')).toBeNull();
+    expect(countryLabel('ID')).toBe('インドネシア');
+    expect(countryLabel('IS')).toBe('IS');
+    expect(countryLabel(null)).toBeNull();
+  });
+
+  it('取込の生産国の列も同じ規則で読む（判定できない値は null のまま）', () => {
+    const text = [
+      'サプライヤーコード,品目,データ種別,数値,単位,生産国',
+      'SUP-41,アルミナ,物理量,100,kg,インドネシア',
+      'SUP-42,アルミナ,物理量,100,kg,BRA',
+      'SUP-43,アルミナ,物理量,100,kg,どこか',
+    ].join('\n');
+    const parsed = extractSupplierCsvRows(text);
+    expect(parsed.rows.map((r) => r.country)).toEqual(['ID', 'BR', null]);
+    expect(parsed.rows[2]?.countryRaw).toBe('どこか');
   });
 });

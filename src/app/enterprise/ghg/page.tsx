@@ -18,6 +18,7 @@ import { AttentionStrip } from '@/components/shared/attention-strip';
 import { PageActions } from '@/components/shared/page-actions';
 import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
+import { StatusBadge } from '@/components/shared/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible } from '@/components/ui/collapsible';
 import { MoreInfo } from '@/components/ui/more-info';
@@ -43,8 +44,15 @@ import {
 } from '@/lib/services/scope3-suppliers';
 import { loadEnterpriseShell } from '@/lib/services/shell';
 import type { AvailabilityStatus, CalculationDataClass } from '@/types/domain';
+import { loadGhgCalcSummary } from './_components/calc-data';
+import { CalcSummarySection } from './_components/calc-summary-section';
 import { GhgTrendMetric } from './_components/ghg-trend';
 import { Scope3CategoryGrid } from './_components/scope3-category-grid';
+import {
+  consolidationMetricCodes,
+  factorOriginCounts,
+  intercompanyTrendNote,
+} from './_components/summary-parts';
 
 export const metadata = { title: 'GHG' };
 
@@ -111,8 +119,15 @@ export default async function GhgPage() {
   // 連結集計（DATA-P0-006）: 合計・持分調整・内部取引控除・推計。
   // 女性管理職比率は GHG と無関係なため 2026-09 の依頼でこの画面から外した
   // （加重平均の算定自体は aggregation サービスに残っている）。
-  // Scope2 はロケーション基準とマーケット基準を別の行にし、決して足さない（§7.2 / A08）
-  const GHG_CONSOLIDATION_CODES = ['scope1', 'scope2', 'scope2_location', 'scope3_cat1'];
+  // Scope2 はロケーション基準とマーケット基準を別の行にし、決して足さない（§7.2 / A08）。
+  // 並べる指標は指標マスターと集計ルールから決める（コードに固定しない。plan CR-16・GE-15）:
+  // 拠点で集める GHG の指標と、集計ルール（連結の設定）を持つ指標
+  const organizationId = shell.ctx.workspace.organizationId;
+  const [aggregationRules, factorSets] = await Promise.all([
+    shell.db.select('aggregationRules', { where: { organizationId } }),
+    shell.db.select('emissionFactorSets', { where: { organizationId } }),
+  ]);
+  const GHG_CONSOLIDATION_CODES = consolidationMetricCodes(shell.metrics, aggregationRules);
   const consolidation = await computeConsolidatedAggregation(
     shell.db,
     shell.ctx,
@@ -137,6 +152,14 @@ export default async function GhgPage() {
       ),
     ),
   );
+  // 控除の有無が年度で違うと前年比の読み方が変わる。年度ごとの控除の有無から文を導く（固定の年度を書かない）
+  const intercompanyNote = intercompanyTrendNote(trend);
+
+  // 係数の出所（架空値の印は Fixture の係数のときだけ。組織指定の係数を「架空」と書かない。plan K13）
+  const factorOrigins = factorOriginCounts(breakdown.factors, factorSets);
+
+  // Scope1・2 の算定と照合（検証期間の拠点別の状態。概要 P90・トライアル概要と同じ数え方）
+  const calcSummary = await loadGhgCalcSummary(shell);
 
   // Scope 別集計: 未入力・対象外の行を 0 として足さない（W0 O4）
   const totals = ghgMetrics.map((metric) => ({
@@ -225,6 +248,13 @@ export default async function GhgPage() {
               label: '未提出のサプライヤー（Cat.1）',
               count: missingSuppliers.length,
               href: '/enterprise/ghg/suppliers',
+              semantic: 'pending',
+            },
+            {
+              key: 'calculation-review',
+              label: 'Scope1・2 の照合で要確認の拠点',
+              count: calcSummary?.status.attention.reconciliationNeedsReview ?? 0,
+              href: '#ghg-calculation',
               semantic: 'pending',
             },
           ]}
@@ -335,10 +365,9 @@ export default async function GhgPage() {
                 <GhgTrendMetric key={code} series={consolidatedTrendSeries(trend, code)} />
               ))}
             </div>
-            {/* 控除の有無が年度で違うことは見えている前年比の読み方を変えるため、1 行は閉じない */}
-            <p className="text-caption text-ink-muted">
-              内部取引控除は FY2026 から適用（過年度は控除前の値）。
-            </p>
+            {/* 控除の有無が年度で違うことは見えている前年比の読み方を変えるため、1 行は閉じない。
+                文は推移の各年度の控除の有無から導く（控除がどの年度にも無ければ出さない） */}
+            {intercompanyNote && <p className="text-caption text-ink-muted">{intercompanyNote}</p>}
             <MoreInfo label="推移の見方">
               <p>
                 値は連結値（推計込み）です。値の無い年度は線を切り「未入力」と書きます（0
@@ -414,6 +443,8 @@ export default async function GhgPage() {
             </MoreInfo>
           </div>
         </Section>
+
+        {calcSummary && <CalcSummarySection data={calcSummary} />}
 
         {/* Scope3: カテゴリー 1〜15 の状況。Cat.1 だけが登録された状態を Scope3 全体として見せない（A09）。
             合計とカテゴリーが両方あるときは照合するだけで、足さない（A10） */}
@@ -752,15 +783,26 @@ export default async function GhgPage() {
         </Section>
 
         {/* 排出係数マスターはサプライヤーデータ取込の画面を正とする（同じ表を 2 か所に置かない。T8）。
-            架空値の注記は閉じない（リンクの横に見せる） */}
+            架空値の注記は閉じない（リンクの横に見せる）。出所で出し分け、Fixture の係数のときだけ「架空値」を出す
+            （組織指定・公的参照の係数を「架空」と書かない。plan K13・CR-16） */}
         <Section
           id="ghg-emission-factors"
           title={`排出係数マスター（${breakdown.factors.length}）`}
           actions={
-            <Badge tone="warning">
-              <CircleAlert className="size-3" aria-hidden="true" />
-              架空値（実係数ではありません）
-            </Badge>
+            <span className="inline-flex flex-wrap items-center gap-1">
+              {factorOrigins.fixture > 0 && (
+                <Badge tone="warning">
+                  <CircleAlert className="size-3" aria-hidden="true" />
+                  架空値（実係数ではありません）
+                </Badge>
+              )}
+              {factorOrigins.customer_specified > 0 && (
+                <StatusBadge domain="factorOrigin" value="customer_specified" />
+              )}
+              {factorOrigins.public_reference > 0 && (
+                <StatusBadge domain="factorOrigin" value="public_reference" />
+              )}
+            </span>
           }
         >
           <p className="text-small text-ink">

@@ -5,6 +5,7 @@ import {
   Bot,
   Boxes,
   Building2,
+  Calculator,
   ChartColumnBig,
   ChartLine,
   ClipboardCheck,
@@ -275,6 +276,23 @@ export const ENTERPRISE_NAV: NavItem[] = [
         keywords: ['GHG', 'scope3', '連結集計', '排出係数'],
       },
       {
+        // 2026-10-16 の要望（plan K2）。Scope1・2 の係数・算定ルール・活動量・算定・照合の作業領域。
+        // Scope3データ取込（入力）と対称の兄弟として置き、下位の 5 画面は葉を増やさず画面上部のタブで届かせる
+        label: 'Scope1・2算定',
+        href: '/enterprise/ghg/calculation',
+        icon: Calculator,
+        keywords: [
+          'GHG',
+          'scope1',
+          'scope2',
+          '排出係数',
+          '活動量',
+          '改良トンキロ法',
+          '照合',
+          '算定ルール',
+        ],
+      },
+      {
         // 2026-09-15 の発注者指示でカテゴリー別の 3 階層へ（SSBJ 配下と同じ構造）。
         // 現状はカテゴリー1 のみだが、他カテゴリーを増やす場所を先に用意する
         label: 'Scope3データ取込',
@@ -500,6 +518,7 @@ export const ENTERPRISE_NAV_DISCLOSURE_FIRST: NavItem[] = [
         keywords: ['CSV', '標準', '手入力', '数値', '登録'],
       },
       { ...legacyItem('/enterprise/ghg', '算定サマリー'), label: 'GHG算定' },
+      legacyItem('/enterprise/ghg/calculation', 'Scope1・2算定'),
       legacyItem('/enterprise/ghg/suppliers', 'Scope3データ取込'),
     ],
   },

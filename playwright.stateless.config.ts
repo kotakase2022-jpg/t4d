@@ -37,6 +37,9 @@ export default defineConfig({
     'zzzz-master-create.stateless.ts',
     // トライアル対応の「試行の流れ」（plan §4.3-6。開示デモのリセットから始め、Cookie だけで最後まで通す）
     'zzzzz-trial-chain.stateless.ts',
+    // Scope1・2 の算定と照合の流れ（2026-10-16 の要望。リセット → 区分規則の承認 → 算定 → 照合 → 原因の記録
+    // → 仮説の再計算 → トライアル概要。最後に開示デモを初期状態に戻す）
+    'zzzzzz-ghg-chain.stateless.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

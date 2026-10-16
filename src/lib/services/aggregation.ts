@@ -1,4 +1,5 @@
 import 'server-only';
+import { previousComparablePeriod, sameFiscalYearEnd } from '@/lib/domain/period-comparability';
 
 import { INTERCOMPANY_BOUNDARY, isCountedInTotals } from '@/lib/domain/boundaries';
 
@@ -379,10 +380,12 @@ export async function computeConsolidatedAggregation(
   metricCodes: string[],
 ): Promise<ConsolidatedAggregation> {
   const organizationId = ctx.workspace.organizationId;
-  const previous =
-    periods
-      .filter((p) => p.organizationId === organizationId && p.endDate < period.startDate)
-      .sort((a, b) => (a.endDate < b.endDate ? 1 : -1))[0] ?? null;
+  // 前年は決算月（終了日の月日）が同じ期間に限る（暦年と年度が並んでも年度の前年に暦年を使わない。plan K10）
+  const previous = previousComparablePeriod(
+    { ...period, organizationId },
+    periods.filter((p) => p.organizationId === organizationId),
+    'end',
+  );
 
   const [metrics, units, rules, current, prev] = await Promise.all([
     db.select('metrics', { where: { organizationId, deletedAt: { isNull: true } } }),
@@ -597,6 +600,10 @@ export async function loadConsolidatedTrend(
   periods: ReportingPeriod[],
   metricCodes: string[],
   count = 3,
+  /**
+   * 推移の基準の期間（決算月が同じ期間だけを並べる。plan K10）。省略時は実績のある最新の期間（終了日の順）
+   */
+  anchor: Pick<ReportingPeriod, 'endDate'> | null = null,
 ): Promise<ConsolidatedTrendEntry[]> {
   const organizationId = ctx.workspace.organizationId;
 
@@ -625,8 +632,12 @@ export async function loadConsolidatedTrend(
       .map((dp) => dp.reportingPeriodId),
   );
 
-  const recent = periods
-    .filter((p) => p.organizationId === organizationId && periodsWithData.has(p.id))
+  const withData = periods.filter(
+    (p) => p.organizationId === organizationId && periodsWithData.has(p.id),
+  );
+  const base = anchor ?? [...withData].sort((a, b) => (a.endDate < b.endDate ? 1 : -1))[0] ?? null;
+  const recent = withData
+    .filter((p) => base === null || sameFiscalYearEnd(p, base))
     .sort((a, b) => (a.startDate < b.startDate ? -1 : 1))
     .slice(-count);
   return Promise.all(

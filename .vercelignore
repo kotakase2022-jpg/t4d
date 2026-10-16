@@ -30,3 +30,6 @@ supabase/.temp
 supabase/.env
 local-evidence
 tmp
+
+# ローカルだけに置く機密の検討資料（Git の対象外）。ビルドに不要なのでアップロードしない
+docs/*-2026-10*

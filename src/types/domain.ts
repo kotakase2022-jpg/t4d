@@ -481,6 +481,12 @@ export interface CalculationInput {
    * 旧形式の行は未設定で、読み出し側が note・activityUnit から推定する。
    */
   dataClass?: CalculationDataClass;
+  /**
+   * 算定に使った係数の年度・値（Scope3 Cat.1）。係数マスターの行を後から直しても、算定に使った値と
+   * 年度が分かるように写す。コードは sourceId から引ける。旧形式の行は未設定（JSONB の行なので移行は不要）
+   */
+  factorYear?: number;
+  factorValue?: number;
 }
 
 /**
@@ -564,6 +570,35 @@ export interface EmissionFactor {
   /** Fixture では必ず「FIXTURE（架空値）」を表示する */
   factorSource: string;
   createdAt: IsoDateTime;
+  /**
+   * 係数セット（0061）。null は Scope3 Cat.1 の既存の係数（セットに属さない・変更可能のまま。
+   * docs/known-limitations.md §6）。セットに属する行は、セットが draft の間だけ変えられる
+   */
+  factorSetId: Uuid | null;
+  /** ISO 3166-1 alpha-2（国別の係数のときだけ） */
+  countryCode: string | null;
+  regionLabel: string | null;
+  /** 電力の基準（ロケーション／マーケット）。電力以外は null */
+  basis: EmissionBasis | null;
+  /** Scope1・2 の算定で使う活動の種類。null は Cat.1 の既存の係数 */
+  activityKind: FactorActivityKind | null;
+  /** 燃料種・契約コードなど（割当の鍵） */
+  activityCode: string | null;
+  /** ガス（既定 co2e。ガス別の係数は未対応） */
+  gas: string;
+  /** 2 段係数: 単位発熱量（例 38.0 GJ/kL） */
+  calorificValue: number | null;
+  calorificUnit: string | null;
+  /** 2 段係数: 炭素排出係数（例 0.0188 tC/GJ） */
+  carbonFactor: number | null;
+  carbonFactorUnit: string | null;
+  validFrom: IsoDate | null;
+  validTo: IsoDate | null;
+  /**
+   * 種類ごとの追加の値（改良トンキロ法の式の係数 A・B・S・燃費区分・最大積載量の区間、
+   * 見なし積載率の原単位表）。コードに固定せず、係数セットの行として持つ（plan K5）
+   */
+  params: Record<string, unknown>;
 }
 
 // ======================================================================
@@ -3306,7 +3341,8 @@ export interface TrialAgreement {
   note: string;
 }
 
-export const TRIAL_AGREEMENT_KEYS = ['scope', 'decider', 'schedule'] as const;
+/** 開始前の合意（範囲・判断者・スケジュール）と、無償の範囲の合意（2026-10-16 の要望 ④） */
+export const TRIAL_AGREEMENT_KEYS = ['scope', 'decider', 'schedule', 'freeScope'] as const;
 export type TrialAgreementKey = (typeof TRIAL_AGREEMENT_KEYS)[number];
 
 /** トライアルの計画・利用枠・選定ケース・終了時の扱い・導入判断（0055。人が入力する） */
@@ -3348,6 +3384,8 @@ export const TRIAL_THEMES = [
   'usability',
   'work_time',
   'operations',
+  // 算定の再現と整合性の確認（0060）
+  'calculation_reconciliation',
 ] as const;
 export type TrialTheme = (typeof TRIAL_THEMES)[number];
 
@@ -3425,6 +3463,18 @@ export type FeedbackStatus = (typeof FEEDBACK_STATUSES)[number];
 export const COST_CLASSES = ['maintenance', 'separate_estimate', 'undecided'] as const;
 export type CostClass = (typeof COST_CLASSES)[number];
 
+/**
+ * 別途協議の区分（0060）。費用区分が別途協議（separate_estimate）のときだけ入れる
+ * （大幅な拠点追加・大量の PDF 等の一次データ処理・外部システムとの個別連携・新規機能の個別開発）
+ */
+export const TRIAL_SCOPE_KINDS = [
+  'site_expansion',
+  'bulk_primary_data',
+  'system_integration',
+  'custom_development',
+] as const;
+export type TrialScopeKind = (typeof TRIAL_SCOPE_KINDS)[number];
+
 /** フィードバックと改善管理表（0055）。投稿は組織メンバー本人、トリアージは enterprise.org.manage */
 export interface TrialFeedbackItem extends AuditColumns, SoftDeletable {
   id: Uuid;
@@ -3450,6 +3500,8 @@ export interface TrialFeedbackItem extends AuditColumns, SoftDeletable {
   verifiedAt: IsoDateTime | null;
   agreed: boolean;
   environmentVersion: string;
+  /** 別途協議の区分（0060。費用区分が別途協議のときだけ。それ以外は null） */
+  scopeKind: TrialScopeKind | null;
 }
 
 export const TRIAL_TASK_KEYS = [
@@ -3500,10 +3552,21 @@ export type AiTrainingUse = (typeof AI_TRAINING_USES)[number];
 export const AI_PROVIDER_STORAGES = ['none', 'provider_default', 'undecided'] as const;
 export type AiProviderStorage = (typeof AI_PROVIDER_STORAGES)[number];
 
+/** 処理を委ねる先の区分（業務委託先・クラウドサービス提供者・AI サービス提供者・その他） */
+export const SUBPROCESSOR_CATEGORIES = ['contractor', 'cloud', 'ai', 'other'] as const;
+export type SubprocessorCategory = (typeof SUBPROCESSOR_CATEGORIES)[number];
+
 export interface DataTermsSubprocessor {
   name: string;
   role: string;
   location: string;
+  /**
+   * 区分（2026-10-16 の要望 ⑥）。以前の版（3 項目）には無く、読むときに other として扱う
+   * （版は追記専用なので書き換えない）
+   */
+  category?: SubprocessorCategory;
+  /** 秘密保持の根拠（個別の NDA・提供元の約款など）。空は未合意 */
+  confidentialityBasis?: string;
 }
 
 /** 合意したデータ取扱条件の版（0056・追記専用）。空の項目・undecided は「未合意」 */
@@ -3525,6 +3588,10 @@ export interface OrganizationDataTerms {
   note: string;
   createdBy: Uuid;
   createdAt: IsoDateTime;
+  /**
+   * 削除の後もバックアップに残る日数の合意値（0060。0〜400）。null は未合意（推測で見込み日を出さない）
+   */
+  backupResidualDays: number | null;
 }
 
 export const ORGANIZATION_OPTION_KEYS = ['cdp'] as const;
@@ -3567,4 +3634,506 @@ export interface ResponseContentLink {
   confirmedAt: IsoDateTime;
   deletedAt: IsoDateTime | null;
   deletedBy: Uuid | null;
+}
+
+// ======================================================================
+// Scope1・2 の算定と既存結果との照合（0061〜0065。2026-10-16 の要望 ①〜③）
+//
+// 係数・パラメータはデータ（係数セットの行と組織の算定方針）。コードには式の形・44/12・単位の定義だけ。
+// 算定・照合はすべて決定論（AI を使わない）。算定は Data Point を直接確定しない。
+// ======================================================================
+
+/** 係数セットの出所（組織指定・公的参照・架空〔デモ〕）。「架空値」のバッジは fixture のときだけ */
+export const FACTOR_SET_ORIGINS = ['customer_specified', 'public_reference', 'fixture'] as const;
+export type FactorSetOrigin = (typeof FACTOR_SET_ORIGINS)[number];
+
+/** 係数セットの状態（draft→active→retired だけ。active 以降は係数を変えない） */
+export const FACTOR_SET_STATUSES = ['draft', 'active', 'retired'] as const;
+export type FactorSetStatus = (typeof FACTOR_SET_STATUSES)[number];
+
+/** 電力の基準（ロケーション基準・マーケット基準。決して足さない） */
+export const EMISSION_BASES = ['location', 'market'] as const;
+export type EmissionBasis = (typeof EMISSION_BASES)[number];
+
+/** 係数の種類（輸送は改良トンキロ法の式と見なし積載率の原単位表） */
+export const FACTOR_ACTIVITY_KINDS = [
+  'fuel',
+  'electricity',
+  'gas',
+  'heat',
+  'transport_formula',
+  'transport_default',
+] as const;
+export type FactorActivityKind = (typeof FACTOR_ACTIVITY_KINDS)[number];
+
+/** 活動量の種類 */
+export const GHG_ACTIVITY_KINDS = ['fuel', 'electricity', 'gas', 'heat', 'transport'] as const;
+export type GhgActivityKind = (typeof GHG_ACTIVITY_KINDS)[number];
+
+/** 算定方法（燃料の燃焼・電力 2 基準・改良トンキロ法・燃料法〔自社便〕） */
+export const GHG_METHODS = [
+  'fuel_combustion',
+  'electricity_location',
+  'electricity_market',
+  'tonkm_improved',
+  'fuel_method',
+] as const;
+export type GhgMethod = (typeof GHG_METHODS)[number];
+
+/** 区分（既定区分＝GHG プロトコル、報告区分＝組織の算定ルール）。指標コードと同じ値 */
+export const GHG_SCOPES = ['scope1', 'scope2', 'scope2_location', 'scope3_cat4'] as const;
+export type GhgScope = (typeof GHG_SCOPES)[number];
+
+/** 差異の原因（照合・確認の記録） */
+export const GHG_CAUSES = [
+  'classification',
+  'coverage',
+  'activity',
+  'conversion',
+  'factor',
+  'method',
+  'rounding',
+  'other',
+] as const;
+export type GhgCause = (typeof GHG_CAUSES)[number];
+
+/** 照合で順に揃える原因（other は人の記録だけ） */
+export type GhgAttributionCause = Exclude<GhgCause, 'other'>;
+
+export const ROUNDING_METHODS = ['half_up', 'half_even', 'floor', 'ceil', 'truncate'] as const;
+export type RoundingMethod = (typeof ROUNDING_METHODS)[number];
+
+/** 丸めの段（行 → 月 → 拠点×活動 → 拠点×区分 → 合計） */
+export const ROUNDING_STAGES = ['line', 'month', 'site_activity', 'site_scope', 'total'] as const;
+export type RoundingStage = (typeof ROUNDING_STAGES)[number];
+
+export const GHG_BATCH_KINDS = ['energy', 'transport'] as const;
+export type GhgBatchKind = (typeof GHG_BATCH_KINDS)[number];
+
+export const GHG_BATCH_SOURCES = ['upload', 'manual', 'fixture'] as const;
+export type GhgBatchSource = (typeof GHG_BATCH_SOURCES)[number];
+
+export const GHG_BATCH_STATUSES = ['draft', 'confirmed', 'superseded', 'discarded'] as const;
+export type GhgBatchStatus = (typeof GHG_BATCH_STATUSES)[number];
+
+export const VEHICLE_USES = ['commercial', 'private'] as const;
+export type VehicleUse = (typeof VEHICLE_USES)[number];
+
+/** 燃費基準の達成区分（告示の式の区分。確認できない車両は unverified） */
+export const FUEL_ECONOMY_CLASSES = ['y2025', 'y2022', 'y2015', 'unverified'] as const;
+export type FuelEconomyClass = (typeof FUEL_ECONOMY_CLASSES)[number];
+
+/** 輸送の担い手（自社便・委託〔自社が荷主の外部業者〕） */
+export const CARRIER_KINDS = ['own_fleet', 'contracted'] as const;
+export type CarrierKind = (typeof CARRIER_KINDS)[number];
+
+export const GHG_RULE_STATUSES = ['proposed', 'approved', 'withdrawn'] as const;
+export type GhgRuleStatus = (typeof GHG_RULE_STATUSES)[number];
+
+export const BASELINE_GRANULARITIES = ['site_scope', 'site_activity', 'line'] as const;
+export type BaselineGranularity = (typeof BASELINE_GRANULARITIES)[number];
+
+/** 係数セット（0061）。組織指定・公的参照・架空の区別、版・公表日・基準年 */
+export interface EmissionFactorSet extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  code: string;
+  name: string;
+  origin: FactorSetOrigin;
+  sourceLabel: string;
+  versionLabel: string;
+  publishedOn: IsoDate | null;
+  referenceYear: number | null;
+  status: FactorSetStatus;
+  activatedBy: Uuid | null;
+  activatedAt: IsoDateTime | null;
+  retiredBy: Uuid | null;
+  retiredAt: IsoDateTime | null;
+  notes: string;
+}
+
+/** 係数の割当（期間 × 拠点／国／全社 × 活動 → 係数。0061）。解決は 拠点 ＞ 国 ＞ 全社 */
+export interface EmissionFactorAssignment extends AuditColumns {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  /** null は国または全社の割当 */
+  unitId: Uuid | null;
+  /** null は拠点または全社の割当（拠点と国を同時に持たない） */
+  countryCode: string | null;
+  activityKind: FactorActivityKind;
+  activityCode: string;
+  basis: EmissionBasis | null;
+  factorId: Uuid;
+  reason: string;
+}
+
+/** 丸めの規則（段ごとに 桁・単位・方式）。単位 kg は t の桁 +3 と同じ */
+export interface RoundingRule {
+  stage: RoundingStage;
+  /** 小数の桁数（kg・t それぞれの単位での桁。0 は整数） */
+  digits: number;
+  unit: 'kg' | 't';
+  method: RoundingMethod;
+}
+
+/** 組織の単位換算（次元をまたぐ換算は方針だけ。例 m3→Nm3 の温度・圧力補正） */
+export interface UnitConversionRule {
+  from: string;
+  to: string;
+  multiplier: number;
+  /** 出典（換算の段に「policy:出典」として残す） */
+  source: string;
+}
+
+/**
+ * 改良トンキロ法の組織のパラメータ。公的資料で扱いを確認できなかった項目（100% 超・最大積載量の範囲・
+ * 海外拠点）は組織が決める（既定は止めるか警告。黙って計算しない）
+ */
+export interface TonKmPolicy {
+  /** 式の形（告示の形が既定。対数式は比較用） */
+  shape: 'kokuji' | 'log';
+  /** 積載率の下限（%）。これ未満は下限の値で算定する（ガイドラインは 10%） */
+  minLoadPct: number;
+  /** 積載率 100% 超の扱い（error: 止める／cap: 100% として警告） */
+  over100: 'error' | 'cap';
+  /** 式を当てる最大積載量の範囲（kg）。範囲外の扱いは payloadOutOfRange */
+  payloadRangeKg: { min: number | null; max: number | null };
+  payloadOutOfRange: 'warn' | 'error';
+  /** 海外拠点の輸送（国内の方法。warn: 警告して算定／block: 止める） */
+  overseas: 'warn' | 'block';
+  /** 原単位の丸め（有効数字。null は丸めない） */
+  intensityRounding: { significant: number; method: RoundingMethod } | null;
+}
+
+/** 算定方針の版（0062。追記専用）。期間ごとに丸め・換算・改良トンキロ法の組織の設定を持つ */
+export interface GhgCalculationPolicy {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  versionNo: number;
+  rounding: RoundingRule[];
+  conversions: UnitConversionRule[];
+  tonkm: TonKmPolicy;
+  notes: string;
+  createdAt: IsoDateTime;
+  createdBy: Uuid | null;
+}
+
+/** 区分規則が当たる活動（すべて指定したものが一致するときだけ） */
+export interface ClassificationMatch {
+  activityKinds?: GhgActivityKind[];
+  carrierKinds?: CarrierKind[];
+  cargoKinds?: string[];
+  unitIds?: Uuid[];
+}
+
+/**
+ * 区分規則（0062）。既定区分（GHG プロトコル）と異なる報告区分にする組織の算定ルール。
+ * 根拠は必須。提案者と承認者は別人（サービス・RLS・トリガ・CHECK）。内容は変えず、取り下げて新しく提案する
+ */
+export interface GhgClassificationRule {
+  id: Uuid;
+  organizationId: Uuid;
+  code: string;
+  name: string;
+  match: ClassificationMatch;
+  protocolScope: GhgScope;
+  reportedScope: GhgScope;
+  rationale: string;
+  disclosureNote: string;
+  effectiveFromPeriodId: Uuid | null;
+  effectiveToPeriodId: Uuid | null;
+  status: GhgRuleStatus;
+  proposedBy: Uuid;
+  approvedBy: Uuid | null;
+  approvedAt: IsoDateTime | null;
+  withdrawnBy: Uuid | null;
+  withdrawnAt: IsoDateTime | null;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+/** 活動量の取込のまとまり（0063）。確定後は行を変えない。差し替えは新しいバッチ */
+export interface GhgActivityBatch {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  unitId: Uuid;
+  kind: GhgBatchKind;
+  source: GhgBatchSource;
+  fileName: string;
+  fileSha256: string | null;
+  rowCount: number;
+  status: GhgBatchStatus;
+  confirmedBy: Uuid | null;
+  confirmedAt: IsoDateTime | null;
+  supersedesBatchId: Uuid | null;
+  createdAt: IsoDateTime;
+  createdBy: Uuid | null;
+  updatedAt: IsoDateTime;
+}
+
+/** 活動量の行（0063・追記専用）。輸送の行は重量×距離か t·km のどちらかを持つ */
+export interface GhgActivityLine {
+  id: Uuid;
+  organizationId: Uuid;
+  batchId: Uuid;
+  lineNo: number;
+  /** 月初日（YYYY-MM-01） */
+  month: IsoDate;
+  activityKind: GhgActivityKind;
+  activityCode: string;
+  amount: number | null;
+  unit: string | null;
+  /** 電力の契約コード（マーケット基準の割当の鍵） */
+  contractCode: string | null;
+  shipmentRef: string | null;
+  cargoWeightT: number | null;
+  distanceKm: number | null;
+  tonKm: number | null;
+  fuelCode: string | null;
+  maxPayloadKg: number | null;
+  /** 積載率（%）。null は不明（見なし積載率の原単位表で算定） */
+  loadFactorPct: number | null;
+  vehicleUse: VehicleUse | null;
+  fuelEconomyClass: FuelEconomyClass | null;
+  carrierKind: CarrierKind | null;
+  cargoKind: string | null;
+  attributes: Record<string, unknown>;
+  note: string;
+  createdAt: IsoDateTime;
+}
+
+/** 区分ごとの値（未丸め・丸め後） */
+export interface GhgScopedValue {
+  unrounded: number;
+  rounded: number;
+}
+
+/** 1 つの見方（報告区分・既定区分）の集計 */
+export interface GhgViewSummary {
+  sites: Array<{ unitId: Uuid; scope: GhgScope } & GhgScopedValue>;
+  siteActivities: Array<
+    { unitId: Uuid; scope: GhgScope; activityKind: GhgActivityKind } & GhgScopedValue
+  >;
+  totals: Array<{ scope: GhgScope } & GhgScopedValue>;
+}
+
+/** 算定の記録の要約（拠点×区分×見方の未丸め・丸め後・再分類分・警告件数） */
+export interface GhgRunSummary {
+  reported: GhgViewSummary;
+  protocol: GhgViewSummary;
+  /** 規則で既定区分から報告区分へ移した分（拠点 × 規則 × 移動元 → 移動先） */
+  reclassified: Array<{
+    unitId: Uuid;
+    ruleId: Uuid;
+    from: GhgScope;
+    to: GhgScope;
+    unrounded: number;
+  }>;
+  /** 拠点ごとの警告の付いた行の数 */
+  warningCounts: Record<Uuid, number>;
+}
+
+/** 算定の記録（0064・追記専用）。入力ハッシュとエンジンの版で、同じ入力から同じ結果を確かめる */
+export interface GhgCalculationRun {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  unitIds: Uuid[];
+  policyId: Uuid;
+  factorSetIds: Uuid[];
+  ruleIds: Uuid[];
+  activityBatchIds: Uuid[];
+  inputHash: string;
+  engineVersion: string;
+  /**
+   * 要約。Demo Mode の Cookie からは持ち回さず、読み込み時に同じ純関数で作り直す。作り直した入力ハッシュが
+   * 記録と違えば null（「入力が変わった」と表示し、数値を出さない。plan K11）
+   */
+  summary: GhgRunSummary | null;
+  lineCount: number;
+  createdAt: IsoDateTime;
+  createdBy: Uuid;
+}
+
+/** 換算の段（内蔵の換算か、組織の換算〔出典付き〕か） */
+export interface ConversionStep {
+  from: string;
+  to: string;
+  factor: number;
+  source: string;
+}
+
+/** 算定行（0064・追記専用）。各段の値・係数のスナップショット・区分を残す */
+export interface GhgCalculationLine {
+  id: Uuid;
+  organizationId: Uuid;
+  runId: Uuid;
+  unitId: Uuid;
+  month: IsoDate;
+  activityLineId: Uuid;
+  activityKind: GhgActivityKind;
+  activityCode: string;
+  method: GhgMethod;
+  activityAmount: number;
+  activityUnit: string;
+  convertedAmount: number;
+  convertedUnit: string;
+  conversionSteps: ConversionStep[];
+  factorId: Uuid;
+  factorValue: number;
+  factorUnit: string;
+  factorYear: number;
+  factorSetCode: string;
+  factorSetVersion: string;
+  resolutionPath: string;
+  methodDetail: Record<string, unknown>;
+  /** t-CO2e（未丸め） */
+  emissionsUnrounded: number;
+  /** t-CO2e（行の段の丸め後。行の段の規則が無ければ未丸めと同じ） */
+  emissionsRounded: number;
+  roundingApplied: Record<string, unknown> | null;
+  protocolScope: GhgScope;
+  reportedScope: GhgScope;
+  classificationRuleId: Uuid | null;
+  warnings: string[];
+  createdAt: IsoDateTime;
+}
+
+/** 既存の算定結果の丸めの記述（読めなければ null＝不明） */
+export interface BaselineRounding {
+  stage: RoundingStage;
+  unit: 'kg' | 't';
+  digits: number;
+  method: RoundingMethod;
+}
+
+/** 既存の算定結果の 1 行（粒度は列の有無で決まる。無い列は null） */
+export interface BaselineRow {
+  rowNo: number;
+  siteCode: string;
+  /** 利用者が対応付けた拠点（推測で決めない。未対応は null） */
+  unitId: Uuid | null;
+  scope: GhgScope;
+  activityKind: GhgActivityKind | null;
+  activityCode: string | null;
+  month: IsoDate | null;
+  shipmentRef: string | null;
+  activityAmount: number | null;
+  activityUnit: string | null;
+  convertedAmount: number | null;
+  convertedUnit: string | null;
+  factorValue: number | null;
+  factorUnit: string | null;
+  factorYear: number | null;
+  method: string | null;
+  /** 排出量（emissionsUnit の単位のまま） */
+  emissions: number;
+  emissionsUnit: string;
+  rounding: BaselineRounding | null;
+  roundingNote: string;
+}
+
+/** 既存の算定結果（0065・追記専用） */
+export interface GhgBaselineResult {
+  id: Uuid;
+  organizationId: Uuid;
+  reportingPeriodId: Uuid;
+  label: string;
+  fileName: string;
+  fileSha256: string;
+  granularity: BaselineGranularity;
+  rows: BaselineRow[];
+  /** 既存結果の拠点コード → 拠点 ID（利用者が選ぶ） */
+  unitMapping: Record<string, Uuid>;
+  rowCount: number;
+  supersedesId: Uuid | null;
+  createdAt: IsoDateTime;
+  createdBy: Uuid;
+}
+
+/** 許容差（区分ごとの絶対値 t と相対 %。どちらかの内なら許容差内。既定値は置かない） */
+export type ReconciliationTolerance = Partial<
+  Record<GhgScope, { absoluteT: number | null; relativePct: number | null }>
+>;
+
+/** 照合の判定（「一致」を使わない。plan K8） */
+export const GHG_RECON_VERDICTS = [
+  'within_tolerance',
+  'needs_review',
+  'cause_confirmed',
+  'unexplained',
+  'one_sided',
+] as const;
+export type GhgReconVerdict = (typeof GHG_RECON_VERDICTS)[number];
+
+/** 原因の寄与（順序つき置き換えの差。適用できない原因は applicable=false で 0） */
+export interface AttributionStep {
+  cause: GhgAttributionCause;
+  delta: number;
+  applicable: boolean;
+}
+
+/** 照合の項目（拠点×報告区分×活動〔×月・×出荷番号〕） */
+export interface ReconciliationItem {
+  key: string;
+  unitId: Uuid | null;
+  scope: GhgScope;
+  activityKind: GhgActivityKind | null;
+  activityCode: string | null;
+  month: IsoDate | null;
+  shipmentRef: string | null;
+  /** T4D の値（t-CO2e）。既存の側にしか無い項目は null */
+  t4d: number | null;
+  /** 既存の値（t-CO2e に揃えた値）。T4D の側にしか無い項目は null */
+  baseline: number | null;
+  /** 既存 − T4D（片側は無い側を 0 として） */
+  diff: number;
+  /** 差率（%。T4D が 0 のときは null） */
+  diffPct: number | null;
+  steps: AttributionStep[];
+  single: Array<{ cause: GhgAttributionCause; delta: number }>;
+  residual: number;
+  /** どちらか片方にしか無い（t4d_only・baseline_only） */
+  oneSided: 't4d_only' | 'baseline_only' | null;
+  /** 許容差の判定（確認の記録を反映する前） */
+  withinTolerance: boolean;
+  /** 寄与の絶対値が最も大きい原因（寄与が無い・残差が最大なら null） */
+  mainCause: GhgAttributionCause | null;
+}
+
+export interface GhgReconciliationResult {
+  items: ReconciliationItem[];
+  /** 項目の合計（既存・T4D・差。区分ごと） */
+  totals: Array<{ scope: GhgScope; t4d: number; baseline: number; diff: number }>;
+}
+
+/** 照合の記録（0065・追記専用）。結果は Demo Mode の Cookie から持ち回さず、読み込み時に作り直す */
+export interface GhgReconciliation {
+  id: Uuid;
+  organizationId: Uuid;
+  runId: Uuid;
+  baselineId: Uuid;
+  tolerance: ReconciliationTolerance;
+  attributionOrder: GhgAttributionCause[];
+  /** 作り直せない（照合の規則の版が違う・入力が変わった）ときは null */
+  result: GhgReconciliationResult | null;
+  checkerVersion: string;
+  createdAt: IsoDateTime;
+  createdBy: Uuid;
+}
+
+/** 原因の確認の記録（0065・追記専用・本人名義。差し替えは supersedesId） */
+export interface GhgReconciliationNote {
+  id: Uuid;
+  organizationId: Uuid;
+  reconciliationId: Uuid;
+  itemKey: string;
+  confirmedCause: GhgCause;
+  comment: string;
+  decidedBy: Uuid;
+  decidedAt: IsoDateTime;
+  supersedesId: Uuid | null;
 }

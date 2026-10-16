@@ -5,7 +5,8 @@ import { exportedValueNames, isUseServer, listFiles, parse } from '../support/st
 
 /**
  * 機能 → E2E の対応表（plan §5.1-1・IF §7.4）。
- *  (a) 棚卸し（inventory-features.md §3）の全機能（F001〜F144 と、トライアル対応 §3.14 の F145〜F201）が表にある
+ *  (a) 棚卸し（inventory-features.md §3）の全機能（F001〜F144・トライアル対応 §3.14 の F145〜F201・
+ *      Scope1・2 の算定と照合 §3.15 の F202〜F221）が表にある
  *  (b) 参照先の spec が実在する
  *  (c) Action の名前が 'use server' の export として実在する（改名・削除で表が古くならない）
  */
@@ -21,11 +22,11 @@ const actionNames = new Set(
 );
 
 describe('機能 → E2E の対応表', () => {
-  it('棚卸しの全機能（F001〜F144・トライアル対応の F145〜F201）が表にあり、表にだけある機能は無い', () => {
-    expect(inventoryIds).toHaveLength(201);
+  it('棚卸しの全機能（F001〜F144・トライアル対応の F145〜F201・算定と照合の F202〜F221）が表にあり、表にだけある機能は無い', () => {
+    expect(inventoryIds).toHaveLength(221);
     // 番号は連番（抜け・重複なし）
     expect([...inventoryIds].sort()).toEqual(
-      Array.from({ length: 201 }, (_, i) => `F${String(i + 1).padStart(3, '0')}`),
+      Array.from({ length: 221 }, (_, i) => `F${String(i + 1).padStart(3, '0')}`),
     );
     expect(Object.keys(FEATURE_COVERAGE).sort()).toEqual([...inventoryIds].sort());
   });

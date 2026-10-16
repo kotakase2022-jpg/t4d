@@ -11,6 +11,7 @@ import {
 } from '@/lib/fixtures/dataset';
 import { DISCLOSURE_FIRST_IDS } from '@/lib/fixtures/disclosure-first';
 import { fid } from '@/lib/fixtures/ids';
+import { GHG_FIXTURE_IDS, ghgBatchId, ghgFactorId } from '@/lib/fixtures/ghg-verification';
 import {
   FY2025_APPROVED_SNAPSHOT_ID,
   TRIAL_ASSESSMENT_IDS,
@@ -4824,6 +4825,782 @@ describe('トライアル対応（0048〜0058）の越権・追記専用・職�
       await expect(
         h.asSuperuser('delete from organization_data_terms where id = $1', [terms!.id]),
       ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+});
+
+describe('Scope1・2 の算定と照合（0060〜0065）の越権・追記専用・職務分離・終了処理', () => {
+  const ORG_A = ORG_IDS.aomi;
+  const ORG_B = ORG_IDS.soten;
+  const AUTHOR = userId('sustainability@demo.local');
+  const RLS = /row-level security/;
+  const G = GHG_FIXTURE_IDS;
+  const CY = G.period;
+  const TABLES = [
+    'emission_factor_sets',
+    'emission_factor_assignments',
+    'ghg_calculation_policies',
+    'ghg_classification_rules',
+    'ghg_activity_batches',
+    'ghg_activity_lines',
+    'ghg_calculation_runs',
+    'ghg_calculation_lines',
+    'ghg_baseline_results',
+    'ghg_reconciliations',
+    'ghg_reconciliation_notes',
+  ];
+  const TONKM = JSON.stringify({
+    shape: 'kokuji',
+    minLoadPct: 10,
+    over100: 'error',
+    payloadRangeKg: { min: null, max: null },
+    payloadOutOfRange: 'warn',
+    overseas: 'warn',
+    intensityRounding: null,
+  });
+  const SHA = 'a'.repeat(64);
+
+  it('他テナント・監査法人（アサイン済み・未アサイン）は 1 行も読めない。自社のメンバーは読める', async () => {
+    for (const table of TABLES) {
+      const own = await h.asUser(
+        ENT_A_ADMIN,
+        `select id from ${table} where organization_id = $1`,
+        [ORG_A],
+      );
+      if (table !== 'ghg_reconciliation_notes') expect(own.length, table).toBeGreaterThan(0);
+      for (const outsider of [ENT_B_ADMIN, FIRM_A_MANAGER, FIRM_A_ADMIN_UNASSIGNED]) {
+        expect(
+          await h.asUser(outsider, `select id from ${table} where organization_id = $1`, [ORG_A]),
+          `${table} / ${outsider}`,
+        ).toHaveLength(0);
+      }
+    }
+    // 係数（既存の表に足した列）も他社からは見えない
+    expect(
+      await h.asUser(ENT_B_ADMIN, 'select id from emission_factors where factor_set_id = $1', [
+        G.sets.org2025,
+      ]),
+    ).toHaveLength(0);
+  });
+
+  it('他社の組織の係数のセット・方針・規則・活動量・既存結果は作れない', async () => {
+    await expect(
+      h.asUser(
+        ENT_B_ADMIN,
+        `insert into emission_factor_sets (organization_id, code, name, origin) values ($1, 'X', 'X', 'customer_specified')`,
+        [ORG_A],
+      ),
+    ).rejects.toThrow(RLS);
+    await expect(
+      h.asUser(
+        ENT_B_ADMIN,
+        `insert into ghg_calculation_policies (organization_id, reporting_period_id, version_no, tonkm) values ($1, $2, 9, $3::jsonb)`,
+        [ORG_A, CY, TONKM],
+      ),
+    ).rejects.toThrow(/row-level security|violates foreign key/);
+    await expect(
+      h.asUser(
+        ENT_B_ADMIN,
+        `insert into ghg_activity_batches (organization_id, reporting_period_id, unit_id, kind) values ($1, $2, $3, 'energy')`,
+        [ORG_A, CY, UNIT_IDS.east],
+      ),
+    ).rejects.toThrow(RLS);
+    await expect(
+      h.asUser(
+        ENT_B_ADMIN,
+        `insert into ghg_baseline_results (organization_id, reporting_period_id, label, file_sha256, granularity, rows, row_count, created_by)
+         values ($1, $2, 'X', $3, 'site_scope', '[]'::jsonb, 0, $4)`,
+        [ORG_A, CY, SHA, ENT_B_ADMIN],
+      ),
+    ).rejects.toThrow(RLS);
+    // 逆向き: 自社の管理者も他社の組織へは書けない（自社の期間・拠点を他社の行に結び付けられない）
+    await expect(
+      h.asUser(
+        ENT_A_ADMIN,
+        `insert into emission_factor_sets (organization_id, code, name, origin) values ($1, 'X', 'X', 'customer_specified')`,
+        [ORG_B],
+      ),
+    ).rejects.toThrow(RLS);
+    await expect(
+      h.asUser(
+        ENT_A_ADMIN,
+        `insert into ghg_activity_batches (organization_id, reporting_period_id, unit_id, kind) values ($1, $2, $3, 'energy')`,
+        [ORG_B, CY, UNIT_IDS.east],
+      ),
+    ).rejects.toThrow(/row-level security|violates foreign key/);
+  });
+
+  describe('0061 係数のセット・係数・割当', () => {
+    let setId = '';
+    let factorId = '';
+
+    it('セットは下書きで作る（作成者は本人に固定）。拠点担当は作れない', async () => {
+      await expect(
+        h.asUser(
+          ENT_A_SITE,
+          `insert into emission_factor_sets (organization_id, code, name, origin) values ($1, 'T-SITE', 'X', 'customer_specified')`,
+          [ORG_A],
+        ),
+      ).rejects.toThrow(RLS);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into emission_factor_sets (organization_id, code, name, origin, status, activated_by, activated_at)
+           values ($1, 'T-ACTIVE', 'X', 'customer_specified', 'active', $2, now())`,
+          [ORG_A, AUTHOR],
+        ),
+      ).rejects.toThrow(/T4D_FACTOR_SET_STATE/);
+      const [set] = await h.asUser<{ id: string; created_by: string }>(
+        AUTHOR,
+        `insert into emission_factor_sets (organization_id, code, name, origin, created_by)
+         values ($1, 'T-RLS', '（テスト）組織指定', 'customer_specified', $2) returning id, created_by`,
+        [ORG_A, ENT_A_ADMIN],
+      );
+      setId = set!.id;
+      expect(set!.created_by).toBe(AUTHOR);
+      const [factor] = await h.asUser<{ id: string }>(
+        AUTHOR,
+        `insert into emission_factors (organization_id, code, name, category, factor_value, factor_unit, activity_unit, factor_year, factor_source, factor_set_id, activity_kind, activity_code)
+         values ($1, 'T-DIESEL', '軽油', 'scope12', 2.6, 't-CO2/kL', 'kL', 2025, '（テスト）', $2, 'fuel', 'diesel') returning id`,
+        [ORG_A, setId],
+      );
+      factorId = factor!.id;
+      const updated = await h.asUser(
+        AUTHOR,
+        `update emission_factors set factor_value = 2.7 where id = $1 returning id`,
+        [factorId],
+      );
+      expect(updated).toHaveLength(1);
+    });
+
+    it('有効化は本人名義。有効にしたセットの係数・内容は変えられない（RLS・トリガ）', async () => {
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `update emission_factor_sets set status = 'active', activated_by = $2, activated_at = now() where id = $1`,
+          [setId, ENT_A_ADMIN],
+        ),
+      ).rejects.toThrow(/T4D_ACTOR_MUST_BE_SELF/);
+      const activated = await h.asUser(
+        AUTHOR,
+        `update emission_factor_sets set status = 'active', activated_by = $2, activated_at = now() where id = $1 returning id`,
+        [setId, AUTHOR],
+      );
+      expect(activated).toHaveLength(1);
+      // 有効なセットの係数は RLS で更新の対象にならず、所有者でもトリガが止める
+      expect(
+        await h.asUser(
+          AUTHOR,
+          `update emission_factors set factor_value = 9 where id = $1 returning id`,
+          [factorId],
+        ),
+      ).toHaveLength(0);
+      await expect(
+        h.asSuperuser(`update emission_factors set factor_value = 9 where id = $1`, [factorId]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asSuperuser(`delete from emission_factors where id = $1`, [ghgFactorId(2025, 'DIESEL')]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into emission_factors (organization_id, code, name, category, factor_value, factor_unit, activity_unit, factor_year, factor_source, factor_set_id, activity_kind, activity_code)
+           values ($1, 'T-LATE', '軽油', 'scope12', 2.6, 't-CO2/kL', 'kL', 2025, '（テスト）', $2, 'fuel', 'diesel')`,
+          [ORG_A, setId],
+        ),
+      ).rejects.toThrow(RLS);
+      await expect(
+        h.asUser(AUTHOR, `update emission_factor_sets set name = '改名' where id = $1`, [setId]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      // 取り下げは本人名義で、取り下げたセットは戻せない
+      await h.asUser(
+        AUTHOR,
+        `update emission_factor_sets set status = 'retired', retired_by = $2, retired_at = now() where id = $1`,
+        [setId, AUTHOR],
+      );
+      await expect(
+        h.asSuperuser(
+          `update emission_factor_sets set status = 'active', retired_by = null, retired_at = null where id = $1`,
+          [setId],
+        ),
+      ).rejects.toThrow(/T4D_FACTOR_SET_STATE|emission_factor_sets_status_consistent/);
+    });
+
+    it('割当は有効なセットの同じ種類の係数だけ。締めた期間は拒否。外せる（DELETE）', async () => {
+      const insert = (
+        actor: string,
+        periodId: string,
+        factor: string,
+        kind = 'fuel',
+        code = 'diesel',
+        unit: string | null = UNIT_IDS.east,
+      ) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into emission_factor_assignments (organization_id, reporting_period_id, unit_id, activity_kind, activity_code, factor_id)
+           values ($1, $2, $3, $4, $5, $6) returning id`,
+          [ORG_A, periodId, unit, kind, code, factor],
+        );
+      await expect(insert(ENT_A_SITE, CY, ghgFactorId(2024, 'DIESEL'))).rejects.toThrow(RLS);
+      await expect(insert(AUTHOR, CY, factorId)).rejects.toThrow(/T4D_FACTOR_ASSIGNMENT/);
+      await expect(
+        insert(AUTHOR, CY, ghgFactorId(2024, 'DIESEL'), 'electricity', 'grid'),
+      ).rejects.toThrow(/T4D_FACTOR_ASSIGNMENT/);
+      await expect(insert(AUTHOR, PERIOD_IDS.fy2025, ghgFactorId(2024, 'DIESEL'))).rejects.toThrow(
+        /T4D_PERIOD_CLOSED/,
+      );
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into emission_factor_assignments (organization_id, reporting_period_id, unit_id, country_code, activity_kind, activity_code, factor_id)
+           values ($1, $2, $3, 'JP', 'fuel', 'diesel', $4)`,
+          [ORG_A, CY, UNIT_IDS.east, ghgFactorId(2024, 'DIESEL')],
+        ),
+      ).rejects.toThrow(/emission_factor_assignments_level/);
+      const [row] = await insert(AUTHOR, CY, ghgFactorId(2024, 'DIESEL'));
+      const removed = await h.asUser(
+        AUTHOR,
+        `delete from emission_factor_assignments where id = $1 returning id`,
+        [row!.id],
+      );
+      expect(removed).toHaveLength(1);
+      // 他社は外せない（見えない）
+      expect(
+        await h.asUser(
+          ENT_B_ADMIN,
+          `delete from emission_factor_assignments where organization_id = $1 returning id`,
+          [ORG_A],
+        ),
+      ).toHaveLength(0);
+    });
+  });
+
+  describe('0062 算定方針・区分規則', () => {
+    it('算定方針は metric.manage が追記するだけ（作成者は本人。UPDATE・DELETE は止まる）', async () => {
+      await expect(
+        h.asUser(
+          ENT_A_SITE,
+          `insert into ghg_calculation_policies (organization_id, reporting_period_id, version_no, tonkm) values ($1, $2, 7, $3::jsonb)`,
+          [ORG_A, CY, TONKM],
+        ),
+      ).rejects.toThrow(RLS);
+      const [row] = await h.asUser<{ id: string; created_by: string }>(
+        AUTHOR,
+        `insert into ghg_calculation_policies (organization_id, reporting_period_id, version_no, tonkm, created_by)
+         values ($1, $2, 7, $3::jsonb, $4) returning id, created_by`,
+        [ORG_A, CY, TONKM, ENT_A_ADMIN],
+      );
+      expect(row!.created_by).toBe(AUTHOR);
+      expect(
+        await h.asUser(
+          AUTHOR,
+          `update ghg_calculation_policies set notes = 'x' where id = $1 returning id`,
+          [row!.id],
+        ),
+      ).toHaveLength(0);
+      await expect(
+        h.asSuperuser(`update ghg_calculation_policies set notes = 'x' where id = $1`, [row!.id]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+
+    it('区分規則: 本人名義で提案、提案者は承認できない、承認は data.approve の本人、内容は変えない', async () => {
+      const propose = (actor: string, proposer: string, code: string, status = 'proposed') =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into ghg_classification_rules (organization_id, code, name, protocol_scope, reported_scope, rationale, proposed_by, status)
+           values ($1, $2, '（テスト）規則', 'scope3_cat4', 'scope1', '（テスト）根拠', $3, $4) returning id`,
+          [ORG_A, code, proposer, status],
+        );
+      // 名義・状態のなりすましは BEFORE トリガ（RLS より先に動く）か RLS が止める
+      await expect(propose(AUTHOR, ENT_A_ADMIN, 'T-R1')).rejects.toThrow(
+        /T4D_ACTOR_MUST_BE_SELF|row-level security/,
+      );
+      await expect(propose(AUTHOR, AUTHOR, 'T-R2', 'approved')).rejects.toThrow(
+        /T4D_ACTOR_MUST_BE_SELF|row-level security/,
+      );
+      await expect(propose(ENT_A_REVIEWER, ENT_A_REVIEWER, 'T-R3')).rejects.toThrow(RLS);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into ghg_classification_rules (organization_id, code, name, protocol_scope, reported_scope, rationale, proposed_by)
+           values ($1, 'T-R4', 'x', 'scope3_cat4', 'scope1', '  ', $2)`,
+          [ORG_A, AUTHOR],
+        ),
+      ).rejects.toThrow(/ghg_classification_rules_rationale_check/);
+      const [rule] = await propose(AUTHOR, AUTHOR, 'T-R5');
+      // 提案者本人の承認はトリガ（提案者は承認できない）と RLS（承認の権限が無い）が止める。所有者が提案者を
+      // 承認者にしても CHECK・トリガが止める
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `update ghg_classification_rules set status = 'approved', approved_by = $2, approved_at = now() where id = $1`,
+          [rule!.id, AUTHOR],
+        ),
+      ).rejects.toThrow(/T4D_RULE_SOD|row-level security/);
+      await expect(
+        h.asSuperuser(
+          `update ghg_classification_rules set status = 'approved', approved_by = proposed_by, approved_at = now() where id = $1`,
+          [rule!.id],
+        ),
+      ).rejects.toThrow(/T4D_RULE_SOD|ghg_classification_rules_sod/);
+      // 承認者は本人の名義だけ
+      await expect(
+        h.asUser(
+          ENT_A_APPROVER,
+          `update ghg_classification_rules set status = 'approved', approved_by = $2, approved_at = now() where id = $1`,
+          [rule!.id, ENT_A_ADMIN],
+        ),
+      ).rejects.toThrow(/T4D_ACTOR_MUST_BE_SELF|row-level security/);
+      const approved = await h.asUser(
+        ENT_A_APPROVER,
+        `update ghg_classification_rules set status = 'approved', approved_by = $2, approved_at = now() where id = $1 returning id`,
+        [rule!.id, ENT_A_APPROVER],
+      );
+      expect(approved).toHaveLength(1);
+      await expect(
+        h.asUser(
+          ENT_A_APPROVER,
+          `update ghg_classification_rules set rationale = '書き換え', status = 'withdrawn', withdrawn_by = $2, withdrawn_at = now() where id = $1`,
+          [rule!.id, ENT_A_APPROVER],
+        ),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      const withdrawn = await h.asUser(
+        AUTHOR,
+        `update ghg_classification_rules set status = 'withdrawn', withdrawn_by = $2, withdrawn_at = now() where id = $1 returning id`,
+        [rule!.id, AUTHOR],
+      );
+      expect(withdrawn).toHaveLength(1);
+      await expect(
+        h.asSuperuser(
+          `update ghg_classification_rules set status = 'proposed', withdrawn_by = null, withdrawn_at = null where id = $1`,
+          [rule!.id],
+        ),
+      ).rejects.toThrow(/T4D_RULE_STATE|ghg_classification_rules_status_consistent/);
+      // Fixture の LOGI-01 は承認待ち（提案者は本社サステナ担当）
+      const [logi] = await h.asSuperuser<{ status: string; proposed_by: string }>(
+        'select status, proposed_by from ghg_classification_rules where id = $1',
+        [G.rule],
+      );
+      expect(logi).toEqual({ status: 'proposed', proposed_by: AUTHOR });
+    });
+  });
+
+  describe('0063 活動量', () => {
+    it('拠点スコープ。確定は本人名義。確定したバッチに行を足せない。行は追記専用', async () => {
+      const batch = (actor: string, unit: string) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into ghg_activity_batches (organization_id, reporting_period_id, unit_id, kind)
+           values ($1, $2, $3, 'energy') returning id`,
+          [ORG_A, CY, unit],
+        );
+      await expect(batch(ENT_A_SITE, G.units.th)).rejects.toThrow(RLS);
+      const [own] = await batch(ENT_A_SITE, UNIT_IDS.east);
+      const line = (actor: string, lineNo: number) =>
+        h.asUser(
+          actor,
+          `insert into ghg_activity_lines (organization_id, batch_id, line_no, month, activity_kind, activity_code, amount, unit)
+           values ($1, $2, $3, '2025-01-01', 'fuel', 'diesel', 100, 'L') returning id`,
+          [ORG_A, own!.id, lineNo],
+        );
+      await line(ENT_A_SITE, 1);
+      await expect(
+        h.asUser(
+          ENT_A_SITE,
+          `update ghg_activity_batches set status = 'confirmed', confirmed_by = $2, confirmed_at = now() where id = $1`,
+          [own!.id, AUTHOR],
+        ),
+      ).rejects.toThrow(/T4D_ACTOR_MUST_BE_SELF/);
+      await h.asUser(
+        ENT_A_SITE,
+        `update ghg_activity_batches set status = 'confirmed', confirmed_by = $2, confirmed_at = now() where id = $1`,
+        [own!.id, ENT_A_SITE],
+      );
+      await expect(line(ENT_A_SITE, 2)).rejects.toThrow(/T4D_IMMUTABLE|row-level security/);
+      await expect(
+        h.asSuperuser(`update ghg_activity_lines set amount = 1 where batch_id = $1`, [own!.id]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asUser(ENT_A_SITE, `update ghg_activity_batches set file_name = 'x' where id = $1`, [
+          own!.id,
+        ]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      // 輸送の行は 重量×距離 か t·km（燃料法なら燃料の量）のどちらかを持つ
+      const [draft] = await batch(AUTHOR, UNIT_IDS.east);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into ghg_activity_lines (organization_id, batch_id, line_no, month, activity_kind, activity_code, distance_km)
+           values ($1, $2, 1, '2025-01-01', 'transport', 'contracted', 100)`,
+          [ORG_A, draft!.id],
+        ),
+      ).rejects.toThrow(/ghg_activity_lines_amount_present/);
+    });
+
+    it('差し替え: 確定すると差し替え元の確定済みのバッチは差し替え済みになる。別の拠点のバッチは差し替えられない', async () => {
+      const previous = ghgBatchId('TH1', 'energy');
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into ghg_activity_batches (organization_id, reporting_period_id, unit_id, kind, supersedes_batch_id)
+           values ($1, $2, $3, 'energy', $4)`,
+          [ORG_A, CY, UNIT_IDS.east, previous],
+        ),
+      ).rejects.toThrow(/T4D_BATCH_SUPERSEDES/);
+      const [next] = await h.asUser<{ id: string }>(
+        AUTHOR,
+        `insert into ghg_activity_batches (organization_id, reporting_period_id, unit_id, kind, supersedes_batch_id)
+         values ($1, $2, $3, 'energy', $4) returning id`,
+        [ORG_A, CY, G.units.th, previous],
+      );
+      await h.asUser(
+        AUTHOR,
+        `insert into ghg_activity_lines (organization_id, batch_id, line_no, month, activity_kind, activity_code, amount, unit)
+         values ($1, $2, 1, '2025-01-01', 'electricity', 'grid', 1000, 'kWh')`,
+        [ORG_A, next!.id],
+      );
+      await h.asUser(
+        AUTHOR,
+        `update ghg_activity_batches set status = 'confirmed', confirmed_by = $2, confirmed_at = now() where id = $1`,
+        [next!.id, AUTHOR],
+      );
+      const [prev] = await h.asSuperuser<{ status: string }>(
+        'select status from ghg_activity_batches where id = $1',
+        [previous],
+      );
+      expect(prev!.status).toBe('superseded');
+    });
+  });
+
+  describe('0064 算定の記録と算定行', () => {
+    it('拠点がすべて担当拠点のときだけ記録できる（作成者は本人）。算定行は記録の作成者本人だけ。どちらも追記専用', async () => {
+      const run = (actor: string, units: string[]) =>
+        h.asUser<{ id: string; created_by: string }>(
+          actor,
+          `insert into ghg_calculation_runs (organization_id, reporting_period_id, unit_ids, policy_id, input_hash, engine_version, summary, line_count, created_by)
+           values ($1, $2, $3::uuid[], $4, $5, 'ghg-engine/1', '{}'::jsonb, 0, $6) returning id, created_by`,
+          [ORG_A, CY, `{${units.join(',')}}`, G.policy, SHA, AUTHOR],
+        );
+      await expect(run(ENT_A_SITE, [UNIT_IDS.east, G.units.th])).rejects.toThrow(RLS);
+      const [own] = await run(ENT_A_SITE, [UNIT_IDS.east]);
+      expect(own!.created_by).toBe(ENT_A_SITE);
+      const [sample] = await h.asSuperuser<Record<string, unknown>>(
+        'select * from ghg_calculation_lines where run_id = $1 limit 1',
+        [G.run],
+      );
+      const insertLine = (actor: string) =>
+        h.asUser(
+          actor,
+          `insert into ghg_calculation_lines (organization_id, run_id, unit_id, month, activity_line_id, activity_kind, activity_code, method,
+             activity_amount, activity_unit, converted_amount, converted_unit, factor_id, factor_value, factor_unit, factor_year,
+             factor_set_code, factor_set_version, resolution_path, emissions_unrounded, emissions_rounded, protocol_scope, reported_scope)
+           values ($1, $2, $3, '2025-01-01', $4, 'fuel', 'diesel', 'fuel_combustion', 1, 'L', 0.001, 'kL', $5, 2.6, 't-CO2/kL', 2025,
+             'ORG-2025', '2025 年版', '（テスト）', 0.0026, 0.0026, 'scope1', 'scope1')`,
+          [ORG_A, own!.id, UNIT_IDS.east, sample!.activity_line_id, sample!.factor_id],
+        );
+      await expect(insertLine(AUTHOR)).rejects.toThrow(RLS);
+      await insertLine(ENT_A_SITE);
+      expect(
+        await h.asUser(
+          AUTHOR,
+          `update ghg_calculation_runs set line_count = 9 where id = $1 returning id`,
+          [G.run],
+        ),
+      ).toHaveLength(0);
+      await expect(
+        h.asSuperuser(`update ghg_calculation_runs set line_count = 9 where id = $1`, [G.run]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asSuperuser(`delete from ghg_calculation_lines where run_id = $1`, [G.run]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0065 既存結果・照合・原因の確認', () => {
+    it('照合は同じ期間の記録と既存結果だけ。確認は data.review の本人名義、その他の原因はコメント必須。追記専用', async () => {
+      const [other] = await h.asUser<{ id: string }>(
+        AUTHOR,
+        `insert into ghg_baseline_results (organization_id, reporting_period_id, label, file_sha256, granularity, rows, row_count, created_by)
+         values ($1, $2, '（テスト）別の期間', $3, 'site_scope', '[]'::jsonb, 0, $4) returning id`,
+        [ORG_A, PERIOD_IDS.fy2026, SHA, AUTHOR],
+      );
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into ghg_reconciliations (organization_id, run_id, baseline_id, tolerance, attribution_order, result, checker_version, created_by)
+           values ($1, $2, $3, '{}'::jsonb, '{factor}', '{}'::jsonb, 'ghg-reconcile/1', $4)`,
+          [ORG_A, G.run, other!.id, AUTHOR],
+        ),
+      ).rejects.toThrow(/T4D_RECONCILIATION_PERIOD/);
+      await expect(
+        h.asUser(
+          AUTHOR,
+          `insert into ghg_reconciliations (organization_id, run_id, baseline_id, tolerance, attribution_order, result, checker_version, created_by)
+           values ($1, $2, $3, '{}'::jsonb, '{guess}', '{}'::jsonb, 'ghg-reconcile/1', $4)`,
+          [ORG_A, G.run, G.baseline, AUTHOR],
+        ),
+      ).rejects.toThrow(/ghg_reconciliations_order_known/);
+      const note = (actor: string, decidedBy: string, cause: string, comment: string) =>
+        h.asUser<{ id: string }>(
+          actor,
+          `insert into ghg_reconciliation_notes (organization_id, reconciliation_id, item_key, confirmed_cause, comment, decided_by)
+           values ($1, $2, 'k', $3, $4, $5) returning id`,
+          [ORG_A, G.reconciliation, cause, comment, decidedBy],
+        );
+      await expect(note(ENT_A_REVIEWER, AUTHOR, 'factor', '')).rejects.toThrow(RLS);
+      await expect(note(ENT_A_SITE, ENT_A_SITE, 'factor', '')).rejects.toThrow(RLS);
+      await expect(note(ENT_A_REVIEWER, ENT_A_REVIEWER, 'other', '')).rejects.toThrow(
+        /ghg_reconciliation_notes_other_comment/,
+      );
+      const [row] = await note(
+        ENT_A_REVIEWER,
+        ENT_A_REVIEWER,
+        'factor',
+        '（テスト）2024 年版の係数',
+      );
+      expect(
+        await h.asUser(
+          ENT_A_REVIEWER,
+          `update ghg_reconciliation_notes set comment = 'x' where id = $1 returning id`,
+          [row!.id],
+        ),
+      ).toHaveLength(0);
+      await expect(
+        h.asSuperuser(`delete from ghg_reconciliation_notes where id = $1`, [row!.id]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+      await expect(
+        h.asSuperuser(`update ghg_baseline_results set label = 'x' where id = $1`, [G.baseline]),
+      ).rejects.toThrow(/T4D_IMMUTABLE/);
+    });
+  });
+
+  describe('0060 別途協議の区分・残存期間・検証シナリオの主題', () => {
+    it('別途協議の区分は費用区分が別途協議のときだけ。残存期間は 0〜400 日', async () => {
+      await expect(
+        h.asUser(
+          ENT_A_ADMIN,
+          `insert into trial_feedback_items (organization_id, kind, channel, title, cost_class, scope_kind, created_by, updated_by)
+           values ($1, 'request', 'in_app', '（テスト）連携', 'undecided', 'system_integration', $2, $2)`,
+          [ORG_A, ENT_A_ADMIN],
+        ),
+      ).rejects.toThrow(/trial_feedback_items_scope_kind_separate/);
+      const ok = await h.asUser(
+        ENT_A_ADMIN,
+        `insert into trial_feedback_items (organization_id, kind, channel, title, cost_class, scope_kind, created_by, updated_by)
+         values ($1, 'request', 'in_app', '（テスト）連携', 'separate_estimate', 'system_integration', $2, $2) returning id`,
+        [ORG_A, ENT_A_ADMIN],
+      );
+      expect(ok).toHaveLength(1);
+      await expect(
+        h.asUser(
+          ENT_A_ADMIN,
+          `insert into organization_data_terms (organization_id, version_no, backup_residual_days, created_by) values ($1, 80, 401, $2)`,
+          [ORG_A, ENT_A_ADMIN],
+        ),
+      ).rejects.toThrow(/organization_data_terms_backup_residual_days_check/);
+      const [s] = await h.asSuperuser<{ theme: string }>(
+        'select theme from trial_scenarios where code = $1 and organization_id = $2',
+        ['S-CALC-01', ORG_A],
+      );
+      expect(s!.theme).toBe('calculation_reconciliation');
+    });
+  });
+
+  describe('0060 終了処理（新しい表・組織の匿名化・資料へのアクセスの記録）', () => {
+    async function seedTemporaryOrganization(code: string): Promise<string> {
+      const org = fid('organization', `TMP-GHG/${code}`);
+      const period = fid('period', `TMP-GHG/${code}`);
+      const unit = fid('unit', `TMP-GHG/${code}`);
+      const set = fid('emission_factor_set', `TMP-GHG/${code}`);
+      const factor = fid('emission_factor', `TMP-GHG/${code}`);
+      const policy = fid('ghg_calculation_policy', `TMP-GHG/${code}`);
+      const rule = fid('ghg_classification_rule', `TMP-GHG/${code}`);
+      const batch = fid('ghg_activity_batch', `TMP-GHG/${code}`);
+      const line = fid('ghg_activity_line', `TMP-GHG/${code}`);
+      const run = fid('ghg_calculation_run', `TMP-GHG/${code}`);
+      const baseline = fid('ghg_baseline_result', `TMP-GHG/${code}`);
+      const recon = fid('ghg_reconciliation', `TMP-GHG/${code}`);
+      const file = fid('file', `TMP-GHG/${code}`);
+      const version = fid('file_version', `TMP-GHG/${code}`);
+      const q = (sql: string, params: unknown[]) => h.asSuperuser(sql, params);
+      await q(
+        `insert into organizations (id, type, name, legal_name, code) values ($1, 'enterprise', '終了テスト（架空）', '終了テスト株式会社（架空）', $2)`,
+        [org, code],
+      );
+      await q(
+        `insert into reporting_periods (id, organization_id, code, label, start_date, end_date, status) values ($1, $2, 'CY2025', 'CY2025', '2025-01-01', '2025-12-31', 'reviewing')`,
+        [period, org],
+      );
+      await q(
+        `insert into organization_units (id, organization_id, code, name, unit_type) values ($1, $2, 'U1', '工場（架空）', 'site')`,
+        [unit, org],
+      );
+      await q(
+        `insert into emission_factor_sets (id, organization_id, code, name, origin, status, activated_by, activated_at)
+         values ($1, $2, 'S', 'S', 'fixture', 'active', $3, now())`,
+        [set, org, ENT_A_ADMIN],
+      );
+      await q(
+        `insert into emission_factors (id, organization_id, code, name, category, factor_value, factor_unit, activity_unit, factor_year, factor_source, factor_set_id, activity_kind, activity_code)
+         values ($1, $2, 'F', 'F', 'scope12', 2.6, 't-CO2/kL', 'kL', 2025, '（架空）', $3, 'fuel', 'diesel')`,
+        [factor, org, set],
+      );
+      await q(
+        `insert into emission_factor_assignments (organization_id, reporting_period_id, activity_kind, activity_code, factor_id) values ($1, $2, 'fuel', 'diesel', $3)`,
+        [org, period, factor],
+      );
+      await q(
+        `insert into ghg_calculation_policies (id, organization_id, reporting_period_id, version_no, tonkm) values ($1, $2, $3, 1, $4::jsonb)`,
+        [policy, org, period, TONKM],
+      );
+      await q(
+        `insert into ghg_classification_rules (id, organization_id, code, name, protocol_scope, reported_scope, rationale, proposed_by)
+         values ($1, $2, 'R', 'R', 'scope3_cat4', 'scope1', '（架空）', $3)`,
+        [rule, org, ENT_A_ADMIN],
+      );
+      await q(
+        `insert into ghg_activity_batches (id, organization_id, reporting_period_id, unit_id, kind, status, confirmed_by, confirmed_at)
+         values ($1, $2, $3, $4, 'energy', 'confirmed', $5, now())`,
+        [batch, org, period, unit, ENT_A_ADMIN],
+      );
+      await q(
+        `insert into ghg_activity_lines (id, organization_id, batch_id, line_no, month, activity_kind, activity_code, amount, unit)
+         values ($1, $2, $3, 1, '2025-01-01', 'fuel', 'diesel', 100, 'L')`,
+        [line, org, batch],
+      );
+      await q(
+        `insert into ghg_calculation_runs (id, organization_id, reporting_period_id, unit_ids, policy_id, input_hash, engine_version, summary, line_count, created_by)
+         values ($1, $2, $3, $4::uuid[], $5, $6, 'ghg-engine/1', '{}'::jsonb, 1, $7)`,
+        [run, org, period, `{${unit}}`, policy, SHA, ENT_A_ADMIN],
+      );
+      await q(
+        `insert into ghg_calculation_lines (organization_id, run_id, unit_id, month, activity_line_id, activity_kind, activity_code, method,
+           activity_amount, activity_unit, converted_amount, converted_unit, factor_id, factor_value, factor_unit, factor_year,
+           factor_set_code, factor_set_version, resolution_path, emissions_unrounded, emissions_rounded, protocol_scope, reported_scope)
+         values ($1, $2, $3, '2025-01-01', $4, 'fuel', 'diesel', 'fuel_combustion', 100, 'L', 0.1, 'kL', $5, 2.6, 't-CO2/kL', 2025,
+           'S', '', '（架空）', 0.26, 0.26, 'scope1', 'scope1')`,
+        [org, run, unit, line, factor],
+      );
+      await q(
+        `insert into ghg_baseline_results (id, organization_id, reporting_period_id, label, file_sha256, granularity, rows, row_count, created_by)
+         values ($1, $2, $3, 'B', $4, 'site_scope', '[]'::jsonb, 0, $5)`,
+        [baseline, org, period, SHA, ENT_A_ADMIN],
+      );
+      await q(
+        `insert into ghg_reconciliations (id, organization_id, run_id, baseline_id, tolerance, attribution_order, result, checker_version, created_by)
+         values ($1, $2, $3, $4, '{}'::jsonb, '{factor}', '{}'::jsonb, 'ghg-reconcile/1', $5)`,
+        [recon, org, run, baseline, ENT_A_ADMIN],
+      );
+      await q(
+        `insert into ghg_reconciliation_notes (organization_id, reconciliation_id, item_key, confirmed_cause, decided_by) values ($1, $2, 'k', 'factor', $3)`,
+        [org, recon, ENT_A_ADMIN],
+      );
+      // 資料と、その資料へのアクセスの記録
+      await q(
+        `insert into files (id, organization_id, bucket, original_name, mime_type) values ($1, $2, 'evidence-private', '（架空）資料.pdf', 'application/pdf')`,
+        [file, org],
+      );
+      await q(
+        `insert into file_versions (id, file_id, organization_id, version_no, storage_key, size_bytes, sha256) values ($1, $2, $3, 1, $4, 1, $5)`,
+        [version, file, org, `enterprise/${org}/evidence/${version}/tmp.bin`, SHA],
+      );
+      await q(
+        `insert into storage_access_events (organization_id, actor_user_id, file_version_id, action) values ($1, $2, $3, 'downloaded')`,
+        [org, ENT_A_ADMIN, version],
+      );
+      return org;
+    }
+
+    const countOf = async (org: string) => {
+      const counts: Record<string, number> = {};
+      for (const table of [...TABLES, 'storage_access_events', 'files', 'file_versions']) {
+        const [row] = await h.asSuperuser<{ count: string }>(
+          `select count(*)::text as count from ${table} where organization_id = $1`,
+          [org],
+        );
+        counts[table] = Number(row!.count);
+      }
+      return counts;
+    };
+
+    it('5 引数の終了処理: 新しい表の行が消え、組織の行は匿名化され、削除の記録に残存期間と消去の見込み日が入る', async () => {
+      const org = await seedTemporaryOrganization('TMP-GHG-1');
+      const before = await countOf(org);
+      expect(
+        Object.values(before).every((n) => n > 0),
+        JSON.stringify(before),
+      ).toBe(true);
+      const [result] = await h.asSuperuser<{ id: string }>(
+        `select t4d.offboard_organization($1, 'TMP-GHG-1', null, 'テスト', 35) as id`,
+        [org],
+      );
+      const after = await countOf(org);
+      expect(
+        Object.values(after).every((n) => n === 0),
+        JSON.stringify(after),
+      ).toBe(true);
+      const [row] = await h.asSuperuser<{
+        name: string;
+        legal_name: string | null;
+        code: string;
+        deleted_at: string | null;
+      }>('select name, legal_name, code, deleted_at from organizations where id = $1', [org]);
+      expect(row!.name).toBe('終了した組織');
+      expect(row!.legal_name).toBeNull();
+      expect(row!.code).toMatch(/^offboarded-[0-9a-f]{12}$/);
+      expect(row!.deleted_at).not.toBeNull();
+      const [record] = await h.asSuperuser<{
+        backup_residual_days: number;
+        purge_ok: boolean;
+        table_counts: Record<string, number>;
+      }>(
+        `select backup_residual_days,
+                backup_purge_due_on = ((now() at time zone 'Asia/Tokyo')::date + 35) as purge_ok,
+                table_counts
+           from tenant_lifecycle_records where id = $1`,
+        [result!.id],
+      );
+      expect(record!.backup_residual_days).toBe(35);
+      expect(record!.purge_ok).toBe(true);
+      expect(record!.table_counts.ghg_calculation_lines).toBe(1);
+      // 資料へのアクセスの記録は削除の対象の表から外しているが、file_versions の削除に連鎖して消える（残らない）
+      expect(record!.table_counts.storage_access_events).toBeUndefined();
+      expect(JSON.stringify(record)).not.toContain('終了テスト');
+    });
+
+    it('4 引数の終了処理（旧い呼び方）も動き、残存期間は未合意（null）。匿名化したコードは組織ごとに一意', async () => {
+      const org = await seedTemporaryOrganization('TMP-GHG-2');
+      const [result] = await h.asSuperuser<{ id: string }>(
+        `select t4d.offboard_organization($1, 'TMP-GHG-2', null, 'テスト') as id`,
+        [org],
+      );
+      const [record] = await h.asSuperuser<{
+        backup_residual_days: number | null;
+        backup_purge_due_on: string | null;
+      }>(
+        'select backup_residual_days, backup_purge_due_on from tenant_lifecycle_records where id = $1',
+        [result!.id],
+      );
+      expect(record).toEqual({ backup_residual_days: null, backup_purge_due_on: null });
+      const codes = await h.asSuperuser<{ code: string }>(
+        `select code from organizations where name = '終了した組織'`,
+      );
+      expect(new Set(codes.map((c) => c.code)).size).toBe(codes.length);
+      expect(codes.length).toBeGreaterThanOrEqual(2);
+      // 残存期間が範囲外なら止まる
+      const org3 = await seedTemporaryOrganization('TMP-GHG-3');
+      await expect(
+        h.asSuperuser(`select t4d.offboard_organization($1, 'TMP-GHG-3', null, 'テスト', 401)`, [
+          org3,
+        ]),
+      ).rejects.toThrow(/T4D_OFFBOARD_RESIDUAL_DAYS/);
+      // 利用者・Service Role は 5 引数の保守関数も実行できない
+      const denied = await h.expectDenied(
+        ENT_A_ADMIN,
+        `select t4d.offboard_organization($1, 'TMP-GHG-3', null, 'x', 1)`,
+        [org3],
+      );
+      expect(denied).toMatch(/permission denied/i);
     });
   });
 });

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { assertCan, assertEnterpriseWorkspace, can, NotFoundError } from '@/lib/authorization/can';
+import { sameFiscalYearEnd } from '@/lib/domain/period-comparability';
 import { ESRS_TOPIC_LABEL, DMA_OUTCOME_LABEL } from '@/lib/domain/csrd';
 import { IRO_TYPE_LABEL, TIME_HORIZON_LABEL } from '@/lib/domain/dma';
 import {
@@ -666,7 +667,10 @@ export async function loadFinancialImpact(
     baseline: financialBaselineFor(input.source),
   };
 
-  const ownPeriods = (await db.select('periods', { where: { organizationId } })).sort(byStartDate);
+  // 決算月が同じ期間だけ（暦年の期間を年度の基準年度・年数に入れない。plan K10）
+  const ownPeriods = (await db.select('periods', { where: { organizationId } }))
+    .filter((p) => sameFiscalYearEnd(p, input.period))
+    .sort(byStartDate);
   const basePeriod =
     ownPeriods
       .filter((p) => p.startDate <= input.period.startDate && p.status === 'closed')

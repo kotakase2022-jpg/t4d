@@ -182,6 +182,23 @@ describe('データの書き出し', () => {
     ).toBe(true);
   });
 
+  it('README に削除の後のバックアップの扱い（合意した残存期間の日数）を書く。未合意ならそう書く', async () => {
+    const readme = (r: Awaited<ReturnType<typeof buildTenantExport>>) =>
+      new TextDecoder().decode(unzip(r.zip).get('README.md')!);
+    // Fixture のデータ取扱条件の最新の版（第 2 版・架空）は残存期間 35 日
+    const agreed = readme(await buildTenantExport(db, admin(), 'data'));
+    expect(agreed).toContain('## 削除の後のバックアップ');
+    expect(agreed).toContain('通常の保存期間（合意: 35 日）残ります');
+    expect(agreed).toContain('それまで秘密情報として管理します');
+    expect(agreed).toContain('削除完了の報告');
+    fixture.organizationDataTerms
+      .filter((t) => t.organizationId === ORG_IDS.aomi)
+      .forEach((t) => (t.backupResidualDays = null));
+    const unagreed = readme(await buildTenantExport(db, admin(), 'files'));
+    expect(unagreed).toContain('残存期間は未合意です');
+    expect(unagreed).not.toContain('合意: 35 日');
+  });
+
   it('数式に見える値は CSV で無害化する', async () => {
     fixture.metrics.find((m) => m.organizationId === ORG_IDS.aomi)!.name = '=HYPERLINK("x")';
     const result = await buildTenantExport(db, admin(), 'data');

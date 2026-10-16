@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { assertCan, assertEnterpriseWorkspace } from '@/lib/authorization/can';
+import { sameFiscalYearEnd } from '@/lib/domain/period-comparability';
 import {
   buildTrendRow,
   INTERCOMPANY_BOUNDARY,
@@ -109,14 +110,22 @@ const STATUS_LABEL: Record<DataPointStatus, string> = {
   approved: '承認済み',
 };
 
-/** 年度の窓（ヘッダーの年度を終点に、開始日がそれ以前の期間を新しい順に最大 3 つ → 昇順） */
+/**
+ * 年度の窓（ヘッダーの年度を終点に、開始日がそれ以前の期間を新しい順に最大 3 つ → 昇順）。
+ * 決算月（終了日の月日）が同じ期間だけ（暦年と年度を同じ推移に並べない。plan K10）
+ */
 export function trendWindowOf(
   period: ReportingPeriod,
   periods: readonly ReportingPeriod[],
   organizationId: Uuid,
 ): ReportingPeriod[] {
   return periods
-    .filter((p) => p.organizationId === organizationId && p.startDate <= period.startDate)
+    .filter(
+      (p) =>
+        p.organizationId === organizationId &&
+        p.startDate <= period.startDate &&
+        sameFiscalYearEnd(p, period),
+    )
     .sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0))
     .slice(0, TREND_WINDOW_YEARS)
     .reverse();

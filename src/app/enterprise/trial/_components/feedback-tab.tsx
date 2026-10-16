@@ -18,7 +18,12 @@ import {
   VERIFICATION_RESULT_LABELS,
   VERIFICATION_RESULTS,
   verificationLabel,
+  type OpenIssueSummary,
 } from '@/lib/domain/trial-metrics';
+import {
+  SEPARATE_CONSULTATION_KINDS,
+  SEPARATE_CONSULTATION_LABELS,
+} from '@/lib/domain/trial-scope';
 import { formatJst, formatJstDate } from '@/lib/format/datetime';
 import type { FeedbackListRow, FeedbackOverview } from '@/lib/services/trial-feedback';
 import type { TrialTextLimits } from '@/lib/services/trial-program';
@@ -60,6 +65,7 @@ export function FeedbackTab({
   const status = typeof params.status === 'string' ? params.status : null;
   const severity = typeof params.severity === 'string' ? params.severity : null;
   const cost = typeof params.cost === 'string' ? params.cost : null;
+  const scopeKind = typeof params.scope === 'string' ? params.scope : null;
   const channel = typeof params.channel === 'string' ? params.channel : null;
   const mandatory = params.mandatory === 'yes';
   const query = typeof params.q === 'string' ? params.q.trim().toLowerCase() : '';
@@ -68,6 +74,7 @@ export function FeedbackTab({
     .filter((item) => (status ? item.status === status : true))
     .filter((item) => (severity ? item.severity === severity : true))
     .filter((item) => (cost ? item.costClass === cost : true))
+    .filter((item) => (scopeKind ? item.scopeKind === scopeKind : true))
     .filter((item) => (channel ? item.channel === channel : true))
     .filter((item) => (mandatory ? item.mandatoryRequirement : true))
     .filter((item) =>
@@ -135,6 +142,20 @@ export function FeedbackTab({
       header: '費用区分',
       importance: 'secondary',
       cell: (item) => <StatusBadge domain="costClass" value={item.costClass} />,
+    },
+    {
+      key: 'scopeKind',
+      header: '別途協議の区分',
+      importance: 'secondary',
+      cell: (item) => (
+        <span className="text-small">
+          {item.scopeKind
+            ? SEPARATE_CONSULTATION_LABELS[item.scopeKind]
+            : item.costClass === 'separate_estimate'
+              ? '区分なし'
+              : '—'}
+        </span>
+      ),
     },
     {
       key: 'version',
@@ -220,6 +241,13 @@ export function FeedbackTab({
           unit="件"
           hint="AI の候補を採用しなかった理由"
         />
+        <MetricTile
+          label="別途協議"
+          value={summary.byCostClass.separate_estimate}
+          unit="件"
+          hint={separateHint(summary.separateByScopeKind)}
+          href={trialHref('feedback', { cost: 'separate_estimate' })}
+        />
       </MetricStrip>
 
       <Section
@@ -244,6 +272,14 @@ export function FeedbackTab({
           overflowFilters={[
             { key: 'severity', label: '重大度', options: statusOptions('severity') },
             { key: 'cost', label: '費用区分', options: statusOptions('costClass') },
+            {
+              key: 'scope',
+              label: '別途協議の区分',
+              options: SEPARATE_CONSULTATION_KINDS.map((value) => ({
+                value,
+                label: SEPARATE_CONSULTATION_LABELS[value],
+              })),
+            },
             {
               key: 'channel',
               label: '経路',
@@ -311,6 +347,15 @@ export function FeedbackTab({
   );
 }
 
+/** 別途協議のタイルの補足（区分ごとの件数。区分の無いものは「区分なし」） */
+function separateHint(counts: OpenIssueSummary['separateByScopeKind']): string {
+  const parts = SEPARATE_CONSULTATION_KINDS.flatMap((kind) =>
+    counts[kind] > 0 ? [`${SEPARATE_CONSULTATION_LABELS[kind]} ${counts[kind]}`] : [],
+  );
+  if (counts.unclassified > 0) parts.push(`区分なし ${counts.unclassified}`);
+  return parts.length > 0 ? parts.join('・') : '標準の範囲の外と判断した要望・論点';
+}
+
 function FeedbackDetail({ item }: { item: FeedbackListRow }) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 py-1 text-small">
@@ -322,6 +367,8 @@ function FeedbackDetail({ item }: { item: FeedbackListRow }) {
       <dd>{FEEDBACK_CHANNEL_LABELS[item.channel]}</dd>
       <dt className="text-ink-muted">関連シナリオ</dt>
       <dd>{item.scenarioCode ?? '—'}</dd>
+      <dt className="text-ink-muted">別途協議の区分</dt>
+      <dd>{item.scopeKind ? SEPARATE_CONSULTATION_LABELS[item.scopeKind] : '—'}</dd>
       <dt className="text-ink-muted">登録時の環境の版</dt>
       <dd>{item.environmentVersion || '—'}</dd>
       <dt className="text-ink-muted">再検証</dt>
@@ -455,6 +502,23 @@ function TriageForms({
                   {statusOptions('costClass').map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              )}
+            </Field>
+            <Field
+              label="別途協議の区分"
+              id="trial-triage-scope-kind"
+              hint="費用区分が「別途協議」のときは必須。それ以外では選べません"
+              className="col-span-4"
+            >
+              {(p) => (
+                <NativeSelect {...p} name="scopeKind" defaultValue={item.scopeKind ?? ''}>
+                  <option value="">選ばない</option>
+                  {SEPARATE_CONSULTATION_KINDS.map((value) => (
+                    <option key={value} value={value}>
+                      {SEPARATE_CONSULTATION_LABELS[value]}
                     </option>
                   ))}
                 </NativeSelect>

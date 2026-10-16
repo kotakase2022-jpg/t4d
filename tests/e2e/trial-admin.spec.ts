@@ -171,10 +171,15 @@ test('データの取扱い: 未合意を表示し、版を記録でき、返却
   await page.getByLabel('保存期間').fill('（架空）契約終了後 90 日');
   await page.getByRole('button', { name: 'この内容で版を記録' }).click();
   await page.waitForURL(/flash=dataTermsRecorded/);
-  await expect(page.getByText(/データ取扱条件の第 2 版を記録しました/)).toBeVisible();
+  // Fixture は第 1 版（区分なし）と第 2 版（処理先の区分・残存期間。合意の手続きは確認中）を持つ。新しい版は第 3 版
+  await expect(page.getByText(/データ取扱条件の第 3 版を記録しました/)).toBeVisible();
   await expect(page.getByRole('table', { name: '合意した条件' })).toContainText(
     '（架空）契約終了後 90 日',
   );
+  // 処理を委ねる先は区分と秘密保持の根拠を前の版から引き継いで記録する（区分の表が出る）
+  const processors = page.getByRole('table', { name: '処理を委ねる先' });
+  await expect(processors).toContainText('クラウドサービス提供者');
+  await expect(processors).toContainText('（架空）提供元のデータ処理条件');
 
   const more = await openMoreMenu(page.locator('[data-page-actions]'));
   await more.getByRole('menuitem', { name: /全データを書き出す/ }).click();

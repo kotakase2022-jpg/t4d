@@ -51,6 +51,10 @@ http://localhost:3000 を開くと Demo / Fixture Mode で起動します。Supa
 7. トライアル対応（架空のサンプル）: 開示プロジェクトの「要求事項」タブで判断・対象外の申請と承認 →「出力」タブで
    承認済みレポートの「内容とトレースを開く」（追跡率）・保証側へ共有 → 監査法人の「開示レポート」でコメント。
    評価の記録はユーザーメニューの「トライアルの評価」、ご意見はヘッダーの「ご意見・不具合」から（記録はすべて架空のデモです）
+8. Scope1・2 の算定と照合（架空の係数・活動量・既存の算定結果）: メニュー「GHG › Scope1・2算定」で拠点別の結果と
+   報告区分／既定区分の二重表示 → `approver@demo.local` が「算定ルール」の区分規則を承認 → `sustainability@demo.local` が
+   「算定を実行」→ 算定明細の「この記録で照合する」で許容差を入れて照合 → `reviewer@demo.local` が照合の詳細で差異の原因を記録・
+   仮説の再計算（保存しません）。算定・照合に AI は使いません
 
 ---
 
@@ -83,6 +87,7 @@ http://localhost:3000 を開くと Demo / Fixture Mode で起動します。Supa
 
 トライアル対応（2026-10。要求事項の判断・トレース・保証側への共有・XBRL の社内確認用出力・トライアルの評価）では
 ライブラリを追加していません（XBRL・XLSX・DOCX は既存の `exceljs`・`docx` と自前の出力で作っています）。
+Scope1・2 の算定と照合（2026-10-16）でもライブラリを追加していません（丸め・単位換算・改良トンキロ法・差異の分解は自前の純関数。XLSX は `exceljs`）。
 
 `openai` は **v7 系**を使います。当初の v4 系は同梱の `node-fetch` v2 が現在の API の応答を
 読めず、全 Model・全 Endpoint で `ERR_STREAM_PREMATURE_CLOSE`（Premature close）になりました
@@ -105,7 +110,7 @@ pnpm typecheck        # TypeScript strict
 pnpm test             # Vitest（unit + integration）
 pnpm test:rls         # PGlite へ migration を適用して RLS 越権テスト
 pnpm test:e2e         # Playwright（初回のみ pnpm test:e2e:install が必要）
-pnpm test:e2e:stateless  # リクエストごとに Fixture を作り直す構成で、Cookie だけで状態を持ち回す流れ（実演・CSRD・トライアル）
+pnpm test:e2e:stateless  # リクエストごとに Fixture を作り直す構成で、Cookie だけで状態を持ち回す流れ（実演・CSRD・トライアル・Scope1・2 の算定と照合）
 pnpm test:e2e:prod       # 本番スモーク（PROD_BASE_URL にローカルの next start を指定して流せる）
 
 pnpm test:e2e:supabase   # 実 Supabase（Auth + RLS + Storage）に接続した E2E

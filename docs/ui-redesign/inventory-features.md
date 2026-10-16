@@ -57,6 +57,8 @@
 
 上の表は 2026-10-07 の基準線。UI 再設計で画面 3 つを足し（81）、トライアル対応（2026-10）の後はページルート 89（P82〜P89）・API ルート 17（E13〜E17）・
 `'use server'` ファイル 28・Server Action は機能 ID で F001〜F201（F145〜F201 の 57 件を追加。§3.14）。回帰の判定は `regression.md` §6。
+Scope1・2 の算定と照合（2026-10-16）の後はページルート 98（P90〜P98。§2.4）・API ルート 21（E18〜E21。§4）・`'use server'` ファイル 33・
+Server Action は F001〜F221（F202〜F221 の 20 件を追加。§3.15）。回帰の判定は `regression.md` §7。
 
 ---
 
@@ -159,6 +161,27 @@ CDP 対応オプションの無い組織で出さない CDP の葉（契約の�
 | P89 | /enterprise/disclosures/impacts                                    | インパクト・リスク・機会の台帳   | —（定性情報の一覧・CSRD 設定・要求事項の詳細・横断対応表の「その他」）・パレット                      | disclosure.read（IRO の追加は disclosure.write） |
 
 タブ（既存の画面の中）: 開示プロジェクト `?tab=crosswalk`（横断対応表）・`?tab=xbrl`（XBRL）、設定 `?tab=approval`（承認ルート）・`?tab=roles`（役割と権限）・`?tab=data-handling`（データの取扱い）。
+
+### 2.4 Scope1・2 の算定と照合（2026-10-16）で足した画面（P90〜P98）
+
+メニュー木に葉を 1 つだけ足した（従来の「GHG」の子「Scope1・2算定」と、開示優先の「情報・根拠」の「GHG算定」の次。plan K2）。
+下位の 8 画面は葉を増やさず、画面上部のタブ（概要／排出係数／算定ルール／活動量／照合）・Command Palette・画面内リンクで届く
+（ROUTE_CATALOG の menu none）。閲覧は企業の全役割（enterprise.data.read）。書きの操作は権限・担当拠点で出し分ける。
+
+| ID  | ルート                                          | 画面名                      | メニュー・入口                                                                                                                        | primary（1 つ）                        | 閲覧条件・書きの権限                                                           |
+| --- | ----------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------ |
+| P90 | /enterprise/ghg/calculation                     | Scope1・2算定（概要）       | 従来「GHG › Scope1・2算定」・開示優先「情報・根拠 › Scope1・2算定」・GHG 算定サマリーの節・トライアル概要・パレット「算定を実行する」 | 算定を実行（data.write・全拠点が担当） | data.read                                                                      |
+| P91 | /enterprise/ghg/calculation/factors             | 排出係数（Scope1・2算定）   | タブ「排出係数」・パレット「係数セットを取り込む」「係数の未割当を直す」・ホームの Attention（未割当）                                | 係数セットを取り込む（metric.manage）  | data.read（取込・割当は metric.manage）                                        |
+| P92 | /enterprise/ghg/calculation/factors/[setId]     | 係数セットの詳細            | —（係数のセットの一覧の行）                                                                                                           | 有効にする（下書きのときだけ）         | data.read（有効化・取り下げは metric.manage）                                  |
+| P93 | /enterprise/ghg/calculation/rules               | 算定ルール（Scope1・2算定） | タブ「算定ルール」・パレット「区分規則を承認する」・ホームの Attention（承認待ち）                                                    | 規則を保存（方針の新しい版）           | data.read（方針・提案は metric.manage、承認は data.approve〔提案者以外〕）     |
+| P94 | /enterprise/ghg/calculation/activity            | 活動量（Scope1・2算定）     | タブ「活動量」・パレット「活動量を取り込む」                                                                                          | 活動量を取り込む                       | data.read（取込は import.run＋data.write・担当拠点）                           |
+| P95 | /enterprise/ghg/calculation/activity/[batchId]  | 活動量の取込の詳細          | —（取込の記録の行・取込の後）                                                                                                         | 確定する（確認中のときだけ）           | data.read（確定・破棄は data.write・担当拠点）                                 |
+| P96 | /enterprise/ghg/calculation/runs/[runId]        | 算定明細                    | —（概要の「算定の記録」・拠点別の結果・算定の後）                                                                                     | Data Point に下書き反映                | data.read（反映は data.write。承認済みの上書きは data.review か data.approve） |
+| P97 | /enterprise/ghg/calculation/reconciliation      | 既存の算定結果との照合      | タブ「照合」・算定明細の「この記録で照合する」・パレット「既存結果と照合する」「既存の算定結果を取り込む」                            | 照合する                               | data.read（取込は import.run＋data.write、照合は data.write）                  |
+| P98 | /enterprise/ghg/calculation/reconciliation/[id] | 照合の詳細                  | —（照合の記録の行・照合の後）・ホームの Attention（照合の要確認）                                                                     | なし（行の操作「原因を記録」）         | data.read（原因の記録は data.review）                                          |
+
+既存の画面に足したもの: GHG 算定サマリーの節「Scope1・2 の算定と照合」、トライアル概要の節「算定の検証範囲」「無償の範囲と別途協議」と返却・削除の日付、
+改善管理表の「別途協議」のタイル・区分、設定「データの取扱い」の処理を委ねる先の区分・バックアップの残存期間。
 
 ---
 
@@ -444,6 +467,37 @@ CDP 対応オプションの無い組織で出さない CDP の葉（契約の�
 
 既存の機能に足した確認: F020（値の修正）は承認済みの値の保存で確認ダイアログ（影響する節・承認済みレポート・保証側へ共有中の件数）を通す。
 
+### 3.15 Scope1・2 の算定と照合（2026-10-16）で足した機能（F202〜F221）
+
+列: スライス＝並行実装の作業単位（S1〜S5）。Action はすべて `src/app/enterprise/ghg/calculation/` の下（`server-action-reachability` で UI から呼ばれることを確認）。
+権限の略は §0.2（`metric.manage`＝enterprise.metric.manage など）。新しい権限キーは無い。S5（トライアルの範囲・データ取扱）は既存の Action（F163・F165・F170・F176）に欄を足しただけ。
+
+| ID   | 機能                                                                   | スライス | Action                                                | 権限                                                         | E2E                                   |
+| ---- | ---------------------------------------------------------------------- | -------- | ----------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------- |
+| F202 | 係数セットの取込を検証する（保存しない。列の対応・小数点の記号）       | S1       | factors/actions.ts previewFactorSetImportAction       | metric.manage                                                | ghg-factors-rules・ghg-activity-tonkm |
+| F203 | 係数セットの取込を確定する（下書きのセット）                           | S1       | factors/actions.ts confirmFactorSetImportAction       | metric.manage                                                | ghg-factors-rules・ghg-activity-tonkm |
+| F204 | 係数セットを有効にする（以後、係数を変更できない）                     | S1       | factors/actions.ts activateFactorSetAction            | metric.manage                                                | ghg-factors-rules                     |
+| F205 | 係数セットを取り下げる                                                 | S1       | factors/actions.ts retireFactorSetAction              | metric.manage                                                | ghg-factors-rules                     |
+| F206 | 係数を割り当てる（期間 × 拠点／国／全社 × 活動）                       | S1       | factors/actions.ts saveAssignmentAction               | metric.manage                                                | ghg-factors-rules                     |
+| F207 | 係数の割当を外す                                                       | S1       | factors/actions.ts clearAssignmentAction              | metric.manage                                                | ghg-factors-rules                     |
+| F208 | 算定方針（丸め・換算・改良トンキロ法の組織の設定）の新しい版を保存     | S1       | rules/actions.ts savePolicyAction                     | metric.manage                                                | ghg-factors-rules                     |
+| F209 | 区分規則を提案する（根拠必須・適用期間）                               | S1       | rules/actions.ts proposeRuleAction                    | metric.manage                                                | ghg-factors-rules                     |
+| F210 | 区分規則を承認する（提案者と別人）                                     | S1       | rules/actions.ts approveRuleAction                    | data.approve（提案者以外）                                   | ghg-factors-rules・zzzzzz-ghg-chain   |
+| F211 | 区分規則を取り下げる                                                   | S1       | rules/actions.ts withdrawRuleAction                   | metric.manage か data.approve                                | ghg-factors-rules                     |
+| F212 | 活動量の取込を検証する（保存しない）                                   | S2       | activity/actions.ts previewActivityImportAction       | import.run＋data.write（担当拠点）                           | ghg-activity-tonkm                    |
+| F213 | 活動量を確認中として取り込む                                           | S2       | activity/actions.ts importActivityFileAction          | import.run＋data.write（担当拠点）                           | ghg-activity-tonkm                    |
+| F214 | 活動量を確定する（差し替えを含む）                                     | S2       | activity/actions.ts confirmActivityBatchAction        | data.write（担当拠点）                                       | ghg-activity-tonkm                    |
+| F215 | 活動量の取込を破棄する                                                 | S2       | activity/actions.ts discardActivityBatchAction        | data.write（担当拠点）                                       | ghg-activity-tonkm                    |
+| F216 | 算定を実行する（算定の記録・算定行）                                   | S3       | runs/actions.ts runGhgCalculationAction               | data.write（全拠点が担当）                                   | ghg-calculation・zzzzzz-ghg-chain     |
+| F217 | 算定の記録の報告区分の値を Data Point に下書きとして反映する           | S3       | runs/actions.ts postGhgRunToDataPointsAction          | data.write（承認済みの上書きは data.review か data.approve） | ghg-calculation                       |
+| F218 | 既存の算定結果の取込を検証する（保存しない。拠点の対応付けは人が選ぶ） | S4       | reconciliation/actions.ts previewBaselineImportAction | import.run＋data.write                                       | ghg-reconciliation                    |
+| F219 | 既存の算定結果の取込を確定する（追記）                                 | S4       | reconciliation/actions.ts confirmBaselineImportAction | import.run＋data.write                                       | ghg-reconciliation                    |
+| F220 | 既存の算定結果と照合する（許容差は人が入れる）                         | S4       | reconciliation/actions.ts reconcileAction             | data.write                                                   | ghg-reconciliation・zzzzzz-ghg-chain  |
+| F221 | 差異の原因を記録する（本人名義・追記）                                 | S4       | reconciliation/actions.ts recordCauseAction           | data.review                                                  | ghg-reconciliation・zzzzzz-ghg-chain  |
+
+危険な操作（確認ダイアログ）: F204・F205・F207・F210・F211（S1）、F214・F215（S2）、F217（S3）、F219（S4）。登録は `tests/unit/fixtures/dangerous-ops/S1〜S4.ts`。
+仮説の再計算（保存しない・GET の `?whatif=`）は Action を持たない読み取りの機能（e2e:ghg-reconciliation・zzzzzz-ghg-chain）。
+
 ---
 
 ## 4. 出力・ダウンロード（API ルート 12 件）
@@ -473,6 +527,15 @@ CDP 対応オプションの無い組織で出さない CDP の葉（契約の�
 | E16 | GET /api/exports/audit-log?…（絞込条件付き）                                                 | 監査ログ（CSV・UTF-8 BOM）                                                                | common.audit.read                          | P88 見出しの「CSV で出力」                     |
 | E17 | GET /api/exports/tenant?part=data\|files                                                     | 全データの返却書き出し（ZIP・manifest）                                                   | org.manage＋export.run                     | 設定「データの取扱い」の「その他 ▾」→ 確認     |
 | E04 | （形式を追加）format=trace_xlsx・reconciliation_xlsx                                         | 追跡表（XLSX）・突合結果（XLSX）。出力は突合で不一致なら渡さない（422・画面は出力タブへ） | export.run                                 | P83・P28 出力タブ                              |
+
+Scope1・2 の算定と照合（2026-10-16）で足した出力 API（E18〜E21）:
+
+| ID  | ルート                                                | 機能                                                                                                     | 権限（route 側）                                                                                              | 起点 UI                            |
+| --- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| E18 | GET /api/exports/ghg-calculation?run=                 | 算定明細 CSV（算定行・係数・未丸め・丸め後・既定区分と報告区分・固定文 N1）                              | export.run（他社は 404・入力が変わった記録は 409）                                                            | P96 見出しの「CSV を出力」         |
+| E19 | GET /api/exports/ghg-reconciliation?id=               | 照合結果 XLSX（項目・原因別の寄与・単独差・残差・確認の記録・許容差・sha256・照合の規則の版・固定文 N3） | export.run（作り直せない照合は 409）                                                                          | P98 見出しの「XLSX を出力」        |
+| E20 | GET /api/exports/ghg-demo-files?kind=factor-set       | energy                                                                                                   | transport                                                                                                     | baseline                           | 架空のサンプルファイル（Fixture から生成）     | data.read（Demo だけ。Supabase Mode は 404） | P91・P94・P97 の取込の欄・「その他」 |
+| E21 | GET /api/exports/ghg-preset-factor-set?fuelCo2=shk_r5 | shk_h21                                                                                                  | 公的参照プリセット（告示の式・別表第3・算定省令の燃料の値）の係数セットの取込用 CSV（既定では算定に使わない） | data.read（Demo・Supabase の両方） | P94 の公的参照プリセットの節・P91 の「その他」 |
 
 ---
 

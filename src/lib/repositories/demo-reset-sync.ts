@@ -1,4 +1,5 @@
 import type { FixtureDb } from '@/lib/fixtures/store';
+import { GHG_DEMO_RESET_TABLES } from './demo-ghg-reset';
 import type { AiFeatureType } from '@/types/domain';
 import type { TableName } from './types';
 
@@ -62,6 +63,9 @@ export const DISCLOSURE_DEMO_RESET_TABLES = [
   'responseContentLinks',
   'responseEvidenceLinks',
   'disclosureMappings',
+  // Scope1・2 の算定と照合（2026-10-16 の要望。plan §2.7）。係数は組織の行を Fixture の値へ戻す
+  // （利用者が取り込んだセットの係数を消す。Cat.1 の係数はアプリから書かないため Fixture のまま）
+  ...GHG_DEMO_RESET_TABLES,
 ] as const satisfies readonly TableName[];
 
 /**

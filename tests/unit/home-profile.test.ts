@@ -221,6 +221,53 @@ describe('タスク動詞とパレットのおすすめ（権限で絞る）', (
     );
   });
 
+  it('Scope1・2 の算定と照合の操作: サービスと同じ権限で出し分け、行き先は開いた画面（実行はしない）', () => {
+    const ids = (role: RoleKey) =>
+      new Map(availableTaskVerbs(canOf(role), ctx).map((v) => [v.id, v.href]));
+    const preparer = ids('sustainability_manager');
+    expect(preparer.get('import-factor-set')).toBe(
+      '/enterprise/ghg/calculation/factors?new=1#factor-import',
+    );
+    expect(preparer.get('assign-factors')).toBe(
+      '/enterprise/ghg/calculation/factors?view=assignments&state=unresolved',
+    );
+    expect(preparer.get('import-activity')).toBe(
+      '/enterprise/ghg/calculation/activity?new=1#activity-import',
+    );
+    expect(preparer.get('run-ghg-calculation')).toBe('/enterprise/ghg/calculation');
+    expect(preparer.get('import-ghg-baseline')).toBe(
+      '/enterprise/ghg/calculation/reconciliation?import=1#import-baseline',
+    );
+    expect(preparer.get('reconcile-ghg')).toBe(
+      '/enterprise/ghg/calculation/reconciliation?reconcile=1#reconcile',
+    );
+    // 区分規則の承認は enterprise.data.approve（提案する本社サステナ担当には出さない）
+    expect(preparer.has('approve-classification-rule')).toBe(false);
+    expect(ids('approver').get('approve-classification-rule')).toBe(
+      '/enterprise/ghg/calculation/rules?status=proposed',
+    );
+    // 係数の設定は metric.manage。拠点担当は活動量の取込・算定・照合だけ
+    const site = ids('site_contributor');
+    expect(site.has('import-factor-set')).toBe(false);
+    expect(site.has('assign-factors')).toBe(false);
+    expect(site.has('import-activity')).toBe(true);
+    // 書込の権限の無い役割（レビュー担当・閲覧者）には書く操作を出さない
+    for (const role of ['reviewer', 'viewer'] as RoleKey[]) {
+      const verbs = ids(role);
+      for (const id of [
+        'import-factor-set',
+        'assign-factors',
+        'import-activity',
+        'run-ghg-calculation',
+        'import-ghg-baseline',
+        'reconcile-ghg',
+        'approve-classification-rule',
+      ]) {
+        expect(verbs.has(id as never), `${role} ${id}`).toBe(false);
+      }
+    }
+  });
+
   it('契約オプションの無い組織のパレットには CDP の画面を出さない（plan NF-38）', () => {
     const can = canOf('sustainability_manager');
     const base = { workspace: 'enterprise' as const, can, verbContext: ctx, navPaths: [] };

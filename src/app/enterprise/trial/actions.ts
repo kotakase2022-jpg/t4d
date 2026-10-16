@@ -20,7 +20,7 @@ import {
   type TrialProgramPatch,
 } from '@/lib/services/trial-program';
 import { recordTaskTiming } from '@/lib/services/trial-timing';
-import { TRIAL_AGREEMENT_KEYS } from '@/types/domain';
+import { TRIAL_AGREEMENT_KEYS, type GhgActivityKind, type GhgScope } from '@/types/domain';
 import { FEEDBACK_FIELDS, type FeedbackFormState } from './_lib/feedback-state';
 
 /**
@@ -104,6 +104,20 @@ export async function saveTrialPlanAction(
         targetMin === null || targetMax === null
           ? null
           : { minPercent: targetMin, maxPercent: targetMax },
+      // 算定の検証範囲・将来の展開対象・無償の範囲の目安（値の検査はサービス）
+      ghgVerification: {
+        periodId: field(formData, 'ghgPeriodId') || null,
+        unitIds: fields(formData, 'ghgUnitIds'),
+        scopes: fields(formData, 'ghgScopes') as GhgScope[],
+        activityKinds: fields(formData, 'ghgActivityKinds') as GhgActivityKind[],
+      },
+      rollout: {
+        totalSites: numberField(formData, 'rolloutTotalSites', '将来の展開対象の拠点数'),
+        note: field(formData, 'rolloutNote'),
+      },
+      freeScope: {
+        pdfFiles: numberField(formData, 'freeScopePdfFiles', 'PDF 等の一次データの目安'),
+      },
     };
     created = (await saveTrialProgram(db, ctx, patch)).created;
   });
@@ -150,6 +164,7 @@ export async function saveTrialDecisionAction(
       agreements,
       endDisposition: field(formData, 'endDisposition'),
       endAgreedOn: field(formData, 'endAgreedOn'),
+      disposal: { plannedOn: field(formData, 'disposalPlannedOn') || null },
       decision: field(formData, 'decision'),
       decisionConditions: field(formData, 'decisionConditions'),
       decidedByLabel: field(formData, 'decidedByLabel'),
@@ -291,6 +306,8 @@ export async function triageFeedbackAction(
       severity: formData.has('severity') ? field(formData, 'severity') : undefined,
       resolvedInVersion: field(formData, 'resolvedInVersion'),
       agreed: formData.get('agreed') === 'on',
+      // 別途協議の区分（費用区分が別途協議のときだけ必須。検査はサービス）
+      scopeKind: formData.has('scopeKind') ? field(formData, 'scopeKind') : undefined,
     });
   });
   if (failure) return failure;

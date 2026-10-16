@@ -11,6 +11,7 @@ import {
   type OpenIssueSummary,
   type VerificationResult,
 } from '@/lib/domain/trial-metrics';
+import { SEPARATE_CONSULTATION_LABELS } from '@/lib/domain/trial-scope';
 import { routePatternOf } from '@/lib/errors/access-denied';
 import { ValidationError } from '@/lib/errors/user-facing';
 import type { DbClient } from '@/lib/repositories/types';
@@ -30,6 +31,7 @@ import {
   FEEDBACK_KINDS,
   FEEDBACK_SEVERITIES,
   FEEDBACK_STATUSES,
+  TRIAL_SCOPE_KINDS,
   type AuthorizationContext,
   type CostClass,
   type FeedbackChannel,
@@ -37,6 +39,7 @@ import {
   type FeedbackSeverity,
   type FeedbackStatus,
   type TrialFeedbackItem,
+  type TrialScopeKind,
   type Uuid,
 } from '@/types/domain';
 
@@ -148,6 +151,8 @@ export async function submitFeedback(
     verifiedAt: null,
     agreed: false,
     environmentVersion: getBuildInfo().commit,
+    // 別途協議の区分（0060）は費用区分を別途協議にしたときに入れる（投稿時は無い）
+    scopeKind: null,
     deletedAt: null,
     createdAt: now,
     updatedAt: now,
@@ -189,6 +194,36 @@ export interface TriageInput {
   severity?: string | null;
   resolvedInVersion: string;
   agreed: boolean;
+  /**
+   * 別途協議の区分（大幅な拠点追加・大量の PDF 等の一次データ処理・外部システムとの個別連携・新規機能の個別開発）。
+   * 費用区分が別途協議のときは必須、それ以外では入れられない（0060 の CHECK と同じ）。
+   * 渡さない（undefined）ときは、別途協議のままなら今の区分を保つ
+   */
+  scopeKind?: string | null;
+}
+
+/** 別途協議の区分の入力を検査する（費用区分と合わせて。0060 の CHECK と同じ規則） */
+function checkedScopeKind(
+  costClass: CostClass,
+  raw: string | null | undefined,
+  current: TrialScopeKind | null,
+): TrialScopeKind | null {
+  const value = (raw ?? '').trim();
+  if (costClass !== 'separate_estimate') {
+    if (raw !== undefined && value !== '') {
+      throw new ValidationError(
+        '別途協議の区分は、費用区分が「別途協議」のときだけ選べます。費用区分を選び直すか、区分を外してください。',
+      );
+    }
+    return null;
+  }
+  if (raw === undefined) return current;
+  if (value === '') {
+    throw new ValidationError(
+      '費用区分が「別途協議」のときは、別途協議の区分（拠点の追加・PDF 等の一次データ・外部システムとの連携・新規機能の開発）を選んでください。',
+    );
+  }
+  return oneOf<TrialScopeKind>(TRIAL_SCOPE_KINDS, value, '別途協議の区分を選んでください。');
 }
 
 /** トリアージ（改善管理の列だけを変える。org.manage）。監査ログ data_updated（trial_feedback） */
@@ -207,6 +242,7 @@ export async function triageFeedback(
     );
   }
   const costClass = oneOf<CostClass>(COST_CLASSES, input.costClass, '費用区分を選んでください。');
+  const scopeKind = checkedScopeKind(costClass, input.scopeKind, item.scopeKind ?? null);
   const patch: Partial<TrialFeedbackItem> = {
     status,
     costClass,
@@ -219,6 +255,9 @@ export async function triageFeedback(
     updatedAt: new Date().toISOString(),
     updatedBy: ctx.userId,
   };
+  // 別途協議の区分は費用区分が別途協議のときだけ（0060 の CHECK と同じ）。費用区分を変えたら外す。
+  // 変わらないときは書かない（以前の Cookie・DB の行に列が無いときに、余計な差分を作らない）
+  if (scopeKind !== (item.scopeKind ?? null)) patch.scopeKind = scopeKind;
   if (item.kind === 'defect' && input.severity !== undefined) {
     const raw = (input.severity ?? '').trim();
     patch.severity =
@@ -231,10 +270,14 @@ export async function triageFeedback(
     eventType: 'data_updated',
     resourceType: 'trial_feedback',
     resourceId: item.id,
-    beforeSummary: `状態: ${statusLabel('feedbackStatus', item.status)}・費用区分: ${statusLabel('costClass', item.costClass)}`,
-    afterSummary: `状態: ${statusLabel('feedbackStatus', updated.status)}・費用区分: ${statusLabel('costClass', updated.costClass)}`,
+    beforeSummary: `状態: ${statusLabel('feedbackStatus', item.status)}・費用区分: ${statusLabel('costClass', item.costClass)}${scopeKindSuffix(item.scopeKind)}`,
+    afterSummary: `状態: ${statusLabel('feedbackStatus', updated.status)}・費用区分: ${statusLabel('costClass', updated.costClass)}${scopeKindSuffix(updated.scopeKind)}`,
   });
   return updated;
+}
+
+function scopeKindSuffix(kind: TrialScopeKind | null | undefined): string {
+  return kind ? `（${SEPARATE_CONSULTATION_LABELS[kind]}）` : '';
 }
 
 export interface ReverificationInput {

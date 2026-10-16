@@ -15,6 +15,11 @@ import { T5_DANGEROUS_OPS } from './fixtures/dangerous-ops/T5';
 import { T6_DANGEROUS_OPS } from './fixtures/dangerous-ops/T6';
 import { T7_DANGEROUS_OPS } from './fixtures/dangerous-ops/T7';
 import { T8_DANGEROUS_OPS } from './fixtures/dangerous-ops/T8';
+import { S1_DANGEROUS_OPS } from './fixtures/dangerous-ops/S1';
+import { S2_DANGEROUS_OPS } from './fixtures/dangerous-ops/S2';
+import { S3_DANGEROUS_OPS } from './fixtures/dangerous-ops/S3';
+import { S4_DANGEROUS_OPS } from './fixtures/dangerous-ops/S4';
+import { S5_DANGEROUS_OPS } from './fixtures/dangerous-ops/S5';
 import type { DangerousOp } from './fixtures/dangerous-ops/types';
 
 /**
@@ -23,7 +28,7 @@ import type { DangerousOp } from './fixtures/dangerous-ops/types';
  *  - 不可逆（irreversible）・一括／上書き（bulk）: 起点の部品が ConfirmDialog か、確認付きの操作
  *    （kind: 'confirm'・BulkActionSpec の confirm）で Server Action を起動する
  *  - 可逆（reversible）: 実行後の通知に「元に戻す」（FlashMessage の undo）を置く、または確認を通す
- * 表はスライスごと（tests/unit/fixtures/dangerous-ops/B1〜B6.ts、トライアル対応は T1〜T8.ts）。移したら status を done にする。
+ * 表はスライスごと（tests/unit/fixtures/dangerous-ops/B1〜B6.ts、トライアル対応は T1〜T8.ts、Scope1・2 の算定と照合は S1〜S5.ts）。移したら status を done にする。
  * 表と実装の食い違い（done なのに確認が無い・確認を付けたのに pending のまま）は失敗にする。
  */
 
@@ -47,6 +52,12 @@ const TRIAL: Array<[string, DangerousOp[]]> = [
   ['T6', T6_DANGEROUS_OPS],
   ['T7', T7_DANGEROUS_OPS],
   ['T8', T8_DANGEROUS_OPS],
+  // Scope1・2 の算定と照合（2026-10-16 の要望）。既存の機能 ID と重ならない規則を同じく当てる
+  ['S1', S1_DANGEROUS_OPS],
+  ['S2', S2_DANGEROUS_OPS],
+  ['S3', S3_DANGEROUS_OPS],
+  ['S4', S4_DANGEROUS_OPS],
+  ['S5', S5_DANGEROUS_OPS],
 ];
 
 const ALL: Array<[string, DangerousOp[]]> = [...REDESIGN, ...TRIAL];

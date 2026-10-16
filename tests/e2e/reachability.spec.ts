@@ -324,3 +324,70 @@ for (const [role, user] of [
     expect(problems).toEqual([]);
   });
 }
+
+/**
+ * Scope1・2 の算定と照合（2026-10-16 の要望）の詳細画面（P92・P95・P96・P98）は固定の行き先を持たない
+ * （ROUTE_CATALOG に href が無い）ため、上の期待集合（パレット）には入らない。入口の画面（概要・排出係数・
+ * 活動量・照合の一覧）の本文にリンクがあり、開くと権限なしにならないことを企業の全役割で確かめる
+ * （閲覧は enterprise.data.read。書きの操作は各画面で権限・担当拠点により出し分ける）
+ */
+const GHG_DETAIL_ENTRIES = [
+  {
+    name: '係数セットの詳細',
+    from: '/enterprise/ghg/calculation/factors',
+    link: /^\/enterprise\/ghg\/calculation\/factors\/[0-9a-f-]{36}$/,
+  },
+  {
+    name: '活動量の取込の詳細',
+    from: '/enterprise/ghg/calculation/activity',
+    link: /^\/enterprise\/ghg\/calculation\/activity\/[0-9a-f-]{36}$/,
+  },
+  {
+    name: '算定明細',
+    from: '/enterprise/ghg/calculation',
+    link: /^\/enterprise\/ghg\/calculation\/runs\/[0-9a-f-]{36}$/,
+  },
+  {
+    name: '照合の詳細',
+    from: '/enterprise/ghg/calculation/reconciliation',
+    link: /^\/enterprise\/ghg\/calculation\/reconciliation\/[0-9a-f-]{36}$/,
+  },
+] as const;
+
+for (const [role, user] of [
+  ['admin', DEMO_USERS.enterpriseAdmin],
+  ['preparer', DEMO_USERS.sustainability],
+  ['site', DEMO_USERS.siteUser],
+  ['reviewer', DEMO_USERS.reviewer],
+  ['approver', DEMO_USERS.approver],
+] as const) {
+  test(`Scope1・2 の算定の詳細画面: ${role} は入口の画面のリンクから届く`, async ({ page }) => {
+    await loginAs(page, user);
+    const problems: string[] = [];
+    for (const entry of GHG_DETAIL_ENTRIES) {
+      await page.goto(entry.from, { waitUntil: 'domcontentloaded' });
+      const hrefs = await page
+        .locator('#t4d-main a[href]')
+        .evaluateAll((links) => links.map((a) => a.getAttribute('href') ?? ''));
+      const target = hrefs.map((h) => h.split(/[?#]/)[0]!).find((h) => entry.link.test(h));
+      if (!target) {
+        problems.push(`${role}: ${entry.name} への入口のリンクが ${entry.from} に無い`);
+        continue;
+      }
+      const response = await page.goto(target, { waitUntil: 'domcontentloaded' });
+      if (!response || response.status() >= 400) {
+        problems.push(`${role}: ${entry.name}（${target}）が ${response?.status()}`);
+        continue;
+      }
+      if (
+        await page
+          .getByText('アクセス権限がありません')
+          .isVisible()
+          .catch(() => false)
+      ) {
+        problems.push(`${role}: ${entry.name}（${target}）が「アクセス権限がありません」`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+}

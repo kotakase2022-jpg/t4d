@@ -224,6 +224,7 @@ describe('改善管理表の集計', () => {
       verifiedAt: null,
       agreed: false,
       environmentVersion: '',
+      scopeKind: null,
       deletedAt: null,
       createdAt: '2026-10-01T00:00:00Z',
       updatedAt: '2026-10-01T00:00:00Z',
@@ -257,6 +258,29 @@ describe('改善管理表の集計', () => {
     // 良かった点は未解決の課題に数えない
     expect(summary.unresolved).toBe(3);
     expect(summary.byKind.defect).toBe(4);
+  });
+
+  it('別途協議の件数を区分ごとに数え、区分の無いものは「区分なし」に分ける（推測で振り分けない）', () => {
+    const summary = openIssueSummary([
+      item({ costClass: 'separate_estimate', scopeKind: 'custom_development' }),
+      item({ costClass: 'separate_estimate', scopeKind: 'system_integration' }),
+      item({ costClass: 'separate_estimate', scopeKind: null }),
+      item({ costClass: 'separate_estimate' }),
+      item({ costClass: 'maintenance' }),
+      item({
+        costClass: 'separate_estimate',
+        scopeKind: 'site_expansion',
+        deletedAt: '2026-10-02T00:00:00Z',
+      }),
+    ]);
+    expect(summary.byCostClass.separate_estimate).toBe(4);
+    expect(summary.separateByScopeKind).toEqual({
+      site_expansion: 0,
+      bulk_primary_data: 0,
+      system_integration: 1,
+      custom_development: 1,
+      unclassified: 2,
+    });
   });
 
   it('再検証の結果は語で出す（生の値を出さない）', () => {

@@ -3,8 +3,8 @@
 `supabase/migrations/0012_rls_core.sql` / `0013_rls_assurance.sql`
 （＋ `0016_storage_bucket_read.sql` / `0017_rls_counterparty_organization.sql` /
 `0025_ssbj_gap_analysis.sql` / `0028_ssbj_analysis_settings.sql` / `0029_approval_routes.sql` /
-`0030_ssbj_disclosure_drafts.sql` / 開示優先モードの `0033`〜`0040` / CSRD の `0044`〜`0046`）の要約です。
-**106 テーブルすべてで RLS を有効化**しており（ポリシー 240 件）、`pnpm check:rls` が未設定を検出します。
+`0030_ssbj_disclosure_drafts.sql` / 開示優先モードの `0033`〜`0040` / CSRD の `0044`〜`0046` / Scope1・2 の算定と照合の `0060`〜`0065`）の要約です。
+**141 テーブルすべてで RLS を有効化**しており（ポリシー 325 件。2026-10-16 時点）、`pnpm check:rls` が未設定を検出します。
 
 凡例
 
@@ -163,6 +163,33 @@
 Demo Mode の Cookie から戻す行（`src/lib/repositories/demo-csrd-checks.ts`）も、分析条件・事項・節は「名義 = 行を書いた人（更新者）」を確かめる
 （評価は確認の後に AI の分析が更新者だけを変えるため、Cookie では確かめず DB 側で見る）。
 
+### 6.3 Scope1・2 の算定と照合（0060〜0065。2026-10-16 の要望）
+
+権限キーは新設していない。参照は組織メンバー（監査法人・他社には見えない）、書込は既存の権限キーで分ける
+（係数・方針・区分規則の提案は `enterprise.metric.manage`、区分規則の承認は `enterprise.data.approve`、活動量・算定・既存結果・照合は
+`enterprise.data.write`、原因の記録は `enterprise.data.review`）。子の `organization_id` は親と一致しなければならず、
+期間・拠点・係数のセット・係数・バッチ・算定の記録を `(id, organization_id)` の複合外部キーで固定している。
+名義（作成者・確定者・承認者・確認者）は BEFORE トリガで `auth.uid()` に固定する（利用者の JWT による書込だけ。Service Role・seed は対象外）。
+
+| テーブル                     | SELECT | INSERT                                                                           | UPDATE                                                                                                                                   | DELETE             |
+| ---------------------------- | ------ | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| emission_factor_sets         | own    | perm:metric.manage。下書きで作る（トリガ）                                       | perm:metric.manage。下書き → 有効 → 取り下げだけ。有効にしたセットの内容は変えない（`emission_factor_set_guard`）                        | —                  |
+| emission_factors（列を追加） | own    | perm:metric.manage。セットに属す行は下書きのセットだけ                           | 同左（有効なセットの係数は変えない。`emission_factor_guard`）                                                                            | 同左               |
+| emission_factor_assignments  | own    | perm:metric.manage。有効なセットの同じ種類の係数だけ・締めた期間は不可（トリガ） | 同左                                                                                                                                     | perm:metric.manage |
+| ghg_calculation_policies     | own    | perm:metric.manage（作成者は本人）                                               | **—（追記専用＋トリガ）**                                                                                                                | —                  |
+| ghg_classification_rules     | own    | perm:metric.manage。提案者は本人・状態は提案                                     | 承認は perm:data.approve の本人（**提案者は承認できない**）・取り下げは本人。承認済みの内容は変えない（`ghg_classification_rule_guard`） | —                  |
+| ghg_activity_batches         | own    | perm:data.write ＋ unit scope                                                    | perm:data.write ＋ unit scope。確定は本人名義・確定後は差し替え済みへの遷移だけ（`ghg_activity_batch_guard`・`_supersede`）              | —                  |
+| ghg_activity_lines           | own    | perm:data.write ＋ 下書きのバッチ ＋ unit scope                                  | **—（追記専用＋トリガ）**                                                                                                                | —                  |
+| ghg_calculation_runs         | own    | perm:data.write ＋ 全拠点が担当（`t4d.all_units_in_scope`）・作成者は本人        | **—（追記専用＋トリガ）**                                                                                                                | —                  |
+| ghg_calculation_lines        | own    | perm:data.write ＋ 記録の作成者本人                                              | **—（追記専用＋トリガ）**                                                                                                                | —                  |
+| ghg_baseline_results         | own    | perm:data.write（作成者は本人）                                                  | **—（追記専用＋トリガ）**                                                                                                                | —                  |
+| ghg_reconciliations          | own    | perm:data.write。記録と既存結果は同じ期間（`ghg_reconciliation_guard`）          | **—（追記専用＋トリガ）**                                                                                                                | —                  |
+| ghg_reconciliation_notes     | own    | perm:data.review の本人。原因「その他」はコメント必須（CHECK）                   | **—（追記専用＋トリガ）**                                                                                                                | —                  |
+
+0060 は表を足さない（列の追加・主題の CHECK の作り直し・`t4d.forbid_mutation()` の置き換え・終了処理の 5 引数版）。
+追記専用のトリガは、終了処理（`t4d.offboard_organization` の 4 引数・5 引数のどちらか。所有者だけが実行）の中の DELETE だけを通す
+（`t4d.is_offboarding_delete`）。
+
 ## 7. Import / AI
 
 | テーブル                          | SELECT | 更新系                                        |
@@ -217,23 +244,27 @@ Demo Mode の Cookie から戻す行（`src/lib/repositories/demo-csrd-checks.ts
 RLS は「通常ユーザー」に対する防御です。Service Role は RLS をバイパスするため、
 追記専用テーブルには `t4d.forbid_mutation()` トリガも付けています。
 
-| テーブル                                                                       | トリガ                                                   |
-| ------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| assurance_snapshots / assurance_snapshot_items                                 | UPDATE/DELETE 禁止                                       |
-| audit_events                                                                   | UPDATE/DELETE 禁止                                       |
-| signoffs                                                                       | UPDATE/DELETE 禁止 ＋ `enforce_self_signoff`（代理禁止） |
-| data_point_versions / disclosure_response_versions / file_versions / approvals | UPDATE/DELETE 禁止                                       |
-| disclosure_response_versions                                                   | `forbid_ai_auto_approval`（AI 由来 ＋ approved を拒否）  |
-| data_points                                                                    | `enforce_data_point_transition`（状態遷移権限）          |
-| project_framework_decisions / narrative_versions / source_anchors              | UPDATE/DELETE 禁止                                       |
-| disclosure_block_versions / review_events / recheck_decisions                  | UPDATE/DELETE 禁止                                       |
-| report_snapshots / export_artifacts / kpi_targets                              | UPDATE/DELETE 禁止                                       |
-| review_events                                                                  | `enforce_review_event`（職務分離・差戻しの必須項目）     |
-| review_requests                                                                | `review_request_guard`（依頼時点の内容は不変・承認権限） |
-| disclosure_blocks                                                              | `enforce_disclosure_block_update`（承認の遷移権限）      |
-| review_comments                                                                | `review_comment_guard`（解決の記録のみ更新可）           |
-| quantitative_import_batches                                                    | `quantitative_import_batch_guard`（確定・却下後は不変）  |
-| csrd_assessments                                                               | `csrd_assessments_item_guard`（CSRD の要求事項だけ）     |
+| テーブル                                                                                     | トリガ                                                   |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| assurance_snapshots / assurance_snapshot_items                                               | UPDATE/DELETE 禁止                                       |
+| audit_events                                                                                 | UPDATE/DELETE 禁止                                       |
+| signoffs                                                                                     | UPDATE/DELETE 禁止 ＋ `enforce_self_signoff`（代理禁止） |
+| data_point_versions / disclosure_response_versions / file_versions / approvals               | UPDATE/DELETE 禁止                                       |
+| disclosure_response_versions                                                                 | `forbid_ai_auto_approval`（AI 由来 ＋ approved を拒否）  |
+| data_points                                                                                  | `enforce_data_point_transition`（状態遷移権限）          |
+| project_framework_decisions / narrative_versions / source_anchors                            | UPDATE/DELETE 禁止                                       |
+| disclosure_block_versions / review_events / recheck_decisions                                | UPDATE/DELETE 禁止                                       |
+| report_snapshots / export_artifacts / kpi_targets                                            | UPDATE/DELETE 禁止                                       |
+| review_events                                                                                | `enforce_review_event`（職務分離・差戻しの必須項目）     |
+| review_requests                                                                              | `review_request_guard`（依頼時点の内容は不変・承認権限） |
+| disclosure_blocks                                                                            | `enforce_disclosure_block_update`（承認の遷移権限）      |
+| review_comments                                                                              | `review_comment_guard`（解決の記録のみ更新可）           |
+| quantitative_import_batches                                                                  | `quantitative_import_batch_guard`（確定・却下後は不変）  |
+| csrd_assessments                                                                             | `csrd_assessments_item_guard`（CSRD の要求事項だけ）     |
+| ghg_calculation_policies / ghg_activity_lines / ghg_calculation_runs / ghg_calculation_lines | UPDATE/DELETE 禁止（0062〜0064）                         |
+| ghg_baseline_results / ghg_reconciliations / ghg_reconciliation_notes                        | UPDATE/DELETE 禁止（0065）                               |
+| data_point_calculations                                                                      | UPDATE/DELETE 禁止（0061 で追加）                        |
+| emission_factor_sets / emission_factors                                                      | 有効にしたセットと係数は変更不可（0061 のガード）        |
 
 ---
 

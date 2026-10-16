@@ -13,6 +13,17 @@
 
 import type {
   AiFeedback,
+  EmissionFactorAssignment,
+  EmissionFactorSet,
+  GhgActivityBatch,
+  GhgActivityLine,
+  GhgBaselineResult,
+  GhgCalculationLine,
+  GhgCalculationPolicy,
+  GhgCalculationRun,
+  GhgClassificationRule,
+  GhgReconciliation,
+  GhgReconciliationNote,
   ExportReconciliation,
   NarrativeRequirementLink,
   OrganizationDataTerms,
@@ -244,6 +255,19 @@ export interface TableMap {
   organizationDataTerms: OrganizationDataTerms;
   organizationOptions: OrganizationOption;
   responseContentLinks: ResponseContentLink;
+
+  // Scope1・2 の算定と既存結果との照合（0061〜0065）
+  emissionFactorSets: EmissionFactorSet;
+  emissionFactorAssignments: EmissionFactorAssignment;
+  ghgCalculationPolicies: GhgCalculationPolicy;
+  ghgClassificationRules: GhgClassificationRule;
+  ghgActivityBatches: GhgActivityBatch;
+  ghgActivityLines: GhgActivityLine;
+  ghgCalculationRuns: GhgCalculationRun;
+  ghgCalculationLines: GhgCalculationLine;
+  ghgBaselineResults: GhgBaselineResult;
+  ghgReconciliations: GhgReconciliation;
+  ghgReconciliationNotes: GhgReconciliationNote;
 
   engagements: Engagement;
   engagementMembers: EngagementMember;

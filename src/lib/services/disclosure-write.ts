@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { previousComparablePeriod } from '@/lib/domain/period-comparability';
+
 import { recordAiDecision, runAi } from '@/lib/ai';
 import { recordAuditEvent } from '@/lib/audit/logger';
 import {
@@ -567,9 +569,13 @@ async function previousResponseFor(
   periodStart: string,
 ): Promise<DisclosureResponse | null> {
   const periods = await db.select('periods', { where: { organizationId } });
-  const previousPeriod = periods
-    .filter((p) => p.startDate < periodStart)
-    .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
+  // 前年は決算月が同じ期間に限る（暦年の期間を年度の前年に使わない。plan K10）
+  const current = periods.find((p) => p.startDate === periodStart);
+  const previousPeriod = current
+    ? previousComparablePeriod(current, periods, 'start')
+    : periods
+        .filter((p) => p.startDate < periodStart)
+        .sort((a, b) => (a.startDate < b.startDate ? 1 : -1))[0];
   if (!previousPeriod) return null;
   const responses = await db.select('disclosureResponses', {
     where: { organizationId, reportingPeriodId: previousPeriod.id },

@@ -1,7 +1,11 @@
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { backupPurgeDueOn } from '@/lib/domain/data-disposal';
+import { SCOPE_OVER_NOTICE, STANDARD_SCOPE_NOTE } from '@/lib/domain/trial-scope';
 import { ORG_IDS, userId } from '@/lib/fixtures/dataset';
+import { GHG_FIXTURE_IDS } from '@/lib/fixtures/ghg-verification';
 import { trialScenarioId } from '@/lib/fixtures/trial-case';
+import { formatJstDate } from '@/lib/format/datetime';
 import { createFixtureDb, type FixtureDb } from '@/lib/fixtures/store';
 import { DemoDbClient } from '@/lib/repositories/demo-client';
 import type { EnterpriseShell } from '@/lib/services/shell';
@@ -152,6 +156,102 @@ describe('概要', () => {
     expect(container.querySelectorAll('input[name="metricIds"]:checked')).toHaveLength(10);
   });
 
+  it('計画に算定の検証拠点（国内 1・海外 4・国コード）と将来の展開対象（全 30・うち検証 5）を出す', async () => {
+    useShell(author());
+    const { container } = await renderPage({ tab: 'overview' });
+    const plan = screen.getByRole('region', { name: '計画' });
+    const sites = container.querySelector('[data-trial-verification-sites]') as HTMLElement;
+    expect(sites).toHaveTextContent('5 拠点（国内 1・海外 4）');
+    expect(sites).toHaveTextContent('東日本工場（JP）・タイ工場（TH）・ベトナム工場（VN）');
+    expect(plan).toHaveTextContent('全 30 拠点（うち検証対象 5・残り 25）');
+    expect(plan).toHaveTextContent('（架空）検証の結果を見て海外の生産拠点へ順に広げる');
+    // 対象拠点のタイルの補足に展開対象の総数
+    expect(screen.getByRole('region', { name: '計画と実績' })).toHaveTextContent('展開対象 全 30');
+  });
+
+  it('算定の検証範囲: 期間・Scope・活動と、拠点別の検証の状況（状態はラベル＋アイコン）', async () => {
+    useShell(author());
+    await renderPage({ tab: 'overview' });
+    const section = screen.getByRole('region', { name: '算定の検証範囲' });
+    expect(section).toHaveTextContent('CY2025・5 拠点（国内 1・海外 4）');
+    expect(section).toHaveTextContent(
+      'Scope1・Scope2（マーケット基準）・Scope2（ロケーション基準）',
+    );
+    const table = within(section).getByRole('table', { name: '拠点別の検証の状況' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((r) => r.querySelector('td')?.textContent)).toEqual([
+      '東日本工場（JP）',
+      'タイ工場（TH）',
+      'ベトナム工場（VN）',
+      'メキシコ工場（MX）',
+      '米国工場（US）',
+    ]);
+    expect(rows[0]).toHaveTextContent('国内');
+    expect(rows[1]).toHaveTextContent('海外');
+    // 状況のバッジは語とアイコン（色だけにしない）
+    for (const row of rows) {
+      expect(row.querySelector('svg')).not.toBeNull();
+    }
+    expect(
+      within(section).getByRole('link', { name: 'Scope1・2算定の概要を開く' }),
+    ).toHaveAttribute('href', expect.stringContaining('/enterprise/ghg/calculation?period='));
+  });
+
+  it('無償の範囲と別途協議: 合意・標準機能の一覧・4 区分の表・超過の知らせ（金額は出さない）', async () => {
+    useShell(author());
+    await renderPage({ tab: 'overview' });
+    const section = screen.getByRole('region', { name: '無償の範囲と別途協議' });
+    expect(section).toHaveTextContent('合意済み');
+    expect(section).toHaveTextContent('（架空）標準機能の範囲は無償、追加開発等は別途協議で合意');
+    expect(section).toHaveTextContent(STANDARD_SCOPE_NOTE);
+    const table = within(section).getByRole('table', { name: '別途協議の区分' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((r) => r.querySelector('td')?.textContent)).toEqual([
+      '大幅な拠点追加',
+      '大量の PDF 等の一次データ処理',
+      '外部システムとの個別連携',
+      '新規機能の個別開発',
+    ]);
+    expect(rows[1]).toHaveTextContent('0 件 / 目安 20');
+    expect(rows[1]).toHaveTextContent('目安の範囲内');
+    expect(rows[2]).toHaveTextContent('数えられない');
+    expect(rows[3]).toHaveTextContent('別途協議の目安を超過');
+    // 超過は止めずに知らせる（折りたたまない）
+    const notice = within(section).getByText(SCOPE_OVER_NOTICE);
+    expect(notice.closest('details')).toBeNull();
+    expect(section.textContent).not.toMatch(/\d円|￥/);
+  });
+
+  it('終了時の扱いに返却・削除の予定日と、バックアップから消える見込み日（予定日 + 35 日）', async () => {
+    const fixture = useShell(author());
+    const plannedOn = (fixture.trialPrograms[0]!.options.disposal as { plannedOn: string })
+      .plannedOn;
+    const { container } = await renderPage({ tab: 'overview' });
+    expect(container.querySelector('[data-trial-disposal]')).toHaveTextContent(
+      formatJstDate(plannedOn),
+    );
+    expect(container.querySelector('[data-trial-purge]')).toHaveTextContent(
+      `${formatJstDate(backupPurgeDueOn(plannedOn, 35))}（予定日 + 残存期間 35 日）`,
+    );
+  });
+
+  it('計画の欄に検証範囲・展開対象・PDF の目安、判断の欄に返却・削除の予定日を、保存済みの値で開く', async () => {
+    const fixture = useShell(admin());
+    const { container } = await renderPage({ tab: 'overview', edit: '1' });
+    const panel = container.querySelector('#trial-plan-panel') as HTMLElement;
+    expect(within(panel).getByLabelText(/算定の検証期間/)).toHaveValue(GHG_FIXTURE_IDS.period);
+    expect(within(panel).getByLabelText(/将来の展開対象の総拠点数/)).toHaveValue(30);
+    expect(within(panel).getByLabelText(/PDF 等の一次データの目安/)).toHaveValue(20);
+    expect(panel.querySelectorAll('input[name="ghgUnitIds"]:checked')).toHaveLength(5);
+    expect(within(panel).getByRole('checkbox', { name: 'タイ工場（TH）' })).toBeChecked();
+    const decision = await renderPage({ tab: 'overview', decision: '1' });
+    const decisionPanel = decision.container.querySelector('#trial-decision-panel') as HTMLElement;
+    expect(within(decisionPanel).getByLabelText(/返却・削除の予定日/)).toHaveValue(
+      (fixture.trialPrograms[0]!.options.disposal as { plannedOn: string }).plannedOn,
+    );
+    expect(within(decisionPanel).getByLabelText(/無償の範囲の合意日/)).toBeInTheDocument();
+  });
+
   it('作成担当には編集の操作を出さない（欄の引数を付けても開かない）', async () => {
     useShell(author());
     const { container } = await renderPage({ tab: 'overview', edit: '1', decision: '1' });
@@ -159,6 +259,7 @@ describe('概要', () => {
     expect(container.querySelector('#trial-decision-panel')).toBeNull();
     expect(screen.queryByRole('link', { name: '計画を編集' })).toBeNull();
     expect(screen.queryByRole('link', { name: '判断を記録' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '合意を記録' })).toBeNull();
     expect(screen.getByText('人が入力した判断（AI は関与しません）')).toBeVisible();
   });
 });
@@ -223,6 +324,31 @@ describe('改善管理表', () => {
     const panel = container.querySelector('#trial-triage-panel') as HTMLElement;
     expect(panel).toHaveTextContent('投稿の内容（種類・件名・本文・画面）は変えません');
     expect(primaries(container)).toEqual(['対応を保存']);
+    // 別途協議の区分（費用区分が別途協議のときは必須）
+    const scopeKind = within(panel).getByLabelText(/別途協議の区分/) as HTMLSelectElement;
+    expect([...scopeKind.options].map((o) => o.textContent)).toEqual([
+      '選ばない',
+      '大幅な拠点追加',
+      '大量の PDF 等の一次データ処理',
+      '外部システムとの個別連携',
+      '新規機能の個別開発',
+    ]);
+  });
+
+  it('集計に「別途協議」の件数のタイル（区分ごとの内訳・費用区分で絞った表へのリンク）', async () => {
+    useShell(author());
+    const { container } = await renderPage({ tab: 'feedback' });
+    const tile = [...container.querySelectorAll('[data-metric-tile]')].find((el) =>
+      el.textContent?.startsWith('別途協議'),
+    ) as HTMLElement;
+    expect(tile).toHaveTextContent('1件');
+    expect(tile).toHaveTextContent('新規機能の個別開発 1');
+    expect(tile.closest('a') ?? tile.querySelector('a')).toHaveAttribute(
+      'href',
+      expect.stringContaining('cost=separate_estimate'),
+    );
+    // 費用区分のラベルは「別途協議」（DB の値は separate_estimate のまま）
+    expect(screen.getByRole('table', { name: '改善管理表' })).toHaveTextContent('別途協議');
   });
 });
 

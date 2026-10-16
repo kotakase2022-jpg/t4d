@@ -30,6 +30,7 @@ import {
   TRIAL_END_DISPOSITIONS,
   TRIAL_JUDGEMENTS,
   TRIAL_PHASES,
+  TRIAL_SCOPE_KINDS,
   TRIAL_TASK_KEYS,
   TRIAL_THEMES,
   TRIAL_TIMING_METHODS,
@@ -84,6 +85,21 @@ function addedColumnCheckValues(table: string, column: string): string[] {
   return quotedValues(m[1]!);
 }
 
+/**
+ * 後の移行で作り直した CHECK（drop constraint → add constraint）の値。いちばん新しい定義を読む
+ * （0060 の trial_scenarios_theme_check のように、作り直した後の値が効いている）
+ */
+function replacedCheckValues(table: string, constraint: string, column: string): string[] {
+  const re = new RegExp(
+    `alter table ${table}\\s+add constraint ${constraint} check \\(${column} in \\(([^)]*)\\)`,
+    'gi',
+  );
+  const matches = [...SQL.matchAll(re)];
+  const last = matches.at(-1);
+  if (!last) throw new Error(`${table}.${constraint} の作り直しが見つかりません`);
+  return quotedValues(last[1]!);
+}
+
 const sorted = (values: readonly string[]) => [...values].sort();
 
 const CASES: Array<[table: string, column: string, values: readonly string[]]> = [
@@ -113,7 +129,6 @@ const CASES: Array<[table: string, column: string, values: readonly string[]]> =
   ['trial_programs', 'phase', TRIAL_PHASES],
   ['trial_programs', 'end_disposition', TRIAL_END_DISPOSITIONS],
   ['trial_programs', 'decision', TRIAL_DECISIONS],
-  ['trial_scenarios', 'theme', TRIAL_THEMES],
   ['trial_scenario_runs', 'completion', TRIAL_COMPLETIONS],
   ['trial_scenario_judgements', 'judgement', TRIAL_JUDGEMENTS],
   ['trial_feedback_items', 'kind', FEEDBACK_KINDS],
@@ -135,6 +150,19 @@ const CASES: Array<[table: string, column: string, values: readonly string[]]> =
 describe('トライアル対応の enum と CHECK 制約の一致', () => {
   it.each(CASES)('%s.%s', (table, column, values) => {
     expect(checkValues(table, column)).toEqual(sorted(values));
+  });
+
+  it('trial_scenarios.theme（0060 で作り直した CHECK。算定の再現と整合性の確認を含む）', () => {
+    expect(replacedCheckValues('trial_scenarios', 'trial_scenarios_theme_check', 'theme')).toEqual(
+      sorted(TRIAL_THEMES),
+    );
+    expect(TRIAL_THEMES).toContain('calculation_reconciliation');
+  });
+
+  it('trial_feedback_items.scope_kind（0060 の追加列）', () => {
+    expect(addedColumnCheckValues('trial_feedback_items', 'scope_kind')).toEqual(
+      sorted(TRIAL_SCOPE_KINDS),
+    );
   });
 
   it('approval_routes.purpose（追加列）', () => {
